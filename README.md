@@ -1,14 +1,26 @@
 # PrintFlow 3D
 
-Front-end demonstrativo da plataforma PrintFlow 3D, desenvolvido com Nuxt 4 e Vue 3.
+Projeto organizado em duas partes:
 
-## Executar
+- `FrontEnd`: aplicacao Nuxt 4 com Vue 3.
+- `BackEnd`: pasta reservada para a API/backend.
+
+## Executar o FrontEnd
+
+Pela raiz do projeto:
 
 ```powershell
+npm.cmd run dev:front
+```
+
+Ou diretamente na pasta do front:
+
+```powershell
+cd FrontEnd
 npm.cmd install
 npm.cmd run dev
 ```
 
 Acesse `http://localhost:3000`.
 
-O projeto e exclusivamente front-end: todos os dados sao demonstrativos e permanecem apenas na sessao do navegador.
+Por enquanto, o front-end usa dados demonstrativos e nao depende do backend para rodar.

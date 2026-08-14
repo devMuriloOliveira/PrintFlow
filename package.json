@@ -1,19 +1,10 @@
 {
-  "name": "printflow-3d",
+  "name": "printflow",
   "private": true,
-  "type": "module",
   "scripts": {
-    "dev": "nuxt dev",
-    "build": "nuxt build",
-    "generate": "nuxt generate",
-    "preview": "nuxt preview"
-  },
-  "dependencies": {
-    "nuxt": "4.5.1",
-    "vue": "^3.5.26",
-    "vue-router": "^4.6.4"
-  },
-  "devDependencies": {
-    "typescript": "^5.9.3"
+    "dev:front": "npm --prefix FrontEnd run dev",
+    "build:front": "npm --prefix FrontEnd run build",
+    "generate:front": "npm --prefix FrontEnd run generate",
+    "preview:front": "npm --prefix FrontEnd run preview"
   }
 }

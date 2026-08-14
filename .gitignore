@@ -1,6 +1,7 @@
+node_modules
 .nuxt
 .output
-node_modules
+dist
 .tools
 .data
 .env
@@ -8,3 +9,10 @@ node_modules
 .chrome-*
 *-cdp.png
 *-preview*.png
+
+FrontEnd/node_modules
+FrontEnd/.nuxt
+FrontEnd/.output
+FrontEnd/dist
+BackEnd/node_modules
+BackEnd/.env
