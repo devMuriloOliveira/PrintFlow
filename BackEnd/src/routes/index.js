@@ -94,6 +94,11 @@ export const handleRequest = async (req, res) => {
 
     return sendJson(res, 404, { error: 'Endpoint nao encontrado' })
   } catch (error) {
+    console.error('Erro ao processar requisicao', {
+      method: req.method,
+      url: req.url,
+      message: error.message
+    })
     return sendJson(res, 400, { error: error.message || 'Requisicao invalida' })
   }
 }
