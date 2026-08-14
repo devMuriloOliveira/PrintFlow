@@ -1,18 +1,35 @@
 <script setup lang="ts">
-const { orders } = useAppData()
+const { orders, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
+const { notify } = useUi()
 const search = ref('')
 const status = ref('Todos')
 const filtered = computed(() => orders.value.filter(o => (status.value === 'Todos' || o.status === status.value) && Object.values(o).join(' ').toLowerCase().includes(search.value.toLowerCase())))
+const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const badgeClass = (s: string) => ({ Novo: '', Producao: 'badge--orange', Impresso: 'badge--purple', Embalando: 'badge--orange', Enviado: '', Entregue: 'badge--green', Cancelado: 'badge--red' }[s] || '')
-const statusSegments = [
-  { label: 'Novo', value: 13.4, color: '#1768f2' }, { label: 'Producao', value: 14.8, color: '#f6b917' }, { label: 'Impresso', value: 12.7, color: '#b23bc1' },
-  { label: 'Embalando', value: 10.9, color: '#f57c1f' }, { label: 'Enviado', value: 15.8, color: '#2f77d5' }, { label: 'Entregue', value: 28.9, color: '#21aa91' }, { label: 'Cancelado', value: 3.5, color: '#ef4444' }
-]
+const removeOrder = async (order: any) => {
+  const id = order.dbId || order.id
+  if (!id || !window.confirm(`Tem certeza que deseja excluir este pedido?\n\n${order.id} - ${order.product}\n\nEsta acao nao podera ser desfeita.`)) return
+  await deleteItem('orders', id)
+  notify('Pedido excluido com sucesso.')
+}
+const statusSegments = computed(() => {
+  const totals = new Map<string, number>()
+  for (const order of orders.value) totals.set(order.status || 'Sem status', (totals.get(order.status || 'Sem status') || 0) + 1)
+  return [...totals.entries()].map(([label, count]) => ({ label, value: metrics.orderCount.value ? count / metrics.orderCount.value * 100 : 0, color: statusColors[label] || '#7d8799' }))
+})
+const marketplaceBars = computed(() => {
+  const colors = ['#1768f2', '#0da566', '#f59e0b', '#c83bb7', '#29b6c8', '#7d8799']
+  const totals = new Map<string, number>()
+  for (const order of orders.value) totals.set(order.marketplace || 'Sem marketplace', (totals.get(order.marketplace || 'Sem marketplace') || 0) + order.gross)
+  const rows = [...totals.entries()].sort((a, b) => b[1] - a[1])
+  const max = rows[0]?.[1] || 0
+  return rows.map(([label, value], i) => ({ label, value, percent: max ? value / max * 100 : 0, color: colors[i % colors.length] }))
+})
 </script>
 <template>
   <div>
-    <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas." />
+    <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" to="/vendas/novo"><UiIcon name="plus"/>Nova Venda</NuxtLink></PageHeader>
     <div class="metrics-grid metrics-grid--5">
       <MetricCard label="Receita Bruta" :value="formatCurrency(metrics.revenue.value)" icon="money" note="Dados do banco" color="green" />
       <MetricCard label="Receita Liquida" :value="formatCurrency(metrics.netRevenue.value)" icon="wallet" note="Dados do banco" color="blue" />
@@ -31,14 +48,14 @@ const statusSegments = [
       <PanelCard title="Pedidos">
         <div class="table-scroll"><table class="data-table">
           <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Liquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr v-for="o in filtered" :key="o.id"><td><strong>{{ o.id }}</strong></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action"><UiIcon name="more" :size="16"/></button></td></tr></tbody>
+          <tbody><tr v-if="!filtered.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para comecar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><strong>{{ o.id }}</strong></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
-        <div class="table-footer"><span>Mostrando 1 a {{ filtered.length }} de 284 pedidos</span><div class="pagination"><button class="page-btn active">1</button><button class="page-btn">2</button><button class="page-btn">3</button><button class="page-btn">…</button><button class="page-btn">29</button></div><select class="select-compact"><option>10 por pagina</option></select></div>
+        <div class="table-footer"><span>Mostrando {{ filtered.length ? 1 : 0 }} a {{ filtered.length }} de {{ orders.length }} pedidos</span><div class="pagination"><button class="page-btn active">1</button></div><select class="select-compact"><option>10 por pagina</option></select></div>
       </PanelCard>
       <aside>
-        <PanelCard title="Vendas por Status"><DonutChart :segments="statusSegments" total="284" caption="Pedidos" /></PanelCard>
+        <PanelCard title="Vendas por Status"><DonutChart :segments="statusSegments" :total="formatNumber(metrics.orderCount.value)" caption="Pedidos" /></PanelCard>
         <PanelCard title="Vendas por Marketplace" style="margin-top:12px">
-          <div class="bar-list"><div v-for="(m, i) in ['Shopee','Mercado Livre','Elo7','Amazon','Instagram']" :key="m" class="bar-row"><span>{{m}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${[100,72,34,25,15][i]}%`,background:['#ee4d2d','#f5c900','#f57c1f','#111827','#c83bb7'][i]}"/></div><strong>{{ [6420,4600,2100,1620,940][i].toLocaleString('pt-BR') }}</strong></div></div>
+          <div class="bar-list"><div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este grafico.</p></div></div><div v-for="bar in marketplaceBars" :key="bar.label" class="bar-row"><span>{{bar.label}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${bar.percent}%`,background:bar.color}"/></div><strong>{{ formatCurrency(bar.value) }}</strong></div></div>
         </PanelCard>
       </aside>
     </div>

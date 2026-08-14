@@ -1,35 +1,42 @@
 export type Order = {
+  dbId?: string;
   id: string; date: string; client: string; marketplace: string; product: string; qty: number;
   gross: number; fee: number; shipping: number; net: number; profit: number; status: string
 }
 
 export type Product = {
+  id?: string;
   name: string; subtitle: string; sku: string; category: string; price: number; weight: number;
   time: string; filament: string; filamentColor: string; cost: number; profit: number; margin: number;
   status: string; thumb: string
 }
 
 export type Expense = {
+  id?: string;
   description: string; category: string; supplier: string; value: number; date: string;
   payment: string; recurrence: string; status: string
 }
 
 export type Filament = {
+  id?: string;
   name: string; maker: string; material: string; type: string; color: string; colorHex: string;
   initial: number; remaining: number; cost: number; supplier: string; date: string; status: string
 }
 
 export type Printer = {
+  id?: string;
   name: string; code: string; maker: string; model: string; acquired: string; power: number;
   hours: number; status: string; maintenance: string; serial: string
 }
 
 export type Marketplace = {
+  id?: string;
   name: string; short: string; color: string; commission: number; fixed: number; financial: number;
   ads: number; others: number; gross: number; net: number; orders: number; active: boolean
 }
 
 export type Client = {
+  id?: string;
   name: string; email: string; phone: string; orders: number; revenue: number; ticket: number; last: string
 }
 
@@ -38,6 +45,7 @@ export type ChartSegment = {
 }
 
 export type Goal = {
+  id?: string;
   name: string; current: number; target: number; color: string; icon: string;
   periodStart?: string; periodEnd?: string; status?: string
 }
@@ -80,10 +88,7 @@ export const useAppData = () => {
   const pending = useState('app-data-pending', () => false)
   const error = useState<string | null>('app-data-error', () => null)
   const goals = useState<Goal[]>('goals', () => [
-    { name: 'Faturamento mensal', current: 18450, target: 30000, color: '#1768f2', icon: 'trend' },
-    { name: 'Lucro liquido', current: 9130, target: 14000, color: '#0da566', icon: 'money' },
-    { name: 'Quantidade de pedidos', current: 284, target: 400, color: '#7c3aed', icon: 'bag' },
-    { name: 'Reducao de despesas', current: 8, target: 15, color: '#f57c1f', icon: 'receipt' }
+    
   ])
 
   const apiUrl = (path: string) => `${apiBase}${path}`
@@ -95,9 +100,7 @@ export const useAppData = () => {
       data.value = await $fetch<AppData>(apiUrl('/api/app-data'), {
         headers: { 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value }
       })
-      if (data.value.goals?.length) {
-        goals.value = data.value.goals
-      }
+      goals.value = data.value.goals || []
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Nao foi possivel carregar os dados da API'
     } finally {
@@ -109,11 +112,47 @@ export const useAppData = () => {
     void loadAppData()
   }
 
+  const resourceHeaders = () => ({ 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value })
+  const setResource = (resource: keyof AppData, list: any[]) => {
+    ;(data.value[resource] as any[]) = list
+  }
+
+  const createItem = async <T>(resource: keyof AppData, item: T) => {
+    const list = await $fetch<T[]>(apiUrl(`/api/${String(resource)}`), {
+      method: 'POST',
+      body: item,
+      headers: resourceHeaders()
+    })
+    setResource(resource, list)
+    return list[0]
+  }
+
+  const updateItem = async <T extends { id?: string; dbId?: string }>(resource: keyof AppData, item: T) => {
+    const id = item.dbId || item.id
+    if (!id) throw new Error('Registro sem identificador para editar.')
+    const list = await $fetch<T[]>(apiUrl(`/api/${String(resource)}/${id}`), {
+      method: 'PUT',
+      body: item,
+      headers: resourceHeaders()
+    })
+    setResource(resource, list)
+    return list
+  }
+
+  const deleteItem = async (resource: keyof AppData, id: string) => {
+    const list = await $fetch<any[]>(apiUrl(`/api/${String(resource)}/${id}`), {
+      method: 'DELETE',
+      headers: resourceHeaders()
+    })
+    setResource(resource, list)
+    return list
+  }
+
   const createProduct = async (product: Product) => {
     const created = await $fetch<Product>(apiUrl('/api/products'), {
       method: 'POST',
       body: product,
-      headers: { 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value }
+      headers: resourceHeaders()
     })
     data.value.products = [created, ...data.value.products.filter((item) => item.sku !== created.sku)]
     return created
@@ -135,5 +174,8 @@ export const useAppData = () => {
     error,
     refreshAppData: loadAppData,
     createProduct
+    , createItem
+    , updateItem
+    , deleteItem
   }
 }

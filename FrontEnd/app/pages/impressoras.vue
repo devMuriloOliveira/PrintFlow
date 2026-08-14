@@ -6,7 +6,7 @@ const emptyPrinter = { name: '', code: '', maker: '', model: '', acquired: '', p
 const selected = computed(() => printers.value[selectedIndex.value] || emptyPrinter)
 const energyCost = computed(() => selected.value ? selected.value.power/1000*82*.68 : 0)
 const badgeClass=(s:string)=>s==='Disponivel'?'badge--green':s==='Em Manutencao'?'badge--orange':''
-const goToNewPrinter = () => navigateTo('/impressoras/nova')
+const goToNewPrinter = () => navigateTo('/impressoras/novo')
 </script>
 <template>
   <div><PageHeader title="Impressoras" subtitle="Gerencie suas impressoras 3D, acompanhe o status e o desempenho operacional."><button class="btn btn--primary" type="button" @click="goToNewPrinter"><UiIcon name="plus"/>Nova Impressora</button></PageHeader>

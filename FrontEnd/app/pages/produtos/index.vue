@@ -1,11 +1,17 @@
 <script setup lang="ts">
-const { products } = useAppData()
+const { products, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
+const { notify } = useUi()
 const search = ref('')
 const category = ref('Todas')
 const selectedIndex = ref(0)
 const selected = computed(() => products.value[selectedIndex.value])
 const filtered = computed(() => products.value.filter(p => (category.value === 'Todas' || p.category === category.value) && `${p.name} ${p.sku} ${p.category}`.toLowerCase().includes(search.value.toLowerCase())))
+const removeProduct = async (product: any) => {
+  if (!product.id || !window.confirm(`Excluir produto?\n\n${product.name}\n\nEsta acao nao podera ser desfeita.`)) return
+  await deleteItem('products', product.id)
+  notify('Produto excluido com sucesso.')
+}
 </script>
 <template>
   <div>
@@ -30,7 +36,7 @@ const filtered = computed(() => products.value.filter(p => (category.value === '
       <PanelCard>
         <div class="table-scroll"><table class="data-table">
           <thead><tr><th></th><th>Produto</th><th>SKU</th><th>Categoria</th><th>Preco de Venda</th><th>Peso</th><th>Tempo de Impressao</th><th>Filamento</th><th>Custo Total</th><th>Lucro</th><th>Margem</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr v-for="p in filtered" :key="p.sku" :class="{selected: selected?.sku === p.sku}" @click="selectedIndex = products.findIndex(x => x.sku === p.sku)"><td><input type="radio" :checked="selected?.sku === p.sku"></td><td><div class="table-product"><ProductThumb :type="p.thumb"/><div><strong>{{p.name}}</strong><small>{{p.subtitle}}</small></div></div></td><td>{{p.sku}}</td><td>{{p.category}}</td><td><strong>{{formatCurrency(p.price)}}</strong></td><td>{{p.weight}} g</td><td>{{p.time}}</td><td><span style="display:flex;align-items:center;gap:6px"><i class="dot" :style="{background:p.filamentColor}"/>{{p.filament}}</span></td><td>{{formatCurrency(p.cost)}}</td><td class="money-positive">{{formatCurrency(p.profit)}}</td><td class="money-positive">{{p.margin}}%</td><td><span class="badge badge--green">{{p.status}}</span></td><td><button class="row-action"><UiIcon name="more" :size="16"/></button></td></tr></tbody>
+          <tbody><tr v-for="p in filtered" :key="p.sku" :class="{selected: selected?.sku === p.sku}" @click="selectedIndex = products.findIndex(x => x.sku === p.sku)"><td><input type="radio" :checked="selected?.sku === p.sku"></td><td><div class="table-product"><ProductThumb :type="p.thumb"/><div><strong>{{p.name}}</strong><small>{{p.subtitle}}</small></div></div></td><td>{{p.sku}}</td><td>{{p.category}}</td><td><strong>{{formatCurrency(p.price)}}</strong></td><td>{{p.weight}} g</td><td>{{p.time}}</td><td><span style="display:flex;align-items:center;gap:6px"><i class="dot" :style="{background:p.filamentColor}"/>{{p.filament}}</span></td><td>{{formatCurrency(p.cost)}}</td><td class="money-positive">{{formatCurrency(p.profit)}}</td><td class="money-positive">{{p.margin}}%</td><td><span class="badge badge--green">{{p.status}}</span></td><td><button class="row-action" title="Excluir produto" @click.stop="removeProduct(p)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
         <div class="table-footer"><span>Mostrando 1 a {{filtered.length}} de 76 produtos</span><div class="pagination"><button class="page-btn active">1</button><button class="page-btn">2</button><button class="page-btn">3</button><button class="page-btn">…</button><button class="page-btn">16</button></div><select class="select-compact"><option>5 por pagina</option></select></div>
       </PanelCard>
@@ -42,3 +48,4 @@ const filtered = computed(() => products.value.filter(p => (category.value === '
     </div>
   </div>
 </template>
+

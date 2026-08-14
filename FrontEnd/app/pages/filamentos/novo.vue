@@ -2,8 +2,9 @@
 import { computed, nextTick, reactive, ref } from 'vue'
 import { navigateTo } from '#app'
 
-const { filaments } = useAppData()
+const { createItem } = useAppData()
 const { notify } = useUi()
+const saving = ref(false)
 const form = reactive({ name: '', maker: '', material: 'PLA', type: '1.75 mm', color: '', colorHex: '#111827', initial: 1000, remaining: 1000, cost: 0, supplier: '', date: '', minStock: 200, status: 'Em estoque' })
 const errors = reactive<Record<string, string>>({})
 const pieceWeight = ref(180)
@@ -25,12 +26,18 @@ const validate = () => {
   return !first
 }
 const reset = () => { form.name = ''; form.maker = ''; form.color = ''; form.cost = 0; form.supplier = ''; form.date = ''; form.remaining = form.initial }
-const save = (again = false) => {
+const save = async (again = false) => {
   if (!validate()) return
-  filaments.value.unshift({ name: form.name, maker: form.maker, material: form.material, type: form.type, color: form.color, colorHex: form.colorHex, initial: form.initial, remaining: form.remaining, cost: form.cost, supplier: form.supplier || 'Nao informado', date: form.date || '-', status: form.status })
-  notify('Filamento cadastrado com sucesso.')
-  if (again) return reset()
-  navigateTo('/filamentos')
+  if (saving.value) return
+  saving.value = true
+  try {
+    await createItem('filaments', { name: form.name, maker: form.maker, material: form.material, type: form.type, color: form.color, colorHex: form.colorHex, initial: form.initial, remaining: form.remaining, cost: form.cost, supplier: form.supplier || 'Nao informado', date: form.date || null, status: form.status })
+    notify('Filamento cadastrado com sucesso.')
+    if (again) return reset()
+    navigateTo('/filamentos')
+  } finally {
+    saving.value = false
+  }
 }
 const cancel = () => {
   if (!touched.value || window.confirm('Descartar alteracoes?\n\nAs informacoes preenchidas ainda nao foram salvas.')) navigateTo('/filamentos')
@@ -71,7 +78,7 @@ const cancel = () => {
             <div class="field col-4"><label>Status</label><select v-model="form.status"><option>Em estoque</option><option>Atencao</option><option>Baixo estoque</option><option>Esgotado</option></select></div>
           </div>
         </div>
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" @click="save(true)">Salvar e adicionar outro</button><button class="btn btn--primary" type="submit">Salvar Filamento</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outro</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : 'Salvar Filamento' }}</button></div>
       </form>
       <aside>
         <div class="detail-card">

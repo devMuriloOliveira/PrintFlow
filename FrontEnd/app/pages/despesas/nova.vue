@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { navigateTo } from '#app'
 
-const { expenses } = useAppData()
+const { createItem } = useAppData()
 const { notify } = useUi()
+const saving = ref(false)
 const form = reactive({ description: '', category: 'Filamento', supplier: '', value: 0, date: '', payment: 'PIX', recurring: false, frequency: 'Mensal', nextDue: '', receipt: '', notes: '', status: 'Pago' })
 const errors = reactive<Record<string, string>>({})
 const touched = computed(() => Object.values(form).some(value => value !== '' && value !== 0 && value !== false && !['Filamento', 'PIX', 'Mensal', 'Pago'].includes(String(value))))
@@ -24,12 +25,18 @@ const reset = () => { form.description = ''; form.supplier = ''; form.value = 0;
 const handleReceiptUpload = (event: Event) => {
   form.receipt = (event.target as HTMLInputElement).files?.[0]?.name || ''
 }
-const save = (again = false) => {
+const save = async (again = false) => {
   if (!validate()) return
-  expenses.value.unshift({ description: form.description, category: form.category, supplier: form.supplier || 'Nao informado', value: form.value, date: form.date, payment: form.payment, recurrence: recurrence.value, status: form.status })
-  notify('Despesa cadastrada com sucesso.')
-  if (again) return reset()
-  navigateTo('/despesas')
+  if (saving.value) return
+  saving.value = true
+  try {
+    await createItem('expenses', { description: form.description, category: form.category, supplier: form.supplier || 'Nao informado', value: form.value, date: form.date, payment: form.payment, recurrence: recurrence.value, status: form.status })
+    notify('Despesa cadastrada com sucesso.')
+    if (again) return reset()
+    navigateTo('/despesas')
+  } finally {
+    saving.value = false
+  }
 }
 const cancel = () => {
   if (!touched.value || window.confirm('Descartar alteracoes?\n\nAs informacoes preenchidas ainda nao foram salvas.')) navigateTo('/despesas')
@@ -71,7 +78,7 @@ const cancel = () => {
           <h2 class="form-card__title"><UiIcon name="edit" />4. Observacoes</h2>
           <div class="field"><label>Observacoes</label><textarea v-model="form.notes" placeholder="Detalhes internos sobre essa despesa" /></div>
         </div>
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" @click="save(true)">Salvar e adicionar outra</button><button class="btn btn--primary" type="submit">Salvar Despesa</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outra</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : 'Salvar Despesa' }}</button></div>
       </form>
       <aside class="detail-card">
         <div class="detail-card__head"><span class="metric-card__icon"><UiIcon name="receipt" /></span><div><h3>Resumo da Despesa</h3><p>{{form.category}}</p><p>{{recurrence}}</p></div></div>
