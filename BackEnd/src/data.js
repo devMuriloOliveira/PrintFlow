@@ -69,3 +69,13 @@ export const db = {
     { label: 'Outros', value: 5.7, color: '#7d8799' }
   ]
 }
+
+const tenantStores = new Map()
+
+export const getTenantData = (tenantId) => {
+  if (!tenantStores.has(tenantId)) {
+    tenantStores.set(tenantId, structuredClone(db))
+  }
+
+  return tenantStores.get(tenantId)
+}

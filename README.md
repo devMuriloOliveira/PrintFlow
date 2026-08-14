@@ -27,6 +27,8 @@ Rotas disponiveis:
 - `GET /api/marketplaces`
 - `GET /api/clients`
 - `GET /api/expense-segments`
+- `GET /api/goals`
+- `GET /api/settings`
 
 ## Executar o FrontEnd
 

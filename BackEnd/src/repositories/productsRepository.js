@@ -1,4 +1,4 @@
-import { query } from '../db/pool.js'
+import { tenantQuery, withTenant } from '../db/pool.js'
 
 const mapProduct = (row) => ({
   name: row.name,
@@ -18,7 +18,7 @@ const mapProduct = (row) => ({
 })
 
 export const listProducts = async (tenantId) => {
-  const result = await query(
+  const result = await tenantQuery(tenantId,
     `select name, subtitle, sku, category, price, weight, print_time, filament,
       filament_color, cost, profit, margin, status, thumb
      from products
@@ -31,14 +31,15 @@ export const listProducts = async (tenantId) => {
 }
 
 export const createProduct = async (tenantId, product) => {
-  await query(
-    `insert into tenants (id, name)
-     values ($1, $1)
-     on conflict (id) do nothing`,
-    [tenantId]
-  )
+  const result = await withTenant(tenantId, async (client) => {
+    await client.query(
+      `insert into tenants (id, name)
+       values ($1, $1)
+       on conflict (id) do nothing`,
+      [tenantId]
+    )
 
-  const result = await query(
+    return client.query(
     `insert into products (
       tenant_id, name, subtitle, sku, category, price, weight, print_time,
       filament, filament_color, cost, profit, margin, status, thumb
@@ -61,7 +62,7 @@ export const createProduct = async (tenantId, product) => {
       updated_at = now()
     returning name, subtitle, sku, category, price, weight, print_time, filament,
       filament_color, cost, profit, margin, status, thumb`,
-    [
+      [
       tenantId,
       product.name,
       product.subtitle || '',
@@ -77,8 +78,9 @@ export const createProduct = async (tenantId, product) => {
       Number(product.margin || 0),
       product.status || 'Ativo',
       product.thumb || 'vase'
-    ]
-  )
+      ]
+    )
+  })
 
   return mapProduct(result.rows[0])
 }

@@ -15,5 +15,6 @@ export const getTenantId = (req) => {
     return DEFAULT_TENANT_ID
   }
 
-  return String(tenantId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || DEFAULT_TENANT_ID
+  const normalized = String(tenantId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80)
+  return normalized || DEFAULT_TENANT_ID
 }
