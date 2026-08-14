@@ -1,0 +1,185 @@
+import { withTenant } from '../db/pool.js'
+import { listProducts, createProduct } from './productsRepository.js'
+import { listResource } from './appDataRepository.js'
+
+const number = (value) => Number(value || 0)
+const dateOrNull = (value) => value || null
+
+const resourceConfig = {
+  products: {
+    table: 'products',
+    create: createProduct,
+    list: listProducts,
+    patch: (item) => ({
+      name: item.name,
+      subtitle: item.subtitle || '',
+      sku: item.sku,
+      category: item.category || '',
+      price: number(item.price),
+      weight: number(item.weight),
+      print_time: item.time || '',
+      filament: item.filament || '',
+      filament_color: item.filamentColor || '#1768f2',
+      cost: number(item.cost),
+      profit: number(item.profit),
+      margin: number(item.margin),
+      status: item.status || 'Ativo',
+      thumb: item.thumb || 'vase'
+    })
+  },
+  expenses: {
+    table: 'expenses',
+    patch: (item) => ({
+      description: item.description,
+      category: item.category || 'Outros',
+      supplier: item.supplier || '',
+      amount: number(item.value),
+      expense_date: dateOrNull(item.date),
+      payment: item.payment || '',
+      recurrence: item.recurrence || 'Nao recorrente',
+      status: item.status || 'Pago'
+    })
+  },
+  filaments: {
+    table: 'filaments',
+    patch: (item) => ({
+      name: item.name,
+      maker: item.maker || '',
+      material: item.material || '',
+      type: item.type || '',
+      color: item.color || '',
+      color_hex: item.colorHex || '#ccd3df',
+      initial_weight: number(item.initial),
+      remaining_weight: number(item.remaining),
+      cost: number(item.cost),
+      supplier: item.supplier || '',
+      purchase_date: dateOrNull(item.date),
+      status: item.status || 'Em estoque'
+    })
+  },
+  printers: {
+    table: 'printers',
+    patch: (item) => ({
+      name: item.name,
+      code: item.code,
+      maker: item.maker || '',
+      model: item.model || '',
+      acquired_at: dateOrNull(item.acquired),
+      power_w: number(item.power),
+      accumulated_hours: number(item.hours),
+      status: item.status || 'Disponivel',
+      last_maintenance_at: dateOrNull(item.maintenance),
+      serial: item.serial || '',
+      location: item.location || '',
+      volume: item.volume || '',
+      default_filament: item.defaultFilament || ''
+    })
+  },
+  marketplaces: {
+    table: 'marketplaces',
+    patch: (item) => ({
+      name: item.name,
+      short: item.short || '',
+      color: item.color || '#1768f2',
+      commission: number(item.commission),
+      fixed: number(item.fixed),
+      financial: number(item.financial),
+      ads: number(item.ads),
+      others: number(item.others),
+      active: item.active !== false
+    })
+  },
+  clients: {
+    table: 'clients',
+    patch: (item) => ({
+      name: item.name,
+      email: item.email || 'nao-informado',
+      phone: item.phone || 'nao-informado'
+    })
+  },
+  goals: {
+    table: 'goals',
+    patch: (item) => ({
+      name: item.name,
+      current_value: number(item.current),
+      target_value: number(item.target),
+      color: item.color || '#1768f2',
+      icon: item.icon || 'target',
+      period_start: dateOrNull(item.periodStart),
+      period_end: dateOrNull(item.periodEnd),
+      status: item.status || 'Ativa'
+    })
+  },
+  orders: {
+    table: 'orders',
+    patch: (item) => ({
+      external_id: item.id || `PED-${Date.now()}`,
+      order_date: dateOrNull(item.date),
+      product_name: item.product || '',
+      quantity: number(item.qty) || 1,
+      gross: number(item.gross),
+      fee: number(item.fee),
+      shipping: number(item.shipping),
+      net: number(item.net),
+      profit: number(item.profit),
+      status: item.status || 'Novo'
+    })
+  }
+}
+
+const configFor = (resource) => {
+  const config = resourceConfig[resource]
+  if (!config) throw new Error('Recurso invalido')
+  return config
+}
+
+const writePatch = async (client, tenantId, resource, item, id = null) => {
+  const config = configFor(resource)
+  if (config.create && !id) return config.create(tenantId, item)
+
+  const values = config.patch(item)
+  const keys = Object.keys(values).filter((key) => values[key] !== undefined)
+  if (!keys.length) throw new Error('Nenhum dado para salvar')
+
+  if (id) {
+    const assignments = keys.map((key, index) => `${key} = $${index + 3}`).join(', ')
+    const params = [tenantId, id, ...keys.map((key) => values[key])]
+    const result = await client.query(
+      `update ${config.table} set ${assignments}${config.table === 'products' || config.table === 'clients' || config.table === 'filaments' || config.table === 'printers' ? ', updated_at = now()' : ''}
+       where tenant_id = $1 and id = $2 returning id`,
+      params
+    )
+    if (!result.rowCount) throw new Error('Registro nao encontrado')
+    return null
+  }
+
+  const columns = ['tenant_id', ...keys]
+  const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
+  await client.query(
+    `insert into ${config.table} (${columns.join(', ')}) values (${placeholders})`,
+    [tenantId, ...keys.map((key) => values[key])]
+  )
+  return null
+}
+
+export const createResource = async (tenantId, resource, item) => {
+  await withTenant(tenantId, async (client) => {
+    await client.query('insert into tenants (id, name) values ($1, $1) on conflict (id) do nothing', [tenantId])
+    await writePatch(client, tenantId, resource, item)
+  })
+  return listResource(tenantId, resource)
+}
+
+export const updateResource = async (tenantId, resource, id, item) => {
+  await withTenant(tenantId, async (client) => writePatch(client, tenantId, resource, item, id))
+  return listResource(tenantId, resource)
+}
+
+export const deleteResource = async (tenantId, resource, id) => {
+  const config = configFor(resource)
+  await withTenant(tenantId, async (client) => {
+    const result = await client.query(`delete from ${config.table} where tenant_id = $1 and id = $2`, [tenantId, id])
+    if (!result.rowCount) throw new Error('Registro nao encontrado')
+  })
+  return listResource(tenantId, resource)
+}

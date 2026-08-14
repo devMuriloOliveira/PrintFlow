@@ -1,7 +1,7 @@
 import { sendJson } from '../http/response.js'
 import { handleLogin, handleMe, handleRegister, getAuthUser } from './auth.js'
 import { env } from '../config/env.js'
-import { handleProductCreate, readRoutes } from './resources.js'
+import { handleProductCreate, handleResourceCreate, handleResourceDelete, handleResourceUpdate, readRoutes } from './resources.js'
 
 export const handleRequest = async (req, res) => {
   try {
@@ -42,6 +42,14 @@ export const handleRequest = async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/products') {
       return handleProductCreate(req, res)
+    }
+
+    const resourceMatch = url.pathname.match(/^\/api\/([a-z-]+)(?:\/([^/]+))?$/)
+    if (resourceMatch) {
+      const [, resource, id] = resourceMatch
+      if (req.method === 'POST' && !id) return handleResourceCreate(req, res, resource)
+      if (req.method === 'PUT' && id) return handleResourceUpdate(req, res, resource, id)
+      if (req.method === 'DELETE' && id) return handleResourceDelete(req, res, resource, id)
     }
 
     return sendJson(res, 404, { error: 'Endpoint nao encontrado' })

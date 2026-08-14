@@ -1,6 +1,7 @@
 import { tenantQuery, withTenant } from '../db/pool.js'
 
 const mapProduct = (row) => ({
+  id: String(row.id),
   name: row.name,
   subtitle: row.subtitle || '',
   sku: row.sku,
@@ -19,7 +20,7 @@ const mapProduct = (row) => ({
 
 export const listProducts = async (tenantId) => {
   const result = await tenantQuery(tenantId,
-    `select name, subtitle, sku, category, price, weight, print_time, filament,
+    `select id, name, subtitle, sku, category, price, weight, print_time, filament,
       filament_color, cost, profit, margin, status, thumb
      from products
      where tenant_id = $1
@@ -60,7 +61,7 @@ export const createProduct = async (tenantId, product) => {
       status = excluded.status,
       thumb = excluded.thumb,
       updated_at = now()
-    returning name, subtitle, sku, category, price, weight, print_time, filament,
+    returning id, name, subtitle, sku, category, price, weight, print_time, filament,
       filament_color, cost, profit, margin, status, thumb`,
       [
       tenantId,

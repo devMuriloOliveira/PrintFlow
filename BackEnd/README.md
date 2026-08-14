@@ -33,6 +33,12 @@ npm.cmd run dev
 
 Servidor: `http://localhost:3333`.
 
+Para remover dados antigos de demonstracao em um banco ja existente:
+
+```powershell
+npm.cmd run clean:demo
+```
+
 ## Deploy
 
 No Render, configure o servico usando:
