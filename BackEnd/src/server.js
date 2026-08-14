@@ -4,11 +4,13 @@ import { migrate } from './db/migrate.js'
 import { handleRequest } from './routes/index.js'
 
 const server = createServer(handleRequest)
+server.keepAliveTimeout = 120_000
+server.headersTimeout = 120_000
 
 try {
   await migrate()
 
-  server.listen(env.port, () => {
+  server.listen(env.port, '0.0.0.0', () => {
     console.log(`PrintFlow API running at http://localhost:${env.port}`)
   })
 } catch (error) {

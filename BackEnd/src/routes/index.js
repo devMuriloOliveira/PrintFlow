@@ -35,6 +35,10 @@ export const handleRequest = async (req, res) => {
       })
     }
 
+    if (req.method === 'GET' && url.pathname === '/healthz') {
+      return sendJson(res, 200, { status: 'ok' })
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/auth/register') {
       return handleRegister(req, res)
     }
