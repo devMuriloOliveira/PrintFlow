@@ -18,7 +18,7 @@ watchEffect(() => {
   const item = expenses.value.find(expense => expense.id === editId.value)
   if (!item) return
   const [frequency, nextDue = ''] = item.recurrence && item.recurrence !== 'Nao recorrente' ? item.recurrence.split(' - ') : ['Mensal', '']
-  Object.assign(form, { description: item.description, category: item.category, supplier: item.supplier, value: item.value, date: item.date || '', payment: item.payment, recurring: item.recurrence !== 'Nao recorrente', frequency, nextDue, status: item.status })
+  Object.assign(form, { description: item.description, category: item.category, supplier: item.supplier, value: item.value, date: toDateInputValue(item.date), payment: item.payment, recurring: item.recurrence !== 'Nao recorrente', frequency, nextDue: toDateInputValue(nextDue), status: item.status })
   hydrated.value = true
 })
 const validate = () => {

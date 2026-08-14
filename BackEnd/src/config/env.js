@@ -18,12 +18,31 @@ if (existsSync(envPath)) {
   }
 }
 
+const databaseUrl = process.env.DATABASE_URL || ''
+const isProduction = process.env.NODE_ENV === 'production'
+const productionLike = isProduction || Boolean(databaseUrl)
+const authSecret = process.env.AUTH_SECRET || ''
+const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY || ''
+const webhookSharedSecret = process.env.WEBHOOK_SHARED_SECRET || ''
+
+const requireProductionSecret = (name, value) => {
+  if (productionLike && !value) {
+    throw new Error(`${name} obrigatorio quando o backend usa banco real.`)
+  }
+}
+
+requireProductionSecret('AUTH_SECRET', authSecret)
+requireProductionSecret('DATA_ENCRYPTION_KEY', dataEncryptionKey)
+requireProductionSecret('WEBHOOK_SHARED_SECRET', webhookSharedSecret)
+
 export const env = {
   port: Number(process.env.PORT || 3333),
-  databaseUrl: process.env.DATABASE_URL || '',
-  allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true',
-  authSecret: process.env.AUTH_SECRET || 'printflow-dev-secret',
-  dataEncryptionKey: process.env.DATA_ENCRYPTION_KEY || '',
+  databaseUrl,
+  isProduction,
+  allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true' && !productionLike,
+  authSecret: authSecret || 'printflow-dev-secret',
+  dataEncryptionKey,
+  webhookSharedSecret,
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || 600),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),

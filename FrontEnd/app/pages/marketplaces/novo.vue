@@ -41,7 +41,7 @@ const form = reactive({
 
 const selectedPlatform = computed(() => platforms.find((item) => item.id === form.platform) || platforms[0])
 const requiresToken = computed(() => form.platform !== 'custom' && !isEditing.value)
-const webhookUrl = computed(() => selectedPlatform.value.webhook ? `${apiBase}${selectedPlatform.value.webhook}` : '')
+const webhookUrl = computed(() => selectedPlatform.value.webhook ? `${apiBase}${selectedPlatform.value.webhook}?secret=SEU_WEBHOOK_SHARED_SECRET` : '')
 const connectionStatus = computed(() => form.platform === 'custom' ? 'manual' : 'connected')
 const fees = computed(() => ({
   commission: saleValue.value * form.commission / 100,

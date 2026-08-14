@@ -2,6 +2,12 @@ import { withTenant } from '../db/pool.js'
 import { decryptField } from '../security/crypto.js'
 
 const number = (value) => Number(value || 0)
+const maskSensitiveIdentifier = (value) => {
+  const decrypted = decryptField(value)
+  if (!decrypted) return ''
+  if (decrypted.length <= 4) return '****'
+  return `${decrypted.slice(0, 2)}***${decrypted.slice(-2)}`
+}
 
 const mapProduct = (row) => ({
   id: String(row.id), name: row.name, subtitle: row.subtitle || '', sku: row.sku, category: row.category || '',
@@ -151,7 +157,7 @@ const readMarketplaceIntegrations = async (client, tenantId) => {
     marketplaceId: row.marketplace_id ? String(row.marketplace_id) : '',
     platform: row.platform,
     connectionName: row.connection_name,
-    accountExternalId: decryptField(row.account_external_id),
+    accountExternalId: maskSensitiveIdentifier(row.account_external_id),
     status: row.status,
     scopes: row.scopes || '',
     hasAccessToken: Boolean(row.access_token),

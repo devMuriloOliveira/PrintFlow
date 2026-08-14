@@ -19,7 +19,7 @@ watchEffect(() => {
   if (!editId.value || hydrated.value) return
   const item = filaments.value.find(filament => filament.id === editId.value)
   if (!item) return
-  Object.assign(form, { ...item, date: item.date || '' })
+  Object.assign(form, { ...item, date: toDateInputValue(item.date) })
   hydrated.value = true
 })
 const validate = () => {

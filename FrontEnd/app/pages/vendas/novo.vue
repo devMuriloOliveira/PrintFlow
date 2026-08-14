@@ -14,7 +14,7 @@ watchEffect(() => {
   if (!editId.value || hydrated.value) return
   const order = orders.value.find(item => item.dbId === editId.value || item.id === editId.value)
   if (!order) return
-  Object.assign(form, { id: order.id, date: order.date, client: order.client, marketplace: order.marketplace, product: order.product, qty: order.qty, gross: order.gross, fee: order.fee, shipping: order.shipping, cost: Number(order.net || 0) - Number(order.profit || 0), status: order.status })
+  Object.assign(form, { id: order.id, date: toDateInputValue(order.date), client: order.client, marketplace: order.marketplace, product: order.product, qty: order.qty, gross: order.gross, fee: order.fee, shipping: order.shipping, cost: Number(order.net || 0) - Number(order.profit || 0), status: order.status })
   hydrated.value = true
 })
 const validate = () => {

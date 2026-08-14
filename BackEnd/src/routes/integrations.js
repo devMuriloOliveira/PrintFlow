@@ -1,6 +1,7 @@
 import { getTenantId } from '../config/tenant.js'
 import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
+import { verifyWebhookSecret } from '../security/webhook.js'
 import {
   createMarketplaceIntegration,
   findIntegrationByExternalAccount,
@@ -23,6 +24,8 @@ export const handleIntegrationCreate = async (req, res) => {
 }
 
 export const handleMercadoLivreWebhook = async (req, res) => {
+  if (!verifyWebhookSecret(req)) return sendJson(res, 401, { error: 'Webhook nao autorizado.' })
+
   const payload = await readJsonBody(req)
   const externalAccountId = String(payload.user_id || '')
   if (!externalAccountId) return sendJson(res, 400, { error: 'ID externo do vendedor nao informado.' })
@@ -56,6 +59,8 @@ export const handleMercadoLivreWebhook = async (req, res) => {
 }
 
 export const handleShopeeWebhook = async (req, res) => {
+  if (!verifyWebhookSecret(req)) return sendJson(res, 401, { error: 'Webhook nao autorizado.' })
+
   const payload = await readJsonBody(req)
   const externalAccountId = String(payload.shop_id || '')
   if (!externalAccountId) return sendJson(res, 400, { error: 'Shop ID nao informado.' })
@@ -89,6 +94,8 @@ export const handleShopeeWebhook = async (req, res) => {
 }
 
 export const handleAmazonWebhook = async (req, res) => {
+  if (!verifyWebhookSecret(req)) return sendJson(res, 401, { error: 'Webhook nao autorizado.' })
+
   const payload = await readJsonBody(req)
   const externalAccountId = String(payload.sellerId || payload.seller_id || payload.merchantId || '')
   if (!externalAccountId) return sendJson(res, 400, { error: 'Seller ID nao informado.' })

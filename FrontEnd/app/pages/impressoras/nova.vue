@@ -19,7 +19,7 @@ watchEffect(() => {
   if (!editId.value || hydrated.value) return
   const item = printers.value.find(printer => printer.id === editId.value)
   if (!item) return
-  Object.assign(form, { name: item.name, maker: item.maker, model: item.model, serial: item.serial, code: item.code, acquired: item.acquired || '', power: item.power, hours: item.hours, status: item.status === 'Em Impressao' ? 'Imprimindo' : item.status === 'Em Manutencao' ? 'Manutencao' : item.status, maintenance: item.maintenance || '' })
+  Object.assign(form, { name: item.name, maker: item.maker, model: item.model, serial: item.serial, code: item.code, acquired: toDateInputValue(item.acquired), power: item.power, hours: item.hours, status: item.status === 'Em Impressao' ? 'Imprimindo' : item.status === 'Em Manutencao' ? 'Manutencao' : item.status, maintenance: toDateInputValue(item.maintenance) })
   hydrated.value = true
 })
 const validate = () => {
