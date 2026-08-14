@@ -172,6 +172,9 @@ input, select, textarea { color: var(--ink); }
 .table-product { display: flex; align-items: center; gap: 9px; }
 .table-product > div:last-child { display: flex; flex-direction: column; gap: 2px; }
 .table-product small { color: var(--muted); font-size: 8px; }
+.table-product--editable .row-action--edit { opacity: 0; pointer-events: none; transform: translateX(-3px); transition: .15s ease; }
+.data-table tbody tr:hover .table-product--editable .row-action--edit,
+.table-product--editable .row-action--edit:focus-visible { opacity: 1; pointer-events: auto; transform: translateX(0); }
 .table-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0 0; color: var(--muted); font-size: 9px; }
 .pagination { display: flex; gap: 5px; }
 .page-btn { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #dfe6ef; border-radius: 7px; color: var(--text); background: #fff; font-size: 10px; cursor: pointer; }

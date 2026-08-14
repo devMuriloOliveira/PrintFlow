@@ -1,6 +1,7 @@
 import { withTenant } from '../db/pool.js'
 import { listProducts, createProduct } from './productsRepository.js'
 import { listResource } from './appDataRepository.js'
+import { blindIndex, encryptField } from '../security/crypto.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
@@ -14,16 +15,16 @@ const findOrCreateClientId = async (client, tenantId, name) => {
   if (!cleanName) return null
 
   const existing = await client.query(
-    'select id from clients where tenant_id = $1 and lower(name) = lower($2) order by created_at asc limit 1',
-    [tenantId, cleanName]
+    'select id from clients where tenant_id = $1 and (name_hash = $2 or lower(name) = lower($3)) order by created_at asc limit 1',
+    [tenantId, blindIndex(cleanName), cleanName]
   )
   if (existing.rows[0]) return existing.rows[0].id
 
   const created = await client.query(
-    `insert into clients (tenant_id, name, email, phone)
-     values ($1, $2, 'nao-informado', 'nao-informado')
+    `insert into clients (tenant_id, name, name_hash, email, phone)
+     values ($1, $2, $3, $4, $5)
      returning id`,
-    [tenantId, cleanName]
+    [tenantId, encryptField(cleanName), blindIndex(cleanName), encryptField('nao-informado'), encryptField('nao-informado')]
   )
   return created.rows[0].id
 }
@@ -58,11 +59,22 @@ const resourceConfig = {
       subtitle: item.subtitle || '',
       sku: item.sku,
       category: item.category || '',
+      description: item.description || '',
+      printer: item.printer || '',
       price: number(item.price),
       weight: number(item.weight),
       print_time: item.time || '',
+      layer_height: number(item.layer),
+      infill: number(item.infill),
+      dimensions: item.dimensions || '',
       filament: item.filament || '',
       filament_color: item.filamentColor || '#1768f2',
+      packaging_cost: number(item.packaging),
+      additional_materials_cost: number(item.materials),
+      labor_cost: number(item.labor),
+      energy_enabled: item.energy !== false,
+      marketplace_fee: number(item.marketplaceFee),
+      desired_margin: number(item.desiredMargin),
       cost: number(item.cost),
       profit: number(item.profit),
       margin: number(item.margin),
@@ -135,9 +147,10 @@ const resourceConfig = {
   clients: {
     table: 'clients',
     patch: (item) => ({
-      name: item.name,
-      email: item.email || 'nao-informado',
-      phone: item.phone || 'nao-informado'
+      name: encryptField(item.name),
+      name_hash: blindIndex(item.name),
+      email: encryptField(item.email || 'nao-informado'),
+      phone: encryptField(item.phone || 'nao-informado')
     })
   },
   goals: {

@@ -1,4 +1,5 @@
 import { withTenant } from '../db/pool.js'
+import { decryptField } from '../security/crypto.js'
 
 const number = (value) => Number(value || 0)
 
@@ -30,7 +31,7 @@ const readOrders = async (client, tenantId) => {
     from orders o left join clients c on c.id = o.client_id left join marketplaces m on m.id = o.marketplace_id
     where o.tenant_id = $1 order by o.order_date desc, o.id desc
   `, [tenantId])
-  return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, date: row.date, client: row.client, marketplace: row.marketplace,
+  return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, date: row.date, client: decryptField(row.client), marketplace: row.marketplace,
     product: row.product, qty: Number(row.qty), gross: number(row.gross), fee: number(row.fee), shipping: number(row.shipping),
     net: number(row.net), profit: number(row.profit), status: row.status }))
 }
@@ -83,7 +84,7 @@ const readClients = async (client, tenantId) => {
     from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1
     where c.tenant_id = $1 group by c.id order by c.created_at desc
   `, [tenantId])
-  return result.rows.map((row) => ({ id: String(row.id), name: row.name, email: row.email, phone: row.phone, orders: Number(row.orders),
+  return result.rows.map((row) => ({ id: String(row.id), name: decryptField(row.name), email: decryptField(row.email), phone: decryptField(row.phone), orders: Number(row.orders),
     revenue: number(row.revenue), ticket: number(row.ticket), last: row.last || '' }))
 }
 
@@ -109,7 +110,20 @@ const readGoals = async (client, tenantId) => {
 const readSettings = async (client, tenantId) => {
   const result = await client.query(`select name, document, phone, email, address, district, city, state, zip, country,
     currency, timezone, kwh from company_settings where tenant_id = $1`, [tenantId])
-  return result.rows[0] || null
+  const row = result.rows[0]
+  if (!row) return null
+  return {
+    ...row,
+    name: decryptField(row.name),
+    document: decryptField(row.document),
+    phone: decryptField(row.phone),
+    email: decryptField(row.email),
+    address: decryptField(row.address),
+    district: decryptField(row.district),
+    city: decryptField(row.city),
+    state: decryptField(row.state),
+    zip: decryptField(row.zip)
+  }
 }
 
 export const loadAppData = async (tenantId) => withTenant(tenantId, async (client) => {

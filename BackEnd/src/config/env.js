@@ -23,6 +23,7 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL || '',
   allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true',
   authSecret: process.env.AUTH_SECRET || 'printflow-dev-secret',
+  dataEncryptionKey: process.env.DATA_ENCRYPTION_KEY || '',
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || 600),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),

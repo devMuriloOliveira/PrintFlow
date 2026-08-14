@@ -52,7 +52,9 @@ export const migrate = async () => {
   `)
   await query("alter table users add column if not exists password_hash text not null default ''")
   await query("alter table users add column if not exists status text not null default 'active'")
+  await query("alter table users add column if not exists email_hash text")
   await query('create index if not exists users_tenant_id_idx on users (tenant_id)')
+  await query('create unique index if not exists users_email_hash_unique on users (email_hash) where email_hash is not null')
 
   await query(`
     create table if not exists products (
@@ -89,6 +91,8 @@ export const migrate = async () => {
       updated_at timestamptz not null default now()
     )
   `)
+  await query("alter table clients add column if not exists name_hash text")
+  await query('create index if not exists clients_tenant_name_hash_idx on clients (tenant_id, name_hash)')
   await query(`
     create table if not exists marketplaces (
       id bigserial primary key, tenant_id text not null references tenants(id) on delete cascade,

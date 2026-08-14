@@ -1,17 +1,17 @@
 import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, verifyPassword } from '../auth/password.js'
 import { hasDatabase, query } from '../db/pool.js'
+import { blindIndex, decryptField, encryptField } from '../security/crypto.js'
 
 const memoryUsers = new Map()
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase()
-const sanitizeTenant = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 60)
 
 const publicUser = (row) => ({
   id: String(row.id),
   tenantId: row.tenant_id,
-  name: row.name,
-  email: row.email,
+  name: decryptField(row.name),
+  email: decryptField(row.email),
   role: row.role,
   status: row.status
 })
@@ -25,9 +25,9 @@ export const registerUser = async ({ name, email, password, company }) => {
   if (!normalizedEmail.includes('@')) throw new Error('Informe um e-mail valido.')
   if (String(password || '').length < 6) throw new Error('A senha precisa ter pelo menos 6 caracteres.')
 
-  const tenantBase = sanitizeTenant(companyName) || 'tenant'
-  const tenantId = `${tenantBase}_${createOpaqueId('ws').slice(3)}`
+  const tenantId = createOpaqueId('tenant')
   const passwordHash = hashPassword(password)
+  const emailHash = blindIndex(normalizedEmail)
 
   if (!hasDatabase) {
     if (memoryUsers.has(normalizedEmail)) throw new Error('Este e-mail ja esta cadastrado.')
@@ -36,21 +36,21 @@ export const registerUser = async ({ name, email, password, company }) => {
     return publicUser(user)
   }
 
-  const existing = await query('select id from users where email = $1 limit 1', [normalizedEmail])
+  const existing = await query('select id from users where email_hash = $1 or email = $2 limit 1', [emailHash, normalizedEmail])
   if (existing.rowCount) throw new Error('Este e-mail ja esta cadastrado.')
 
   await query(
     `insert into tenants (id, name, email, is_initialized)
      values ($1, $2, $3, false)
      on conflict (id) do nothing`,
-    [tenantId, companyName, normalizedEmail]
+    [tenantId, encryptField(companyName), encryptField(normalizedEmail)]
   )
 
   const result = await query(
-    `insert into users (tenant_id, name, email, password_hash, role, status)
-     values ($1, $2, $3, $4, 'admin', 'active')
+    `insert into users (tenant_id, name, email, email_hash, password_hash, role, status)
+     values ($1, $2, $3, $4, $5, 'admin', 'active')
      returning id, tenant_id, name, email, role, status`,
-    [tenantId, cleanName, normalizedEmail, passwordHash]
+    [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, passwordHash]
   )
 
   return publicUser(result.rows[0])
@@ -59,6 +59,7 @@ export const registerUser = async ({ name, email, password, company }) => {
 export const loginUser = async ({ email, password }) => {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail || !password) throw new Error('Informe e-mail e senha.')
+  const emailHash = blindIndex(normalizedEmail)
 
   if (!hasDatabase) {
     const user = memoryUsers.get(normalizedEmail)
@@ -67,11 +68,20 @@ export const loginUser = async ({ email, password }) => {
   }
 
   const result = await query(
-    `select id, tenant_id, name, email, password_hash, role, status
-     from users where email = $1 and status = 'active' limit 1`,
-    [normalizedEmail]
+    `select id, tenant_id, name, email, email_hash, password_hash, role, status
+     from users where (email_hash = $1 or email = $2) and status = 'active' limit 1`,
+    [emailHash, normalizedEmail]
   )
   const user = result.rows[0]
   if (!user || !verifyPassword(password, user.password_hash)) throw new Error('E-mail ou senha invalidos.')
+
+  if (!user.email_hash || user.email === normalizedEmail) {
+    await query(
+      `update users set name = $1, email = $2, email_hash = $3, updated_at = now()
+       where id = $4`,
+      [encryptField(decryptField(user.name)), encryptField(normalizedEmail), emailHash, user.id]
+    )
+  }
+
   return publicUser(user)
 }

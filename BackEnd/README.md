@@ -23,6 +23,7 @@ Copy-Item .env.example .env
 - `DATABASE_URL`: URL privada de conexao com o Neon/PostgreSQL.
 - `PORT`: porta local da API.
 - `AUTH_SECRET`: segredo usado para assinar os tokens de login. Use um valor forte em producao.
+- `DATA_ENCRYPTION_KEY`: chave privada usada para criptografar dados pessoais no banco. Use um valor longo e diferente do `AUTH_SECRET` em producao.
 - `ALLOW_DEMO_TENANT`: somente para testes sem identificador. Mantenha `false` no Render.
 
 ## Rodar localmente
@@ -47,6 +48,8 @@ No Render, configure o servico usando:
 - Start command: `npm start`
 - Root directory: `BackEnd`
 - Environment variable: `DATABASE_URL` com a URL privada do Neon.
+- Environment variable: `AUTH_SECRET` com um segredo longo.
+- Environment variable: `DATA_ENCRYPTION_KEY` com uma chave longa e privada.
 
 O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para apontar para outra API, configure a variavel `NUXT_PUBLIC_API_BASE`.
 
@@ -72,3 +75,4 @@ Regras importantes:
 - Toda busca, criacao, atualizacao e exclusao precisa usar o `tenant_id` resolvido no backend.
 - Chaves unicas de dados do cliente devem incluir o tenant, por exemplo `unique (tenant_id, sku)`.
 - Dados sensiveis devem ficar apenas em variaveis de ambiente privadas, nunca commitados no front ou no backend.
+- Campos pessoais como e-mail, telefone, documento e endereco devem ser gravados criptografados. Quando precisar buscar por algum deles, use hash cego em coluna auxiliar, nunca texto puro.
