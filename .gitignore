@@ -1,0 +1,10 @@
+.nuxt
+.output
+node_modules
+.tools
+.data
+.env
+*.log
+.chrome-*
+*-cdp.png
+*-preview*.png

@@ -1,0 +1,1 @@
+import{t as e}from"./D8u5M9Km.js";var t=()=>{let t=e(`global-toast`,()=>({visible:!1,message:``,type:`success`})),n;return{toast:t,notify:(e,r=`success`)=>{t.value={visible:!0,message:e,type:r},n&&clearTimeout(n),n=setTimeout(()=>{t.value.visible=!1},2800)}}};export{t};

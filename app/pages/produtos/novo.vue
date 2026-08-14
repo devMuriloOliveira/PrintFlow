@@ -1,0 +1,34 @@
+<script setup lang="ts">
+const { products } = useAppData()
+const { notify } = useUi()
+const router = useRouter()
+const form = reactive({ name: 'Vaso Geometrico', sku: 'VGE-001', category: 'Decoracao', description: 'Vaso decorativo moderno com design geometrico. Ideal para plantas pequenas e decoracao de ambientes.', status: 'Ativo', printer: 'Bambu Lab P1S', filament: 'PLA Cinza', weight: 212, hours: 5, minutes: 20, layer: .2, infill: 20, packaging: 1.5, materials: .8, labor: 2, energy: true, marketplaceFee: 14, price: 49.9, desiredMargin: 40 })
+const filamentCost = computed(() => form.weight * .032)
+const energyCost = computed(() => form.energy ? (form.hours + form.minutes/60) * .28 : 0)
+const marketplaceCost = computed(() => form.price * form.marketplaceFee / 100)
+const totalCost = computed(() => filamentCost.value + energyCost.value + form.packaging + form.materials + form.labor + marketplaceCost.value)
+const profit = computed(() => form.price - totalCost.value)
+const margin = computed(() => profit.value / form.price * 100)
+const save = () => {
+  products.value.unshift({ name: form.name, subtitle: form.description.slice(0, 42), sku: form.sku, category: form.category, price: form.price, weight: form.weight, time: `${form.hours}h ${form.minutes}m`, filament: form.filament, filamentColor: '#555b64', cost: totalCost.value, profit: profit.value, margin: margin.value, status: form.status, thumb: 'vase' })
+  notify('Produto salvo com sucesso')
+  router.push('/produtos')
+}
+</script>
+<template>
+  <div>
+    <PageHeader title="Novo Produto" subtitle="Cadastre um novo produto e calcule automaticamente seus custos e margem." />
+    <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
+      <div>
+        <form class="form-card" @submit.prevent="save"><h2 class="form-card__title"><UiIcon name="box"/>1. Informacoes Basicas</h2><div class="form-grid">
+          <div class="field col-5"><label>Nome do Produto *</label><input v-model="form.name" required></div><div class="field col-4"><label>SKU *</label><input v-model="form.sku" required></div><div class="field col-3"><label>Status *</label><select v-model="form.status"><option>Ativo</option><option>Rascunho</option></select></div>
+          <div class="field col-5"><label>Categoria *</label><select v-model="form.category"><option>Decoracao</option><option>Acessorios</option><option>Brinquedos</option><option>Organizadores</option></select></div><div class="field col-7"><label>Descricao</label><textarea v-model="form.description"/></div>
+        </div></form>
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="settings"/>2. Especificacoes da Impressao</h2><div class="form-grid"><div class="field col-4"><label>Impressora *</label><select v-model="form.printer"><option>Bambu Lab P1S</option><option>Ender 3 V2</option></select></div><div class="field col-4"><label>Filamento *</label><select v-model="form.filament"><option>PLA Cinza</option><option>PLA Preto</option></select></div><div class="field col-4"><label>Peso da peca (g) *</label><input v-model.number="form.weight" type="number"></div><div class="field col-2"><label>Horas</label><input v-model.number="form.hours" type="number"></div><div class="field col-2"><label>Minutos</label><input v-model.number="form.minutes" type="number"></div><div class="field col-3"><label>Altura da camada</label><input v-model.number="form.layer" type="number" step=".01"></div><div class="field col-2"><label>Infill (%)</label><input v-model.number="form.infill" type="number"></div><div class="field col-3"><label>Dimensoes</label><input value="120 x 120 x 150 mm"></div></div></div>
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="money"/>3. Custos Adicionais</h2><div class="form-grid"><div class="field col-3"><label>Embalagem (R$)</label><input v-model.number="form.packaging" type="number" step=".1"></div><div class="field col-3"><label>Materiais adicionais (R$)</label><input v-model.number="form.materials" type="number" step=".1"></div><div class="field col-3"><label>Mao de obra (R$)</label><input v-model.number="form.labor" type="number" step=".1"></div><div class="field col-3"><label>Taxa marketplace (%)</label><input v-model.number="form.marketplaceFee" type="number"></div><div class="field col-4"><label>Incluir custo de energia</label><div class="switch-row"><span>{{form.energy?'Ativado':'Desativado'}}</span><button type="button" class="switch" :class="{active:form.energy}" @click="form.energy=!form.energy"/></div></div></div></div>
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="tag"/>4. Precificacao</h2><div class="form-grid"><div class="field col-4"><label>Preco de venda (R$)</label><input v-model.number="form.price" type="number" step=".1"></div><div class="field col-4"><label>Margem desejada (%)</label><input v-model.number="form.desiredMargin" type="number"></div><div class="col-4" style="display:flex;align-items:end"><button class="btn btn--primary btn--wide" type="button" @click="save"><UiIcon name="save" :size="16"/>Salvar Produto</button></div></div></div>
+      </div>
+      <aside><div class="detail-card"><div class="detail-card__head"><ProductThumb type="vase" :size="110"/><div><h3>{{form.name}}</h3><p>Categoria: {{form.category}}</p><p>Material: {{form.filament}}</p><p>Peso: {{form.weight}} g</p></div></div><div class="detail-card__body"><h3 style="font-size:12px">Resumo Financeiro</h3><div class="detail-list"><div class="detail-list__row"><span><i style="background:#278ba1"/>Filamento</span><strong>{{formatCurrency(filamentCost)}}</strong></div><div class="detail-list__row"><span><i style="background:#f4c43f"/>Energia</span><strong>{{formatCurrency(energyCost)}}</strong></div><div class="detail-list__row"><span><i style="background:#f47b3b"/>Embalagem</span><strong>{{formatCurrency(form.packaging)}}</strong></div><div class="detail-list__row"><span><i style="background:#c43dcc"/>Taxa Marketplace</span><strong>{{formatCurrency(marketplaceCost)}}</strong></div></div><div class="summary-box"><div class="detail-list__row"><span>Custo Total</span><strong>{{formatCurrency(totalCost)}}</strong></div><div class="detail-list__row"><span>Preco de Venda</span><strong>{{formatCurrency(form.price)}}</strong></div><div class="detail-list__row"><span>Lucro Liquido</span><strong class="money-positive">{{formatCurrency(profit)}}</strong></div><div class="detail-list__row"><span>Margem Liquida</span><strong class="money-positive">{{margin.toFixed(1)}}%</strong></div></div><div class="viability"><span class="viability__icon"><UiIcon name="check"/></span><div><h3>Produto viavel</h3><p>Com essa margem, seu produto esta saudavel e pronto para ser vendido.</p></div></div></div></div></aside>
+    </div>
+  </div>
+</template>
