@@ -31,6 +31,8 @@ const save = async (again = false) => {
     notify('Impressora cadastrada com sucesso.')
     if (again) { form.name = ''; form.model = ''; form.serial = ''; form.code = ''; return }
     navigateTo('/impressoras')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Nao foi possivel salvar a impressora.', 'info')
   } finally {
     saving.value = false
   }

@@ -4,6 +4,49 @@ import { listResource } from './appDataRepository.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
+const textOrNull = (value) => {
+  const text = String(value || '').trim()
+  return text || null
+}
+
+const findOrCreateClientId = async (client, tenantId, name) => {
+  const cleanName = textOrNull(name)
+  if (!cleanName) return null
+
+  const existing = await client.query(
+    'select id from clients where tenant_id = $1 and lower(name) = lower($2) order by created_at asc limit 1',
+    [tenantId, cleanName]
+  )
+  if (existing.rows[0]) return existing.rows[0].id
+
+  const created = await client.query(
+    `insert into clients (tenant_id, name, email, phone)
+     values ($1, $2, 'nao-informado', 'nao-informado')
+     returning id`,
+    [tenantId, cleanName]
+  )
+  return created.rows[0].id
+}
+
+const findOrCreateMarketplaceId = async (client, tenantId, name) => {
+  const cleanName = textOrNull(name)
+  if (!cleanName) return null
+
+  const existing = await client.query(
+    'select id from marketplaces where tenant_id = $1 and lower(name) = lower($2) order by created_at asc limit 1',
+    [tenantId, cleanName]
+  )
+  if (existing.rows[0]) return existing.rows[0].id
+
+  const created = await client.query(
+    `insert into marketplaces (tenant_id, name, short, color, active)
+     values ($1, $2, $3, '#1768f2', true)
+     on conflict (tenant_id, name) do update set name = excluded.name
+     returning id`,
+    [tenantId, cleanName, cleanName.slice(0, 2).toUpperCase()]
+  )
+  return created.rows[0].id
+}
 
 const resourceConfig = {
   products: {
@@ -138,6 +181,10 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
   if (config.create && !id) return config.create(tenantId, item)
 
   const values = config.patch(item)
+  if (resource === 'orders') {
+    values.client_id = await findOrCreateClientId(client, tenantId, item.client)
+    values.marketplace_id = await findOrCreateMarketplaceId(client, tenantId, item.marketplace)
+  }
   const keys = Object.keys(values).filter((key) => values[key] !== undefined)
   if (!keys.length) throw new Error('Nenhum dado para salvar')
 

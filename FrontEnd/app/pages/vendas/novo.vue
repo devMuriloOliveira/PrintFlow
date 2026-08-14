@@ -20,6 +20,8 @@ const save = async () => {
     await createItem('orders', { ...form, id: form.id || `PED-${Date.now()}`, net: net.value, profit: profit.value })
     notify('Venda cadastrada com sucesso.')
     await navigateTo('/vendas')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Nao foi possivel salvar a venda.', 'info')
   } finally {
     saving.value = false
   }

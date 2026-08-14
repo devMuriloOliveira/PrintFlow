@@ -1,5 +1,4 @@
 import { withTenant } from '../db/pool.js'
-import { ensureTenantData } from '../db/seed.js'
 
 const number = (value) => Number(value || 0)
 
@@ -114,7 +113,6 @@ const readSettings = async (client, tenantId) => {
 }
 
 export const loadAppData = async (tenantId) => withTenant(tenantId, async (client) => {
-  await ensureTenantData(client, tenantId)
   const [products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings] = await Promise.all([
     readProducts(client, tenantId), readOrders(client, tenantId), readExpenses(client, tenantId), readFilaments(client, tenantId),
     readPrinters(client, tenantId), readMarketplaces(client, tenantId), readClients(client, tenantId), readExpenseSegments(client, tenantId),

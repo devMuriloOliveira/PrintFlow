@@ -1,4 +1,5 @@
 import { sendJson } from '../http/response.js'
+import { enterRequest } from '../http/rateLimit.js'
 import { handleLogin, handleMe, handleRegister, getAuthUser } from './auth.js'
 import { env } from '../config/env.js'
 import { handleProductCreate, handleResourceCreate, handleResourceDelete, handleResourceUpdate, readRoutes } from './resources.js'
@@ -10,6 +11,14 @@ export const handleRequest = async (req, res) => {
     if (req.method === 'OPTIONS') {
       return sendJson(res, 204, null)
     }
+
+    const limit = enterRequest(req, url.pathname)
+    if (!limit.allowed) {
+      return sendJson(res, limit.status, limit.body, limit.headers)
+    }
+
+    res.once('finish', limit.release)
+    res.once('close', limit.release)
 
     if (req.method === 'GET' && url.pathname === '/') {
       return sendJson(res, 200, {

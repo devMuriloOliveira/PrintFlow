@@ -7,6 +7,8 @@ export type Order = {
 export type Product = {
   id?: string;
   name: string; subtitle: string; sku: string; category: string; price: number; weight: number;
+  description?: string; printer?: string; layer?: number; infill?: number; dimensions?: string;
+  packaging?: number; materials?: number; labor?: number; energy?: boolean; marketplaceFee?: number; desiredMargin?: number;
   time: string; filament: string; filamentColor: string; cost: number; profit: number; margin: number;
   status: string; thumb: string
 }
@@ -86,10 +88,10 @@ export const useAppData = () => {
   const tenantId = useTenantId()
   const data = useState<AppData>('app-data', emptyData)
   const pending = useState('app-data-pending', () => false)
+  const loaded = useState('app-data-loaded', () => false)
+  const loadedTenant = useState('app-data-loaded-tenant', () => '')
   const error = useState<string | null>('app-data-error', () => null)
-  const goals = useState<Goal[]>('goals', () => [
-    
-  ])
+  const goals = useState<Goal[]>('goals', () => [])
 
   const apiUrl = (path: string) => `${apiBase}${path}`
 
@@ -101,6 +103,8 @@ export const useAppData = () => {
         headers: { 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value }
       })
       goals.value = data.value.goals || []
+      loaded.value = true
+      loadedTenant.value = tenantId.value
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Nao foi possivel carregar os dados da API'
     } finally {
@@ -108,7 +112,14 @@ export const useAppData = () => {
     }
   }
 
-  if (process.client && !pending.value && data.value.products.length === 0 && !error.value) {
+  if (process.client && loadedTenant.value && loadedTenant.value !== tenantId.value) {
+    data.value = emptyData()
+    goals.value = []
+    loaded.value = false
+    loadedTenant.value = ''
+  }
+
+  if (process.client && !loaded.value && !pending.value && !error.value) {
     void loadAppData()
   }
 

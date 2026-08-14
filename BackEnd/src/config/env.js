@@ -22,5 +22,10 @@ export const env = {
   port: Number(process.env.PORT || 3333),
   databaseUrl: process.env.DATABASE_URL || '',
   allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true',
-  authSecret: process.env.AUTH_SECRET || 'printflow-dev-secret'
+  authSecret: process.env.AUTH_SECRET || 'printflow-dev-secret',
+  authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || 600),
+  rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
+  rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),
+  rateLimitAuthMaxRequests: Number(process.env.RATE_LIMIT_AUTH_MAX_REQUESTS || 12),
+  maxConcurrentRequestsPerIp: Number(process.env.MAX_CONCURRENT_REQUESTS_PER_IP || 25)
 }
