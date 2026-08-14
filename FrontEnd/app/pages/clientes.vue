@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const { clients } = useAppData()
+const metrics = useBusinessMetrics()
 const search = ref('')
 const filtered = computed(() => clients.value.filter(c => Object.values(c).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const goToNewClient = () => navigateTo('/clientes/novo')
@@ -11,10 +12,10 @@ const goToNewClient = () => navigateTo('/clientes/novo')
       <button class="btn btn--primary" type="button" @click="goToNewClient"><UiIcon name="plus" />Novo Cliente</button>
     </PageHeader>
     <div class="metrics-grid metrics-grid--4">
-      <MetricCard label="Clientes Ativos" value="186" icon="users" change="8,4%" note="vs. mes anterior" />
-      <MetricCard label="Novos no Mes" value="24" icon="plus" change="14,3%" note="vs. mes anterior" color="green" />
-      <MetricCard label="Cliente mais Rentavel" value="Cliente 001" icon="trend" change="R$ 1.890,40" color="purple" />
-      <MetricCard label="Ticket Medio" value="R$ 128,40" icon="tag" change="6,2%" note="vs. mes anterior" color="orange" />
+      <MetricCard label="Clientes Ativos" :value="formatNumber(clients.length)" icon="users" note="Dados do banco" />
+      <MetricCard label="Novos no Mes" :value="formatNumber(clients.length)" icon="plus" note="Cadastros carregados" color="green" />
+      <MetricCard label="Cliente mais Rentavel" :value="metrics.bestClient.value?.name || '-'" icon="trend" :change="formatCurrency(metrics.bestClient.value?.revenue || 0)" color="purple" />
+      <MetricCard label="Ticket Medio" :value="formatCurrency(metrics.clientTicket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" />
     </div>
     <div class="filters">
       <div class="field field--search">

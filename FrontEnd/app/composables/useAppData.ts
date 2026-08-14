@@ -74,6 +74,7 @@ export const formatNumber = (value: number) => new Intl.NumberFormat('pt-BR').fo
 export const useAppData = () => {
   const config = useRuntimeConfig()
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
+  const auth = useAuth()
   const tenantId = useTenantId()
   const data = useState<AppData>('app-data', emptyData)
   const pending = useState('app-data-pending', () => false)
@@ -92,7 +93,7 @@ export const useAppData = () => {
     error.value = null
     try {
       data.value = await $fetch<AppData>(apiUrl('/api/app-data'), {
-        headers: { 'X-Tenant-Id': tenantId.value }
+        headers: { 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value }
       })
       if (data.value.goals?.length) {
         goals.value = data.value.goals
@@ -112,7 +113,7 @@ export const useAppData = () => {
     const created = await $fetch<Product>(apiUrl('/api/products'), {
       method: 'POST',
       body: product,
-      headers: { 'X-Tenant-Id': tenantId.value }
+      headers: { 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value }
     })
     data.value.products = [created, ...data.value.products.filter((item) => item.sku !== created.sku)]
     return created

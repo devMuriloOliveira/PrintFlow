@@ -7,6 +7,13 @@ const createWorkspaceId = () => {
 
 export const useTenantId = () => {
   const tenantId = useState<string>('printflow-workspace-id', () => '')
+  const auth = useAuth()
+
+  if (auth.user.value?.tenantId) {
+    tenantId.value = auth.user.value.tenantId
+    if (process.client) localStorage.setItem(STORAGE_KEY, tenantId.value)
+    return tenantId
+  }
 
   if (process.client && !tenantId.value) {
     tenantId.value = localStorage.getItem(STORAGE_KEY) || createWorkspaceId()

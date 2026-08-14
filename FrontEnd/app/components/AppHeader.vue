@@ -2,6 +2,9 @@
 defineEmits<{ menu: [] }>()
 const searchOpen = ref(false)
 const notificationsOpen = ref(false)
+const auth = useAuth()
+
+const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'PF')
 </script>
 
 <template>
@@ -28,10 +31,10 @@ const notificationsOpen = ref(false)
           </div>
         </Transition>
       </div>
-      <button class="profile-control">
-        <span class="avatar">LG</span>
-        <span class="profile-copy"><strong>Lucas Godoi</strong><small>Administrador</small></span>
-        <UiIcon name="down" :size="14" />
+      <button class="profile-control" @click="auth.logout">
+        <span class="avatar">{{ initials }}</span>
+        <span class="profile-copy"><strong>{{ auth.user.value?.name || 'Usuario' }}</strong><small>Sair da conta</small></span>
+        <UiIcon name="logout" :size="14" />
       </button>
     </div>
   </header>

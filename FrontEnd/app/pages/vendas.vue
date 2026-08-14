@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const { orders } = useAppData()
+const metrics = useBusinessMetrics()
 const search = ref('')
 const status = ref('Todos')
 const filtered = computed(() => orders.value.filter(o => (status.value === 'Todos' || o.status === status.value) && Object.values(o).join(' ').toLowerCase().includes(search.value.toLowerCase())))
@@ -13,11 +14,11 @@ const statusSegments = [
   <div>
     <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas." />
     <div class="metrics-grid metrics-grid--5">
-      <MetricCard label="Receita Bruta" value="R$ 18.450,00" icon="money" change="12,8%" note="vs. mes anterior" color="green" />
-      <MetricCard label="Receita Liquida" value="R$ 15.980,00" icon="wallet" change="10,6%" note="vs. mes anterior" color="blue" />
-      <MetricCard label="Lucro Total" value="R$ 9.130,00" icon="money" change="10,9%" note="vs. mes anterior" color="green" />
-      <MetricCard label="Pedidos no Mes" value="284" icon="bag" change="15,3%" note="vs. mes anterior" color="purple" />
-      <MetricCard label="Frete" value="R$ 1.840,00" icon="cart" change="4,5%" note="vs. mes anterior" color="orange" negative />
+      <MetricCard label="Receita Bruta" :value="formatCurrency(metrics.revenue.value)" icon="money" note="Dados do banco" color="green" />
+      <MetricCard label="Receita Liquida" :value="formatCurrency(metrics.netRevenue.value)" icon="wallet" note="Dados do banco" color="blue" />
+      <MetricCard label="Lucro Total" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" />
+      <MetricCard label="Pedidos no Mes" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Dados do banco" color="purple" />
+      <MetricCard label="Frete" :value="formatCurrency(metrics.shipping.value)" icon="cart" note="Dados do banco" color="orange" negative />
     </div>
     <div class="filters">
       <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Pedido, cliente ou produto"></div></div>

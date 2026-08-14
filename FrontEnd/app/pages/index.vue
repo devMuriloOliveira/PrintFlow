@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const { products, expenseSegments } = useAppData()
+const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const revenue = [4, 5, 13, 9, 13, 16, 13, 10, 15, 12, 12.5, 18]
 const revenueLabels = ['Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai']
@@ -16,12 +17,12 @@ const marketplaceBars = [
     <PageHeader title="Dashboard" subtitle="Resumo geral do seu negocio de impressao 3D" />
 
     <div class="metrics-grid">
-      <MetricCard label="Faturamento Total" value="R$ 18.450,00" icon="trend" change="12,8%" note="vs. 01/04 - 30/04" color="blue" :points="[5,13,9,15,11,17,10,18]" />
-      <MetricCard label="Despesas Totais" value="R$ 9.320,00" icon="receipt" change="8,6%" note="vs. 01/04 - 30/04" color="red" negative :points="[4,15,9,16,11,14,8,19]" />
-      <MetricCard label="Lucro Liquido" value="R$ 9.130,00" icon="money" change="Margem 49,48%" color="green" selected :points="[4,16,10,18,8,15,10,20]" />
-      <MetricCard label="Pedidos" value="284" icon="bag" change="15,3%" note="vs. 01/04 - 30/04" color="purple" :points="[3,12,7,17,10,14,9,20]" />
-      <MetricCard label="Ticket Medio" value="R$ 64,97" icon="tag" note="Faturamento / Pedidos" color="orange" :points="[2,5,4,13,7,9,10,15]" />
-      <MetricCard label="Taxas de Marketplaces" value="R$ 2.740,00" icon="percent" change="10,2%" note="vs. 01/04 - 30/04" color="cyan" :points="[3,6,5,12,6,10,7,12]" />
+      <MetricCard label="Faturamento Total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Dados do banco" color="blue" :points="[5,13,9,15,11,17,10,18]" />
+      <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative :points="[4,15,9,16,11,14,8,19]" />
+      <MetricCard label="Lucro Liquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" selected :points="[4,16,10,18,8,15,10,20]" />
+      <MetricCard label="Pedidos" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Dados do banco" color="purple" :points="[3,12,7,17,10,14,9,20]" />
+      <MetricCard label="Ticket Medio" :value="formatCurrency(metrics.ticket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="[2,5,4,13,7,9,10,15]" />
+      <MetricCard label="Taxas de Marketplaces" :value="formatCurrency(metrics.fees.value)" icon="percent" note="Dados do banco" color="cyan" :points="[3,6,5,12,6,10,7,12]" />
     </div>
 
     <div class="dashboard-grid">
@@ -39,7 +40,7 @@ const marketplaceBars = [
       </PanelCard>
       <PanelCard title="Despesas por Categoria">
         <template #actions><select class="select-compact"><option>Este mes</option></select></template>
-        <DonutChart :segments="expenseSegments" total="R$ 9.320" />
+        <DonutChart :segments="expenseSegments" :total="formatCurrency(metrics.expenseTotal.value)" />
       </PanelCard>
     </div>
 

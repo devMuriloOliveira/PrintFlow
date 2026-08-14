@@ -1,4 +1,6 @@
 import { sendJson } from '../http/response.js'
+import { handleLogin, handleMe, handleRegister, getAuthUser } from './auth.js'
+import { env } from '../config/env.js'
 import { handleProductCreate, readRoutes } from './resources.js'
 
 export const handleRequest = async (req, res) => {
@@ -15,6 +17,23 @@ export const handleRequest = async (req, res) => {
         status: 'ok',
         endpoints: Object.keys(readRoutes)
       })
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/auth/register') {
+      return handleRegister(req, res)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/auth/login') {
+      return handleLogin(req, res)
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/auth/me') {
+      return handleMe(req, res)
+    }
+
+    const isProtectedApi = url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/auth/')
+    if (isProtectedApi && !env.allowDemoTenant && !getAuthUser(req)) {
+      return sendJson(res, 401, { error: 'Login necessario' })
     }
 
     if (req.method === 'GET' && readRoutes[url.pathname]) {

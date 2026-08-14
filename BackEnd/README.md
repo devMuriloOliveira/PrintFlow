@@ -22,6 +22,7 @@ Copy-Item .env.example .env
 
 - `DATABASE_URL`: URL privada de conexao com o Neon/PostgreSQL.
 - `PORT`: porta local da API.
+- `AUTH_SECRET`: segredo usado para assinar os tokens de login. Use um valor forte em producao.
 - `ALLOW_DEMO_TENANT`: somente para testes sem identificador. Mantenha `false` no Render.
 
 ## Rodar localmente
@@ -43,13 +44,21 @@ No Render, configure o servico usando:
 
 O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para apontar para outra API, configure a variavel `NUXT_PUBLIC_API_BASE`.
 
+## Autenticacao
+
+A API possui cadastro, login e validacao de sessao:
+
+- `POST /api/auth/register`: cria empresa, usuario administrador e retorna token.
+- `POST /api/auth/login`: valida e-mail/senha e retorna token.
+- `GET /api/auth/me`: retorna o usuario autenticado pelo token.
+
+As rotas de negocio usam `Authorization: Bearer <token>`. O tenant e resolvido no backend a partir do token, entao o front nao decide qual base de dados acessar.
+
 ## Modelo de dados e isolamento
 
-As migracoes criam as tabelas `tenants`, `products`, `orders`, `expenses`, `filaments`, `printers`, `marketplaces`, `clients`, `goals`, `company_settings`, `calculator_simulations` e `export_history`. Todos os dados de negocio possuem `tenant_id`, indices por tenant e politicas de Row Level Security no PostgreSQL.
+As migracoes criam as tabelas `tenants`, `users`, `products`, `orders`, `expenses`, `filaments`, `printers`, `marketplaces`, `clients`, `goals`, `company_settings`, `calculator_simulations` e `export_history`. Todos os dados de negocio possuem `tenant_id`, indices por tenant e politicas de Row Level Security no PostgreSQL.
 
-Como ainda nao existe cadastro, o front cria um identificador aleatorio de espaco de trabalho e o envia no header `X-Tenant-Id`, persistido apenas no navegador. Isso separa navegadores/espacos durante esta fase e evita uma conta `demo` compartilhada.
-
-Essa etapa nao substitui autenticacao: alguem que alterar manualmente o header pode tentar acessar outro espaco. Antes de abrir o sistema para dados reais, substitua esse header por um tenant derivado de sessao/JWT validado exclusivamente no backend.
+Cada conta criada recebe um tenant proprio. Com `ALLOW_DEMO_TENANT=false`, as rotas de negocio exigem login e ignoram tenant escolhido manualmente pelo usuario.
 
 Regras importantes:
 

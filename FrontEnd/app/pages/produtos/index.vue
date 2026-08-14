@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const { products } = useAppData()
+const metrics = useBusinessMetrics()
 const search = ref('')
 const category = ref('Todas')
 const selectedIndex = ref(0)
@@ -12,10 +13,10 @@ const filtered = computed(() => products.value.filter(p => (category.value === '
       <NuxtLink class="btn btn--primary" to="/produtos/novo"><UiIcon name="plus" :size="17"/><span>Novo Produto</span></NuxtLink>
     </PageHeader>
     <div class="metrics-grid metrics-grid--4">
-      <MetricCard label="Produtos Ativos" value="76" icon="box" change="12,5%" note="vs. mes anterior" />
-      <MetricCard label="Preco Medio" value="R$ 98,60" icon="tag" change="8,3%" note="vs. mes anterior" color="green" />
-      <MetricCard label="Custo Medio" value="R$ 53,21" icon="money" change="6,1%" note="vs. mes anterior" color="purple" />
-      <MetricCard label="Margem Media" value="45,9%" icon="percent" change="2,2 p.p." note="vs. mes anterior" color="orange" />
+      <MetricCard label="Produtos Ativos" :value="formatNumber(metrics.activeProducts.value)" icon="box" note="Dados do banco" />
+      <MetricCard label="Preco Medio" :value="formatCurrency(metrics.averagePrice.value)" icon="tag" note="Dados do banco" color="green" />
+      <MetricCard label="Custo Medio" :value="formatCurrency(metrics.averageCost.value)" icon="money" note="Dados do banco" color="purple" />
+      <MetricCard label="Margem Media" :value="metrics.percent(metrics.averageProductMargin.value)" icon="percent" note="Dados do banco" color="orange" />
     </div>
     <div class="filters">
       <div class="field field--search"><label>Produto</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Buscar produtos..."></div></div>
