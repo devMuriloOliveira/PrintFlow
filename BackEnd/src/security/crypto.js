@@ -5,16 +5,25 @@ const PREFIX = 'enc:v1'
 const ALGORITHM = 'aes-256-gcm'
 
 const keyMaterial = env.dataEncryptionKey || env.authSecret
-const encryptionKey = createHash('sha256').update(String(keyMaterial)).digest()
-const indexKey = createHash('sha256').update(`${keyMaterial}:blind-index`).digest()
+const deriveEncryptionKey = (material) => createHash('sha256').update(String(material)).digest()
+const deriveIndexKey = (material) => createHash('sha256').update(`${material}:blind-index`).digest()
+const encryptionKey = deriveEncryptionKey(keyMaterial)
+const indexKey = deriveIndexKey(keyMaterial)
+const legacyKeyMaterials = env.legacyDataEncryptionKeys.filter((value) => value && value !== keyMaterial)
 
 export const normalizeForIndex = (value) => String(value || '').trim().toLowerCase()
 
-export const blindIndex = (value) => {
+const blindIndexWithKey = (value, key) => {
   const normalized = normalizeForIndex(value)
   if (!normalized) return ''
-  return createHmac('sha256', indexKey).update(normalized).digest('base64url')
+  return createHmac('sha256', key).update(normalized).digest('base64url')
 }
+
+export const blindIndex = (value) => blindIndexWithKey(value, indexKey)
+
+export const blindIndexesForLookup = (value) =>
+  [...new Set([blindIndex(value), ...legacyKeyMaterials.map((material) => blindIndexWithKey(value, deriveIndexKey(material)))]).values()]
+    .filter(Boolean)
 
 export const isEncrypted = (value) => String(value || '').startsWith(`${PREFIX}:`)
 
@@ -33,15 +42,22 @@ export const decryptField = (value) => {
   const text = String(value || '')
   if (!text || !isEncrypted(text)) return text
 
-  try {
+  const decryptWithKey = (key) => {
     const [, , iv, tag, encrypted] = text.split(':')
-    const decipher = createDecipheriv(ALGORITHM, encryptionKey, Buffer.from(iv, 'base64url'))
+    const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(iv, 'base64url'))
     decipher.setAuthTag(Buffer.from(tag, 'base64url'))
     return Buffer.concat([
       decipher.update(Buffer.from(encrypted, 'base64url')),
       decipher.final()
     ]).toString('utf8')
-  } catch {
-    return ''
   }
+
+  for (const key of [encryptionKey, ...legacyKeyMaterials.map(deriveEncryptionKey)]) {
+    try {
+      const decrypted = decryptWithKey(key)
+      if (decrypted) return decrypted
+    } catch {}
+  }
+
+  return ''
 }

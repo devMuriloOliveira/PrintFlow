@@ -24,6 +24,10 @@ const productionLike = isProduction || Boolean(databaseUrl)
 const authSecret = process.env.AUTH_SECRET || ''
 const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY || ''
 const webhookSharedSecret = process.env.WEBHOOK_SHARED_SECRET || ''
+const legacyDataEncryptionKeys = String(process.env.LEGACY_DATA_ENCRYPTION_KEYS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
 
 const requireProductionSecret = (name, value) => {
   if (productionLike && !value) {
@@ -42,6 +46,7 @@ export const env = {
   allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true' && !productionLike,
   authSecret: authSecret || 'printflow-dev-secret',
   dataEncryptionKey,
+  legacyDataEncryptionKeys,
   webhookSharedSecret,
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || 600),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),

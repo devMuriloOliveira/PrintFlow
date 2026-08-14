@@ -1,7 +1,7 @@
 import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, verifyPassword } from '../auth/password.js'
 import { hasDatabase, query } from '../db/pool.js'
-import { blindIndex, decryptField, encryptField } from '../security/crypto.js'
+import { blindIndex, blindIndexesForLookup, decryptField, encryptField } from '../security/crypto.js'
 
 const memoryUsers = new Map()
 
@@ -36,7 +36,7 @@ export const registerUser = async ({ name, email, password, company }) => {
     return publicUser(user)
   }
 
-  const existing = await query('select id from users where email_hash = $1 or email = $2 limit 1', [emailHash, normalizedEmail])
+  const existing = await query('select id from users where email_hash = any($1::text[]) or email = $2 limit 1', [blindIndexesForLookup(normalizedEmail), normalizedEmail])
   if (existing.rowCount) throw new Error('Este e-mail ja esta cadastrado.')
 
   await query(
@@ -69,13 +69,13 @@ export const loginUser = async ({ email, password }) => {
 
   const result = await query(
     `select id, tenant_id, name, email, email_hash, password_hash, role, status
-     from users where (email_hash = $1 or email = $2) and status = 'active' limit 1`,
-    [emailHash, normalizedEmail]
+     from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`,
+    [blindIndexesForLookup(normalizedEmail), normalizedEmail]
   )
   const user = result.rows[0]
   if (!user || !verifyPassword(password, user.password_hash)) throw new Error('E-mail ou senha invalidos.')
 
-  if (!user.email_hash || user.email === normalizedEmail) {
+  if (!user.email_hash || user.email_hash !== emailHash || user.email === normalizedEmail) {
     await query(
       `update users set name = $1, email = $2, email_hash = $3, updated_at = now()
        where id = $4`,
