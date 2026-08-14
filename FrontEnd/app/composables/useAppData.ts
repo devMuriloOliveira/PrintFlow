@@ -37,6 +37,10 @@ export type ChartSegment = {
   label: string; value: number; color: string
 }
 
+export type Goal = {
+  name: string; current: number; target: number; color: string; icon: string
+}
+
 type AppData = {
   products: Product[]
   orders: Order[]
@@ -45,6 +49,7 @@ type AppData = {
   printers: Printer[]
   marketplaces: Marketplace[]
   clients: Client[]
+  goals?: Goal[]
   expenseSegments: ChartSegment[]
 }
 
@@ -56,6 +61,7 @@ const emptyData = (): AppData => ({
   printers: [],
   marketplaces: [],
   clients: [],
+  goals: [],
   expenseSegments: []
 })
 
@@ -68,6 +74,12 @@ export const useAppData = () => {
   const data = useState<AppData>('app-data', emptyData)
   const pending = useState('app-data-pending', () => false)
   const error = useState<string | null>('app-data-error', () => null)
+  const goals = useState<Goal[]>('goals', () => [
+    { name: 'Faturamento mensal', current: 18450, target: 30000, color: '#1768f2', icon: 'trend' },
+    { name: 'Lucro liquido', current: 9130, target: 14000, color: '#0da566', icon: 'money' },
+    { name: 'Quantidade de pedidos', current: 284, target: 400, color: '#7c3aed', icon: 'bag' },
+    { name: 'Reducao de despesas', current: 8, target: 15, color: '#f57c1f', icon: 'receipt' }
+  ])
 
   const apiUrl = (path: string) => `${apiBase}${path}`
 
@@ -76,6 +88,9 @@ export const useAppData = () => {
     error.value = null
     try {
       data.value = await $fetch<AppData>(apiUrl('/api/app-data'))
+      if (data.value.goals?.length) {
+        goals.value = data.value.goals
+      }
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Nao foi possivel carregar os dados da API'
     } finally {
@@ -104,6 +119,7 @@ export const useAppData = () => {
     printers: computed(() => data.value.printers),
     marketplaces: computed(() => data.value.marketplaces),
     clients: computed(() => data.value.clients),
+    goals,
     expenseSegments: computed(() => data.value.expenseSegments),
     apiBase,
     pending,

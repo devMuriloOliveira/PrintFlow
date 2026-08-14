@@ -43,8 +43,32 @@ No Render, configure o servico usando:
 
 O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para apontar para outra API, configure a variavel `NUXT_PUBLIC_API_BASE`.
 
+## Banco de dados
+
+A migracao cria a base operacional do PrintFlow 3D:
+
+- `tenants`: empresas/contas isoladas.
+- `users`: usuarios vinculados a um tenant.
+- `clients`, `suppliers`, `categories`.
+- `products`, `filaments`, `printers`.
+- `marketplaces` e `marketplace_fee_versions` para historico de taxas.
+- `expenses`, `orders`, `order_items`.
+- `goals` e `settings`.
+
+Para executar as migracoes:
+
+```powershell
+npm.cmd run migrate
+```
+
 ## Isolamento de dados
 
-As tabelas persistidas devem possuir `tenant_id`, e toda consulta precisa filtrar por esse campo. A tabela `products` ja segue esse modelo com `unique (tenant_id, sku)`.
+Todas as tabelas operacionais possuem `tenant_id` e as consultas do backend filtram por esse campo. Assim, clientes, produtos, despesas, vendas, filamentos, impressoras, marketplaces e metas de uma empresa nao aparecem para outra.
 
 Enquanto a autenticacao nao estiver pronta, o backend aceita `X-Tenant-Id` para desenvolvimento. Em producao, esse valor deve vir do usuario autenticado/JWT no backend, nunca de um campo editavel pelo front.
+
+Regras importantes:
+
+- Toda tabela nova que guardar dado do cliente precisa ter `tenant_id`.
+- Toda busca, criacao, atualizacao e exclusao precisa usar o `tenant_id` resolvido no backend.
+- Chaves unicas de dados do cliente devem incluir o tenant, por exemplo `unique (tenant_id, sku)` e `unique (tenant_id, code)`.

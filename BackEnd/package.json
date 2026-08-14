@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
+    "migrate": "node src/db/runMigrations.js",
     "start": "node src/server.js"
   },
   "engines": {

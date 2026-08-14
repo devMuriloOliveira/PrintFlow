@@ -3,21 +3,29 @@ import { hasDatabase } from '../db/pool.js'
 import { getTenantId } from '../config/tenant.js'
 import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
+import {
+  listClients,
+  listExpenses,
+  listFilaments,
+  listGoals,
+  listMarketplaces,
+  listOrders,
+  listPrinters,
+  readAppData
+} from '../repositories/appDataRepository.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 
 export const readRoutes = {
   '/api/products': async (req) => hasDatabase ? listProducts(getTenantId(req)) : db.products,
-  '/api/orders': () => db.orders,
-  '/api/expenses': () => db.expenses,
-  '/api/filaments': () => db.filaments,
-  '/api/printers': () => db.printers,
-  '/api/marketplaces': () => db.marketplaces,
-  '/api/clients': () => db.clients,
+  '/api/orders': async (req) => hasDatabase ? listOrders(getTenantId(req)) : db.orders,
+  '/api/expenses': async (req) => hasDatabase ? listExpenses(getTenantId(req)) : db.expenses,
+  '/api/filaments': async (req) => hasDatabase ? listFilaments(getTenantId(req)) : db.filaments,
+  '/api/printers': async (req) => hasDatabase ? listPrinters(getTenantId(req)) : db.printers,
+  '/api/marketplaces': async (req) => hasDatabase ? listMarketplaces(getTenantId(req)) : db.marketplaces,
+  '/api/clients': async (req) => hasDatabase ? listClients(getTenantId(req)) : db.clients,
+  '/api/goals': async (req) => hasDatabase ? listGoals(getTenantId(req)) : [],
   '/api/expense-segments': () => db.expenseSegments,
-  '/api/app-data': async (req) => ({
-    ...db,
-    products: hasDatabase ? await listProducts(getTenantId(req)) : db.products
-  })
+  '/api/app-data': async (req) => hasDatabase ? readAppData(getTenantId(req)) : { ...db, goals: [] }
 }
 
 export const handleProductCreate = async (req, res) => {
