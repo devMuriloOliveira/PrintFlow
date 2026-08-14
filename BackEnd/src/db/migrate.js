@@ -2,7 +2,8 @@ import { hasDatabase, query } from './pool.js'
 
 const tenantTables = [
   'products', 'orders', 'expenses', 'filaments', 'printers', 'marketplaces',
-  'clients', 'goals', 'company_settings', 'calculator_simulations', 'export_history'
+  'clients', 'goals', 'company_settings', 'calculator_simulations', 'export_history',
+  'tracked_sales', 'marketplace_webhook_events'
 ]
 
 const enableTenantIsolation = async (table) => {
@@ -101,6 +102,63 @@ export const migrate = async () => {
       financial numeric(8,2) not null default 0, ads numeric(8,2) not null default 0,
       others numeric(8,2) not null default 0, active boolean not null default true,
       created_at timestamptz not null default now(), unique (tenant_id, name)
+    )
+  `)
+  await query("alter table marketplaces add column if not exists platform text not null default 'custom'")
+  await query("alter table marketplaces add column if not exists connection_status text not null default 'manual'")
+  await query(`
+    create table if not exists marketplace_integrations (
+      id bigserial primary key,
+      tenant_id text not null references tenants(id) on delete cascade,
+      marketplace_id bigint references marketplaces(id) on delete set null,
+      platform text not null,
+      connection_name text not null default '',
+      account_external_id text not null default '',
+      account_external_id_hash text not null default '',
+      access_token text not null default '',
+      refresh_token text not null default '',
+      token_expires_at timestamptz,
+      status text not null default 'pending',
+      scopes text not null default '',
+      last_sync_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (tenant_id, platform, account_external_id_hash)
+    )
+  `)
+  await query('create index if not exists marketplace_integrations_lookup_idx on marketplace_integrations (platform, account_external_id_hash)')
+  await query(`
+    create table if not exists tracked_sales (
+      id bigserial primary key,
+      tenant_id text not null references tenants(id) on delete cascade,
+      integration_id bigint references marketplace_integrations(id) on delete set null,
+      marketplace_id bigint references marketplaces(id) on delete set null,
+      platform text not null,
+      external_order_id text not null default '',
+      external_order_hash text not null default '',
+      gross numeric(12,2) not null default 0,
+      marketplace_fee numeric(12,2) not null default 0,
+      shipping numeric(12,2) not null default 0,
+      net numeric(12,2) not null default 0,
+      cost numeric(12,2) not null default 0,
+      profit numeric(12,2) not null default 0,
+      status text not null default 'received',
+      sold_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (tenant_id, platform, external_order_hash)
+    )
+  `)
+  await query(`
+    create table if not exists marketplace_webhook_events (
+      id bigserial primary key,
+      tenant_id text not null references tenants(id) on delete cascade,
+      integration_id bigint references marketplace_integrations(id) on delete set null,
+      platform text not null,
+      event_type text not null default '',
+      external_order_id text not null default '',
+      payload text not null default '',
+      status text not null default 'received',
+      created_at timestamptz not null default now()
     )
   `)
   await query(`

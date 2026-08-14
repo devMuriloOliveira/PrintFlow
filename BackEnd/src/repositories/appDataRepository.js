@@ -67,14 +67,26 @@ const readPrinters = async (client, tenantId) => {
 
 const readMarketplaces = async (client, tenantId) => {
   const result = await client.query(`
-    select m.id, m.name, m.short, m.color, m.commission, m.fixed, m.financial, m.ads, m.others, m.active,
-      coalesce(sum(o.gross), 0) as gross, coalesce(sum(o.net), 0) as net, count(o.id)::int as orders
-    from marketplaces m left join orders o on o.marketplace_id = m.id and o.tenant_id = $1
-    where m.tenant_id = $1 group by m.id order by m.created_at asc
+    select m.id, m.name, m.short, m.color, m.platform, m.connection_status, m.commission, m.fixed, m.financial, m.ads, m.others, m.active,
+      coalesce(o.gross, 0) + coalesce(ts.gross, 0) as gross,
+      coalesce(o.net, 0) + coalesce(ts.net, 0) as net,
+      (coalesce(o.orders, 0) + coalesce(ts.orders, 0))::int as orders
+    from marketplaces m
+    left join (
+      select marketplace_id, sum(gross) as gross, sum(net) as net, count(id)::int as orders
+      from orders where tenant_id = $1 group by marketplace_id
+    ) o on o.marketplace_id = m.id
+    left join (
+      select marketplace_id, sum(gross) as gross, sum(net) as net, count(id)::int as orders
+      from tracked_sales where tenant_id = $1 group by marketplace_id
+    ) ts on ts.marketplace_id = m.id
+    where m.tenant_id = $1
+    order by m.created_at asc
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, short: row.short, color: row.color, commission: number(row.commission),
     fixed: number(row.fixed), financial: number(row.financial), ads: number(row.ads), others: number(row.others),
-    gross: number(row.gross), net: number(row.net), orders: Number(row.orders), active: row.active }))
+    gross: number(row.gross), net: number(row.net), orders: Number(row.orders), active: row.active,
+    platform: row.platform, connectionStatus: row.connection_status }))
 }
 
 const readClients = async (client, tenantId) => {
@@ -126,13 +138,36 @@ const readSettings = async (client, tenantId) => {
   }
 }
 
+const readMarketplaceIntegrations = async (client, tenantId) => {
+  const result = await client.query(`
+    select id, marketplace_id, platform, connection_name, account_external_id, status, scopes,
+      access_token, refresh_token, token_expires_at, last_sync_at
+    from marketplace_integrations
+    where tenant_id = $1
+    order by created_at desc
+  `, [tenantId])
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    marketplaceId: row.marketplace_id ? String(row.marketplace_id) : '',
+    platform: row.platform,
+    connectionName: row.connection_name,
+    accountExternalId: decryptField(row.account_external_id),
+    status: row.status,
+    scopes: row.scopes || '',
+    hasAccessToken: Boolean(row.access_token),
+    hasRefreshToken: Boolean(row.refresh_token),
+    tokenExpiresAt: row.token_expires_at || null,
+    lastSyncAt: row.last_sync_at || null
+  }))
+}
+
 export const loadAppData = async (tenantId) => withTenant(tenantId, async (client) => {
-  const [products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings] = await Promise.all([
+  const [products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations] = await Promise.all([
     readProducts(client, tenantId), readOrders(client, tenantId), readExpenses(client, tenantId), readFilaments(client, tenantId),
     readPrinters(client, tenantId), readMarketplaces(client, tenantId), readClients(client, tenantId), readExpenseSegments(client, tenantId),
-    readGoals(client, tenantId), readSettings(client, tenantId)
+    readGoals(client, tenantId), readSettings(client, tenantId), readMarketplaceIntegrations(client, tenantId)
   ])
-  return { products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings }
+  return { products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations }
 })
 
 export const listResource = async (tenantId, resource) => {

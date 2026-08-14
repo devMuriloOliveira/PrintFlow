@@ -3,6 +3,13 @@ import { enterRequest } from '../http/rateLimit.js'
 import { handleLogin, handleMe, handleRegister, getAuthUser } from './auth.js'
 import { env } from '../config/env.js'
 import { handleProductCreate, handleResourceCreate, handleResourceDelete, handleResourceUpdate, readRoutes } from './resources.js'
+import {
+  handleAmazonWebhook,
+  handleIntegrationCreate,
+  handleIntegrationsList,
+  handleMercadoLivreWebhook,
+  handleShopeeWebhook
+} from './integrations.js'
 
 export const handleRequest = async (req, res) => {
   try {
@@ -36,6 +43,18 @@ export const handleRequest = async (req, res) => {
       return handleLogin(req, res)
     }
 
+    if (req.method === 'POST' && url.pathname === '/webhooks/mercadolivre') {
+      return handleMercadoLivreWebhook(req, res)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/webhooks/shopee') {
+      return handleShopeeWebhook(req, res)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/webhooks/amazon') {
+      return handleAmazonWebhook(req, res)
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/auth/me') {
       return handleMe(req, res)
     }
@@ -47,6 +66,14 @@ export const handleRequest = async (req, res) => {
 
     if (req.method === 'GET' && readRoutes[url.pathname]) {
       return sendJson(res, 200, await readRoutes[url.pathname](req))
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/marketplace-integrations') {
+      return handleIntegrationsList(req, res)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/marketplace-integrations') {
+      return handleIntegrationCreate(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/api/products') {

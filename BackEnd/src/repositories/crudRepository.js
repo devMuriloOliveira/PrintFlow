@@ -136,6 +136,8 @@ const resourceConfig = {
       name: item.name,
       short: item.short || '',
       color: item.color || '#1768f2',
+      platform: item.platform || 'custom',
+      connection_status: item.connectionStatus || 'manual',
       commission: number(item.commission),
       fixed: number(item.fixed),
       financial: number(item.financial),

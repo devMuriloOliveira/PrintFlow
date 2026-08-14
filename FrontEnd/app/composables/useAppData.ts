@@ -34,7 +34,22 @@ export type Printer = {
 export type Marketplace = {
   id?: string;
   name: string; short: string; color: string; commission: number; fixed: number; financial: number;
-  ads: number; others: number; gross: number; net: number; orders: number; active: boolean
+  ads: number; others: number; gross: number; net: number; orders: number; active: boolean;
+  platform?: string; connectionStatus?: string
+}
+
+export type MarketplaceIntegration = {
+  id?: string;
+  marketplaceId?: string;
+  platform: string;
+  connectionName: string;
+  accountExternalId: string;
+  status: string;
+  scopes?: string;
+  hasAccessToken?: boolean;
+  hasRefreshToken?: boolean;
+  tokenExpiresAt?: string | null;
+  lastSyncAt?: string | null
 }
 
 export type Client = {
@@ -59,6 +74,7 @@ type AppData = {
   filaments: Filament[]
   printers: Printer[]
   marketplaces: Marketplace[]
+  marketplaceIntegrations?: MarketplaceIntegration[]
   clients: Client[]
   expenseSegments: ChartSegment[]
   goals?: Goal[]
@@ -72,6 +88,7 @@ const emptyData = (): AppData => ({
   filaments: [],
   printers: [],
   marketplaces: [],
+  marketplaceIntegrations: [],
   clients: [],
   expenseSegments: [],
   goals: [],
@@ -169,6 +186,19 @@ export const useAppData = () => {
     return created
   }
 
+  const createMarketplaceIntegration = async (integration: Partial<MarketplaceIntegration> & Record<string, unknown>) => {
+    const created = await $fetch<MarketplaceIntegration>(apiUrl('/api/marketplace-integrations'), {
+      method: 'POST',
+      body: integration,
+      headers: resourceHeaders()
+    })
+    data.value.marketplaceIntegrations = [
+      created,
+      ...(data.value.marketplaceIntegrations || []).filter((item) => item.id !== created.id)
+    ]
+    return created
+  }
+
   return {
     products: computed(() => data.value.products),
     orders: computed(() => data.value.orders),
@@ -176,6 +206,7 @@ export const useAppData = () => {
     filaments: computed(() => data.value.filaments),
     printers: computed(() => data.value.printers),
     marketplaces: computed(() => data.value.marketplaces),
+    marketplaceIntegrations: computed(() => data.value.marketplaceIntegrations || []),
     clients: computed(() => data.value.clients),
     goals,
     expenseSegments: computed(() => data.value.expenseSegments),
@@ -185,6 +216,7 @@ export const useAppData = () => {
     error,
     refreshAppData: loadAppData,
     createProduct
+    , createMarketplaceIntegration
     , createItem
     , updateItem
     , deleteItem
