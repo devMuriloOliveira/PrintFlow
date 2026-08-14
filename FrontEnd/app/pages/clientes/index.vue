@@ -1,9 +1,20 @@
 <script setup lang="ts">
-const { clients } = useAppData()
+const { clients, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
+const { notify } = useUi()
+const router = useRouter()
 const search = ref('')
 const filtered = computed(() => clients.value.filter(c => Object.values(c).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const goToNewClient = () => navigateTo('/clientes/novo')
+const editClient = (client: any) => {
+  if (!client.id) return
+  router.push(`/clientes/novo?id=${client.id}`)
+}
+const removeClient = async (client: any) => {
+  if (!client.id || !window.confirm(`Excluir cliente?\n\n${client.name}\n\nEsta acao nao podera ser desfeita.`)) return
+  await deleteItem('clients', client.id)
+  notify('Cliente excluido com sucesso.')
+}
 </script>
 
 <template>
@@ -30,14 +41,14 @@ const goToNewClient = () => navigateTo('/clientes/novo')
           <thead><tr><th>Cliente</th><th>E-mail</th><th>Telefone</th><th>Pedidos</th><th>Faturamento Total</th><th>Ticket Medio</th><th>Ultima Compra</th><th></th></tr></thead>
           <tbody>
             <tr v-for="c in filtered" :key="c.email">
-              <td><div class="table-product"><span class="avatar">{{c.name.split(' ').map(x=>x[0]).join('')}}</span><strong>{{c.name}}</strong></div></td>
+              <td><div class="table-product table-product--editable"><span class="avatar">{{c.name.split(' ').map(x=>x[0]).join('')}}</span><strong>{{c.name}}</strong><button class="row-action row-action--edit" title="Editar cliente" @click.stop="editClient(c)"><UiIcon name="edit" :size="15"/></button></div></td>
               <td>{{c.email}}</td>
               <td>{{c.phone}}</td>
               <td>{{c.orders}}</td>
               <td class="money-positive">{{formatCurrency(c.revenue)}}</td>
               <td>{{formatCurrency(c.ticket)}}</td>
               <td>{{c.last}}</td>
-              <td><button class="row-action"><UiIcon name="more" /></button></td>
+              <td><button class="row-action" title="Excluir cliente" @click.stop="removeClient(c)"><UiIcon name="close" :size="16" /></button></td>
             </tr>
           </tbody>
         </table>

@@ -1,18 +1,73 @@
 <script setup lang="ts">
-const { expenses, expenseSegments } = useAppData()
+const { expenses, expenseSegments, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
+const { notify } = useUi()
+const router = useRouter()
 const search = ref('')
 const category = ref('Todas')
 const filtered = computed(() => expenses.value.filter(e => (category.value === 'Todas' || e.category === category.value) && Object.values(e).join(' ').toLowerCase().includes(search.value.toLowerCase())))
-const recurring = computed(() => expenses.value.filter(e => !/nao|não/i.test(e.recurrence)).slice(0, 3))
+const recurring = computed(() => expenses.value.filter(e => !/nao|nao/i.test(e.recurrence)).slice(0, 3))
 const recurringTotal = computed(() => recurring.value.reduce((total, item) => total + item.value, 0))
+const editExpense = (expense: any) => {
+  if (!expense.id) return
+  router.push(`/despesas/nova?id=${expense.id}`)
+}
+const removeExpense = async (expense: any) => {
+  if (!expense.id || !window.confirm(`Excluir despesa?\n\n${expense.description}\n\nEsta acao nao podera ser desfeita.`)) return
+  await deleteItem('expenses', expense.id)
+  notify('Despesa excluida com sucesso.')
+}
 </script>
+
 <template>
   <div>
     <PageHeader title="Despesas" subtitle="Acompanhe e gerencie todos os gastos do seu negocio de impressao 3D." />
-    <div class="metrics-grid metrics-grid--4"><MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative/><MetricCard label="Despesas Recorrentes" :value="formatCurrency(metrics.recurringExpenses.value)" icon="calendar" :change="`${metrics.percent(metrics.expenseTotal.value ? metrics.recurringExpenses.value / metrics.expenseTotal.value * 100 : 0)} do total`" color="orange"/><MetricCard label="Maior Categoria" :value="String(metrics.biggestExpenseCategory.value[0])" icon="tag" :change="formatCurrency(Number(metrics.biggestExpenseCategory.value[1]))" note="Dados do banco" color="purple"/><MetricCard label="Media Mensal" :value="formatCurrency(metrics.expenseTotal.value)" icon="chart" note="Periodo atual" color="cyan"/></div>
-    <div class="filters"><div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Descricao ou fornecedor"></div></div><div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option v-for="c in [...new Set(expenses.map(x=>x.category))]" :key="c">{{c}}</option></select></div><div class="field"><label>Forma de pagamento</label><select><option>Todas</option><option>PIX</option><option>Cartao</option><option>Boleto</option></select></div><button class="btn" @click="search='';category='Todas'"><UiIcon name="close" :size="15"/> Limpar</button><NuxtLink class="btn btn--primary filters__push" to="/despesas/nova"><UiIcon name="plus" :size="16"/> Nova Despesa</NuxtLink></div>
-    <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 350px"><PanelCard title="Lista de Despesas"><div class="table-scroll"><table class="data-table"><thead><tr><th>Descricao</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th><th>Data</th><th>Pagamento</th><th>Recorrencia</th><th>Status</th><th></th></tr></thead><tbody><tr v-if="!filtered.length"><td colspan="9"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="receipt"/></div><h3>Nenhuma despesa cadastrada</h3><p>Cadastre sua primeira despesa para acompanhar os gastos.</p></div></div></td></tr><tr v-for="e in filtered" :key="e.id || e.description"><td><strong>{{e.description}}</strong></td><td><span class="badge">{{e.category}}</span></td><td>{{e.supplier}}</td><td><strong>{{formatCurrency(e.value)}}</strong></td><td>{{e.date}}</td><td>{{e.payment}}</td><td>{{e.recurrence}}</td><td><span class="badge badge--green">{{e.status}}</span></td><td><button class="row-action"><UiIcon name="more" :size="16"/></button></td></tr></tbody></table></div><div class="table-footer"><span>Mostrando {{filtered.length ? 1 : 0}} a {{filtered.length}} de {{expenses.length}} despesas</span><div class="pagination"><button class="page-btn active">1</button></div></div></PanelCard><aside><PanelCard title="Despesas por Categoria"><DonutChart :segments="expenseSegments" :total="formatCurrency(metrics.expenseTotal.value)"/></PanelCard><PanelCard title="Proximas Despesas Recorrentes" style="margin-top:12px"><div class="alerts-list"><div v-if="!recurring.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="calendar"/></div><h3>Nenhuma recorrencia</h3><p>Despesas recorrentes cadastradas aparecem aqui.</p></div></div><div v-for="(item,i) in recurring" :key="item.id || item.description" class="alert-row"><span class="alert-row__icon"><UiIcon :name="i===0?'bolt':'receipt'" :size="17"/></span><div><strong>{{item.description}}</strong><small>{{item.supplier || 'Sem fornecedor'}}</small></div><strong>{{formatCurrency(item.value)}}</strong><span class="badge badge--orange">{{item.date}}</span></div></div><div class="summary-box"><div class="detail-list__row"><span>Total recorrente</span><strong class="money-positive">{{ formatCurrency(recurringTotal) }}</strong></div></div></PanelCard></aside></div>
+    <div class="metrics-grid metrics-grid--4">
+      <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative />
+      <MetricCard label="Despesas Recorrentes" :value="formatCurrency(metrics.recurringExpenses.value)" icon="calendar" :change="`${metrics.percent(metrics.expenseTotal.value ? metrics.recurringExpenses.value / metrics.expenseTotal.value * 100 : 0)} do total`" color="orange" />
+      <MetricCard label="Maior Categoria" :value="String(metrics.biggestExpenseCategory.value[0])" icon="tag" :change="formatCurrency(Number(metrics.biggestExpenseCategory.value[1]))" note="Dados do banco" color="purple" />
+      <MetricCard label="Media Mensal" :value="formatCurrency(metrics.expenseTotal.value)" icon="chart" note="Periodo atual" color="cyan" />
+    </div>
+    <div class="filters">
+      <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16" /><input v-model="search" placeholder="Descricao ou fornecedor"></div></div>
+      <div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option v-for="c in [...new Set(expenses.map(x=>x.category))]" :key="c">{{c}}</option></select></div>
+      <div class="field"><label>Forma de pagamento</label><select><option>Todas</option><option>PIX</option><option>Cartao</option><option>Boleto</option></select></div>
+      <button class="btn" @click="search='';category='Todas'"><UiIcon name="close" :size="15" /> Limpar</button>
+      <NuxtLink class="btn btn--primary filters__push" to="/despesas/nova"><UiIcon name="plus" :size="16" /> Nova Despesa</NuxtLink>
+    </div>
+    <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 350px">
+      <PanelCard title="Lista de Despesas">
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>Descricao</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th><th>Data</th><th>Pagamento</th><th>Recorrencia</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              <tr v-if="!filtered.length"><td colspan="9"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="receipt" /></div><h3>Nenhuma despesa cadastrada</h3><p>Cadastre sua primeira despesa para acompanhar os gastos.</p></div></div></td></tr>
+              <tr v-for="e in filtered" :key="e.id || e.description">
+                <td><div class="table-product table-product--editable"><strong>{{e.description}}</strong><button class="row-action row-action--edit" title="Editar despesa" @click.stop="editExpense(e)"><UiIcon name="edit" :size="15" /></button></div></td>
+                <td><span class="badge">{{e.category}}</span></td>
+                <td>{{e.supplier}}</td>
+                <td><strong>{{formatCurrency(e.value)}}</strong></td>
+                <td>{{e.date}}</td>
+                <td>{{e.payment}}</td>
+                <td>{{e.recurrence}}</td>
+                <td><span class="badge badge--green">{{e.status}}</span></td>
+                <td><button class="row-action" title="Excluir despesa" @click.stop="removeExpense(e)"><UiIcon name="close" :size="16" /></button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer"><span>Mostrando {{filtered.length ? 1 : 0}} a {{filtered.length}} de {{expenses.length}} despesas</span><div class="pagination"><button class="page-btn active">1</button></div></div>
+      </PanelCard>
+      <aside>
+        <PanelCard title="Despesas por Categoria"><DonutChart :segments="expenseSegments" :total="formatCurrency(metrics.expenseTotal.value)" /></PanelCard>
+        <PanelCard title="Proximas Despesas Recorrentes" style="margin-top:12px">
+          <div class="alerts-list">
+            <div v-if="!recurring.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="calendar" /></div><h3>Nenhuma recorrencia</h3><p>Despesas recorrentes cadastradas aparecem aqui.</p></div></div>
+            <div v-for="(item,i) in recurring" :key="item.id || item.description" class="alert-row"><span class="alert-row__icon"><UiIcon :name="i===0?'bolt':'receipt'" :size="17" /></span><div><strong>{{item.description}}</strong><small>{{item.supplier || 'Sem fornecedor'}}</small></div><strong>{{formatCurrency(item.value)}}</strong><span class="badge badge--orange">{{item.date}}</span></div>
+          </div>
+          <div class="summary-box"><div class="detail-list__row"><span>Total recorrente</span><strong class="money-positive">{{ formatCurrency(recurringTotal) }}</strong></div></div>
+        </PanelCard>
+      </aside>
+    </div>
   </div>
 </template>
-

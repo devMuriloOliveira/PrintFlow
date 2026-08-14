@@ -2,11 +2,17 @@
 const { orders, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
+const router = useRouter()
 const search = ref('')
 const status = ref('Todos')
 const filtered = computed(() => orders.value.filter(o => (status.value === 'Todos' || o.status === status.value) && Object.values(o).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const badgeClass = (s: string) => ({ Novo: '', Producao: 'badge--orange', Impresso: 'badge--purple', Embalando: 'badge--orange', Enviado: '', Entregue: 'badge--green', Cancelado: 'badge--red' }[s] || '')
+const editOrder = (order: any) => {
+  const id = order.dbId || order.id
+  if (!id) return
+  router.push(`/vendas/novo?id=${id}`)
+}
 const removeOrder = async (order: any) => {
   const id = order.dbId || order.id
   if (!id || !window.confirm(`Tem certeza que deseja excluir este pedido?\n\n${order.id} - ${order.product}\n\nEsta acao nao podera ser desfeita.`)) return
@@ -48,7 +54,7 @@ const marketplaceBars = computed(() => {
       <PanelCard title="Pedidos">
         <div class="table-scroll"><table class="data-table">
           <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Liquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr v-if="!filtered.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para comecar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><strong>{{ o.id }}</strong></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
+          <tbody><tr v-if="!filtered.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para comecar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><div class="table-product table-product--editable"><strong>{{ o.id }}</strong><button class="row-action row-action--edit" title="Editar pedido" @click.stop="editOrder(o)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click.stop="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
         <div class="table-footer"><span>Mostrando {{ filtered.length ? 1 : 0 }} a {{ filtered.length }} de {{ orders.length }} pedidos</span><div class="pagination"><button class="page-btn active">1</button></div><select class="select-compact"><option>10 por pagina</option></select></div>
       </PanelCard>

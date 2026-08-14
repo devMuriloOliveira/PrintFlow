@@ -1,16 +1,27 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watchEffect } from 'vue'
 import { navigateTo } from '#app'
 
-const { createItem } = useAppData()
+const { filaments, createItem, updateItem } = useAppData()
 const { notify } = useUi()
+const route = useRoute()
 const saving = ref(false)
 const form = reactive({ name: '', maker: '', material: 'PLA', type: '1.75 mm', color: '', colorHex: '#111827', initial: 1000, remaining: 1000, cost: 0, supplier: '', date: '', minStock: 200, status: 'Em estoque' })
 const errors = reactive<Record<string, string>>({})
+const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
+const isEditing = computed(() => Boolean(editId.value))
+const hydrated = ref(false)
 const pieceWeight = ref(180)
 const costPerGram = computed(() => form.initial ? form.cost / form.initial : 0)
 const pieceCost = computed(() => costPerGram.value * pieceWeight.value)
 const touched = computed(() => Object.values(form).some(value => value !== '' && value !== 0 && !['PLA', '1.75 mm', '#111827', 'Em estoque', 1000, 200].includes(value as never)))
+watchEffect(() => {
+  if (!editId.value || hydrated.value) return
+  const item = filaments.value.find(filament => filament.id === editId.value)
+  if (!item) return
+  Object.assign(form, { ...item, date: item.date || '' })
+  hydrated.value = true
+})
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
   if (!form.name.trim()) errors.name = 'Informe o nome do filamento.'
@@ -31,8 +42,10 @@ const save = async (again = false) => {
   if (saving.value) return
   saving.value = true
   try {
-    await createItem('filaments', { name: form.name, maker: form.maker, material: form.material, type: form.type, color: form.color, colorHex: form.colorHex, initial: form.initial, remaining: form.remaining, cost: form.cost, supplier: form.supplier || 'Nao informado', date: form.date || null, status: form.status })
-    notify('Filamento cadastrado com sucesso.')
+    const payload = { id: editId.value, name: form.name, maker: form.maker, material: form.material, type: form.type, color: form.color, colorHex: form.colorHex, initial: form.initial, remaining: form.remaining, cost: form.cost, supplier: form.supplier || 'Nao informado', date: form.date || null, status: form.status }
+    if (isEditing.value) await updateItem('filaments', payload)
+    else await createItem('filaments', payload)
+    notify(isEditing.value ? 'Filamento atualizado com sucesso.' : 'Filamento cadastrado com sucesso.')
     if (again) return reset()
     navigateTo('/filamentos')
   } finally {
@@ -46,8 +59,8 @@ const cancel = () => {
 
 <template>
   <div>
-    <div class="breadcrumb"><span>Filamentos</span><UiIcon name="chevron" :size="12" /><strong>Novo Filamento</strong></div>
-    <PageHeader title="Novo Filamento" subtitle="Cadastre um novo rolo de filamento e acompanhe automaticamente seu estoque e custo por grama." />
+    <div class="breadcrumb"><span>Filamentos</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar Filamento' : 'Novo Filamento' }}</strong></div>
+    <PageHeader :title="isEditing ? 'Editar Filamento' : 'Novo Filamento'" :subtitle="isEditing ? 'Atualize estoque, custo e dados do rolo.' : 'Cadastre um novo rolo de filamento e acompanhe automaticamente seu estoque e custo por grama.'" />
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <form @submit.prevent="save(false)">
         <div class="form-card">
@@ -78,7 +91,7 @@ const cancel = () => {
             <div class="field col-4"><label>Status</label><select v-model="form.status"><option>Em estoque</option><option>Atencao</option><option>Baixo estoque</option><option>Esgotado</option></select></div>
           </div>
         </div>
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outro</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : 'Salvar Filamento' }}</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button v-if="!isEditing" class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outro</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alteracoes' : 'Salvar Filamento' }}</button></div>
       </form>
       <aside>
         <div class="detail-card">

@@ -1,16 +1,27 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watchEffect } from 'vue'
 import { navigateTo } from '#app'
 
-const { printers, filaments, createItem } = useAppData()
+const { printers, filaments, createItem, updateItem } = useAppData()
 const { notify } = useUi()
+const route = useRoute()
 const saving = ref(false)
 const nextCode = computed(() => `PRT-${String(printers.value.length + 1).padStart(3, '0')}`)
 const form = reactive({ name: '', maker: '', model: '', serial: '', code: '', acquired: '', purchase: 0, power: 350, consumption: .35, x: 220, y: 220, z: 250, nozzle: .4, firmware: 'Marlin 2.1', hours: 0, status: 'Disponivel', location: '', filament: 'PLA Preto', maintenance: '', nextMaintenance: '', interval: 250 })
 const errors = reactive<Record<string, string>>({})
+const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
+const isEditing = computed(() => Boolean(editId.value))
+const hydrated = ref(false)
 const testHours = ref(10)
 const energyCost = computed(() => form.power / 1000 * testHours.value * .68)
 const touched = computed(() => Object.values(form).some(value => value !== '' && value !== 0 && !['Disponivel', 'PLA Preto', 'Marlin 2.1', 350, .35, 220, 250, .4].includes(value as never)))
+watchEffect(() => {
+  if (!editId.value || hydrated.value) return
+  const item = printers.value.find(printer => printer.id === editId.value)
+  if (!item) return
+  Object.assign(form, { name: item.name, maker: item.maker, model: item.model, serial: item.serial, code: item.code, acquired: item.acquired || '', power: item.power, hours: item.hours, status: item.status === 'Em Impressao' ? 'Imprimindo' : item.status === 'Em Manutencao' ? 'Manutencao' : item.status, maintenance: item.maintenance || '' })
+  hydrated.value = true
+})
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
   if (!form.name.trim()) errors.name = 'Informe o nome da impressora.'
@@ -27,8 +38,10 @@ const save = async (again = false) => {
   if (saving.value) return
   saving.value = true
   try {
-    await createItem('printers', { name: form.name, code: form.code || nextCode.value, maker: form.maker, model: form.model, acquired: form.acquired || null, power: form.power, hours: form.hours, status: form.status === 'Imprimindo' ? 'Em Impressao' : form.status === 'Manutencao' ? 'Em Manutencao' : form.status, maintenance: form.maintenance || null, serial: form.serial || '-', location: form.location, volume: `${form.x} x ${form.y} x ${form.z} mm`, defaultFilament: form.filament })
-    notify('Impressora cadastrada com sucesso.')
+    const payload = { id: editId.value, name: form.name, code: form.code || nextCode.value, maker: form.maker, model: form.model, acquired: form.acquired || null, power: form.power, hours: form.hours, status: form.status === 'Imprimindo' ? 'Em Impressao' : form.status === 'Manutencao' ? 'Em Manutencao' : form.status, maintenance: form.maintenance || null, serial: form.serial || '-', location: form.location, volume: `${form.x} x ${form.y} x ${form.z} mm`, defaultFilament: form.filament }
+    if (isEditing.value) await updateItem('printers', payload)
+    else await createItem('printers', payload)
+    notify(isEditing.value ? 'Impressora atualizada com sucesso.' : 'Impressora cadastrada com sucesso.')
     if (again) { form.name = ''; form.model = ''; form.serial = ''; form.code = ''; return }
     navigateTo('/impressoras')
   } catch (error) {
@@ -44,8 +57,8 @@ const cancel = () => {
 
 <template>
   <div>
-    <div class="breadcrumb"><span>Impressoras</span><UiIcon name="chevron" :size="12" /><strong>Nova Impressora</strong></div>
-    <PageHeader title="Nova Impressora" subtitle="Cadastre uma nova impressora 3D e acompanhe sua operacao, consumo e manutencao." />
+    <div class="breadcrumb"><span>Impressoras</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar Impressora' : 'Nova Impressora' }}</strong></div>
+    <PageHeader :title="isEditing ? 'Editar Impressora' : 'Nova Impressora'" :subtitle="isEditing ? 'Atualize operacao, potencia e manutencao da impressora.' : 'Cadastre uma nova impressora 3D e acompanhe sua operacao, consumo e manutencao.'" />
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 340px">
       <form @submit.prevent="save(false)">
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="printer" />1. Identificacao</h2><div class="form-grid">
@@ -62,7 +75,7 @@ const cancel = () => {
         </div></div>
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="play" />4. Operacao</h2><div class="form-grid"><div class="field col-3"><label>Horas acumuladas</label><input v-model.number="form.hours" type="number"></div><div class="field col-3" data-field="status" :class="{'field--error':errors.status}"><label>Status *</label><select v-model="form.status"><option>Disponivel</option><option>Imprimindo</option><option>Manutencao</option><option>Inativa</option></select><small v-if="errors.status" class="field__error">{{errors.status}}</small></div><div class="field col-3"><label>Localizacao</label><input v-model="form.location" placeholder="Sala de Producao"></div><div class="field col-3"><label>Filamento padrao</label><select v-model="form.filament"><option v-for="f in filaments" :key="f.name">{{f.name}}</option></select></div></div></div>
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="wrench" />5. Manutencao</h2><div class="form-grid"><div class="field col-4"><label>Ultima manutencao</label><input v-model="form.maintenance" type="date"></div><div class="field col-4"><label>Proxima manutencao</label><input v-model="form.nextMaintenance" type="date"></div><div class="field col-4"><label>Intervalo recomendado</label><input v-model.number="form.interval" type="number"></div></div></div>
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outra</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : 'Salvar Impressora' }}</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button v-if="!isEditing" class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outra</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alteracoes' : 'Salvar Impressora' }}</button></div>
       </form>
       <aside><div class="detail-card"><div class="detail-card__head"><span class="product-thumb" style="width:95px;height:95px"><UiIcon name="printer" :size="58" /></span><div><h3>{{form.name || 'Nova impressora'}}</h3><p>{{form.maker || 'Fabricante'}} {{form.model}}</p><p><span class="badge badge--green">{{form.status}}</span></p></div></div></div>
         <PanelCard title="Estimativa de Energia" style="margin-top:12px"><div class="field"><label>Horas de impressao</label><input v-model.number="testHours" type="number"></div><div class="summary-box"><div class="detail-list__row"><span>Potencia</span><strong>{{form.power}} W</strong></div><div class="detail-list__row"><span>Custo estimado</span><strong class="money-positive">{{formatCurrency(energyCost)}}</strong></div></div></PanelCard></aside>

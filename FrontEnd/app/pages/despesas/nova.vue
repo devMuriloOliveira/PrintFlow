@@ -1,14 +1,26 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watchEffect } from 'vue'
 import { navigateTo } from '#app'
 
-const { createItem } = useAppData()
+const { expenses, createItem, updateItem } = useAppData()
 const { notify } = useUi()
+const route = useRoute()
 const saving = ref(false)
 const form = reactive({ description: '', category: 'Filamento', supplier: '', value: 0, date: '', payment: 'PIX', recurring: false, frequency: 'Mensal', nextDue: '', receipt: '', notes: '', status: 'Pago' })
 const errors = reactive<Record<string, string>>({})
+const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
+const isEditing = computed(() => Boolean(editId.value))
+const hydrated = ref(false)
 const touched = computed(() => Object.values(form).some(value => value !== '' && value !== 0 && value !== false && !['Filamento', 'PIX', 'Mensal', 'Pago'].includes(String(value))))
 const recurrence = computed(() => form.recurring ? `${form.frequency}${form.nextDue ? ` - ${form.nextDue}` : ''}` : 'Nao recorrente')
+watchEffect(() => {
+  if (!editId.value || hydrated.value) return
+  const item = expenses.value.find(expense => expense.id === editId.value)
+  if (!item) return
+  const [frequency, nextDue = ''] = item.recurrence && item.recurrence !== 'Nao recorrente' ? item.recurrence.split(' - ') : ['Mensal', '']
+  Object.assign(form, { description: item.description, category: item.category, supplier: item.supplier, value: item.value, date: item.date || '', payment: item.payment, recurring: item.recurrence !== 'Nao recorrente', frequency, nextDue, status: item.status })
+  hydrated.value = true
+})
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
   if (!form.description.trim()) errors.description = 'Informe a descricao da despesa.'
@@ -30,8 +42,10 @@ const save = async (again = false) => {
   if (saving.value) return
   saving.value = true
   try {
-    await createItem('expenses', { description: form.description, category: form.category, supplier: form.supplier || 'Nao informado', value: form.value, date: form.date, payment: form.payment, recurrence: recurrence.value, status: form.status })
-    notify('Despesa cadastrada com sucesso.')
+    const payload = { id: editId.value, description: form.description, category: form.category, supplier: form.supplier || 'Nao informado', value: form.value, date: form.date, payment: form.payment, recurrence: recurrence.value, status: form.status }
+    if (isEditing.value) await updateItem('expenses', payload)
+    else await createItem('expenses', payload)
+    notify(isEditing.value ? 'Despesa atualizada com sucesso.' : 'Despesa cadastrada com sucesso.')
     if (again) return reset()
     navigateTo('/despesas')
   } finally {
@@ -45,8 +59,8 @@ const cancel = () => {
 
 <template>
   <div>
-    <div class="breadcrumb"><span>Despesas</span><UiIcon name="chevron" :size="12" /><strong>Nova Despesa</strong></div>
-    <PageHeader title="Nova Despesa" subtitle="Registre uma nova despesa da empresa e mantenha seu financeiro atualizado." />
+    <div class="breadcrumb"><span>Despesas</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar Despesa' : 'Nova Despesa' }}</strong></div>
+    <PageHeader :title="isEditing ? 'Editar Despesa' : 'Nova Despesa'" :subtitle="isEditing ? 'Atualize valor, categoria e recorrencia da despesa.' : 'Registre uma nova despesa da empresa e mantenha seu financeiro atualizado.'" />
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <form @submit.prevent="save(false)">
         <div class="form-card">
@@ -78,7 +92,7 @@ const cancel = () => {
           <h2 class="form-card__title"><UiIcon name="edit" />4. Observacoes</h2>
           <div class="field"><label>Observacoes</label><textarea v-model="form.notes" placeholder="Detalhes internos sobre essa despesa" /></div>
         </div>
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outra</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : 'Salvar Despesa' }}</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button v-if="!isEditing" class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outra</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alteracoes' : 'Salvar Despesa' }}</button></div>
       </form>
       <aside class="detail-card">
         <div class="detail-card__head"><span class="metric-card__icon"><UiIcon name="receipt" /></span><div><h3>Resumo da Despesa</h3><p>{{form.category}}</p><p>{{recurrence}}</p></div></div>

@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch, watchEffect } from 'vue'
 import { navigateTo } from '#app'
 
-const { apiBase, createItem, createMarketplaceIntegration } = useAppData()
+const { apiBase, marketplaces, createItem, updateItem, createMarketplaceIntegration } = useAppData()
 const { notify } = useUi()
+const route = useRoute()
 const saving = ref(false)
 const errors = reactive<Record<string, string>>({})
 const saleValue = ref(100)
+const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
+const isEditing = computed(() => Boolean(editId.value))
+const hydrated = ref(false)
 
 const platforms = [
   { id: 'mercado_livre', name: 'Mercado Livre', short: 'ML', color: '#ffe600', webhook: '/webhooks/mercadolivre', commission: 16, fixed: 5, financial: 0, ads: 3 },
@@ -36,7 +40,7 @@ const form = reactive({
 })
 
 const selectedPlatform = computed(() => platforms.find((item) => item.id === form.platform) || platforms[0])
-const requiresToken = computed(() => form.platform !== 'custom')
+const requiresToken = computed(() => form.platform !== 'custom' && !isEditing.value)
 const webhookUrl = computed(() => selectedPlatform.value.webhook ? `${apiBase}${selectedPlatform.value.webhook}` : '')
 const connectionStatus = computed(() => form.platform === 'custom' ? 'manual' : 'connected')
 const fees = computed(() => ({
@@ -50,6 +54,7 @@ const totalFees = computed(() => Object.values(fees.value).reduce((a, b) => a + 
 const netPreview = computed(() => saleValue.value - totalFees.value)
 
 watch(() => form.platform, (platformId) => {
+  if (isEditing.value && hydrated.value) return
   const platform = platforms.find((item) => item.id === platformId) || platforms[0]
   form.name = platform.name
   form.short = platform.short
@@ -58,6 +63,14 @@ watch(() => form.platform, (platformId) => {
   form.fixed = platform.fixed
   form.financial = platform.financial
   form.ads = platform.ads
+})
+
+watchEffect(() => {
+  if (!editId.value || hydrated.value) return
+  const item = marketplaces.value.find(marketplace => marketplace.id === editId.value)
+  if (!item) return
+  Object.assign(form, { platform: item.platform || 'custom', name: item.name, short: item.short, color: item.color, active: item.active, commission: item.commission, fixed: item.fixed, financial: item.financial, ads: item.ads, others: item.others })
+  hydrated.value = true
 })
 
 const validate = () => {
@@ -81,7 +94,8 @@ const save = async () => {
   if (!validate() || saving.value) return
   saving.value = true
   try {
-    await createItem('marketplaces', {
+    const payload = {
+      id: editId.value,
       name: form.name,
       short: (form.short || form.name[0]).slice(0, 2).toUpperCase(),
       color: form.color,
@@ -93,9 +107,11 @@ const save = async () => {
       ads: form.ads,
       others: form.others,
       active: form.active
-    })
+    }
+    if (isEditing.value) await updateItem('marketplaces', payload)
+    else await createItem('marketplaces', payload)
 
-    if (requiresToken.value) {
+    if (!isEditing.value && requiresToken.value) {
       await createMarketplaceIntegration({
         platform: form.platform,
         marketplaceName: form.name,
@@ -108,7 +124,7 @@ const save = async () => {
       })
     }
 
-    notify(requiresToken.value ? 'Marketplace conectado com sucesso.' : 'Marketplace cadastrado com sucesso.')
+    notify(isEditing.value ? 'Marketplace atualizado com sucesso.' : requiresToken.value ? 'Marketplace conectado com sucesso.' : 'Marketplace cadastrado com sucesso.')
     navigateTo('/marketplaces')
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Nao foi possivel salvar o marketplace.', 'info')
@@ -124,8 +140,8 @@ const cancel = () => {
 
 <template>
   <div>
-    <div class="breadcrumb"><span>Marketplaces</span><UiIcon name="chevron" :size="12" /><strong>Novo Marketplace</strong></div>
-    <PageHeader title="Novo Marketplace" subtitle="Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente." />
+    <div class="breadcrumb"><span>Marketplaces</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar Marketplace' : 'Novo Marketplace' }}</strong></div>
+    <PageHeader :title="isEditing ? 'Editar Marketplace' : 'Novo Marketplace'" :subtitle="isEditing ? 'Atualize taxas, status e identificacao do canal.' : 'Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente.'" />
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <form @submit.prevent="save">
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="store" />1. Servico de venda</h2><div class="integration-grid">
@@ -161,7 +177,7 @@ const cancel = () => {
           <div class="col-5 info-note"><UiIcon name="info" :size="18" />Essas regras entram quando a plataforma nao enviar o detalhamento completo das taxas.</div>
         </div></div>
 
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : 'Salvar e conectar' }}</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alteracoes' : 'Salvar e conectar' }}</button></div>
       </form>
       <aside><PanelCard title="Previa de resultado"><div class="field"><label>Valor da venda</label><input v-model.number="saleValue" type="number"></div><div class="detail-list" style="margin-top:10px"><div class="detail-list__row"><span>Venda bruta</span><strong>{{formatCurrency(saleValue)}}</strong></div><div class="detail-list__row"><span>Total de taxas</span><strong>- {{formatCurrency(totalFees)}}</strong></div><div class="detail-list__row"><span>Receita liquida</span><strong class="money-positive">{{formatCurrency(netPreview)}}</strong></div></div><div class="summary-box"><small>Status da conexao</small><strong style="display:block;font-size:18px;margin-top:6px">{{connectionStatus === 'connected' ? 'Conectado' : 'Manual'}}</strong><span class="badge badge--green" style="margin-top:7px">{{netPreview && saleValue ? (netPreview/saleValue*100).toFixed(1) : '0.0'}}% do bruto</span></div></PanelCard></aside>
     </div>
