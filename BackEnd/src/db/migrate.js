@@ -28,6 +28,12 @@ export const migrate = async () => {
     )
   `)
   await query('alter table tenants add column if not exists is_initialized boolean not null default false')
+  await query('alter table tenants add column if not exists document text')
+  await query('alter table tenants add column if not exists email text')
+  await query('alter table tenants add column if not exists phone text')
+  await query("alter table tenants add column if not exists kwh_cost numeric(12,4) not null default 0.68")
+  await query("alter table tenants add column if not exists currency text not null default 'BRL'")
+  await query("alter table tenants add column if not exists timezone text not null default 'America/Sao_Paulo'")
 
   await query(`
     create table if not exists products (

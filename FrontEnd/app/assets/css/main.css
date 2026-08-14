@@ -223,8 +223,27 @@ input, select, textarea { color: var(--ink); }
 .form-card + .form-card { margin-top: 10px; }
 .form-card__title { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; font-size: 14px; }
 .form-card__title .ui-icon { color: var(--blue); }
+.breadcrumb { display: flex; align-items: center; gap: 7px; color: var(--muted); margin: -2px 0 9px; font-size: 10px; font-weight: 650; }
+.breadcrumb strong { color: var(--blue); }
 .form-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 11px 14px; }
 .col-2 { grid-column: span 2; }.col-3 { grid-column: span 3; }.col-4 { grid-column: span 4; }.col-5 { grid-column: span 5; }.col-6 { grid-column: span 6; }.col-7 { grid-column: span 7; }.col-8 { grid-column: span 8; }.col-9 { grid-column: span 9; }.col-12 { grid-column: span 12; }
+.field--error input,.field--error select,.field--error textarea { border-color: var(--red); box-shadow: 0 0 0 3px rgba(239,68,68,.08); }
+.field__error { color: var(--red); font-size: 9px; font-weight: 650; }
+.upload-zone { display: grid; min-height: 118px; place-items: center; border: 1px dashed #b8c7dc; border-radius: 10px; color: var(--muted); background: #fbfdff; text-align: center; cursor: pointer; }
+.upload-zone:hover { border-color: var(--blue); background: #f4f8ff; }
+.upload-zone strong { display: block; color: var(--ink); margin-top: 8px; font-size: 11px; }
+.upload-zone small { display: block; margin-top: 4px; font-size: 9px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 9px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; margin-top: 10px; padding: 12px 15px; box-shadow: var(--shadow); }
+.choice-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.choice-card { min-height: 96px; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 12px; text-align: left; cursor: pointer; }
+.choice-card.active { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px rgba(23,104,242,.18); }
+.choice-card strong { display: block; margin-top: 8px; font-size: 11px; }
+.choice-card small { display: block; color: var(--muted); margin-top: 4px; font-size: 9px; }
+.confirm-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(17,28,52,.32); padding: 18px; }
+.confirm-card { width: min(420px, 100%); border: 1px solid var(--line); border-radius: var(--radius); background: #fff; padding: 18px; box-shadow: 0 18px 52px rgba(25,44,84,.22); }
+.confirm-card h3 { margin: 0 0 6px; font-size: 16px; }
+.confirm-card p { color: var(--muted); margin: 0 0 16px; font-size: 11px; line-height: 1.55; }
+.confirm-card__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .switch-row { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; }
 .switch { position: relative; width: 39px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 999px; background: #cfd7e4; cursor: pointer; transition: .2s; }
 .switch::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.2); content: ''; transition: .2s; }
@@ -317,6 +336,7 @@ input, select, textarea { color: var(--ink); }
   .settings-layout { grid-template-columns: 1fr; }.settings-layout > :last-child { grid-column: auto; }
   .settings-nav { display: flex; overflow-x: auto; }.settings-nav button { min-width: 170px; }
   .role-grid { grid-template-columns: 1fr 1fr; }
+  .choice-grid { grid-template-columns: 1fr 1fr; }
   .form-grid { grid-template-columns: 1fr 1fr; }.form-grid > * { grid-column: span 1 !important; }.form-grid > .col-12,.form-grid > .col-9,.form-grid > .col-8 { grid-column: 1 / -1 !important; }
   .result-grid { grid-template-columns: 1fr 1fr; }.calculator-layout { display: block; }.calculator-results { margin-top: 12px; }
   .page-heading__actions { max-width: 50%; }.page-heading__actions .btn span { display: none; }
@@ -332,6 +352,8 @@ input, select, textarea { color: var(--ink); }
   .result-grid,.role-grid,.stat-strip { grid-template-columns: 1fr; }
   .result-card { min-height: 110px; }.result-card strong { margin-top: 14px; }
   .form-grid { grid-template-columns: 1fr; }.form-grid > * { grid-column: 1 !important; }
+  .choice-grid { grid-template-columns: 1fr; }
+  .form-actions { flex-direction: column; }.form-actions .btn { width: 100%; }
   .viability { align-items: flex-start; }
   .dropdown-card { position: fixed; top: 64px; right: 10px; left: 10px; width: auto; }
   .toast { right: 12px; bottom: 12px; left: 12px; }

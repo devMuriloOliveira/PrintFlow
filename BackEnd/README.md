@@ -50,3 +50,10 @@ As migracoes criam as tabelas `tenants`, `products`, `orders`, `expenses`, `fila
 Como ainda nao existe cadastro, o front cria um identificador aleatorio de espaco de trabalho e o envia no header `X-Tenant-Id`, persistido apenas no navegador. Isso separa navegadores/espacos durante esta fase e evita uma conta `demo` compartilhada.
 
 Essa etapa nao substitui autenticacao: alguem que alterar manualmente o header pode tentar acessar outro espaco. Antes de abrir o sistema para dados reais, substitua esse header por um tenant derivado de sessao/JWT validado exclusivamente no backend.
+
+Regras importantes:
+
+- Toda tabela nova que guardar dado do cliente precisa ter `tenant_id`.
+- Toda busca, criacao, atualizacao e exclusao precisa usar o `tenant_id` resolvido no backend.
+- Chaves unicas de dados do cliente devem incluir o tenant, por exemplo `unique (tenant_id, sku)`.
+- Dados sensiveis devem ficar apenas em variaveis de ambiente privadas, nunca commitados no front ou no backend.
