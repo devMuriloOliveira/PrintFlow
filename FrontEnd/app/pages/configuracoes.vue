@@ -2,7 +2,7 @@
 const { notify } = useUi()
 const active = ref('Empresa')
 const tabs=[['Empresa','building','Informacoes da empresa'],['Financeiro','money','Impostos, moedas e contas'],['Usuarios e Permissoes','users','Gestao de usuarios e acessos'],['Notificacoes','bell','E-mails e alertas do sistema'],['Seguranca','shield','Acesso, 2FA e sessoes'],['Personalizacao','settings','Marca, aparencia e preferencias'],['Integracoes','box','Marketplaces e servicos'],['Backup e Dados','download','Exportar e restaurar dados']]
-const company=reactive({name:'PrintFlow 3D LTDA',cnpj:'42.123.456/0001-78',phone:'(11) 99876-5432',email:'contato@printflow3d.com.br',address:'Rua das Impressoras, 123',district:'Vila Maker',city:'Sao Paulo',state:'SP',zip:'01234-567',country:'Brasil',currency:'Real (R$)',timezone:'(GMT-03:00) Brasilia',kwh:.85})
+const company=reactive({name:'Empresa Demo',cnpj:'documento-demo',phone:'nao-informado',email:'nao-informado',address:'Endereco demonstrativo',district:'Bairro Demo',city:'Sao Paulo',state:'SP',zip:'cep-demo',country:'Brasil',currency:'Real (R$)',timezone:'(GMT-03:00) Brasilia',kwh:.85})
 </script>
 <template>
   <div><PageHeader title="Configuracoes" subtitle="Gerencie as configuracoes da sua empresa e da plataforma"/>

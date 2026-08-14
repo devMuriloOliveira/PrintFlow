@@ -3,8 +3,9 @@ const { marketplaces } = useAppData()
 const { notify } = useUi()
 const saleValue = ref(100)
 const selectedName = ref('Shopee')
-const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0])
-const fees = computed(() => ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }))
+const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
+const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
+const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
 </script>
 <template>

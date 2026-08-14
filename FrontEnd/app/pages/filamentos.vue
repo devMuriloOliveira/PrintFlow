@@ -2,9 +2,10 @@
 const { filaments } = useAppData()
 const { notify } = useUi()
 const selectedIndex = ref(0)
-const selected = computed(() => filaments.value[selectedIndex.value])
+const emptyFilament = { name: '', maker: '', material: '', type: '', color: '', colorHex: '#ccd3df', initial: 1, remaining: 0, cost: 0, supplier: '', date: '', status: '' }
+const selected = computed(() => filaments.value[selectedIndex.value] || emptyFilament)
 const pieceWeight = ref(180)
-const pieceCost = computed(() => selected.value.cost / selected.value.initial * pieceWeight.value)
+const pieceCost = computed(() => selected.value ? selected.value.cost / selected.value.initial * pieceWeight.value : 0)
 const badgeClass = (s:string) => s==='Em estoque'?'badge--green':s==='Atencao'?'badge--orange':'badge--red'
 </script>
 <template>

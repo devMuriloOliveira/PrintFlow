@@ -2,8 +2,9 @@
 const { printers } = useAppData()
 const { notify } = useUi()
 const selectedIndex = ref(0)
-const selected = computed(() => printers.value[selectedIndex.value])
-const energyCost = computed(() => selected.value.power/1000*82*.68)
+const emptyPrinter = { name: '', code: '', maker: '', model: '', acquired: '', power: 0, hours: 0, status: '', maintenance: '', serial: '' }
+const selected = computed(() => printers.value[selectedIndex.value] || emptyPrinter)
+const energyCost = computed(() => selected.value ? selected.value.power/1000*82*.68 : 0)
 const badgeClass=(s:string)=>s==='Disponivel'?'badge--green':s==='Em Manutencao'?'badge--orange':''
 </script>
 <template>

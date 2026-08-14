@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products } = useAppData()
+const { createProduct } = useAppData()
 const { notify } = useUi()
 const router = useRouter()
 const form = reactive({ name: 'Vaso Geometrico', sku: 'VGE-001', category: 'Decoracao', description: 'Vaso decorativo moderno com design geometrico. Ideal para plantas pequenas e decoracao de ambientes.', status: 'Ativo', printer: 'Bambu Lab P1S', filament: 'PLA Cinza', weight: 212, hours: 5, minutes: 20, layer: .2, infill: 20, packaging: 1.5, materials: .8, labor: 2, energy: true, marketplaceFee: 14, price: 49.9, desiredMargin: 40 })
@@ -9,8 +9,8 @@ const marketplaceCost = computed(() => form.price * form.marketplaceFee / 100)
 const totalCost = computed(() => filamentCost.value + energyCost.value + form.packaging + form.materials + form.labor + marketplaceCost.value)
 const profit = computed(() => form.price - totalCost.value)
 const margin = computed(() => profit.value / form.price * 100)
-const save = () => {
-  products.value.unshift({ name: form.name, subtitle: form.description.slice(0, 42), sku: form.sku, category: form.category, price: form.price, weight: form.weight, time: `${form.hours}h ${form.minutes}m`, filament: form.filament, filamentColor: '#555b64', cost: totalCost.value, profit: profit.value, margin: margin.value, status: form.status, thumb: 'vase' })
+const save = async () => {
+  await createProduct({ name: form.name, subtitle: form.description.slice(0, 42), sku: form.sku, category: form.category, price: form.price, weight: form.weight, time: `${form.hours}h ${form.minutes}m`, filament: form.filament, filamentColor: '#555b64', cost: totalCost.value, profit: profit.value, margin: margin.value, status: form.status, thumb: 'vase' })
   notify('Produto salvo com sucesso')
   router.push('/produtos')
 }
