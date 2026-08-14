@@ -4,6 +4,6 @@ const route = useRoute()
 
 <template>
   <NuxtLayout>
-    <NuxtPage :key="route.fullPath" :page-key="route.fullPath" />
+    <NuxtPage :key="route.fullPath" :page-key="route.fullPath" :transition="{ name: 'page', mode: 'out-in' }" />
   </NuxtLayout>
 </template>
