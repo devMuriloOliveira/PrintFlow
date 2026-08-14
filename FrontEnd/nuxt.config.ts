@@ -3,6 +3,11 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: false },
   nitro: { preset: 'static' },
+  runtimeConfig: {
+    public: {
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com'
+    }
+  },
   css: ['~/assets/css/main.css'],
   app: {
     head: {
