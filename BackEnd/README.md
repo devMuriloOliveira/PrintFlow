@@ -8,7 +8,7 @@ API do PrintFlow 3D separada do front-end.
 - `src/config`: configuracoes de ambiente.
 - `src/http`: utilitarios HTTP, CORS, JSON e leitura de payload.
 - `src/routes`: definicao das rotas e handlers da API.
-- `src/db`: conexao PostgreSQL e migracoes iniciais.
+- `src/db`: conexao PostgreSQL, migracoes e carga inicial isolada por espaco.
 - `src/repositories`: consultas ao banco por recurso.
 - `src/data.js`: dados temporarios em memoria.
 
@@ -22,7 +22,7 @@ Copy-Item .env.example .env
 
 - `DATABASE_URL`: URL privada de conexao com o Neon/PostgreSQL.
 - `PORT`: porta local da API.
-- `ALLOW_DEMO_TENANT`: permite usar o tenant `demo` quando nao houver autenticacao real. Em producao com login/JWT, use `false`.
+- `ALLOW_DEMO_TENANT`: somente para testes sem identificador. Mantenha `false` no Render.
 
 ## Rodar localmente
 
@@ -43,8 +43,10 @@ No Render, configure o servico usando:
 
 O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para apontar para outra API, configure a variavel `NUXT_PUBLIC_API_BASE`.
 
-## Isolamento de dados
+## Modelo de dados e isolamento
 
-As tabelas persistidas devem possuir `tenant_id`, e toda consulta precisa filtrar por esse campo. A tabela `products` ja segue esse modelo com `unique (tenant_id, sku)`.
+As migracoes criam as tabelas `tenants`, `products`, `orders`, `expenses`, `filaments`, `printers`, `marketplaces`, `clients`, `goals`, `company_settings`, `calculator_simulations` e `export_history`. Todos os dados de negocio possuem `tenant_id`, indices por tenant e politicas de Row Level Security no PostgreSQL.
 
-Enquanto a autenticacao nao estiver pronta, o backend aceita `X-Tenant-Id` para desenvolvimento. Em producao, esse valor deve vir do usuario autenticado/JWT no backend, nunca de um campo editavel pelo front.
+Como ainda nao existe cadastro, o front cria um identificador aleatorio de espaco de trabalho e o envia no header `X-Tenant-Id`, persistido apenas no navegador. Isso separa navegadores/espacos durante esta fase e evita uma conta `demo` compartilhada.
+
+Essa etapa nao substitui autenticacao: alguem que alterar manualmente o header pode tentar acessar outro espaco. Antes de abrir o sistema para dados reais, substitua esse header por um tenant derivado de sessao/JWT validado exclusivamente no backend.

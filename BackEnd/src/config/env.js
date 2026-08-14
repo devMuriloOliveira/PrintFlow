@@ -21,5 +21,5 @@ if (existsSync(envPath)) {
 export const env = {
   port: Number(process.env.PORT || 3333),
   databaseUrl: process.env.DATABASE_URL || '',
-  allowDemoTenant: process.env.ALLOW_DEMO_TENANT !== 'false'
+  allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true'
 }
