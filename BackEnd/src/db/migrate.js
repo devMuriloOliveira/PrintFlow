@@ -77,6 +77,8 @@ export const migrate = async () => {
   const productColumns = [
     'description text', 'printer text', 'layer_height numeric(6,3) not null default 0',
     'infill numeric(6,2) not null default 0', 'dimensions text',
+    'printer_id bigint',
+    'filament_id bigint',
     'packaging_cost numeric(12,2) not null default 0',
     'additional_materials_cost numeric(12,2) not null default 0',
     'labor_cost numeric(12,2) not null default 0', 'energy_enabled boolean not null default true',

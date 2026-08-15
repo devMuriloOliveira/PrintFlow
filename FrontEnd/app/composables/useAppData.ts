@@ -1,16 +1,16 @@
 export type Order = {
   dbId?: string;
-  id: string; date: string; client: string; marketplace: string; product: string; qty: number;
+  id: string; productId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
   gross: number; fee: number; shipping: number; net: number; profit: number; status: string
 }
 
 export type Product = {
   id?: string;
   name: string; subtitle: string; sku: string; category: string; price: number; weight: number;
-  description?: string; printer?: string; layer?: number; infill?: number; dimensions?: string;
+  description?: string; printerId?: string; printer?: string; layer?: number; infill?: number; dimensions?: string;
   packaging?: number; materials?: number; labor?: number; energy?: boolean; marketplaceFee?: number; desiredMargin?: number;
-  time: string; filament: string; filamentColor: string; cost: number; profit: number; margin: number;
-  status: string; thumb: string
+  time: string; filamentId?: string; filament: string; filamentColor: string; cost: number; profit: number; margin: number;
+  status: string; thumb: string; createdAt?: string; updatedAt?: string
 }
 
 export type Expense = {
@@ -28,7 +28,7 @@ export type Filament = {
 export type Printer = {
   id?: string;
   name: string; code: string; maker: string; model: string; acquired: string; power: number;
-  hours: number; status: string; maintenance: string; serial: string
+  hours: number; status: string; maintenance: string; serial: string; location?: string; volume?: string; defaultFilament?: string
 }
 
 export type Marketplace = {
@@ -210,6 +210,7 @@ export const useAppData = () => {
     clients: computed(() => data.value.clients),
     goals,
     expenseSegments: computed(() => data.value.expenseSegments),
+    settings: computed(() => data.value.settings),
     apiBase,
     tenantId,
     pending,

@@ -1,13 +1,142 @@
 <script setup lang="ts">
-const { orders, deleteItem } = useAppData()
+const { products, orders, createItem, updateItem, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
 const search = ref('')
 const status = ref('Todos')
+const selectedMetric = ref<'gross' | 'net' | 'profit' | 'orders'>('gross')
+const chartPeriod = ref<'week' | 'month' | 'year'>('month')
+const manualQuantities = reactive<Record<string, number>>({})
+const savingProduct = reactive<Record<string, boolean>>({})
 const filtered = computed(() => orders.value.filter(o => (status.value === 'Todos' || o.status === status.value) && Object.values(o).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
+const metricCards = computed(() => [
+  { key: 'gross' as const, label: 'Receita Bruta', value: formatCurrency(metrics.revenue.value), icon: 'money', note: 'Dados do banco', color: 'green' },
+  { key: 'net' as const, label: 'Receita Liquida', value: formatCurrency(metrics.netRevenue.value), icon: 'wallet', note: 'Dados do banco', color: 'blue' },
+  { key: 'profit' as const, label: 'Lucro Total', value: formatCurrency(metrics.profit.value), icon: 'money', change: `Margem ${metrics.percent(metrics.margin.value)}`, color: 'green' },
+  { key: 'orders' as const, label: 'Pedidos no Mes', value: formatNumber(metrics.orderCount.value), icon: 'bag', note: 'Dados do banco', color: 'purple' }
+])
+const metricDetails = {
+  gross: { title: 'Evolucao da Receita Bruta', color: '#0da566', totalLabel: 'Total no periodo', formatter: formatCurrency },
+  net: { title: 'Evolucao da Receita Liquida', color: '#1768f2', totalLabel: 'Total no periodo', formatter: formatCurrency },
+  profit: { title: 'Evolucao do Lucro Total', color: '#0da566', totalLabel: 'Total no periodo', formatter: formatCurrency },
+  orders: { title: 'Quantidade de Pedidos', color: '#7c3aed', totalLabel: 'Pedidos no periodo', formatter: formatNumber }
+}
 const badgeClass = (s: string) => ({ Novo: '', Producao: 'badge--orange', Impresso: 'badge--purple', Embalando: 'badge--orange', Enviado: '', Entregue: 'badge--green', Cancelado: 'badge--red' }[s] || '')
+const parseOrderDate = (date: string) => {
+  const normalized = date.includes('/') ? date.split('/').reverse().join('-') : date
+  const parsed = new Date(`${normalized}T00:00:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+const today = () => new Date().toISOString().slice(0, 10)
+const dateToDisplay = (date: string) => date.split('-').reverse().join('/')
+const productKey = (product: any) => String(product.id || product.sku || product.name)
+const manualOrderId = (product: any, date = today()) => `MANUAL-${date}-${product.sku || product.id}`
+const sameOrderDate = (orderDate: string, isoDate: string) => orderDate === isoDate || orderDate === dateToDisplay(isoDate)
+const manualOrderFor = (product: any, date = today()) => orders.value.find(order =>
+  order.id === manualOrderId(product, date) || (String(order.id || '').startsWith('MANUAL-') && sameOrderDate(order.date, date) && (order.productId === product.id || order.product === product.name))
+)
+const manualProductRows = computed(() => products.value.map(product => {
+  const qty = Number(manualQuantities[productKey(product)] || 0)
+  const gross = Number(product.price || 0) * qty
+  const fee = gross * Number(product.marketplaceFee || 0) / 100
+  const net = gross - fee
+  const cost = Number(product.cost || 0) * qty
+  return { product, qty, gross, fee, net, cost, profit: net - cost }
+}))
+const syncManualQuantities = () => {
+  const currentDate = today()
+  for (const product of products.value) {
+    const key = productKey(product)
+    if (savingProduct[key]) continue
+    manualQuantities[key] = Number(manualOrderFor(product, currentDate)?.qty || 0)
+  }
+}
+watchEffect(syncManualQuantities)
+const saveManualQuantity = async (product: any, rawQty: number) => {
+  const key = productKey(product)
+  if (savingProduct[key]) return
+  const qty = Math.max(0, Math.floor(Number(rawQty || 0)))
+  manualQuantities[key] = qty
+  savingProduct[key] = true
+  try {
+    const date = today()
+    const existing = manualOrderFor(product, date)
+    if (!qty) {
+      if (existing?.dbId || existing?.id) await deleteItem('orders', existing.dbId || existing.id)
+      notify('Registro de venda atualizado.')
+      return
+    }
+
+    const gross = Number(product.price || 0) * qty
+    const fee = gross * Number(product.marketplaceFee || 0) / 100
+    const net = gross - fee
+    const cost = Number(product.cost || 0) * qty
+    const payload = {
+      id: manualOrderId(product, date),
+      dbId: existing?.dbId,
+      productId: product.id,
+      date,
+      client: 'Venda manual',
+      marketplace: 'Manual',
+      product: product.name,
+      qty,
+      gross,
+      fee,
+      shipping: 0,
+      net,
+      profit: net - cost,
+      status: 'Entregue'
+    }
+    if (existing?.dbId) await updateItem('orders', payload)
+    else await createItem('orders', payload)
+    notify('Venda por produto salva.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Nao foi possivel salvar a venda manual.', 'info')
+    syncManualQuantities()
+  } finally {
+    savingProduct[key] = false
+  }
+}
+const adjustManualQuantity = (product: any, delta: number) => {
+  const current = Number(manualQuantities[productKey(product)] || 0)
+  void saveManualQuantity(product, current + delta)
+}
+const dateKey = (date: Date) => {
+  if (chartPeriod.value === 'week') {
+    const start = new Date(date)
+    start.setDate(date.getDate() - date.getDay())
+    return start.toISOString().slice(0, 10)
+  }
+  if (chartPeriod.value === 'year') return String(date.getFullYear())
+  return date.toISOString().slice(0, 7)
+}
+const formatChartLabel = (key: string) => {
+  const [year, month, day] = key.split('-').map(Number)
+  if (chartPeriod.value === 'year') return key
+  if (chartPeriod.value === 'week') return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}`
+  return `${String(month).padStart(2, '0')}/${year}`
+}
+const selectedDetail = computed(() => metricDetails[selectedMetric.value])
+const detailedChart = computed(() => {
+  const totals = new Map<string, number>()
+  for (const order of orders.value) {
+    const date = parseOrderDate(order.date)
+    if (!date) continue
+    const key = dateKey(date)
+    const value = selectedMetric.value === 'orders' ? 1 : Number(order[selectedMetric.value] || 0)
+    totals.set(key, (totals.get(key) || 0) + value)
+  }
+
+  const rows = [...totals.entries()].sort(([a], [b]) => a.localeCompare(b))
+  const values = rows.map(([, value]) => value)
+  return {
+    labels: rows.map(([key]) => formatChartLabel(key)),
+    values: values.length ? values : [0, 0],
+    total: values.reduce((total, value) => total + value, 0)
+  }
+})
 const editOrder = (order: any) => {
   const id = order.dbId || order.id
   if (!id) return
@@ -36,13 +165,54 @@ const marketplaceBars = computed(() => {
 <template>
   <div>
     <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" to="/vendas/novo"><UiIcon name="plus"/>Nova Venda</NuxtLink></PageHeader>
-    <div class="metrics-grid metrics-grid--5">
-      <MetricCard label="Receita Bruta" :value="formatCurrency(metrics.revenue.value)" icon="money" note="Dados do banco" color="green" />
-      <MetricCard label="Receita Liquida" :value="formatCurrency(metrics.netRevenue.value)" icon="wallet" note="Dados do banco" color="blue" />
-      <MetricCard label="Lucro Total" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" />
-      <MetricCard label="Pedidos no Mes" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Dados do banco" color="purple" />
-      <MetricCard label="Frete" :value="formatCurrency(metrics.shipping.value)" icon="cart" note="Dados do banco" color="orange" negative />
+    <div class="metrics-grid metrics-grid--4">
+      <MetricCard
+        v-for="card in metricCards"
+        :key="card.key"
+        :label="card.label"
+        :value="card.value"
+        :icon="card.icon"
+        :note="card.note"
+        :change="card.change"
+        :color="card.color"
+        :selected="selectedMetric === card.key"
+        interactive
+        @click="selectedMetric = card.key"
+      />
     </div>
+    <PanelCard :title="selectedDetail.title" :subtitle="`${selectedDetail.totalLabel}: ${selectedDetail.formatter(detailedChart.total)}`">
+      <template #actions>
+        <div class="segmented-control" aria-label="Periodo do grafico">
+          <button type="button" :class="{ active: chartPeriod === 'week' }" @click="chartPeriod = 'week'">Semana</button>
+          <button type="button" :class="{ active: chartPeriod === 'month' }" @click="chartPeriod = 'month'">Mes</button>
+          <button type="button" :class="{ active: chartPeriod === 'year' }" @click="chartPeriod = 'year'">Ano</button>
+        </div>
+      </template>
+      <LineChart :values="detailedChart.values" :labels="detailedChart.labels" :color="selectedDetail.color" />
+    </PanelCard>
+    <PanelCard title="Registrar vendas por produto" subtitle="Informe rapidamente as unidades vendidas hoje para cada produto cadastrado.">
+      <div v-if="!products.length" class="empty-state">
+        <div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado.</h3><p>Cadastre seu primeiro produto para registrar vendas por quantidade.</p><NuxtLink class="btn btn--primary" to="/produtos/novo">Cadastrar Produto</NuxtLink></div>
+      </div>
+      <div v-else class="manual-sales-list">
+        <div v-for="row in manualProductRows" :key="productKey(row.product)" class="manual-sales-row">
+          <div class="manual-sales-product">
+            <ProductThumb :type="row.product.thumb" :size="42"/>
+            <div><strong>{{ row.product.name }}</strong><small>SKU: {{ row.product.sku || '-' }} · {{ formatCurrency(row.product.price) }}</small></div>
+          </div>
+          <div class="manual-sales-meta">
+            <span>Qtd. vendida hoje</span>
+            <strong>{{ formatCurrency(row.gross) }}</strong>
+          </div>
+          <div class="quantity-stepper" :aria-label="`Quantidade vendida de ${row.product.name}`">
+            <button type="button" :disabled="savingProduct[productKey(row.product)] || row.qty <= 0" @click="adjustManualQuantity(row.product, -1)">-</button>
+            <input :value="row.qty" type="number" min="0" :disabled="savingProduct[productKey(row.product)]" @change="saveManualQuantity(row.product, Number(($event.target as HTMLInputElement).value))">
+            <button type="button" :disabled="savingProduct[productKey(row.product)]" @click="adjustManualQuantity(row.product, 1)">+</button>
+          </div>
+          <span class="manual-sales-status">{{ savingProduct[productKey(row.product)] ? 'Salvando...' : 'Salvo' }}</span>
+        </div>
+      </div>
+    </PanelCard>
     <div class="filters">
       <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Pedido, cliente ou produto"></div></div>
       <div class="field"><label>Marketplace</label><select><option>Todos Marketplaces</option><option>Shopee</option><option>Mercado Livre</option></select></div>

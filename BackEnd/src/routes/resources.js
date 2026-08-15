@@ -51,23 +51,59 @@ export const handleProductCreate = async (req, res) => {
 }
 
 const validResources = new Set(['products', 'orders', 'expenses', 'filaments', 'printers', 'marketplaces', 'clients', 'goals'])
+const localId = () => String(Date.now() + Math.floor(Math.random() * 1000))
+
+const createLocalResource = (tenantId, resource, payload) => {
+  const tenantData = getTenantData(tenantId)
+  const list = tenantData[resource]
+  if (!Array.isArray(list)) return []
+
+  const id = payload.dbId || payload.id || localId()
+  const existingIndex = list.findIndex((item) => item.dbId === id || item.id === id)
+  const item = { ...payload, dbId: id, id: payload.id || id }
+  if (existingIndex >= 0) list.splice(existingIndex, 1, { ...list[existingIndex], ...item })
+  else list.unshift(item)
+  return list
+}
+
+const updateLocalResource = (tenantId, resource, id, payload) => {
+  const tenantData = getTenantData(tenantId)
+  const list = tenantData[resource]
+  if (!Array.isArray(list)) return []
+
+  const index = list.findIndex((item) => item.dbId === id || item.id === id)
+  if (index < 0) throw new Error('Registro nao encontrado')
+  list.splice(index, 1, { ...list[index], ...payload, dbId: list[index].dbId || id })
+  return list
+}
+
+const deleteLocalResource = (tenantId, resource, id) => {
+  const tenantData = getTenantData(tenantId)
+  const list = tenantData[resource]
+  if (!Array.isArray(list)) return []
+
+  const index = list.findIndex((item) => item.dbId === id || item.id === id)
+  if (index < 0) throw new Error('Registro nao encontrado')
+  list.splice(index, 1)
+  return list
+}
 
 export const handleResourceCreate = async (req, res, resource) => {
   if (!validResources.has(resource)) return sendJson(res, 404, { error: 'Recurso nao encontrado' })
   const payload = await readJsonBody(req)
-  const list = hasDatabase ? await createResource(getTenantId(req), resource, payload) : []
+  const list = hasDatabase ? await createResource(getTenantId(req), resource, payload) : createLocalResource(getTenantId(req), resource, payload)
   return sendJson(res, 201, list)
 }
 
 export const handleResourceUpdate = async (req, res, resource, id) => {
   if (!validResources.has(resource)) return sendJson(res, 404, { error: 'Recurso nao encontrado' })
   const payload = await readJsonBody(req)
-  const list = hasDatabase ? await updateResource(getTenantId(req), resource, id, payload) : []
+  const list = hasDatabase ? await updateResource(getTenantId(req), resource, id, payload) : updateLocalResource(getTenantId(req), resource, id, payload)
   return sendJson(res, 200, list)
 }
 
 export const handleResourceDelete = async (req, res, resource, id) => {
   if (!validResources.has(resource)) return sendJson(res, 404, { error: 'Recurso nao encontrado' })
-  const list = hasDatabase ? await deleteResource(getTenantId(req), resource, id) : []
+  const list = hasDatabase ? await deleteResource(getTenantId(req), resource, id) : deleteLocalResource(getTenantId(req), resource, id)
   return sendJson(res, 200, list)
 }

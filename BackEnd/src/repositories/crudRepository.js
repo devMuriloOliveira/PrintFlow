@@ -9,6 +9,10 @@ const textOrNull = (value) => {
   const text = String(value || '').trim()
   return text || null
 }
+const idOrNull = (value) => {
+  const id = Number(value || 0)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
 
 const findOrCreateClientId = async (client, tenantId, name) => {
   const cleanName = textOrNull(name)
@@ -60,6 +64,7 @@ const resourceConfig = {
       sku: item.sku,
       category: item.category || '',
       description: item.description || '',
+      printer_id: idOrNull(item.printerId),
       printer: item.printer || '',
       price: number(item.price),
       weight: number(item.weight),
@@ -67,6 +72,7 @@ const resourceConfig = {
       layer_height: number(item.layer),
       infill: number(item.infill),
       dimensions: item.dimensions || '',
+      filament_id: idOrNull(item.filamentId),
       filament: item.filament || '',
       filament_color: item.filamentColor || '#1768f2',
       packaging_cost: number(item.packaging),
@@ -172,6 +178,7 @@ const resourceConfig = {
     table: 'orders',
     patch: (item) => ({
       external_id: item.id || `PED-${Date.now()}`,
+      product_id: idOrNull(item.productId),
       order_date: dateOrNull(item.date),
       product_name: item.product || '',
       quantity: number(item.qty) || 1,
@@ -217,8 +224,11 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
 
   const columns = ['tenant_id', ...keys]
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ')
+  const conflictClause = resource === 'orders'
+    ? ` on conflict (tenant_id, external_id) do update set ${keys.map((key) => `${key} = excluded.${key}`).join(', ')}`
+    : ''
   await client.query(
-    `insert into ${config.table} (${columns.join(', ')}) values (${placeholders})`,
+    `insert into ${config.table} (${columns.join(', ')}) values (${placeholders})${conflictClause}`,
     [tenantId, ...keys.map((key) => values[key])]
   )
   return null

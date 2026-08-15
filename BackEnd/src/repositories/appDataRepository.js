@@ -11,33 +11,40 @@ const maskSensitiveIdentifier = (value) => {
 
 const mapProduct = (row) => ({
   id: String(row.id), name: row.name, subtitle: row.subtitle || '', sku: row.sku, category: row.category || '',
-  description: row.description || '', printer: row.printer || '', price: number(row.price), weight: number(row.weight),
+  description: row.description || '', printerId: row.printer_id ? String(row.printer_id) : '', printer: row.printer_name || row.printer || '', price: number(row.price), weight: number(row.weight),
   time: row.print_time || '', layer: number(row.layer_height), infill: number(row.infill), dimensions: row.dimensions || '',
-  filament: row.filament || '', filamentColor: row.filament_color || '#1768f2',
+  filamentId: row.filament_id ? String(row.filament_id) : '', filament: row.filament_name || row.filament || '', filamentColor: row.filament_color || row.linked_filament_color || '#1768f2',
   packaging: number(row.packaging_cost), materials: number(row.additional_materials_cost), labor: number(row.labor_cost),
   energy: row.energy_enabled, marketplaceFee: number(row.marketplace_fee), desiredMargin: number(row.desired_margin),
-  cost: number(row.cost), profit: number(row.profit), margin: number(row.margin), status: row.status, thumb: row.thumb
+  cost: number(row.cost), profit: number(row.profit), margin: number(row.margin), status: row.status, thumb: row.thumb,
+  createdAt: row.created_at || '', updatedAt: row.updated_at || ''
 })
 
 const readProducts = async (client, tenantId) => {
   const result = await client.query(`
-    select id, name, subtitle, sku, category, description, printer, price, weight, print_time, layer_height, infill,
-      dimensions, filament, filament_color, packaging_cost, additional_materials_cost, labor_cost,
-      energy_enabled, marketplace_fee, desired_margin, cost, profit, margin, status, thumb
-    from products where tenant_id = $1 order by created_at desc
+    select p.id, p.name, p.subtitle, p.sku, p.category, p.description, p.printer_id, p.printer, pr.name as printer_name,
+      p.price, p.weight, p.print_time, p.layer_height, p.infill, p.dimensions, p.filament_id, p.filament,
+      f.name as filament_name, p.filament_color, f.color_hex as linked_filament_color, p.packaging_cost,
+      p.additional_materials_cost, p.labor_cost, p.energy_enabled, p.marketplace_fee, p.desired_margin,
+      p.cost, p.profit, p.margin, p.status, p.thumb,
+      to_char(p.created_at, 'YYYY-MM-DD') as created_at, to_char(p.updated_at, 'YYYY-MM-DD') as updated_at
+    from products p
+    left join printers pr on pr.id = p.printer_id and pr.tenant_id = p.tenant_id
+    left join filaments f on f.id = p.filament_id and f.tenant_id = p.tenant_id
+    where p.tenant_id = $1 order by p.created_at desc
   `, [tenantId])
   return result.rows.map(mapProduct)
 }
 
 const readOrders = async (client, tenantId) => {
   const result = await client.query(`
-    select o.id, o.external_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
+    select o.id, o.external_id, o.product_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
       coalesce(m.name, 'Nao informado') as marketplace, o.product_name as product, o.quantity as qty,
       o.gross, o.fee, o.shipping, o.net, o.profit, o.status
     from orders o left join clients c on c.id = o.client_id left join marketplaces m on m.id = o.marketplace_id
     where o.tenant_id = $1 order by o.order_date desc, o.id desc
   `, [tenantId])
-  return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, date: row.date, client: decryptField(row.client), marketplace: row.marketplace,
+  return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, productId: row.product_id ? String(row.product_id) : '', date: row.date, client: decryptField(row.client), marketplace: row.marketplace,
     product: row.product, qty: Number(row.qty), gross: number(row.gross), fee: number(row.fee), shipping: number(row.shipping),
     net: number(row.net), profit: number(row.profit), status: row.status }))
 }

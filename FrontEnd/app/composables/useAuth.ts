@@ -15,7 +15,6 @@ type AuthResponse = {
 const AUTH_TOKEN_KEY = 'printflow-auth-token'
 const AUTH_USER_KEY = 'printflow-auth-user'
 const AUTH_EXPIRES_KEY = 'printflow-auth-expires-at'
-const SESSION_MAX_AGE_MS = 10 * 60 * 1000
 
 let logoutTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -77,11 +76,10 @@ export const useAuth = () => {
 
   const setSession = (session: AuthResponse) => {
     const tokenExpiresAt = decodeTokenExpiresAt(session.token)
-    const maxExpiresAt = Date.now() + SESSION_MAX_AGE_MS
 
     token.value = session.token
     user.value = session.user
-    expiresAt.value = tokenExpiresAt ? Math.min(tokenExpiresAt, maxExpiresAt) : maxExpiresAt
+    expiresAt.value = tokenExpiresAt || Date.now() + 7 * 24 * 60 * 60 * 1000
     if (process.client) {
       localStorage.setItem(AUTH_TOKEN_KEY, session.token)
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(session.user))

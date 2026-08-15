@@ -24,6 +24,7 @@ const productionLike = isProduction || Boolean(databaseUrl)
 const authSecret = process.env.AUTH_SECRET || ''
 const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY || ''
 const webhookSharedSecret = process.env.WEBHOOK_SHARED_SECRET || ''
+const defaultAuthTokenTtlSeconds = productionLike ? 600 : 7 * 24 * 60 * 60
 const legacyDataEncryptionKeys = String(process.env.LEGACY_DATA_ENCRYPTION_KEYS || '')
   .split(',')
   .map((value) => value.trim())
@@ -48,7 +49,7 @@ export const env = {
   dataEncryptionKey,
   legacyDataEncryptionKeys,
   webhookSharedSecret,
-  authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || 600),
+  authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || defaultAuthTokenTtlSeconds),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),
   rateLimitAuthMaxRequests: Number(process.env.RATE_LIMIT_AUTH_MAX_REQUESTS || 12),

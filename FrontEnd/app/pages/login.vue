@@ -3,6 +3,7 @@ definePageMeta({ layout: false })
 
 const auth = useAuth()
 const { notify } = useUi()
+const config = useRuntimeConfig()
 const mode = ref<'login' | 'register'>('login')
 const loading = ref(false)
 const error = ref('')
@@ -15,6 +16,7 @@ const form = reactive({
 
 const title = computed(() => mode.value === 'login' ? 'Entrar no PrintFlow' : 'Criar conta')
 const actionLabel = computed(() => mode.value === 'login' ? 'Entrar' : 'Criar conta e entrar')
+const apiBase = computed(() => String(config.public.apiBase || '').replace(/\/$/, ''))
 
 const submit = async () => {
   error.value = ''
@@ -35,7 +37,10 @@ const submit = async () => {
     }
     await navigateTo('/')
   } catch (err: any) {
-    error.value = err?.data?.error || err?.message || 'Nao foi possivel autenticar.'
+    const isNetworkError = err?.message === 'Failed to fetch' || err?.cause?.message === 'Failed to fetch'
+    error.value = isNetworkError
+      ? `Nao foi possivel conectar na API (${apiBase.value}). Verifique se o backend esta rodando.`
+      : err?.data?.error || err?.message || 'Nao foi possivel autenticar.'
   } finally {
     loading.value = false
   }

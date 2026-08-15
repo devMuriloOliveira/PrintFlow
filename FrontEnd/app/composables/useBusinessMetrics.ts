@@ -4,13 +4,39 @@ export const useBusinessMetrics = () => {
   const sum = <T>(items: T[], getter: (item: T) => number) => items.reduce((total, item) => total + getter(item), 0)
   const avg = (total: number, count: number) => count ? total / count : 0
   const percent = (value: number) => `${value.toFixed(1).replace('.', ',')}%`
+  const parseProductHours = (time = '') => {
+    const hours = Number(time.match(/(\d+(?:[.,]\d+)?)\s*h/i)?.[1]?.replace(',', '.') || 0)
+    const minutes = Number(time.match(/(\d+(?:[.,]\d+)?)\s*m/i)?.[1]?.replace(',', '.') || 0)
+    return hours + minutes / 60
+  }
+  const productForOrder = (order: any) => products.value.find((product) => product.id && product.id === order.productId) || products.value.find((product) => product.name === order.product)
+  const soldRecipeRows = computed(() => orders.value.map((order) => ({ order, product: productForOrder(order) })).filter((row) => row.product))
+  const filamentUsageById = computed(() => {
+    const totals = new Map<string, number>()
+    for (const { order, product } of soldRecipeRows.value) {
+      if (!product?.filamentId) continue
+      totals.set(product.filamentId, (totals.get(product.filamentId) || 0) + Number(product.weight || 0) * Number(order.qty || 0))
+    }
+    return totals
+  })
+  const printerUsageById = computed(() => {
+    const totals = new Map<string, number>()
+    for (const { order, product } of soldRecipeRows.value) {
+      if (!product?.printerId) continue
+      totals.set(product.printerId, (totals.get(product.printerId) || 0) + parseProductHours(product.time) * Number(order.qty || 0))
+    }
+    return totals
+  })
+  const orderRecipeCost = computed(() => sum(soldRecipeRows.value, ({ order, product }) => Number(product?.cost || 0) * Number(order.qty || 0)))
 
   const revenue = computed(() => sum(orders.value, (order) => order.gross))
   const netRevenue = computed(() => sum(orders.value, (order) => order.net))
   const profit = computed(() => sum(orders.value, (order) => order.profit))
   const fees = computed(() => sum(orders.value, (order) => order.fee))
   const shipping = computed(() => sum(orders.value, (order) => order.shipping))
-  const expenseTotal = computed(() => sum(expenses.value, (expense) => expense.value))
+  const manualExpenseTotal = computed(() => sum(expenses.value, (expense) => expense.value))
+  const derivedExpenseTotal = computed(() => fees.value + shipping.value + orderRecipeCost.value)
+  const expenseTotal = computed(() => manualExpenseTotal.value + derivedExpenseTotal.value)
   const orderCount = computed(() => orders.value.length)
   const ticket = computed(() => avg(revenue.value, orderCount.value))
   const margin = computed(() => revenue.value ? profit.value / revenue.value * 100 : 0)
@@ -29,21 +55,22 @@ export const useBusinessMetrics = () => {
   const biggestExpenseCategory = computed(() => categoryTotals.value[0] || ['-', 0])
 
   const filamentStockCount = computed(() => filaments.value.filter((filament) => filament.status !== 'Esgotado').length)
-  const filamentStockCost = computed(() => sum(filaments.value, (filament) => filament.initial ? filament.cost * (filament.remaining / filament.initial) : 0))
-  const filamentWeight = computed(() => sum(filaments.value, (filament) => filament.remaining))
+  const filamentRemainingAfterSales = (filament: any) => Math.max(0, Number(filament.remaining || 0) - Number(filamentUsageById.value.get(String(filament.id)) || 0))
+  const filamentStockCost = computed(() => sum(filaments.value, (filament) => filament.initial ? filament.cost * (filamentRemainingAfterSales(filament) / filament.initial) : 0))
+  const filamentWeight = computed(() => sum(filaments.value, filamentRemainingAfterSales))
   const filamentAverageGramCost = computed(() => avg(sum(filaments.value, (filament) => filament.cost), sum(filaments.value, (filament) => filament.initial)))
   const filamentMaterialTotals = computed(() => {
     const totals = new Map<string, number>()
-    for (const filament of filaments.value) totals.set(filament.material, (totals.get(filament.material) || 0) + filament.remaining)
+    for (const filament of filaments.value) totals.set(filament.material, (totals.get(filament.material) || 0) + filamentRemainingAfterSales(filament))
     return [...totals.entries()].sort((a, b) => b[1] - a[1])
   })
   const mostUsedMaterial = computed(() => filamentMaterialTotals.value[0]?.[0] || '-')
-  const lowStockFilaments = computed(() => filaments.value.filter((filament) => filament.remaining < 300).length)
+  const lowStockFilaments = computed(() => filaments.value.filter((filament) => filamentRemainingAfterSales(filament) < 300).length)
 
   const activePrinters = computed(() => printers.value.filter((printer) => /disponivel|impressao|impressão/i.test(printer.status)).length)
   const printingPrinters = computed(() => printers.value.filter((printer) => /impress/i.test(printer.status)).length)
   const maintenancePrinters = computed(() => printers.value.filter((printer) => /manutenc/i.test(printer.status)).length)
-  const printerHours = computed(() => sum(printers.value, (printer) => printer.hours))
+  const printerHours = computed(() => sum(printers.value, (printer) => Number(printer.hours || 0) + Number(printerUsageById.value.get(String(printer.id)) || 0)))
 
   const activeMarketplaces = computed(() => marketplaces.value.filter((marketplace) => marketplace.active).length)
   const marketplaceAverageFee = computed(() => avg(sum(marketplaces.value, (marketplace) => marketplace.commission + marketplace.financial + marketplace.ads + marketplace.others), marketplaces.value.length))
@@ -65,6 +92,8 @@ export const useBusinessMetrics = () => {
     fees,
     shipping,
     expenseTotal,
+    manualExpenseTotal,
+    derivedExpenseTotal,
     orderCount,
     ticket,
     margin,
@@ -78,12 +107,14 @@ export const useBusinessMetrics = () => {
     filamentStockCost,
     filamentWeight,
     filamentAverageGramCost,
+    filamentUsageById,
     mostUsedMaterial,
     lowStockFilaments,
     activePrinters,
     printingPrinters,
     maintenancePrinters,
     printerHours,
+    printerUsageById,
     activeMarketplaces,
     marketplaceAverageFee,
     bestMarketplace,
