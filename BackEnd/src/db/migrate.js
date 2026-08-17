@@ -82,7 +82,8 @@ export const migrate = async () => {
     'packaging_cost numeric(12,2) not null default 0',
     'additional_materials_cost numeric(12,2) not null default 0',
     'labor_cost numeric(12,2) not null default 0', 'energy_enabled boolean not null default true',
-    'marketplace_fee numeric(8,2) not null default 0', 'desired_margin numeric(8,2) not null default 0'
+    'marketplace_fee numeric(8,2) not null default 0', 'desired_margin numeric(8,2) not null default 0',
+    "cost_breakdown jsonb not null default '{}'::jsonb"
   ]
   for (const column of productColumns) await query(`alter table products add column if not exists ${column}`)
 

@@ -27,6 +27,7 @@ const mapProduct = (row) => ({
   cost: Number(row.cost),
   profit: Number(row.profit),
   margin: Number(row.margin),
+  costBreakdown: row.cost_breakdown || {},
   status: row.status,
   thumb: row.thumb,
   createdAt: row.created_at || '',
@@ -44,7 +45,7 @@ export const listProducts = async (tenantId) => {
       pr.name as printer_name, p.price, p.weight, p.print_time, p.layer_height, p.infill, p.dimensions,
       p.filament_id, p.filament, f.name as filament_name, p.filament_color, f.color_hex as linked_filament_color, p.packaging_cost,
       additional_materials_cost, labor_cost, energy_enabled, marketplace_fee, desired_margin,
-      p.cost, p.profit, p.margin, p.status, p.thumb, to_char(p.created_at, 'YYYY-MM-DD') as created_at, to_char(p.updated_at, 'YYYY-MM-DD') as updated_at
+      p.cost, p.profit, p.margin, p.cost_breakdown, p.status, p.thumb, to_char(p.created_at, 'YYYY-MM-DD') as created_at, to_char(p.updated_at, 'YYYY-MM-DD') as updated_at
      from products p
      left join printers pr on pr.id = p.printer_id and pr.tenant_id = p.tenant_id
      left join filaments f on f.id = p.filament_id and f.tenant_id = p.tenant_id
@@ -70,9 +71,9 @@ export const createProduct = async (tenantId, product) => {
       tenant_id, name, subtitle, sku, category, description, printer_id, printer, price, weight, print_time,
       layer_height, infill, dimensions, filament_id, filament, filament_color, packaging_cost,
       additional_materials_cost, labor_cost, energy_enabled, marketplace_fee, desired_margin,
-      cost, profit, margin, status, thumb
+      cost, profit, margin, cost_breakdown, status, thumb
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
     on conflict (tenant_id, sku) do update set
       name = excluded.name,
       subtitle = excluded.subtitle,
@@ -98,13 +99,14 @@ export const createProduct = async (tenantId, product) => {
       cost = excluded.cost,
       profit = excluded.profit,
       margin = excluded.margin,
+      cost_breakdown = excluded.cost_breakdown,
       status = excluded.status,
       thumb = excluded.thumb,
       updated_at = now()
     returning id, name, subtitle, sku, category, description, printer_id, printer, price, weight, print_time,
       layer_height, infill, dimensions, filament_id, filament, filament_color, packaging_cost,
       additional_materials_cost, labor_cost, energy_enabled, marketplace_fee, desired_margin,
-      cost, profit, margin, status, thumb, to_char(created_at, 'YYYY-MM-DD') as created_at, to_char(updated_at, 'YYYY-MM-DD') as updated_at`,
+      cost, profit, margin, cost_breakdown, status, thumb, to_char(created_at, 'YYYY-MM-DD') as created_at, to_char(updated_at, 'YYYY-MM-DD') as updated_at`,
       [
       tenantId,
       product.name,
@@ -132,6 +134,7 @@ export const createProduct = async (tenantId, product) => {
       Number(product.cost || 0),
       Number(product.profit || 0),
       Number(product.margin || 0),
+      JSON.stringify(product.costBreakdown || {}),
       product.status || 'Ativo',
       product.thumb || 'vase'
       ]

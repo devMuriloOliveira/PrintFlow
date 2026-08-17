@@ -16,7 +16,7 @@ const mapProduct = (row) => ({
   filamentId: row.filament_id ? String(row.filament_id) : '', filament: row.filament_name || row.filament || '', filamentColor: row.filament_color || row.linked_filament_color || '#1768f2',
   packaging: number(row.packaging_cost), materials: number(row.additional_materials_cost), labor: number(row.labor_cost),
   energy: row.energy_enabled, marketplaceFee: number(row.marketplace_fee), desiredMargin: number(row.desired_margin),
-  cost: number(row.cost), profit: number(row.profit), margin: number(row.margin), status: row.status, thumb: row.thumb,
+  cost: number(row.cost), profit: number(row.profit), margin: number(row.margin), costBreakdown: row.cost_breakdown || {}, status: row.status, thumb: row.thumb,
   createdAt: row.created_at || '', updatedAt: row.updated_at || ''
 })
 
@@ -26,7 +26,7 @@ const readProducts = async (client, tenantId) => {
       p.price, p.weight, p.print_time, p.layer_height, p.infill, p.dimensions, p.filament_id, p.filament,
       f.name as filament_name, p.filament_color, f.color_hex as linked_filament_color, p.packaging_cost,
       p.additional_materials_cost, p.labor_cost, p.energy_enabled, p.marketplace_fee, p.desired_margin,
-      p.cost, p.profit, p.margin, p.status, p.thumb,
+      p.cost, p.profit, p.margin, p.cost_breakdown, p.status, p.thumb,
       to_char(p.created_at, 'YYYY-MM-DD') as created_at, to_char(p.updated_at, 'YYYY-MM-DD') as updated_at
     from products p
     left join printers pr on pr.id = p.printer_id and pr.tenant_id = p.tenant_id

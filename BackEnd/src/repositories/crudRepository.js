@@ -84,6 +84,7 @@ const resourceConfig = {
       cost: number(item.cost),
       profit: number(item.profit),
       margin: number(item.margin),
+      cost_breakdown: item.costBreakdown || {},
       status: item.status || 'Ativo',
       thumb: item.thumb || 'vase'
     })

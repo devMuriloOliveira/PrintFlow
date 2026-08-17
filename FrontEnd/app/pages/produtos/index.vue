@@ -24,6 +24,20 @@ const paginatedProducts = computed(() => {
   return filtered.value.slice(start, start + perPage.value)
 })
 const selected = computed(() => products.value.find(p => p.id === selectedProductId.value) || paginatedProducts.value[0] || filtered.value[0])
+const productCostBreakdown = (product: any) => ({
+  materialCost: Number(product.costBreakdown?.materialCost ?? 0),
+  packagingCost: Number(product.costBreakdown?.packagingCost ?? product.packaging ?? 0),
+  energyCost: Number(product.costBreakdown?.energyCost ?? 0),
+  additionalMaterialsCost: Number(product.costBreakdown?.additionalMaterialsCost ?? product.materials ?? 0),
+  laborCost: Number(product.costBreakdown?.laborCost ?? product.labor ?? 0),
+  otherCosts: Number(product.costBreakdown?.otherCosts ?? 0),
+  shopeeFeeCost: Number(product.costBreakdown?.shopeeFeeCost ?? 0),
+  otherMarketplaceFeeCost: Number(product.costBreakdown?.otherMarketplaceFeeCost ?? 0),
+  additionalFeeCost: Number(product.costBreakdown?.additionalFeeCost ?? 0),
+  productionTimeMinutes: Number(product.costBreakdown?.productionTimeMinutes ?? 0),
+  materialName: String(product.costBreakdown?.materialName || product.filament || '')
+})
+const selectedBreakdown = computed(() => selected.value ? productCostBreakdown(selected.value) : null)
 const paginationSummary = computed(() => {
   const total = filtered.value.length
   if (!total) return 'Mostrando 0 de 0 produtos'
@@ -157,7 +171,7 @@ const removeProduct = async (product: any) => {
       <aside v-if="selected" class="detail-card">
         <div class="detail-card__head"><ProductThumb :type="selected.thumb" :size="75"/><div><h3>{{selected.name}} <span class="badge" :class="selected.status === 'Ativo' ? 'badge--green' : ''">{{ selected.status }}</span></h3><p>SKU: {{selected.sku}}</p><p>{{selected.category}}</p><p>Material: {{selected.filament}}</p></div></div>
         <div class="tabs"><button class="tab active">Ficha Financeira</button><button class="tab">Detalhes</button><button class="tab">Historico</button></div>
-        <div class="detail-card__body"><div class="detail-list"><div class="detail-list__row"><span><i style="background:#2a8ca1"/>Filamento ({{selected.weight}} g)</span><strong>{{formatCurrency(selected.materials || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f6c344"/>Energia ({{selected.time}})</span><strong>{{ selected.energy ? 'Ativa' : 'Inativa' }}</strong></div><div class="detail-list__row"><span><i style="background:#f47b3b"/>Embalagem</span><strong>{{formatCurrency(selected.packaging || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#c43dcc"/>Materiais adicionais</span><strong>{{formatCurrency(selected.materials || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#697386"/>Taxa Marketplace</span><strong>{{formatCurrency(selected.marketplaceFee || 0)}}</strong></div></div><div class="summary-box"><div class="detail-list__row"><span>Custo Total</span><strong>{{formatCurrency(selected.cost)}}</strong></div><div class="detail-list__row"><span>Preco de Venda</span><strong>{{formatCurrency(selected.price)}}</strong></div><div class="detail-list__row"><span>Lucro Liquido</span><strong class="money-positive">{{formatCurrency(selected.profit)}}</strong></div><div class="detail-list__row"><span>Margem Liquida</span><strong class="money-positive">{{selected.margin}}%</strong></div></div></div>
+        <div class="detail-card__body"><div class="detail-list"><div class="detail-list__row"><span><i style="background:#2a8ca1"/>Material ({{selected.weight}} g)</span><strong>{{formatCurrency(selectedBreakdown?.materialCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f6c344"/>Energia ({{selected.time}})</span><strong>{{formatCurrency(selectedBreakdown?.energyCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f47b3b"/>Embalagem</span><strong>{{formatCurrency(selectedBreakdown?.packagingCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#c43dcc"/>Materiais adicionais</span><strong>{{formatCurrency(selectedBreakdown?.additionalMaterialsCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#697386"/>Mao de obra</span><strong>{{formatCurrency(selectedBreakdown?.laborCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#7c3aed"/>Outros gastos</span><strong>{{formatCurrency(selectedBreakdown?.otherCosts || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#ee4d2d"/>Taxas Shopee</span><strong>{{formatCurrency(selectedBreakdown?.shopeeFeeCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#1768f2"/>Outros marketplaces</span><strong>{{formatCurrency(selectedBreakdown?.otherMarketplaceFeeCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#111827"/>Demais taxas</span><strong>{{formatCurrency(selectedBreakdown?.additionalFeeCost || 0)}}</strong></div></div><div class="summary-box"><div class="detail-list__row"><span>Custo Total</span><strong>{{formatCurrency(selected.cost)}}</strong></div><div class="detail-list__row"><span>Preco de Venda</span><strong>{{formatCurrency(selected.price)}}</strong></div><div class="detail-list__row"><span>Lucro Liquido</span><strong class="money-positive">{{formatCurrency(selected.profit)}}</strong></div><div class="detail-list__row"><span>Margem Liquida</span><strong class="money-positive">{{selected.margin}}%</strong></div></div></div>
       </aside>
     </div>
   </div>

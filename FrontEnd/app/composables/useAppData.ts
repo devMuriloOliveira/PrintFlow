@@ -9,6 +9,7 @@ export type Product = {
   name: string; subtitle: string; sku: string; category: string; price: number; weight: number;
   description?: string; printerId?: string; printer?: string; layer?: number; infill?: number; dimensions?: string;
   packaging?: number; materials?: number; labor?: number; energy?: boolean; marketplaceFee?: number; desiredMargin?: number;
+  costBreakdown?: Record<string, number | string | boolean | null | undefined>;
   time: string; filamentId?: string; filament: string; filamentColor: string; cost: number; profit: number; margin: number;
   status: string; thumb: string; createdAt?: string; updatedAt?: string
 }
