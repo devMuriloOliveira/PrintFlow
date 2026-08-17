@@ -44,21 +44,21 @@ const productPerformance = computed(() => {
   }).sort((a, b) => b.orderProfit - a.orderProfit)
 })
 const alerts = computed(() => [
-  ...filaments.value.filter(f => f.remaining < 300).map(f => ({ icon: 'box', title: `${f.name} proximo do fim`, text: `Restam ${formatNumber(f.remaining)} g em estoque`, badge: 'Estoque baixo', cls: 'badge--orange' })),
+  ...filaments.value.filter(f => f.remaining < 300).map(f => ({ icon: 'box', title: `${f.name} próximo do fim`, text: `Restam ${formatNumber(f.remaining)} g em estoque`, badge: 'Estoque baixo', cls: 'badge--orange' })),
   ...goals.value.filter(g => g.target > 0).map(g => ({ icon: 'target', title: g.title, text: `${metrics.percent(Math.min(g.current / g.target * 100, 100))} da meta`, badge: g.status, cls: 'badge--green' }))
 ])
 </script>
 
 <template>
   <div>
-    <PageHeader title="Dashboard" subtitle="Resumo geral do seu negocio de impressao 3D" />
+    <PageHeader title="Dashboard" subtitle="Resumo geral do seu negócio de impressão 3D" />
 
     <div class="metrics-grid">
       <MetricCard label="Faturamento Total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Dados do banco" color="blue" :points="monthlyRevenue" />
       <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative :points="monthlyExpenses" />
-      <MetricCard label="Lucro Liquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" selected :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
+      <MetricCard label="Lucro Líquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" selected :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
       <MetricCard label="Pedidos" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Dados do banco" color="purple" :points="monthlyRevenue" />
-      <MetricCard label="Ticket Medio" :value="formatCurrency(metrics.ticket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="monthlyRevenue" />
+      <MetricCard label="Ticket Médio" :value="formatCurrency(metrics.ticket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="monthlyRevenue" />
       <MetricCard label="Taxas de Marketplaces" :value="formatCurrency(metrics.fees.value)" icon="percent" note="Dados do banco" color="cyan" :points="monthlyRevenue" />
     </div>
 
@@ -71,14 +71,14 @@ const alerts = computed(() => [
     <div class="dashboard-grid dashboard-grid--bottom">
       <PanelCard title="Faturamento por Marketplace">
         <div class="bar-list" style="padding-top:12px">
-          <div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este grafico.</p></div></div>
+          <div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este gráfico.</p></div></div>
           <div v-for="bar in marketplaceBars" :key="bar.label" class="bar-row"><span>{{ bar.label }}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{ width: `${bar.percent}%`, background: bar.color }"/></div><strong>{{ formatCurrency(bar.value) }}</strong></div>
         </div>
       </PanelCard>
       <PanelCard title="Produtos mais Lucrativos">
         <div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Vendas</th><th>Lucro</th><th>Margem</th></tr></thead><tbody><tr v-if="!productPerformance.length"><td colspan="4"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado</h3><p>Cadastre produtos e vendas para ver o desempenho.</p></div></div></td></tr><tr v-for="p in productPerformance" :key="p.sku"><td><div class="table-product"><ProductThumb :type="p.thumb" :size="28"/><strong>{{ p.name }}</strong></div></td><td>{{ p.sales }}</td><td class="money-positive">{{ formatCurrency(p.orderProfit) }}</td><td><span class="badge badge--green">{{ metrics.percent(p.margin || 0) }}</span></td></tr></tbody></table></div>
       </PanelCard>
-      <PanelCard title="Alertas e Recomendacoes">
+      <PanelCard title="Alertas e Recomendações">
         <template #actions><button class="btn btn--ghost" @click="notify('Central de alertas aberta', 'info')">Ver todos</button></template>
         <div class="alerts-list">
           <div v-if="!alerts.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bell"/></div><h3>Nenhum alerta no momento</h3><p>Os alertas aparecem conforme seus dados forem cadastrados.</p></div></div>

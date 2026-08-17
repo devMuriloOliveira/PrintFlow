@@ -7,29 +7,30 @@ const selectedIndex = ref(0)
 const emptyPrinter = { name: '', code: '', maker: '', model: '', acquired: '', power: 0, hours: 0, status: '', maintenance: '', serial: '' }
 const selected = computed(() => printers.value[selectedIndex.value] || emptyPrinter)
 const energyCost = computed(() => selected.value ? selected.value.power/1000*82*.68 : 0)
-const badgeClass=(s:string)=>s==='Disponivel'?'badge--green':s==='Em Manutencao'?'badge--orange':''
+const displayStatus=(s:string)=>s.replace('Disponivel', 'Disponível').replace('Em Impressao', 'Em Impressão').replace('Em Manutencao', 'Em Manutenção')
+const badgeClass=(s:string)=>/Disponivel|Disponível/.test(s)?'badge--green':/Em Manutencao|Em Manutenção/.test(s)?'badge--orange':''
 const editPrinter = (printer: any) => {
   if (!printer.id) return
   router.push(`/impressoras/nova?id=${printer.id}`)
 }
 const removePrinter = async (printer: any) => {
-  if (!printer.id || !window.confirm(`Excluir impressora?\n\n${printer.name}\n\nEsta acao nao podera ser desfeita.`)) return
+  if (!printer.id || !window.confirm(`Excluir impressora?\n\n${printer.name}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('printers', printer.id)
-  notify('Impressora excluida com sucesso.')
+  notify('Impressora excluída com sucesso.')
 }
 </script>
 
 <template>
   <div>
     <PageHeader title="Impressoras" subtitle="Gerencie suas impressoras 3D, acompanhe o status e o desempenho operacional."><NuxtLink class="btn btn--primary" to="/impressoras/nova"><UiIcon name="plus" />Nova Impressora</NuxtLink></PageHeader>
-    <div class="metrics-grid metrics-grid--5"><MetricCard label="Impressoras Ativas" :value="formatNumber(metrics.activePrinters.value)" icon="printer" note="Dados do banco" color="green" /><MetricCard label="Em Impressao" :value="formatNumber(metrics.printingPrinters.value)" icon="play" note="Dados do banco" /><MetricCard label="Em Manutencao" :value="formatNumber(metrics.maintenancePrinters.value)" icon="wrench" note="Dados do banco" color="orange" negative /><MetricCard label="Horas Acumuladas" :value="`${formatNumber(metrics.printerHours.value)} h`" icon="clock" note="Dados do banco" color="purple" /><MetricCard label="Custo Medio de Energia" :value="formatCurrency(0.68)" icon="bolt" note="Config. do sistema" color="cyan" negative /></div>
+    <div class="metrics-grid metrics-grid--5"><MetricCard label="Impressoras Ativas" :value="formatNumber(metrics.activePrinters.value)" icon="printer" note="Dados do banco" color="green" /><MetricCard label="Em Impressão" :value="formatNumber(metrics.printingPrinters.value)" icon="play" note="Dados do banco" /><MetricCard label="Em Manutenção" :value="formatNumber(metrics.maintenancePrinters.value)" icon="wrench" note="Dados do banco" color="orange" negative /><MetricCard label="Horas Acumuladas" :value="`${formatNumber(metrics.printerHours.value)} h`" icon="clock" note="Dados do banco" color="purple" /><MetricCard label="Custo Médio de Energia" :value="formatCurrency(0.68)" icon="bolt" note="Config. do sistema" color="cyan" negative /></div>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 390px">
       <div>
         <div class="filters"><div v-for="f in ['Status','Fabricante','Modelo']" :key="f" class="field"><label>{{f}}</label><select><option>Todos</option></select></div><button class="btn"><UiIcon name="close" />Limpar filtros</button></div>
         <PanelCard>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th></th><th>Nome</th><th>Fabricante</th><th>Modelo</th><th>Data de Aquisicao</th><th>Potencia</th><th>Horas Acumuladas</th><th>Status</th><th>Ultima Manutencao</th><th></th></tr></thead>
+              <thead><tr><th></th><th>Nome</th><th>Fabricante</th><th>Modelo</th><th>Data de Aquisição</th><th>Potência</th><th>Horas Acumuladas</th><th>Status</th><th>Última Manutenção</th><th></th></tr></thead>
               <tbody>
                 <tr v-for="(p,i) in printers" :key="p.id || p.code" :class="{selected:i===selectedIndex}" @click="selectedIndex=i">
                   <td><input type="radio" :checked="i===selectedIndex"></td>
@@ -39,7 +40,7 @@ const removePrinter = async (printer: any) => {
                   <td>{{p.acquired}}</td>
                   <td>{{p.power}} W</td>
                   <td>{{p.hours}} h</td>
-                  <td><span class="badge" :class="badgeClass(p.status)">{{p.status}}</span></td>
+                  <td><span class="badge" :class="badgeClass(p.status)">{{displayStatus(p.status)}}</span></td>
                   <td>{{p.maintenance}}</td>
                   <td><button class="row-action" title="Excluir impressora" @click.stop="removePrinter(p)"><UiIcon name="close" :size="16" /></button></td>
                 </tr>
@@ -50,8 +51,8 @@ const removePrinter = async (printer: any) => {
         </PanelCard>
       </div>
       <aside class="detail-card">
-        <div class="detail-card__head"><span class="product-thumb" style="width:100px;height:100px"><UiIcon name="printer" :size="65" /></span><div><h3>{{selected.name}} <span class="badge badge--green">{{selected.status}}</span></h3><p>Codigo: {{selected.code}}</p><p>Fabricante: {{selected.maker}}</p><p>Modelo: {{selected.model}}</p><p>N de Serie: {{selected.serial}}</p></div></div>
-        <div class="detail-card__body"><div class="stat-strip"><div class="stat-box"><small>Potencia</small><strong>{{selected.power}} W</strong></div><div class="stat-box"><small>Consumo Medio</small><strong>{{(selected.power/1000).toFixed(2)}} kWh</strong></div><div class="stat-box"><small>Horas (Mes)</small><strong>82 h</strong></div><div class="stat-box"><small>Custo kWh</small><strong>R$ 0,68</strong></div></div><div class="form-card" style="margin-top:12px"><h3 style="margin:0;font-size:12px">Calculo de Custo de Energia</h3><p style="color:var(--muted);font-size:9px">Potencia (kW) x Tempo (h) x Valor do kWh</p><div class="summary-box"><div class="detail-list__row"><span>Custo estimado mensal</span><strong class="money-positive">{{formatCurrency(energyCost)}}</strong></div></div></div><div class="form-card"><h3 style="margin:0 0 10px;font-size:12px">Informacoes Adicionais</h3><div class="detail-list"><div class="detail-list__row"><span>Localizacao</span><strong>Lab Principal</strong></div><div class="detail-list__row"><span>Volume de Impressao</span><strong>220 x 220 x 250 mm</strong></div><div class="detail-list__row"><span>Filamento Padrao</span><strong>PLA</strong></div></div></div></div>
+        <div class="detail-card__head"><span class="product-thumb" style="width:100px;height:100px"><UiIcon name="printer" :size="65" /></span><div><h3>{{selected.name}} <span class="badge badge--green">{{displayStatus(selected.status)}}</span></h3><p>Código: {{selected.code}}</p><p>Fabricante: {{selected.maker}}</p><p>Modelo: {{selected.model}}</p><p>Nº de Série: {{selected.serial}}</p></div></div>
+        <div class="detail-card__body"><div class="stat-strip"><div class="stat-box"><small>Potência</small><strong>{{selected.power}} W</strong></div><div class="stat-box"><small>Consumo Médio</small><strong>{{(selected.power/1000).toFixed(2)}} kWh</strong></div><div class="stat-box"><small>Horas (Mês)</small><strong>82 h</strong></div><div class="stat-box"><small>Custo kWh</small><strong>R$ 0,68</strong></div></div><div class="form-card" style="margin-top:12px"><h3 style="margin:0;font-size:12px">Cálculo de Custo de Energia</h3><p style="color:var(--muted);font-size:9px">Potência (kW) x Tempo (h) x Valor do kWh</p><div class="summary-box"><div class="detail-list__row"><span>Custo estimado mensal</span><strong class="money-positive">{{formatCurrency(energyCost)}}</strong></div></div></div><div class="form-card"><h3 style="margin:0 0 10px;font-size:12px">Informações Adicionais</h3><div class="detail-list"><div class="detail-list__row"><span>Localização</span><strong>Lab Principal</strong></div><div class="detail-list__row"><span>Volume de Impressão</span><strong>220 x 220 x 250 mm</strong></div><div class="detail-list__row"><span>Filamento Padrão</span><strong>PLA</strong></div></div></div></div>
       </aside>
     </div>
   </div>

@@ -6,16 +6,16 @@ const router = useRouter()
 const search = ref('')
 const category = ref('Todas')
 const filtered = computed(() => expenses.value.filter(e => (category.value === 'Todas' || e.category === category.value) && Object.values(e).join(' ').toLowerCase().includes(search.value.toLowerCase())))
-const recurring = computed(() => expenses.value.filter(e => !/nao|nao/i.test(e.recurrence)).slice(0, 3))
+const recurring = computed(() => expenses.value.filter(e => !/nao|não/i.test(e.recurrence)).slice(0, 3))
 const recurringTotal = computed(() => recurring.value.reduce((total, item) => total + item.value, 0))
 const editExpense = (expense: any) => {
   if (!expense.id) return
   router.push(`/despesas/nova?id=${expense.id}`)
 }
 const removeExpense = async (expense: any) => {
-  if (!expense.id || !window.confirm(`Excluir despesa?\n\n${expense.description}\n\nEsta acao nao podera ser desfeita.`)) return
+  if (!expense.id || !window.confirm(`Excluir despesa?\n\n${expense.description}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('expenses', expense.id)
-  notify('Despesa excluida com sucesso.')
+  notify('Despesa excluída com sucesso.')
 }
 </script>
 
@@ -26,10 +26,10 @@ const removeExpense = async (expense: any) => {
       <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative />
       <MetricCard label="Despesas Recorrentes" :value="formatCurrency(metrics.recurringExpenses.value)" icon="calendar" :change="`${metrics.percent(metrics.expenseTotal.value ? metrics.recurringExpenses.value / metrics.expenseTotal.value * 100 : 0)} do total`" color="orange" />
       <MetricCard label="Maior Categoria" :value="String(metrics.biggestExpenseCategory.value[0])" icon="tag" :change="formatCurrency(Number(metrics.biggestExpenseCategory.value[1]))" note="Dados do banco" color="purple" />
-      <MetricCard label="Media Mensal" :value="formatCurrency(metrics.expenseTotal.value)" icon="chart" note="Periodo atual" color="cyan" />
+      <MetricCard label="Média Mensal" :value="formatCurrency(metrics.expenseTotal.value)" icon="chart" note="Período atual" color="cyan" />
     </div>
     <div class="filters">
-      <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16" /><input v-model="search" placeholder="Descricao ou fornecedor"></div></div>
+      <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16" /><input v-model="search" placeholder="Descrição ou fornecedor"></div></div>
       <div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option v-for="c in [...new Set(expenses.map(x=>x.category))]" :key="c">{{c}}</option></select></div>
       <div class="field"><label>Forma de pagamento</label><select><option>Todas</option><option>PIX</option><option>Cartao</option><option>Boleto</option></select></div>
       <button class="btn" @click="search='';category='Todas'"><UiIcon name="close" :size="15" /> Limpar</button>
@@ -39,7 +39,7 @@ const removeExpense = async (expense: any) => {
       <PanelCard title="Lista de Despesas">
         <div class="table-scroll">
           <table class="data-table">
-            <thead><tr><th>Descricao</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th><th>Data</th><th>Pagamento</th><th>Recorrencia</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Descrição</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th><th>Data</th><th>Pagamento</th><th>Recorrência</th><th>Status</th><th></th></tr></thead>
             <tbody>
               <tr v-if="!filtered.length"><td colspan="9"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="receipt" /></div><h3>Nenhuma despesa cadastrada</h3><p>Cadastre sua primeira despesa para acompanhar os gastos.</p></div></div></td></tr>
               <tr v-for="e in filtered" :key="e.id || e.description">

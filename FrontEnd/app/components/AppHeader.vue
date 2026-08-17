@@ -19,12 +19,12 @@ const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean)
       <button class="top-control top-control--date"><UiIcon name="calendar" :size="18" /><span>01/05/2024 - 31/05/2024</span><UiIcon name="down" :size="15" /></button>
       <button class="top-control top-control--company"><UiIcon name="building" :size="18" /><span>PrintFlow 3D LTDA</span><UiIcon name="down" :size="15" /></button>
       <div class="notification-wrap">
-        <button class="icon-btn notification" aria-label="Notificacoes" @click="notificationsOpen = !notificationsOpen">
+        <button class="icon-btn notification" aria-label="Notificações" @click="notificationsOpen = !notificationsOpen">
           <UiIcon name="bell" :size="21" /><b>3</b>
         </button>
         <Transition name="drop">
           <div v-if="notificationsOpen" class="dropdown-card notifications">
-            <div class="dropdown-card__head"><strong>Notificacoes</strong><span>3 novas</span></div>
+            <div class="dropdown-card__head"><strong>Notificações</strong><span>3 novas</span></div>
             <div class="notification-item"><i class="dot dot--orange"/><div><strong>PLA Preto com estoque baixo</strong><small>Restam apenas 180 g</small></div></div>
             <div class="notification-item"><i class="dot dot--blue"/><div><strong>Nova meta atingida</strong><small>61% da meta mensal</small></div></div>
             <div class="notification-item"><i class="dot dot--green"/><div><strong>Pedido #10845 entregue</strong><small>Ha 12 minutos</small></div></div>
@@ -33,7 +33,7 @@ const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean)
       </div>
       <button class="profile-control" @click="auth.logout">
         <span class="avatar">{{ initials }}</span>
-        <span class="profile-copy"><strong>{{ auth.user.value?.name || 'Usuario' }}</strong><small>Sair da conta</small></span>
+        <span class="profile-copy"><strong>{{ auth.user.value?.name || 'Usuário' }}</strong><small>Sair da conta</small></span>
         <UiIcon name="logout" :size="14" />
       </button>
     </div>

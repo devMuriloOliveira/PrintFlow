@@ -56,14 +56,14 @@ const visiblePages = computed<(number | string)[]>(() => {
 
 const metricCards = computed(() => [
   { key: 'active' as const, label: 'Produtos Ativos', value: formatNumber(metrics.activeProducts.value), icon: 'box', note: 'Dados do banco', color: 'blue' },
-  { key: 'price' as const, label: 'Preco Medio', value: formatCurrency(metrics.averagePrice.value), icon: 'tag', note: 'Dados do banco', color: 'green' },
-  { key: 'cost' as const, label: 'Custo Medio', value: formatCurrency(metrics.averageCost.value), icon: 'money', note: 'Dados do banco', color: 'purple' },
+  { key: 'price' as const, label: 'Preço Médio', value: formatCurrency(metrics.averagePrice.value), icon: 'tag', note: 'Dados do banco', color: 'green' },
+  { key: 'cost' as const, label: 'Custo Médio', value: formatCurrency(metrics.averageCost.value), icon: 'money', note: 'Dados do banco', color: 'purple' },
   { key: 'margin' as const, label: 'Margem Media', value: metrics.percent(metrics.averageProductMargin.value), icon: 'percent', note: 'Dados do banco', color: 'orange' }
 ])
 const metricDetails = {
   active: { title: 'Evolucao de Produtos Ativos', color: '#1768f2', totalLabel: 'Produtos ativos', formatter: formatNumber },
-  price: { title: 'Evolucao do Preco Medio', color: '#0da566', totalLabel: 'Preco medio atual', formatter: formatCurrency },
-  cost: { title: 'Evolucao do Custo Medio', color: '#7c3aed', totalLabel: 'Custo medio atual', formatter: formatCurrency },
+  price: { title: 'Evolução do Preço Médio', color: '#0da566', totalLabel: 'Preço médio atual', formatter: formatCurrency },
+  cost: { title: 'Evolução do Custo Médio', color: '#7c3aed', totalLabel: 'Custo médio atual', formatter: formatCurrency },
   margin: { title: 'Evolucao da Margem Media', color: '#f57c1f', totalLabel: 'Margem media atual', formatter: (value: number) => metrics.percent(value) }
 }
 const selectedDetail = computed(() => metricDetails[selectedMetric.value])
@@ -128,15 +128,15 @@ const editProduct = (product: any) => {
   router.push(`/produtos/novo?id=${product.id}`)
 }
 const removeProduct = async (product: any) => {
-  if (!product.id || !window.confirm(`Excluir produto?\n\n${product.name}\n\nEsta acao nao podera ser desfeita.`)) return
+  if (!product.id || !window.confirm(`Excluir produto?\n\n${product.name}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('products', product.id)
-  notify('Produto excluido com sucesso.')
+  notify('Produto excluído com sucesso.')
 }
 </script>
 
 <template>
   <div>
-    <PageHeader title="Produtos" subtitle="Gerencie seu catalogo de produtos e acompanhe a performance">
+    <PageHeader title="Produtos" subtitle="Gerencie seu catálogo de produtos e acompanhe a performance">
       <NuxtLink class="btn btn--primary" to="/produtos/novo"><UiIcon name="plus" :size="17"/><span>Novo Produto</span></NuxtLink>
     </PageHeader>
     <div class="metrics-grid metrics-grid--4">
@@ -144,9 +144,9 @@ const removeProduct = async (product: any) => {
     </div>
     <PanelCard :title="selectedDetail.title" :subtitle="`${selectedDetail.totalLabel}: ${selectedDetail.formatter(detailedChart.total)}`">
       <template #actions>
-        <div class="segmented-control" aria-label="Periodo do grafico">
+        <div class="segmented-control" aria-label="Período do gráfico">
           <button type="button" :class="{ active: chartPeriod === 'week' }" @click="chartPeriod = 'week'">Semana</button>
-          <button type="button" :class="{ active: chartPeriod === 'month' }" @click="chartPeriod = 'month'">Mes</button>
+          <button type="button" :class="{ active: chartPeriod === 'month' }" @click="chartPeriod = 'month'">Mês</button>
           <button type="button" :class="{ active: chartPeriod === 'year' }" @click="chartPeriod = 'year'">Ano</button>
         </div>
       </template>
@@ -154,7 +154,7 @@ const removeProduct = async (product: any) => {
     </PanelCard>
     <div class="filters">
       <div class="field field--search"><label>Produto</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Buscar produtos..."></div></div>
-      <div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option>Decoracao</option><option>Acessorios</option><option>Brinquedos</option><option>Organizadores</option></select></div>
+      <div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option>Decoração</option><option>Acessórios</option><option>Brinquedos</option><option>Organizadores</option></select></div>
       <div class="field"><label>Impressora</label><select><option>Todas</option></select></div>
       <div class="field"><label>Material</label><select><option>Todos</option></select></div>
       <div class="field"><label>Status</label><select v-model="productStatus"><option>Todos</option><option>Ativo</option><option>Rascunho</option></select></div>
@@ -163,15 +163,15 @@ const removeProduct = async (product: any) => {
     <div class="split-layout">
       <PanelCard>
         <div class="table-scroll"><table class="data-table">
-          <thead><tr><th></th><th>Produto</th><th>SKU</th><th>Categoria</th><th>Preco de Venda</th><th>Peso</th><th>Tempo de Impressao</th><th>Filamento</th><th>Custo Total</th><th>Lucro</th><th>Margem</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Produto</th><th>SKU</th><th>Categoria</th><th>Preço de Venda</th><th>Peso</th><th>Tempo de Impressão</th><th>Filamento</th><th>Custo Total</th><th>Lucro</th><th>Margem</th><th>Status</th><th></th></tr></thead>
           <tbody><tr v-if="!paginatedProducts.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto encontrado</h3><p>Cadastre produtos ou ajuste os filtros para preencher a lista.</p></div></div></td></tr><tr v-for="p in paginatedProducts" :key="p.sku" :class="{selected: selected?.sku === p.sku}" @click="selectedProductId = p.id || ''"><td><input type="radio" :checked="selected?.sku === p.sku"></td><td><div class="table-product table-product--editable"><ProductThumb :type="p.thumb"/><div><strong>{{p.name}}</strong><small>{{p.subtitle}}</small></div><button class="row-action row-action--edit" title="Editar produto" @click.stop="editProduct(p)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{p.sku}}</td><td>{{p.category}}</td><td><strong>{{formatCurrency(p.price)}}</strong></td><td>{{p.weight}} g</td><td>{{p.time}}</td><td><span style="display:flex;align-items:center;gap:6px"><i class="dot" :style="{background:p.filamentColor}"/>{{p.filament}}</span></td><td>{{formatCurrency(p.cost)}}</td><td class="money-positive">{{formatCurrency(p.profit)}}</td><td class="money-positive">{{p.margin}}%</td><td><span class="badge" :class="p.status === 'Ativo' ? 'badge--green' : ''">{{p.status}}</span></td><td><button class="row-action" title="Excluir produto" @click.stop="removeProduct(p)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
-        <div class="table-footer"><span>{{ paginationSummary }}</span><div class="pagination"><button v-for="page in visiblePages" :key="page" class="page-btn" :class="{ active: page === currentPage }" :disabled="page === '...'" @click="typeof page === 'number' && (currentPage = page)">{{ page }}</button></div><select v-model.number="perPage" class="select-compact"><option :value="5">5 por pagina</option><option :value="10">10 por pagina</option><option :value="20">20 por pagina</option></select></div>
+        <div class="table-footer"><span>{{ paginationSummary }}</span><div class="pagination"><button v-for="page in visiblePages" :key="page" class="page-btn" :class="{ active: page === currentPage }" :disabled="page === '...'" @click="typeof page === 'number' && (currentPage = page)">{{ page }}</button></div><select v-model.number="perPage" class="select-compact"><option :value="5">5 por página</option><option :value="10">10 por página</option><option :value="20">20 por página</option></select></div>
       </PanelCard>
       <aside v-if="selected" class="detail-card">
         <div class="detail-card__head"><ProductThumb :type="selected.thumb" :size="75"/><div><h3>{{selected.name}} <span class="badge" :class="selected.status === 'Ativo' ? 'badge--green' : ''">{{ selected.status }}</span></h3><p>SKU: {{selected.sku}}</p><p>{{selected.category}}</p><p>Material: {{selected.filament}}</p></div></div>
         <div class="tabs"><button class="tab active">Ficha Financeira</button><button class="tab">Detalhes</button><button class="tab">Historico</button></div>
-        <div class="detail-card__body"><div class="detail-list"><div class="detail-list__row"><span><i style="background:#2a8ca1"/>Material ({{selected.weight}} g)</span><strong>{{formatCurrency(selectedBreakdown?.materialCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f6c344"/>Energia ({{selected.time}})</span><strong>{{formatCurrency(selectedBreakdown?.energyCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f47b3b"/>Embalagem</span><strong>{{formatCurrency(selectedBreakdown?.packagingCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#c43dcc"/>Materiais adicionais</span><strong>{{formatCurrency(selectedBreakdown?.additionalMaterialsCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#697386"/>Mao de obra</span><strong>{{formatCurrency(selectedBreakdown?.laborCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#7c3aed"/>Outros gastos</span><strong>{{formatCurrency(selectedBreakdown?.otherCosts || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#ee4d2d"/>Taxas Shopee</span><strong>{{formatCurrency(selectedBreakdown?.shopeeFeeCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#1768f2"/>Outros marketplaces</span><strong>{{formatCurrency(selectedBreakdown?.otherMarketplaceFeeCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#111827"/>Demais taxas</span><strong>{{formatCurrency(selectedBreakdown?.additionalFeeCost || 0)}}</strong></div></div><div class="summary-box"><div class="detail-list__row"><span>Custo Total</span><strong>{{formatCurrency(selected.cost)}}</strong></div><div class="detail-list__row"><span>Preco de Venda</span><strong>{{formatCurrency(selected.price)}}</strong></div><div class="detail-list__row"><span>Lucro Liquido</span><strong class="money-positive">{{formatCurrency(selected.profit)}}</strong></div><div class="detail-list__row"><span>Margem Liquida</span><strong class="money-positive">{{selected.margin}}%</strong></div></div></div>
+        <div class="detail-card__body"><div class="detail-list"><div class="detail-list__row"><span><i style="background:#2a8ca1"/>Material ({{selected.weight}} g)</span><strong>{{formatCurrency(selectedBreakdown?.materialCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f6c344"/>Energia ({{selected.time}})</span><strong>{{formatCurrency(selectedBreakdown?.energyCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#f47b3b"/>Embalagem</span><strong>{{formatCurrency(selectedBreakdown?.packagingCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#c43dcc"/>Materiais adicionais</span><strong>{{formatCurrency(selectedBreakdown?.additionalMaterialsCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#697386"/>Mão de obra</span><strong>{{formatCurrency(selectedBreakdown?.laborCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#7c3aed"/>Outros gastos</span><strong>{{formatCurrency(selectedBreakdown?.otherCosts || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#ee4d2d"/>Taxas Shopee</span><strong>{{formatCurrency(selectedBreakdown?.shopeeFeeCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#1768f2"/>Outros marketplaces</span><strong>{{formatCurrency(selectedBreakdown?.otherMarketplaceFeeCost || 0)}}</strong></div><div class="detail-list__row"><span><i style="background:#111827"/>Demais taxas</span><strong>{{formatCurrency(selectedBreakdown?.additionalFeeCost || 0)}}</strong></div></div><div class="summary-box"><div class="detail-list__row"><span>Custo Total</span><strong>{{formatCurrency(selected.cost)}}</strong></div><div class="detail-list__row"><span>Preço de Venda</span><strong>{{formatCurrency(selected.price)}}</strong></div><div class="detail-list__row"><span>Lucro Líquido</span><strong class="money-positive">{{formatCurrency(selected.profit)}}</strong></div><div class="detail-list__row"><span>Margem Líquida</span><strong class="money-positive">{{selected.margin}}%</strong></div></div></div>
       </aside>
     </div>
   </div>

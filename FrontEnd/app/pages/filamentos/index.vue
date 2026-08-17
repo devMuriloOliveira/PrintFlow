@@ -8,22 +8,23 @@ const emptyFilament = { name: '', maker: '', material: '', type: '', color: '', 
 const selected = computed(() => filaments.value[selectedIndex.value] || emptyFilament)
 const pieceWeight = ref(180)
 const pieceCost = computed(() => selected.value ? selected.value.cost / selected.value.initial * pieceWeight.value : 0)
-const badgeClass = (s:string) => s==='Em estoque'?'badge--green':s==='Atencao'?'badge--orange':'badge--red'
+const displayStatus = (s:string) => s.replace('Atencao', 'Atenção')
+const badgeClass = (s:string) => s==='Em estoque'?'badge--green':/Atencao|Atenção/.test(s)?'badge--orange':'badge--red'
 const editFilament = (filament: any) => {
   if (!filament.id) return
   router.push(`/filamentos/novo?id=${filament.id}`)
 }
 const removeFilament = async (filament: any) => {
-  if (!filament.id || !window.confirm(`Excluir filamento?\n\n${filament.name}\n\nEsta acao nao podera ser desfeita.`)) return
+  if (!filament.id || !window.confirm(`Excluir filamento?\n\n${filament.name}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('filaments', filament.id)
-  notify('Filamento excluido com sucesso.')
+  notify('Filamento excluído com sucesso.')
 }
 </script>
 
 <template>
   <div>
     <PageHeader title="Filamentos" subtitle="Gerencie seu estoque de filamentos e mantenha o controle de custos por grama."><NuxtLink class="btn btn--primary" to="/filamentos/novo"><UiIcon name="plus" :size="16" />Novo Filamento</NuxtLink></PageHeader>
-    <div class="metrics-grid metrics-grid--5"><MetricCard label="Rolos em Estoque" :value="formatNumber(metrics.filamentStockCount.value)" icon="spool" note="Dados do banco" /><MetricCard label="Custo Total em Estoque" :value="formatCurrency(metrics.filamentStockCost.value)" icon="money" note="Dados do banco" color="green" /><MetricCard label="Custo Medio por Grama" :value="formatCurrency(metrics.filamentAverageGramCost.value)" icon="calculator" note="Dados do banco" color="purple" negative /><MetricCard label="Material Mais Usado" :value="metrics.mostUsedMaterial.value" icon="chart" note="Por peso em estoque" color="orange" /><MetricCard label="Alertas de Baixo Estoque" :value="formatNumber(metrics.lowStockFilaments.value)" icon="alert" change="rolos abaixo de 300 g" color="red" /></div>
+    <div class="metrics-grid metrics-grid--5"><MetricCard label="Rolos em Estoque" :value="formatNumber(metrics.filamentStockCount.value)" icon="spool" note="Dados do banco" /><MetricCard label="Custo Total em Estoque" :value="formatCurrency(metrics.filamentStockCost.value)" icon="money" note="Dados do banco" color="green" /><MetricCard label="Custo Médio por Grama" :value="formatCurrency(metrics.filamentAverageGramCost.value)" icon="calculator" note="Dados do banco" color="purple" negative /><MetricCard label="Material Mais Usado" :value="metrics.mostUsedMaterial.value" icon="chart" note="Por peso em estoque" color="orange" /><MetricCard label="Alertas de Baixo Estoque" :value="formatNumber(metrics.lowStockFilaments.value)" icon="alert" change="rolos abaixo de 300 g" color="red" /></div>
     <div class="filters"><div v-for="f in ['Fabricante','Material','Cor','Tipo','Status']" :key="f" class="field"><label>{{f}}</label><select><option>Todos</option></select></div><button class="btn"><UiIcon name="close" :size="15" />Limpar filtros</button></div>
     <div class="split-layout">
       <PanelCard>
@@ -44,7 +45,7 @@ const removeFilament = async (filament: any) => {
                 <td>R$ {{(f.cost/f.initial).toFixed(3).replace('.',',')}}</td>
                 <td>{{f.supplier}}</td>
                 <td>{{f.date}}</td>
-                <td><span class="badge" :class="badgeClass(f.status)">{{f.status}}</span></td>
+                <td><span class="badge" :class="badgeClass(f.status)">{{displayStatus(f.status)}}</span></td>
                 <td><button class="row-action" title="Excluir filamento" @click.stop="removeFilament(f)"><UiIcon name="close" :size="16" /></button></td>
               </tr>
             </tbody>
@@ -54,9 +55,9 @@ const removeFilament = async (filament: any) => {
       </PanelCard>
       <aside>
         <div class="detail-card"><div class="detail-card__head"><span class="product-thumb" style="border-radius:50%"><UiIcon name="spool" :size="45" /></span><div><h3>{{selected.name}}</h3><p>Fabricante: {{selected.maker}}</p><p>Material: {{selected.material}}</p><p>Peso restante: <b class="money-negative">{{selected.remaining}} g</b></p></div></div></div>
-        <PanelCard title="Calculadora de Custo por Grama" style="margin-top:12px"><div class="form-grid"><div class="field col-6"><label>Custo por grama</label><div class="stat-box"><strong>R$ {{(selected.cost/selected.initial).toFixed(3).replace('.',',')}}</strong></div></div><div class="field col-6"><label>Peso de uma peca</label><input v-model.number="pieceWeight" type="number"><strong class="money-positive">= {{formatCurrency(pieceCost)}}</strong></div></div></PanelCard>
+        <PanelCard title="Calculadora de Custo por Grama" style="margin-top:12px"><div class="form-grid"><div class="field col-6"><label>Custo por grama</label><div class="stat-box"><strong>R$ {{(selected.cost/selected.initial).toFixed(3).replace('.',',')}}</strong></div></div><div class="field col-6"><label>Peso de uma peça</label><input v-model.number="pieceWeight" type="number"><strong class="money-positive">= {{formatCurrency(pieceCost)}}</strong></div></div></PanelCard>
       </aside>
     </div>
-    <div class="dashboard-grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:12px"><PanelCard title="Distribuicao por Material"><DonutChart :segments="[{label:'PLA',value:62.4,color:'#1768f2'},{label:'PETG',value:18.7,color:'#2fb4c2'},{label:'ASA',value:10.9,color:'#f6ad2e'},{label:'Outros',value:8,color:'#7c3aed'}]" total="38 rolos" /></PanelCard><PanelCard title="Peso Total em Estoque"><div class="empty-state" style="min-height:170px"><div><div class="empty-state__icon"><UiIcon name="spool" /></div><h3>23,45 kg</h3><p>Rolos cheios equivalem a aproximadamente 31,3 kg.</p></div></div></PanelCard><PanelCard title="Alertas e Recomendacoes"><div class="alerts-list"><div class="alert-row"><span class="alert-row__icon"><UiIcon name="alert" /></span><div><strong>PLA Preto proximo do fim</strong><small>Apenas 180 g restantes</small></div><span class="badge badge--orange">Repor agora</span></div><div class="alert-row"><span class="alert-row__icon"><UiIcon name="bolt" /></span><div><strong>TPU Azul com estoque baixo</strong><small>Somente 260 g restantes</small></div><span class="badge">Ver detalhes</span></div></div></PanelCard></div>
+    <div class="dashboard-grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:12px"><PanelCard title="Distribuição por Material"><DonutChart :segments="[{label:'PLA',value:62.4,color:'#1768f2'},{label:'PETG',value:18.7,color:'#2fb4c2'},{label:'ASA',value:10.9,color:'#f6ad2e'},{label:'Outros',value:8,color:'#7c3aed'}]" total="38 rolos" /></PanelCard><PanelCard title="Peso Total em Estoque"><div class="empty-state" style="min-height:170px"><div><div class="empty-state__icon"><UiIcon name="spool" /></div><h3>23,45 kg</h3><p>Rolos cheios equivalem a aproximadamente 31,3 kg.</p></div></div></PanelCard><PanelCard title="Alertas e Recomendações"><div class="alerts-list"><div class="alert-row"><span class="alert-row__icon"><UiIcon name="alert" /></span><div><strong>PLA Preto próximo do fim</strong><small>Apenas 180 g restantes</small></div><span class="badge badge--orange">Repor agora</span></div><div class="alert-row"><span class="alert-row__icon"><UiIcon name="bolt" /></span><div><strong>TPU Azul com estoque baixo</strong><small>Somente 260 g restantes</small></div><span class="badge">Ver detalhes</span></div></div></PanelCard></div>
   </div>
 </template>

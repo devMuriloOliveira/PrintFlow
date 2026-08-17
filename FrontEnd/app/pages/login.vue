@@ -39,8 +39,8 @@ const submit = async () => {
   } catch (err: any) {
     const isNetworkError = err?.message === 'Failed to fetch' || err?.cause?.message === 'Failed to fetch'
     error.value = isNetworkError
-      ? `Nao foi possivel conectar na API (${apiBase.value}). Verifique se o backend esta rodando.`
-      : err?.data?.error || err?.message || 'Nao foi possivel autenticar.'
+      ? `Não foi possível conectar na API (${apiBase.value}). Verifique se o backend está rodando.`
+      : err?.data?.error || err?.message || 'Não foi possível autenticar.'
   } finally {
     loading.value = false
   }
@@ -52,7 +52,7 @@ const submit = async () => {
     <section class="auth-panel">
       <div class="auth-brand">
         <AppLogo />
-        <p>Gestao financeira e operacional para impressao 3D.</p>
+        <p>Gestão financeira e operacional para impressão 3D.</p>
       </div>
 
       <form class="auth-form" @submit.prevent="submit">
@@ -83,7 +83,7 @@ const submit = async () => {
 
         <label class="field">
           <span>Senha</span>
-          <input v-model="form.password" type="password" autocomplete="current-password" required minlength="6" placeholder="Minimo 6 caracteres">
+          <input v-model="form.password" type="password" autocomplete="current-password" required minlength="10" placeholder="Mínimo 10 caracteres">
         </label>
 
         <p v-if="error" class="auth-error">{{ error }}</p>

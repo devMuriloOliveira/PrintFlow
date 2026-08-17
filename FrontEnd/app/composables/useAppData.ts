@@ -124,7 +124,7 @@ export const useAppData = () => {
       loaded.value = true
       loadedTenant.value = tenantId.value
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Nao foi possivel carregar os dados da API'
+      error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados da API'
     } finally {
       pending.value = false
     }

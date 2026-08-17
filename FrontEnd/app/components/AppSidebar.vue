@@ -12,11 +12,11 @@ const items = [
   { label: 'Impressoras', to: '/impressoras', icon: 'printer' },
   { label: 'Marketplaces', to: '/marketplaces', icon: 'store' },
   { label: 'Clientes', to: '/clientes', icon: 'users' },
-  { label: 'Relatorios', to: '/relatorios', icon: 'chart' },
+  { label: 'Relatórios', to: '/relatorios', icon: 'chart' },
   { label: 'Metas', to: '/metas', icon: 'target' },
-  { label: 'Exportacoes', to: '/exportacoes', icon: 'download' },
+  { label: 'Exportações', to: '/exportacoes', icon: 'download' },
   { label: 'Calculadora 3D', to: '/calculadora-3d', icon: 'calculator' },
-  { label: 'Configuracoes', to: '/configuracoes', icon: 'settings' }
+  { label: 'Configurações', to: '/configuracoes', icon: 'settings' }
 ]
 
 const active = (to: string) => to === '/' ? route.path === '/' : route.path.startsWith(to)
@@ -39,7 +39,7 @@ const active = (to: string) => to === '/' ? route.path === '/' : route.path.star
       <div class="tip-card__icon"><UiIcon name="box" :size="21" /></div>
       <div>
         <strong>Dica PrintFlow</strong>
-        <p>Transforme seus numeros em decisoes mais seguras.</p>
+        <p>Transforme seus números em decisões mais seguras.</p>
         <NuxtLink to="/calculadora-3d">Saiba mais <span>→</span></NuxtLink>
       </div>
     </div>
