@@ -248,6 +248,14 @@ export const updateResource = async (tenantId, resource, id, item) => {
   return listResource(tenantId, resource)
 }
 
+export const assertResourceBelongsToTenant = async (tenantId, resource, id) => {
+  const config = configFor(resource)
+  await withTenant(tenantId, async (client) => {
+    const result = await client.query(`select id from ${config.table} where tenant_id = $1 and id = $2 limit 1`, [tenantId, id])
+    if (!result.rowCount) throw new Error('Registro nao encontrado')
+  })
+}
+
 export const deleteResource = async (tenantId, resource, id) => {
   const config = configFor(resource)
   await withTenant(tenantId, async (client) => {

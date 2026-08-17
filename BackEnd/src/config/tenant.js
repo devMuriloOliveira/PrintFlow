@@ -4,8 +4,8 @@ import { getAuthUser } from '../routes/auth.js'
 const TENANT_HEADER = 'x-tenant-id'
 const DEFAULT_TENANT_ID = 'demo'
 
-export const getTenantId = (req) => {
-  const user = getAuthUser(req)
+export const getTenantId = async (req) => {
+  const user = await getAuthUser(req)
   if (user?.tenantId) return user.tenantId
 
   if (!env.allowDemoTenant) {

@@ -23,6 +23,8 @@ Copy-Item .env.example .env
 - `DATABASE_URL`: URL privada de conexao com o Neon/PostgreSQL.
 - `PORT`: porta local da API.
 - `AUTH_SECRET`: segredo usado para assinar os tokens de login. Use um valor forte em producao.
+- `AUTH_TOKEN_TTL_SECONDS`: duracao do access token em segundos. Padrao: 900.
+- `REFRESH_TOKEN_TTL_SECONDS`: duracao do refresh token em segundos. Padrao: 30 dias.
 - `DATA_ENCRYPTION_KEY`: chave privada usada para criptografar dados pessoais no banco. Use um valor longo e diferente do `AUTH_SECRET` em producao.
 - `ALLOW_DEMO_TENANT`: somente para testes sem identificador. Mantenha `false` no Render.
 
@@ -49,6 +51,8 @@ No Render, configure o servico usando:
 - Root directory: `BackEnd`
 - Environment variable: `DATABASE_URL` com a URL privada do Neon.
 - Environment variable: `AUTH_SECRET` com um segredo longo.
+- Environment variable: `AUTH_TOKEN_TTL_SECONDS` opcional para ajustar a duracao curta do access token.
+- Environment variable: `REFRESH_TOKEN_TTL_SECONDS` opcional para ajustar a duracao do refresh token.
 - Environment variable: `DATA_ENCRYPTION_KEY` com uma chave longa e privada.
 
 O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para apontar para outra API, configure a variavel `NUXT_PUBLIC_API_BASE`.
@@ -58,7 +62,9 @@ O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para a
 A API possui cadastro, login e validacao de sessao:
 
 - `POST /api/auth/register`: cria empresa, usuario administrador e retorna token.
-- `POST /api/auth/login`: valida e-mail/senha e retorna token.
+- `POST /api/auth/login`: valida e-mail/senha e retorna access token curto e refresh token rotativo.
+- `POST /api/auth/refresh`: rotaciona o refresh token e retorna uma nova sessao.
+- `POST /api/auth/logout`: revoga a sessao e invalida access tokens vinculados a ela.
 - `GET /api/auth/me`: retorna o usuario autenticado pelo token.
 
 As rotas de negocio usam `Authorization: Bearer <token>`. O tenant e resolvido no backend a partir do token, entao o front nao decide qual base de dados acessar.

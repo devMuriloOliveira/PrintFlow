@@ -3,7 +3,7 @@ import { hasDatabase, query } from './pool.js'
 const tenantTables = [
   'products', 'orders', 'expenses', 'filaments', 'printers', 'marketplaces',
   'clients', 'goals', 'company_settings', 'calculator_simulations', 'export_history',
-  'tracked_sales', 'marketplace_webhook_events'
+  'marketplace_integrations', 'tracked_sales', 'marketplace_webhook_events'
 ]
 
 const enableTenantIsolation = async (table) => {
@@ -54,8 +54,25 @@ export const migrate = async () => {
   await query("alter table users add column if not exists password_hash text not null default ''")
   await query("alter table users add column if not exists status text not null default 'active'")
   await query("alter table users add column if not exists email_hash text")
+  await query("alter table users add column if not exists token_version integer not null default 0")
   await query('create index if not exists users_tenant_id_idx on users (tenant_id)')
   await query('create unique index if not exists users_email_hash_unique on users (email_hash) where email_hash is not null')
+
+  await query(`
+    create table if not exists refresh_tokens (
+      id bigserial primary key,
+      tenant_id text not null references tenants(id) on delete cascade,
+      user_id bigint not null references users(id) on delete cascade,
+      session_id text not null,
+      token_hash text not null unique,
+      expires_at timestamptz not null,
+      revoked_at timestamptz,
+      replaced_by_hash text,
+      created_at timestamptz not null default now()
+    )
+  `)
+  await query('create index if not exists refresh_tokens_session_idx on refresh_tokens (session_id)')
+  await query('create index if not exists refresh_tokens_user_id_idx on refresh_tokens (user_id)')
 
   await query(`
     create table if not exists products (

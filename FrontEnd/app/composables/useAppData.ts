@@ -118,7 +118,7 @@ export const useAppData = () => {
     error.value = null
     try {
       data.value = await $fetch<AppData>(apiUrl('/api/app-data'), {
-        headers: { 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value }
+        headers: auth.authHeaders.value
       })
       goals.value = data.value.goals || []
       loaded.value = true
@@ -141,7 +141,7 @@ export const useAppData = () => {
     void loadAppData()
   }
 
-  const resourceHeaders = () => ({ 'X-Tenant-Id': tenantId.value, ...auth.authHeaders.value })
+  const resourceHeaders = () => auth.authHeaders.value
   const setResource = (resource: keyof AppData, list: any[]) => {
     ;(data.value[resource] as any[]) = list
   }

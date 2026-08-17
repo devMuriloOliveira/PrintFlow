@@ -12,7 +12,6 @@ const safeEqual = (a, b) => {
 export const verifyWebhookSecret = (req) => {
   if (!env.webhookSharedSecret) return false
 
-  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-  const received = headerValue(req.headers['x-printflow-webhook-secret']) || url.searchParams.get('secret')
+  const received = headerValue(req.headers['x-printflow-webhook-secret'])
   return safeEqual(received, env.webhookSharedSecret)
 }

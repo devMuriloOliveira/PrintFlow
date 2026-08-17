@@ -6,7 +6,7 @@ const base64url = (value) => Buffer.from(value).toString('base64url')
 const sign = (payload) =>
   createHmac('sha256', env.authSecret).update(payload).digest('base64url')
 
-export const createToken = (user) => {
+export const createToken = (user, session = {}) => {
   const expiresAt = Math.floor(Date.now() / 1000) + env.authTokenTtlSeconds
   const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
   const payload = base64url(JSON.stringify({
@@ -15,6 +15,8 @@ export const createToken = (user) => {
     name: user.name,
     email: user.email,
     role: user.role,
+    tokenVersion: Number(user.tokenVersion || 0),
+    sid: session.sessionId || '',
     exp: expiresAt
   }))
   const unsigned = `${header}.${payload}`

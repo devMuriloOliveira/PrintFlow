@@ -41,7 +41,9 @@ const readOrders = async (client, tenantId) => {
     select o.id, o.external_id, o.product_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
       coalesce(m.name, 'Nao informado') as marketplace, o.product_name as product, o.quantity as qty,
       o.gross, o.fee, o.shipping, o.net, o.profit, o.status
-    from orders o left join clients c on c.id = o.client_id left join marketplaces m on m.id = o.marketplace_id
+    from orders o
+    left join clients c on c.id = o.client_id and c.tenant_id = o.tenant_id
+    left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
     where o.tenant_id = $1 order by o.order_date desc, o.id desc
   `, [tenantId])
   return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, productId: row.product_id ? String(row.product_id) : '', date: row.date, client: decryptField(row.client), marketplace: row.marketplace,

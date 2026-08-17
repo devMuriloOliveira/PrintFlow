@@ -15,11 +15,11 @@ const number = (value) => Number(value || 0)
 const ignored = (res) => sendJson(res, 200, { message: 'Conta ignorada ou nao integrada.' })
 
 export const handleIntegrationsList = async (req, res) =>
-  sendJson(res, 200, await listMarketplaceIntegrations(getTenantId(req)))
+  sendJson(res, 200, await listMarketplaceIntegrations(await getTenantId(req)))
 
 export const handleIntegrationCreate = async (req, res) => {
   const payload = await readJsonBody(req)
-  const integration = await createMarketplaceIntegration(getTenantId(req), payload)
+  const integration = await createMarketplaceIntegration(await getTenantId(req), payload)
   return sendJson(res, 201, integration)
 }
 

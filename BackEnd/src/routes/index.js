@@ -1,8 +1,8 @@
 import { sendJson } from '../http/response.js'
 import { enterRequest } from '../http/rateLimit.js'
-import { handleLogin, handleMe, handleRegister, getAuthUser } from './auth.js'
+import { handleLogin, handleLogout, handleMe, handleRefresh, handleRegister, getAuthUser } from './auth.js'
 import { env } from '../config/env.js'
-import { handleProductCreate, handleResourceCreate, handleResourceDelete, handleResourceUpdate, readRoutes } from './resources.js'
+import { handleProductCreate, handleResourceCreate, handleResourceDelete, handleResourceRead, handleResourceUpdate, readRoutes } from './resources.js'
 import {
   handleAmazonWebhook,
   handleIntegrationCreate,
@@ -40,31 +40,39 @@ export const handleRequest = async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/auth/register') {
-      return handleRegister(req, res)
+      return await handleRegister(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
-      return handleLogin(req, res)
+      return await handleLogin(req, res)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/auth/refresh') {
+      return await handleRefresh(req, res)
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
+      return await handleLogout(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/webhooks/mercadolivre') {
-      return handleMercadoLivreWebhook(req, res)
+      return await handleMercadoLivreWebhook(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/webhooks/shopee') {
-      return handleShopeeWebhook(req, res)
+      return await handleShopeeWebhook(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/webhooks/amazon') {
-      return handleAmazonWebhook(req, res)
+      return await handleAmazonWebhook(req, res)
     }
 
     if (req.method === 'GET' && url.pathname === '/api/auth/me') {
-      return handleMe(req, res)
+      return await handleMe(req, res)
     }
 
     const isProtectedApi = url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/auth/')
-    if (isProtectedApi && !env.allowDemoTenant && !getAuthUser(req)) {
+    if (isProtectedApi && !env.allowDemoTenant && !(await getAuthUser(req))) {
       return sendJson(res, 401, { error: 'Login necessario' })
     }
 
@@ -73,32 +81,42 @@ export const handleRequest = async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/marketplace-integrations') {
-      return handleIntegrationsList(req, res)
+      return await handleIntegrationsList(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/api/marketplace-integrations') {
-      return handleIntegrationCreate(req, res)
+      return await handleIntegrationCreate(req, res)
     }
 
     if (req.method === 'POST' && url.pathname === '/api/products') {
-      return handleProductCreate(req, res)
+      return await handleProductCreate(req, res)
     }
 
     const resourceMatch = url.pathname.match(/^\/api\/([a-z-]+)(?:\/([^/]+))?$/)
     if (resourceMatch) {
       const [, resource, id] = resourceMatch
-      if (req.method === 'POST' && !id) return handleResourceCreate(req, res, resource)
-      if (req.method === 'PUT' && id) return handleResourceUpdate(req, res, resource, id)
-      if (req.method === 'DELETE' && id) return handleResourceDelete(req, res, resource, id)
+      if (req.method === 'GET' && id) return await handleResourceRead(req, res, resource, id)
+      if (req.method === 'POST' && !id) return await handleResourceCreate(req, res, resource)
+      if (req.method === 'PUT' && id) return await handleResourceUpdate(req, res, resource, id)
+      if (req.method === 'DELETE' && id) return await handleResourceDelete(req, res, resource, id)
     }
 
     return sendJson(res, 404, { error: 'Endpoint nao encontrado' })
   } catch (error) {
-    console.error('Erro ao processar requisicao', {
-      method: req.method,
-      url: req.url,
-      message: error.message
-    })
-    return sendJson(res, 400, { error: error.message || 'Requisicao invalida' })
+    const expectedClientErrors = new Set([
+      'Registro nao encontrado',
+      'E-mail ou senha invalidos.',
+      'Refresh token invalido.',
+      'Refresh token reutilizado.'
+    ])
+    const status = error.message === 'Registro nao encontrado' ? 404 : 400
+    if (!expectedClientErrors.has(error.message)) {
+      console.error('Erro ao processar requisicao', {
+        method: req.method,
+        url: req.url,
+        message: error.message
+      })
+    }
+    return sendJson(res, status, { error: error.message || 'Requisicao invalida' })
   }
 }
