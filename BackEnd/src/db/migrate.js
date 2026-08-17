@@ -62,7 +62,7 @@ export const migrate = async () => {
     create table if not exists refresh_tokens (
       id bigserial primary key,
       tenant_id text not null references tenants(id) on delete cascade,
-      user_id bigint not null references users(id) on delete cascade,
+      user_id text not null,
       session_id text not null,
       token_hash text not null unique,
       expires_at timestamptz not null,

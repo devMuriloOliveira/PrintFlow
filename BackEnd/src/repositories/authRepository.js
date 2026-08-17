@@ -73,7 +73,7 @@ const createDatabaseSession = async (user, sessionId = createOpaqueId('session')
   await query(
     `insert into refresh_tokens (tenant_id, user_id, session_id, token_hash, expires_at)
      values ($1, $2, $3, $4, $5)`,
-    [user.tenantId, user.id, sessionId, tokenHash, refreshExpiresAt()]
+    [user.tenantId, String(user.id), sessionId, tokenHash, refreshExpiresAt()]
   )
   return { refreshToken, sessionId }
 }
@@ -105,7 +105,7 @@ export const validateAccessPayload = async (payload) => {
        and u.token_version = $3
        and exists (
          select 1 from refresh_tokens rt
-         where rt.user_id = u.id and rt.session_id = $4
+         where rt.user_id = u.id::text and rt.session_id = $4
            and rt.revoked_at is null and rt.expires_at > now()
        )
      limit 1`,
@@ -140,7 +140,7 @@ export const rotateRefreshToken = async (refreshToken) => {
     `select rt.id, rt.tenant_id, rt.user_id, rt.session_id, rt.expires_at, rt.revoked_at,
       u.name, u.email, u.role, u.status, u.token_version
      from refresh_tokens rt
-     join users u on u.id = rt.user_id and u.tenant_id = rt.tenant_id
+     join users u on u.id::text = rt.user_id and u.tenant_id = rt.tenant_id
      where rt.token_hash = $1
      limit 1`,
     [tokenHash]
