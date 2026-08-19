@@ -1,7 +1,7 @@
 import { hasDatabase, query } from './pool.js'
 
 const tenantTables = [
-  'products', 'orders', 'expenses', 'filaments', 'printers', 'marketplaces',
+  'products', 'orders', 'expenses', 'filaments', 'printers', 'agents','agent_pairing_codes','agent_commands', 'marketplaces',
   'clients', 'goals', 'company_settings', 'calculator_simulations', 'export_history',
   'marketplace_integrations', 'tracked_sales', 'marketplace_webhook_events'
 ]
@@ -223,6 +223,75 @@ export const migrate = async () => {
       created_at timestamptz not null default now(), updated_at timestamptz not null default now(), unique (tenant_id, code)
     )
   `)
+
+await query(`
+  create table if not exists agents (
+    id bigserial primary key,
+    tenant_id text not null references tenants(id) on delete cascade,
+
+    name text not null default '',
+    machine_name text not null,
+    platform text not null default '',
+    architecture text not null default '',
+    agent_version text not null default '',
+
+    status text not null default 'offline',
+    last_seen_at timestamptz,
+
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+
+    unique (tenant_id, machine_name)
+  )
+`)
+await query(`
+  alter table agents
+  add column if not exists secret_hash text
+`)
+await query(`
+  create table if not exists agent_pairing_codes (
+    id bigserial primary key,
+
+    tenant_id text not null
+      references tenants(id)
+      on delete cascade,
+
+    code_hash text not null,
+
+    expires_at timestamptz not null,
+
+    used_at timestamptz,
+
+    created_at timestamptz not null default now()
+  )
+`)
+  await query(`
+  create table if not exists agent_commands (
+    id bigserial primary key,
+
+    tenant_id text not null
+      references tenants(id)
+      on delete cascade,
+
+    agent_id bigint not null
+      references agents(id)
+      on delete cascade,
+
+    command text not null,
+
+    payload jsonb not null default '{}'::jsonb,
+
+    status text not null default 'pending',
+
+    result jsonb,
+
+    created_at timestamptz not null default now(),
+
+    started_at timestamptz,
+
+    completed_at timestamptz
+  )
+`)
   await query(`
     create table if not exists goals (
       id bigserial primary key, tenant_id text not null references tenants(id) on delete cascade,

@@ -1,8 +1,22 @@
 import { sendJson } from '../http/response.js'
 import { enterRequest } from '../http/rateLimit.js'
-import { handleLogin, handleLogout, handleMe, handleRefresh, handleRegister, getAuthUser } from './auth.js'
+import { 
+  handleLogin, 
+  handleLogout, 
+  handleMe, 
+  handleRefresh, 
+  handleRegister, 
+  getAuthUser 
+} from './auth.js'
 import { env } from '../config/env.js'
-import { handleProductCreate, handleResourceCreate, handleResourceDelete, handleResourceRead, handleResourceUpdate, readRoutes } from './resources.js'
+import { 
+  handleProductCreate,
+  handleResourceCreate, 
+  handleResourceDelete, 
+  handleResourceRead, 
+  handleResourceUpdate, 
+  readRoutes
+ } from './resources.js'
 import {
   handleAmazonWebhook,
   handleIntegrationCreate,
@@ -10,6 +24,18 @@ import {
   handleMercadoLivreWebhook,
   handleShopeeWebhook
 } from './integrations.js'
+import { 
+  handleAgentPair, 
+  handleAgentPairingCodeCreate,
+  handleAgentVerify,
+  handleAgentHeartbeat, 
+  handleAgentsList,
+  handleAgentDiscoverCreate,
+  handleAgentCommandsPending,
+  handleAgentCommandComplete,
+  handleAgentCommandGet,
+  handleAgentConnectPrinterCreate
+} from './agents.js'
 
 export const handleRequest = async (req, res) => {
   try {
@@ -70,10 +96,104 @@ export const handleRequest = async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/auth/me') {
       return await handleMe(req, res)
     }
+    
+    if (req.method === 'POST' && url.pathname === '/api/agents/pair') {
+     return await handleAgentPair(req, res)
+    }
 
-    const isProtectedApi = url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/auth/')
-    if (isProtectedApi && !env.allowDemoTenant && !(await getAuthUser(req))) {
+    if (req.method === 'POST' && url.pathname === '/api/agents/verify') {
+      return await handleAgentVerify(req, res)
+    }
+    
+    if (req.method === 'POST' && url.pathname === '/api/agents/heartbeat') {
+      return await handleAgentHeartbeat(req, res)
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/agents/commands/pending') {
+      return await handleAgentCommandsPending(req, res)
+    }   
+
+      const agentCommandCompleteMatch =
+        url.pathname.match(
+          /^\/api\/agents\/commands\/([^/]+)\/complete$/
+        )
+
+          if (
+            req.method === 'POST' &&
+            agentCommandCompleteMatch
+            ) {
+            const commandId =
+              agentCommandCompleteMatch[1]
+
+        return await handleAgentCommandComplete(
+          req,
+          res,
+          commandId
+        )
+      }    
+                const isPublicAgentRoute =
+          (
+            req.method === 'POST' &&
+            (
+              url.pathname === '/api/agents/pair' ||
+              url.pathname === '/api/agents/verify' ||
+              url.pathname === '/api/agents/heartbeat' ||
+              /^\/api\/agents\/commands\/[^/]+\/complete$/.test(
+                url.pathname
+              )
+            )
+          ) ||
+          (
+            req.method === 'GET' &&
+            url.pathname === '/api/agents/commands/pending'
+          )
+    const isProtectedApi =
+      url.pathname.startsWith('/api/') &&
+        !url.pathname.startsWith('/api/auth/') &&
+          !isPublicAgentRoute
+
+     if (isProtectedApi && !env.allowDemoTenant && !(await getAuthUser(req))) {
       return sendJson(res, 401, { error: 'Login necessario' })
+    }
+
+     const agentCommandGetMatch =
+        url.pathname.match(
+          /^\/api\/agent-commands\/([^/]+)$/
+        )
+
+      if (
+        req.method === 'GET' &&
+        agentCommandGetMatch
+      ) {
+        const commandId =
+          agentCommandGetMatch[1]
+
+        return await handleAgentCommandGet(
+          req,
+          res,
+          commandId
+        )
+      } 
+
+    const agentDiscoverMatch =
+      url.pathname.match(/^\/api\/agents\/([^/]+)\/discover$/)
+
+    if (req.method === 'POST' && agentDiscoverMatch) {
+      const agentId = agentDiscoverMatch[1]
+
+      return await handleAgentDiscoverCreate(
+        req,
+        res,
+        agentId
+      )
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/agents') {
+      return await handleAgentsList(req, res)
+    } 
+
+    if (req.method === 'POST' && url.pathname === '/api/agents/pairing-code') {
+      return await handleAgentPairingCodeCreate(req, res)
     }
 
     if (req.method === 'GET' && readRoutes[url.pathname]) {
@@ -91,6 +211,25 @@ export const handleRequest = async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/products') {
       return await handleProductCreate(req, res)
     }
+
+    const agentConnectPrinterMatch =
+  url.pathname.match(
+    /^\/api\/agents\/([^/]+)\/connect-printer$/
+  )
+
+if (
+  req.method === 'POST' &&
+  agentConnectPrinterMatch
+) {
+  const agentId =
+    agentConnectPrinterMatch[1]
+
+  return await handleAgentConnectPrinterCreate(
+    req,
+    res,
+    agentId
+  )
+}
 
     const resourceMatch = url.pathname.match(/^\/api\/([a-z-]+)(?:\/([^/]+))?$/)
     if (resourceMatch) {
