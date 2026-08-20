@@ -29,51 +29,94 @@ const config = useRuntimeConfig()
 const agentLoading = ref(false)
 const pairingLoading = ref(false)
 
-const discoveringAgentId = ref<string | null>(null)
-const discoveryAgentId = ref<string | null>(null)
+const discoveringAgentId =
+  ref<string | null>(null)
 
-const connectingPrinterKey = ref<string | null>(null)
+const discoveryAgentId =
+  ref<string | null>(null)
+
+const connectingPrinterKey =
+  ref<string | null>(null)
+
+const printerStatusLoadingKey =
+  ref<string | null>(null)
+
+const printerControlLoadingKey =
+  ref<string | null>(null)
 
 const discoveryStatus = ref<
-  'idle' | 'pending' | 'running' | 'completed' | 'failed'
+  'idle' |
+  'pending' |
+  'running' |
+  'completed' |
+  'failed'
 >('idle')
 
-const discoveredPrinters = ref<any[]>([])
-const discoveryMessage = ref('')
+const discoveredPrinters =
+  ref<any[]>([])
 
-const agents = ref<any[]>([])
+const discoveryMessage =
+  ref('')
 
-const pairingCode = ref('')
-const pairingExpiresAt = ref('')
+const printerStatuses =
+  reactive<Record<string, any>>({})
 
-const connectionMode = ref<'agent' | 'manual'>('agent')
+const agents =
+  ref<any[]>([])
+
+const pairingCode =
+  ref('')
+
+const pairingExpiresAt =
+  ref('')
+
+const connectionMode =
+  ref<'agent' | 'manual'>(
+    'agent'
+  )
 
 // ======================================================
 // CREDENCIAIS BAMBU
 // ======================================================
 
-const bambuCredentials = reactive<
-  Record<
-    string,
-    {
-      serial: string
-      accessCode: string
-    }
-  >
->({})
+const bambuCredentials =
+  reactive<
+    Record<
+      string,
+      {
+        serial: string
+        accessCode: string
+      }
+    >
+  >({})
 
-const getPrinterKey = (printer: any) => {
+const getPrinterKey = (
+  printer: any
+) => {
   return [
-    printer.connectionType || 'unknown',
-    printer.ip || printer.port || 'unknown',
-    printer.protocol || 'unknown'
+    printer.connectionType ||
+      'unknown',
+
+    printer.ip ||
+      printer.port ||
+      'unknown',
+
+    printer.protocol ||
+      'unknown'
   ].join(':')
 }
 
-const getBambuCredentials = (printer: any) => {
-  const key = getPrinterKey(printer)
+const getBambuCredentials = (
+  printer: any
+) => {
+  const key =
+    getPrinterKey(
+      printer
+    )
 
-  if (!bambuCredentials[key]) {
+  if (
+    !bambuCredentials[key]
+  ) {
     bambuCredentials[key] = {
       serial: '',
       accessCode: ''
@@ -88,7 +131,8 @@ const getBambuCredentials = (printer: any) => {
 // ======================================================
 
 const loadAgents = async () => {
-  agentLoading.value = true
+  agentLoading.value =
+    true
 
   try {
     const token =
@@ -102,15 +146,16 @@ const loadAgents = async () => {
       )
     }
 
-    const response = await fetch(
-      `${config.public.apiBase}/api/agents`,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${token}`
+    const response =
+      await fetch(
+        `${config.public.apiBase}/api/agents`,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${token}`
+          }
         }
-      }
-    )
+      )
 
     const data =
       await response.json()
@@ -132,7 +177,8 @@ const loadAgents = async () => {
       'info'
     )
   } finally {
-    agentLoading.value = false
+    agentLoading.value =
+      false
   }
 }
 
@@ -140,69 +186,77 @@ const loadAgents = async () => {
 // GERAR CÓDIGO DE PAREAMENTO
 // ======================================================
 
-const generatePairingCode = async () => {
-  pairingLoading.value = true
+const generatePairingCode =
+  async () => {
+    pairingLoading.value =
+      true
 
-  try {
-    const token =
-      localStorage.getItem(
-        'printflow-auth-token'
-      )
+    try {
+      const token =
+        localStorage.getItem(
+          'printflow-auth-token'
+        )
 
-    if (!token) {
-      throw new Error(
-        'Sessão não encontrada.'
-      )
-    }
-
-    const response = await fetch(
-      `${config.public.apiBase}/api/agents/pairing-code`,
-      {
-        method: 'POST',
-
-        headers: {
-          Authorization:
-            `Bearer ${token}`,
-
-          'Content-Type':
-            'application/json'
-        }
+      if (!token) {
+        throw new Error(
+          'Sessão não encontrada.'
+        )
       }
-    )
 
-    const data =
-      await response.json()
+      const response =
+        await fetch(
+          `${config.public.apiBase}/api/agents/pairing-code`,
+          {
+            method: 'POST',
 
-    if (!response.ok) {
-      throw new Error(
-        data?.error ||
-        'Não foi possível gerar o código.'
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+
+              'Content-Type':
+                'application/json'
+            }
+          }
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível gerar o código.'
+        )
+      }
+
+      pairingCode.value =
+        data.code
+
+      pairingExpiresAt.value =
+        data.expiresAt
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível gerar o código.',
+        'info'
       )
+    } finally {
+      pairingLoading.value =
+        false
     }
-
-    pairingCode.value =
-      data.code
-
-    pairingExpiresAt.value =
-      data.expiresAt
-  } catch (error) {
-    notify(
-      error instanceof Error
-        ? error.message
-        : 'Não foi possível gerar o código.',
-      'info'
-    )
-  } finally {
-    pairingLoading.value = false
   }
-}
 
 // ======================================================
 // AGENT ONLINE
 // ======================================================
 
-const agentIsOnline = (agent: any) => {
-  if (!agent?.lastSeenAt) {
+const agentIsOnline = (
+  agent: any
+) => {
+  if (
+    !agent?.lastSeenAt
+  ) {
     return false
   }
 
@@ -230,10 +284,13 @@ const formatLastSeen = (
   }
 
   const time =
-    new Date(value).getTime()
+    new Date(
+      value
+    ).getTime()
 
   const difference =
-    Date.now() - time
+    Date.now() -
+    time
 
   if (
     difference <
@@ -279,260 +336,127 @@ const formatLastSeen = (
 // VALIDADE DO CÓDIGO
 // ======================================================
 
-const formatPairingExpiration = computed(() => {
-  if (
-    !pairingExpiresAt.value
-  ) {
-    return ''
-  }
-
-  return new Date(
-    pairingExpiresAt.value
-  ).toLocaleTimeString(
-    'pt-BR',
-    {
-      hour: '2-digit',
-      minute: '2-digit'
+const formatPairingExpiration =
+  computed(() => {
+    if (
+      !pairingExpiresAt.value
+    ) {
+      return ''
     }
-  )
-})
+
+    return new Date(
+      pairingExpiresAt.value
+    ).toLocaleTimeString(
+      'pt-BR',
+      {
+        hour: '2-digit',
+        minute: '2-digit'
+      }
+    )
+  })
 
 // ======================================================
 // ESPERAR RESULTADO DE COMANDO
 // ======================================================
 
-const waitForCommandResult = async (
-  commandId: string
-) => {
-  const token =
-    localStorage.getItem(
-      'printflow-auth-token'
-    )
+const waitForCommandResult =
+  async (
+    commandId: string
+  ) => {
+    const token =
+      localStorage.getItem(
+        'printflow-auth-token'
+      )
 
-  if (!token) {
-    throw new Error(
-      'Sessão não encontrada.'
-    )
-  }
-
-  const maxAttempts = 40
-  const intervalMs = 1000
-
-  for (
-    let attempt = 0;
-    attempt < maxAttempts;
-    attempt++
-  ) {
-    const response = await fetch(
-      `${config.public.apiBase}/api/agent-commands/${commandId}`,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${token}`
-        }
-      }
-    )
-
-    const data =
-      await response.json()
-
-    if (!response.ok) {
+    if (!token) {
       throw new Error(
-        data?.error ||
-        'Não foi possível consultar o resultado do comando.'
+        'Sessão não encontrada.'
       )
     }
 
-    const command =
-      data.command
+    const maxAttempts =
+      40
 
-    discoveryStatus.value =
-      command.status
+    const intervalMs =
+      1000
 
-    if (
-      command.status ===
-      'completed'
+    for (
+      let attempt = 0;
+      attempt < maxAttempts;
+      attempt++
     ) {
-      return command.result
-    }
-
-    if (
-      command.status ===
-      'failed'
-    ) {
-      throw new Error(
-        command.result?.error ||
-        'O comando falhou.'
-      )
-    }
-
-    await new Promise(
-      resolve =>
-        setTimeout(
-          resolve,
-          intervalMs
+      const response =
+        await fetch(
+          `${config.public.apiBase}/api/agent-commands/${commandId}`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${token}`
+            }
+          }
         )
-    )
-  }
 
-  throw new Error(
-    'A operação demorou mais que o esperado.'
-  )
-}
+      const data =
+        await response.json()
 
-// ======================================================
-// PROCURAR IMPRESSORAS
-// ======================================================
-
-const discoverPrinters = async (
-  agent: any
-) => {
-  if (
-    !agentIsOnline(agent)
-  ) {
-    notify(
-      'Este Agent está offline. Inicie o PrintFlow Agent antes de procurar impressoras.',
-      'info'
-    )
-
-    return
-  }
-
-  if (
-    discoveringAgentId.value
-  ) {
-    return
-  }
-
-  discoveringAgentId.value =
-    String(agent.id)
-
-  discoveryAgentId.value =
-    String(agent.id)
-
-  discoveryStatus.value =
-    'pending'
-
-  discoveredPrinters.value =
-    []
-
-  discoveryMessage.value =
-    'Enviando comando para o PrintFlow Agent...'
-
-  try {
-    const token =
-      localStorage.getItem(
-        'printflow-auth-token'
-      )
-
-    if (!token) {
-      throw new Error(
-        'Sessão não encontrada.'
-      )
-    }
-
-    const response = await fetch(
-      `${config.public.apiBase}/api/agents/${agent.id}/discover`,
-      {
-        method: 'POST',
-
-        headers: {
-          Authorization:
-            `Bearer ${token}`,
-
-          'Content-Type':
-            'application/json'
-        }
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível consultar o resultado do comando.'
+        )
       }
-    )
 
-    const data =
-      await response.json()
+      const command =
+        data.command
 
-    if (!response.ok) {
-      throw new Error(
-        data?.error ||
-        'Não foi possível iniciar a busca.'
+      if (
+        command.status ===
+        'completed'
+      ) {
+        return command.result
+      }
+
+      if (
+        command.status ===
+        'failed'
+      ) {
+        throw new Error(
+          command.result?.error ||
+          'O comando falhou.'
+        )
+      }
+
+      await new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            intervalMs
+          )
       )
     }
 
-    const commandId =
-      String(
-        data.command.id
-      )
-
-    discoveryMessage.value =
-      'O Agent está procurando impressoras...'
-
-    const result =
-      await waitForCommandResult(
-        commandId
-      )
-
-    const found =
-      Array.isArray(
-        result?.printers
-      )
-        ? result.printers
-        : []
-
-    discoveredPrinters.value =
-      found
-
-    discoveryStatus.value =
-      'completed'
-
-    if (
-      found.length === 0
-    ) {
-      discoveryMessage.value =
-        'Nenhuma impressora foi encontrada.'
-    } else {
-      discoveryMessage.value =
-        `${found.length} impressora(s) encontrada(s).`
-    }
-  } catch (error) {
-    discoveryStatus.value =
-      'failed'
-
-    discoveryMessage.value =
-      error instanceof Error
-        ? error.message
-        : 'Não foi possível procurar impressoras.'
-
-    notify(
-      discoveryMessage.value,
-      'info'
+    throw new Error(
+      'A operação demorou mais que o esperado.'
     )
-  } finally {
-    discoveringAgentId.value =
-      null
-  }
-}
-
-// ======================================================
-// CONECTAR IMPRESSORA ENCONTRADA
-// ======================================================
-
-const connectDiscoveredPrinter = async (
-  agent: any,
-  printer: any
-) => {
-  const key =
-    getPrinterKey(
-      printer
-    )
-
-  if (
-    connectingPrinterKey.value
-  ) {
-    return
   }
 
-  connectingPrinterKey.value =
-    key
+  // ======================================================
+// LOCALIZAR IMPRESSORA REGISTRADA NO AGENT
+// ======================================================
 
-  try {
+// ======================================================
+// LOCALIZAR IMPRESSORA REGISTRADA NO AGENT
+// ======================================================
+
+const findRegisteredAgentPrinter =
+  async (
+    agent: any,
+    printer: any
+  ) => {
+    // ==================================================
+    // TOKEN
+    // ==================================================
+
     const token =
       localStorage.getItem(
         'printflow-auth-token'
@@ -544,15 +468,26 @@ const connectDiscoveredPrinter = async (
       )
     }
 
-    const printerPayload = {
-      ...printer
-    }
+    // ==================================================
+    // SERIAL
+    // ==================================================
 
-    const options:
-      Record<string, any> = {}
+    let serial =
+      String(
+        printer.serial ||
+        ''
+      ).trim()
 
     // ==================================================
     // BAMBU
+    // ==================================================
+    //
+    // Durante a descoberta, o objeto da Bambu pode
+    // não possuir o serial.
+    //
+    // Nesse caso usamos o serial informado pelo
+    // usuário no formulário de conexão.
+    //
     // ==================================================
 
     if (
@@ -564,108 +499,988 @@ const connectDiscoveredPrinter = async (
           printer
         )
 
-      const serial =
-        credentials.serial.trim()
+      const enteredSerial =
+        String(
+          credentials.serial ||
+          ''
+        ).trim()
 
-      const accessCode =
-        credentials.accessCode.trim()
+      if (
+        enteredSerial
+      ) {
+        serial =
+          enteredSerial
+      }
 
-      if (!serial) {
+      if (
+        !serial
+      ) {
         throw new Error(
           'Informe o número de série da Bambu.'
         )
       }
-
-      if (!accessCode) {
-        throw new Error(
-          'Informe o LAN Access Code da Bambu.'
-        )
-      }
-
-      printerPayload.serial =
-        serial
-
-      options.accessCode =
-        accessCode
     }
 
-    discoveryMessage.value =
-      'Testando conexão com a impressora...'
+    // ==================================================
+    // BUSCAR IMPRESSORAS REGISTRADAS
+    // ==================================================
 
-    const response = await fetch(
-      `${config.public.apiBase}/api/agents/${agent.id}/connect-printer`,
-      {
-        method: 'POST',
-
-        headers: {
-          Authorization:
-            `Bearer ${token}`,
-
-          'Content-Type':
-            'application/json'
-        },
-
-        body: JSON.stringify({
-          printer:
-            printerPayload,
-
-          options
-        })
-      }
-    )
+    const response =
+      await fetch(
+        `${config.public.apiBase}/api/agents/${agent.id}/printers`,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${token}`
+          }
+        }
+      )
 
     const data =
       await response.json()
 
-    if (!response.ok) {
+    if (
+      !response.ok
+    ) {
       throw new Error(
         data?.error ||
-        'Não foi possível iniciar a conexão.'
+        'Não foi possível localizar as impressoras registradas.'
       )
     }
 
-    const result =
-      await waitForCommandResult(
+    const registeredPrinters =
+      Array.isArray(
+        data?.printers
+      )
+        ? data.printers
+        : []
+
+    // ==================================================
+    // NORMALIZAR IDENTIFICADORES
+    // ==================================================
+
+    const protocol =
+      String(
+        printer.protocol ||
+        ''
+      )
+        .trim()
+        .toLowerCase()
+
+    const connectionType =
+      String(
+        printer.connectionType ||
+        ''
+      )
+        .trim()
+        .toLowerCase()
+
+    const ip =
+      String(
+        printer.ip ||
+        ''
+      ).trim()
+
+    const port =
+      printer.port !==
+        undefined &&
+      printer.port !==
+        null
+        ? String(
+            printer.port
+          ).trim()
+        : ''
+
+    // ==================================================
+    // LOCALIZAR REGISTRO
+    // ==================================================
+
+    const registeredPrinter =
+      registeredPrinters.find(
+        (item: any) => {
+          const itemProtocol =
+            String(
+              item.protocol ||
+              ''
+            )
+              .trim()
+              .toLowerCase()
+
+          if (
+            itemProtocol !==
+            protocol
+          ) {
+            return false
+          }
+
+          // ==============================================
+          // BAMBU
+          // ==============================================
+
+          if (
+            protocol ===
+            'bambu'
+          ) {
+            const itemSerial =
+              String(
+                item.serial ||
+                ''
+              )
+                .trim()
+                .toLowerCase()
+
+            const targetSerial =
+              String(
+                serial ||
+                ''
+              )
+                .trim()
+                .toLowerCase()
+
+            return (
+              itemSerial ===
+              targetSerial
+            )
+          }
+
+          // ==============================================
+          // USB / MARLIN
+          // ==============================================
+
+          if (
+            connectionType ===
+            'usb'
+          ) {
+            return (
+              String(
+                item.port ||
+                ''
+              ).trim() ===
+              port
+            )
+          }
+
+          // ==============================================
+          // REDE
+          // ==============================================
+
+          return (
+            String(
+              item.ip ||
+              ''
+            ).trim() ===
+              ip &&
+            (
+              !port ||
+              String(
+                item.port ||
+                ''
+              ).trim() ===
+                port
+            )
+          )
+        }
+      )
+
+    // ==================================================
+    // NÃO ENCONTRADA
+    // ==================================================
+
+    if (
+      !registeredPrinter
+    ) {
+      throw new Error(
+        'Esta impressora ainda não está registrada como conectada ao PrintFlow Agent. Conecte a impressora primeiro.'
+      )
+    }
+
+    // ==================================================
+    // ID TÉCNICO DA IMPRESSORA
+    // ==================================================
+
+    const agentPrinterId =
+      String(
+        registeredPrinter.id ||
+        ''
+      ).trim()
+
+    if (
+      !agentPrinterId
+    ) {
+      throw new Error(
+        'Identificação da impressora conectada não encontrada.'
+      )
+    }
+
+    // ==================================================
+    // CHAVE LOCAL DA INTERFACE
+    // ==================================================
+
+    const key =
+      getPrinterKey(
+        printer
+      )
+
+    // ==================================================
+    // ÚLTIMA TELEMETRIA CONHECIDA
+    // ==================================================
+
+    const lastStatus =
+      registeredPrinter
+        ?.lastStatus
+
+    // ==================================================
+    // ERROS CONHECIDOS
+    // ==================================================
+
+    const lastConnectionError =
+      registeredPrinter
+        ?.lastConnectionError ||
+      null
+
+    const lastOperationError =
+      registeredPrinter
+        ?.lastOperationError ||
+      null
+
+    // ==================================================
+    // CARREGAR ESTADO NO FRONTEND
+    // ==================================================
+    //
+    // Mesmo que ainda não exista telemetria, mantemos
+    // os erros conhecidos.
+    //
+    // Dessa forma podemos mostrar:
+    //
+    // - problema de conexão
+    // - erro operacional
+    //
+    // separadamente.
+    //
+    // ==================================================
+
+    if (
+      lastStatus &&
+      typeof lastStatus ===
+        'object' &&
+      !Array.isArray(
+        lastStatus
+      ) &&
+      Object.keys(
+        lastStatus
+      ).length >
+        0
+    ) {
+      printerStatuses[key] = {
+        ...lastStatus,
+
+        lastConnectionError,
+
+        lastOperationError
+      }
+    } else {
+      printerStatuses[key] = {
+        lastConnectionError,
+
+        lastOperationError
+      }
+    }
+
+    // ==================================================
+    // RETORNO
+    // ==================================================
+
+    return {
+      agentPrinterId,
+      registeredPrinter
+    }
+  }
+
+// ======================================================
+// PROCURAR IMPRESSORAS
+// ======================================================
+
+const discoverPrinters =
+  async (
+    agent: any
+  ) => {
+    if (
+      !agentIsOnline(
+        agent
+      )
+    ) {
+      notify(
+        'Este Agent está offline. Inicie o PrintFlow Agent antes de procurar impressoras.',
+        'info'
+      )
+
+      return
+    }
+
+    if (
+      discoveringAgentId.value
+    ) {
+      return
+    }
+
+    discoveringAgentId.value =
+      String(
+        agent.id
+      )
+
+    discoveryAgentId.value =
+      String(
+        agent.id
+      )
+
+    discoveryStatus.value =
+      'pending'
+
+    discoveredPrinters.value =
+      []
+
+    discoveryMessage.value =
+      'Enviando comando para o PrintFlow Agent...'
+
+    try {
+      const token =
+        localStorage.getItem(
+          'printflow-auth-token'
+        )
+
+      if (!token) {
+        throw new Error(
+          'Sessão não encontrada.'
+        )
+      }
+
+      const response =
+        await fetch(
+          `${config.public.apiBase}/api/agents/${agent.id}/discover`,
+          {
+            method: 'POST',
+
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+
+              'Content-Type':
+                'application/json'
+            }
+          }
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível iniciar a busca.'
+        )
+      }
+
+      const commandId =
         String(
           data.command.id
         )
+
+      discoveryStatus.value =
+        'running'
+
+      discoveryMessage.value =
+        'O Agent está procurando impressoras...'
+
+      const result =
+        await waitForCommandResult(
+          commandId
+        )
+
+      const found =
+        Array.isArray(
+          result?.printers
+        )
+          ? result.printers
+          : []
+
+      discoveredPrinters.value =
+        found
+
+      discoveryStatus.value =
+        'completed'
+
+      if (
+        found.length ===
+        0
+      ) {
+        discoveryMessage.value =
+          'Nenhuma impressora foi encontrada.'
+      } else {
+        discoveryMessage.value =
+          `${found.length} impressora(s) encontrada(s).`
+      }
+    } catch (error) {
+      discoveryStatus.value =
+        'failed'
+
+      discoveryMessage.value =
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível procurar impressoras.'
+
+      notify(
+        discoveryMessage.value,
+        'info'
+      )
+    } finally {
+      discoveringAgentId.value =
+        null
+    }
+  }
+
+// ======================================================
+// CONECTAR IMPRESSORA
+// ======================================================
+
+const connectDiscoveredPrinter =
+  async (
+    agent: any,
+    printer: any
+  ) => {
+    const key =
+      getPrinterKey(
+        printer
       )
 
     if (
-      result?.success ===
-      false
+      connectingPrinterKey.value
     ) {
-      throw new Error(
-        result.error ||
-        'Não foi possível conectar à impressora.'
-      )
+      return
     }
 
-    notify(
-      'Impressora conectada com sucesso.'
-    )
-
-    discoveryMessage.value =
-      'Impressora conectada com sucesso.'
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Não foi possível conectar à impressora.'
-
-    discoveryMessage.value =
-      message
-
-    notify(
-      message,
-      'info'
-    )
-  } finally {
     connectingPrinterKey.value =
-      null
-  }
-}
+      key
 
+    try {
+      const token =
+        localStorage.getItem(
+          'printflow-auth-token'
+        )
+
+      if (!token) {
+        throw new Error(
+          'Sessão não encontrada.'
+        )
+      }
+
+      const printerPayload = {
+        ...printer
+      }
+
+      const options:
+        Record<string, any> =
+        {}
+
+      // ==================================================
+      // BAMBU
+      // ==================================================
+
+      if (
+        printer.protocol ===
+        'bambu'
+      ) {
+        const credentials =
+          getBambuCredentials(
+            printer
+          )
+
+        const serial =
+          credentials
+            .serial
+            .trim()
+
+        const accessCode =
+          credentials
+            .accessCode
+            .trim()
+
+        if (!serial) {
+          throw new Error(
+            'Informe o número de série da Bambu.'
+          )
+        }
+
+        if (!accessCode) {
+          throw new Error(
+            'Informe o LAN Access Code da Bambu.'
+          )
+        }
+
+        printerPayload.serial =
+          serial
+
+        options.accessCode =
+          accessCode
+      }
+
+      discoveryMessage.value =
+        'Testando conexão com a impressora...'
+
+      const response =
+        await fetch(
+          `${config.public.apiBase}/api/agents/${agent.id}/connect-printer`,
+          {
+            method: 'POST',
+
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+
+              'Content-Type':
+                'application/json'
+            },
+
+            body:
+              JSON.stringify({
+                printer:
+                  printerPayload,
+
+                options
+              })
+          }
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível iniciar a conexão.'
+        )
+      }
+
+      const result =
+        await waitForCommandResult(
+          String(
+            data.command.id
+          )
+        )
+
+      if (
+        result?.success ===
+        false
+      ) {
+        throw new Error(
+          result.error ||
+          'Não foi possível conectar à impressora.'
+        )
+      }
+
+      discoveryMessage.value =
+        'Impressora conectada com sucesso.'
+
+      notify(
+        'Impressora conectada com sucesso.'
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível conectar à impressora.'
+
+      discoveryMessage.value =
+        message
+
+      notify(
+        message,
+        'info'
+      )
+    } finally {
+      connectingPrinterKey.value =
+        null
+    }
+  }
+
+// ======================================================
+// CONSULTAR STATUS DA IMPRESSORA
+// ======================================================
+
+// ======================================================
+// CONSULTAR STATUS DA IMPRESSORA
+// ======================================================
+
+const loadPrinterStatus =
+  async (
+    agent: any,
+    printer: any
+  ) => {
+    const key =
+      getPrinterKey(
+        printer
+      )
+
+    // ==================================================
+    // EVITAR CONSULTAS SIMULTÂNEAS
+    // ==================================================
+
+    if (
+      printerStatusLoadingKey.value
+    ) {
+      return
+    }
+
+    printerStatusLoadingKey.value =
+      key
+
+    try {
+      // ==================================================
+      // TOKEN
+      // ==================================================
+
+      const token =
+        localStorage.getItem(
+          'printflow-auth-token'
+        )
+
+      if (
+        !token
+      ) {
+        throw new Error(
+          'Sessão não encontrada.'
+        )
+      }
+
+      // ==================================================
+      // LOCALIZAR IMPRESSORA REGISTRADA
+      // ==================================================
+      //
+      // O helper:
+      //
+      // 1. consulta agent_printers;
+      // 2. identifica a impressora correta;
+      // 3. obtém agentPrinterId;
+      // 4. carrega lastStatus;
+      // 5. carrega erros conhecidos.
+      //
+      // ==================================================
+
+      const {
+        agentPrinterId
+      } =
+        await findRegisteredAgentPrinter(
+          agent,
+          printer
+        )
+
+      // ==================================================
+      // SOLICITAR STATUS
+      // ==================================================
+      //
+      // O navegador envia SOMENTE:
+      //
+      // agentPrinterId
+      //
+      // IP, serial, protocolo e porta são recuperados
+      // pelo BackEnd a partir de agent_printers.
+      //
+      // ==================================================
+
+      const response =
+        await fetch(
+          `${config.public.apiBase}/api/agents/${agent.id}/printer-status`,
+          {
+            method:
+              'POST',
+
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+
+              'Content-Type':
+                'application/json'
+            },
+
+            body:
+              JSON.stringify({
+                agentPrinterId
+              })
+          }
+        )
+
+      const data =
+        await response.json()
+
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível solicitar o status.'
+        )
+      }
+
+      // ==================================================
+      // ESPERAR AGENT
+      // ==================================================
+
+      const result =
+        await waitForCommandResult(
+          String(
+            data.command.id
+          )
+        )
+
+      if (
+        result?.success ===
+        false
+      ) {
+        throw new Error(
+          result.error ||
+          'Não foi possível consultar o status.'
+        )
+      }
+
+      // ==================================================
+      // TELEMETRIA ATUAL
+      // ==================================================
+
+      const status =
+        result?.status &&
+        typeof result.status ===
+          'object'
+          ? result.status
+          : {}
+
+      // ==================================================
+      // PRESERVAR ESTADO EXISTENTE
+      // ==================================================
+      //
+      // Antes dessa chamada o helper pode ter carregado:
+      //
+      // lastOperationError
+      // lastConnectionError
+      // lastStatus
+      //
+      // Um printer_status bem-sucedido prova que a
+      // comunicação está funcionando.
+      //
+      // Portanto:
+      //
+      // lastConnectionError = null
+      //
+      // mas preservamos lastOperationError.
+      //
+      // ==================================================
+
+      const currentStatus =
+        printerStatuses[key] &&
+        typeof printerStatuses[key] ===
+          'object'
+          ? printerStatuses[key]
+          : {}
+
+      printerStatuses[key] = {
+        ...currentStatus,
+        ...status,
+
+        lastConnectionError:
+          null
+      }
+
+      // ==================================================
+      // SUCESSO
+      // ==================================================
+
+      notify(
+        'Status atualizado.'
+      )
+    } catch (
+      error
+    ) {
+      // ==================================================
+      // ERRO DE STATUS / COMUNICAÇÃO
+      // ==================================================
+      //
+      // Não apagamos a última telemetria.
+      //
+      // A última leitura válida continua visível,
+      // mas registramos na interface que a atualização
+      // atual falhou.
+      //
+      // ==================================================
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível consultar o status.'
+
+      const currentStatus =
+        printerStatuses[key] &&
+        typeof printerStatuses[key] ===
+          'object'
+          ? printerStatuses[key]
+          : {}
+
+      printerStatuses[key] = {
+        ...currentStatus,
+
+        lastConnectionError:
+          message
+      }
+
+      notify(
+        message,
+        'info'
+      )
+    } finally {
+      printerStatusLoadingKey.value =
+        null
+    }
+  }
+// ======================================================
+// CONTROLES DA IMPRESSORA
+// ======================================================
+
+const controlPrinter =
+  async (
+    agent: any,
+    printer: any,
+    action:
+      | 'pause'
+      | 'resume'
+      | 'cancel'
+  ) => {
+    const key =
+      getPrinterKey(
+        printer
+      )
+
+    if (
+      printerControlLoadingKey.value
+    ) {
+      return
+    }
+
+    if (
+      action ===
+      'cancel'
+    ) {
+      const confirmed =
+        window.confirm(
+          'Deseja realmente cancelar a impressão atual?'
+        )
+
+      if (!confirmed) {
+        return
+      }
+    }
+
+    printerControlLoadingKey.value =
+      `${key}:${action}`
+
+    try {
+      const token =
+        localStorage.getItem(
+          'printflow-auth-token'
+        )
+
+      if (!token) {
+        throw new Error(
+          'Sessão não encontrada.'
+        )
+      }
+
+      const {
+        agentPrinterId
+      } =
+        await findRegisteredAgentPrinter(
+          agent,
+          printer
+        )
+
+      const response =
+        await fetch(
+          `${config.public.apiBase}/api/agents/${agent.id}/printer-${action}`,
+          {
+            method:
+              'POST',
+
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+
+              'Content-Type':
+                'application/json'
+            },
+
+            body:
+              JSON.stringify({
+                agentPrinterId
+              })
+          }
+        )
+
+      const data =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+          'Não foi possível enviar o comando.'
+        )
+      }
+
+      const result =
+        await waitForCommandResult(
+          String(
+            data.command.id
+          )
+        )
+
+      if (
+        result?.success ===
+        false
+      ) {
+        throw new Error(
+          result.error ||
+          'O comando não pôde ser executado.'
+        )
+      }
+
+      const messages = {
+        pause:
+          'Impressão pausada.',
+
+        resume:
+          'Impressão retomada.',
+
+        cancel:
+          'Impressão cancelada.'
+      }
+
+      notify(
+        messages[action]
+      )
+
+      await loadPrinterStatus(
+        agent,
+        printer
+      )
+    } catch (
+      error
+    ) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível executar o comando.',
+        'info'
+      )
+    } finally {
+      printerControlLoadingKey.value =
+        null
+    }
+  }
 // ======================================================
 // INICIALIZAÇÃO
 // ======================================================
@@ -678,54 +1493,61 @@ onMounted(() => {
 // FORMULÁRIO MANUAL
 // ======================================================
 
-const saving = ref(false)
+const saving =
+  ref(false)
 
-const nextCode = computed(
-  () =>
-    `PRT-${String(
-      printers.value.length +
-        1
-    ).padStart(
-      3,
-      '0'
-    )}`
-)
+const nextCode =
+  computed(
+    () =>
+      `PRT-${String(
+        printers.value.length +
+          1
+      ).padStart(
+        3,
+        '0'
+      )}`
+  )
 
-const form = reactive({
-  name: '',
-  maker: '',
-  model: '',
-  serial: '',
-  code: '',
-  acquired: '',
-  purchase: 0,
-  power: 350,
-  consumption: 0.35,
-  x: 220,
-  y: 220,
-  z: 250,
-  nozzle: 0.4,
-  firmware: 'Marlin 2.1',
-  hours: 0,
-  status: 'Disponível',
-  location: '',
-  filament: 'PLA Preto',
-  maintenance: '',
-  nextMaintenance: '',
-  interval: 250
-})
+const form =
+  reactive({
+    name: '',
+    maker: '',
+    model: '',
+    serial: '',
+    code: '',
+    acquired: '',
+    purchase: 0,
+    power: 350,
+    consumption: 0.35,
+    x: 220,
+    y: 220,
+    z: 250,
+    nozzle: 0.4,
+    firmware: 'Marlin 2.1',
+    hours: 0,
+    status: 'Disponível',
+    location: '',
+    filament: 'PLA Preto',
+    maintenance: '',
+    nextMaintenance: '',
+    interval: 250
+  })
 
 const errors =
   reactive<
-    Record<string, string>
+    Record<
+      string,
+      string
+    >
   >({})
 
-const editId = computed(() =>
-  typeof route.query.id ===
-  'string'
-    ? route.query.id
-    : ''
-)
+const editId =
+  computed(() =>
+    typeof route.query.id ===
+    'string'
+      ? route.query.id
+      : ''
+  )
 
 const isEditing =
   computed(
@@ -773,6 +1595,10 @@ const touched =
     )
   )
 
+// ======================================================
+// CARREGAR IMPRESSORA EM EDIÇÃO
+// ======================================================
+
 watchEffect(() => {
   if (
     !editId.value ||
@@ -795,11 +1621,20 @@ watchEffect(() => {
   Object.assign(
     form,
     {
-      name: item.name,
-      maker: item.maker,
-      model: item.model,
-      serial: item.serial,
-      code: item.code,
+      name:
+        item.name,
+
+      maker:
+        item.maker,
+
+      model:
+        item.model,
+
+      serial:
+        item.serial,
+
+      code:
+        item.code,
 
       acquired:
         toDateInputValue(
@@ -836,6 +1671,10 @@ watchEffect(() => {
   hydrated.value =
     true
 })
+
+// ======================================================
+// VALIDAR FORMULÁRIO
+// ======================================================
 
 const validate = () => {
   Object.keys(
@@ -900,121 +1739,130 @@ const validate = () => {
   return !first
 }
 
-const save = async (
-  again = false
-) => {
-  if (!validate()) {
-    return
-  }
+// ======================================================
+// SALVAR
+// ======================================================
 
-  if (
-    saving.value
-  ) {
-    return
-  }
-
-  saving.value =
-    true
-
-  try {
-    const payload = {
-      id:
-        editId.value,
-
-      name:
-        form.name,
-
-      code:
-        form.code ||
-        nextCode.value,
-
-      maker:
-        form.maker,
-
-      model:
-        form.model,
-
-      acquired:
-        form.acquired ||
-        null,
-
-      power:
-        form.power,
-
-      hours:
-        form.hours,
-
-      status:
-        form.status ===
-        'Imprimindo'
-          ? 'Em Impressão'
-          : form.status ===
-              'Manutenção'
-            ? 'Em Manutenção'
-            : form.status,
-
-      maintenance:
-        form.maintenance ||
-        null,
-
-      serial:
-        form.serial ||
-        '-',
-
-      location:
-        form.location,
-
-      volume:
-        `${form.x} x ${form.y} x ${form.z} mm`,
-
-      defaultFilament:
-        form.filament
-    }
-
-    if (
-      isEditing.value
-    ) {
-      await updateItem(
-        'printers',
-        payload
-      )
-    } else {
-      await createItem(
-        'printers',
-        payload
-      )
-    }
-
-    notify(
-      isEditing.value
-        ? 'Impressora atualizada com sucesso.'
-        : 'Impressora cadastrada com sucesso.'
-    )
-
-    if (again) {
-      form.name = ''
-      form.model = ''
-      form.serial = ''
-      form.code = ''
-
+const save =
+  async (
+    again = false
+  ) => {
+    if (!validate()) {
       return
     }
 
-    navigateTo(
-      '/impressoras'
-    )
-  } catch (error) {
-    notify(
-      error instanceof Error
-        ? error.message
-        : 'Não foi possível salvar a impressora.',
-      'info'
-    )
-  } finally {
+    if (
+      saving.value
+    ) {
+      return
+    }
+
     saving.value =
-      false
+      true
+
+    try {
+      const payload = {
+        id:
+          editId.value,
+
+        name:
+          form.name,
+
+        code:
+          form.code ||
+          nextCode.value,
+
+        maker:
+          form.maker,
+
+        model:
+          form.model,
+
+        acquired:
+          form.acquired ||
+          null,
+
+        power:
+          form.power,
+
+        hours:
+          form.hours,
+
+        status:
+          form.status ===
+          'Imprimindo'
+            ? 'Em Impressão'
+            : form.status ===
+                'Manutenção'
+              ? 'Em Manutenção'
+              : form.status,
+
+        maintenance:
+          form.maintenance ||
+          null,
+
+        serial:
+          form.serial ||
+          '-',
+
+        location:
+          form.location,
+
+        volume:
+          `${form.x} x ${form.y} x ${form.z} mm`,
+
+        defaultFilament:
+          form.filament
+      }
+
+      if (
+        isEditing.value
+      ) {
+        await updateItem(
+          'printers',
+          payload
+        )
+      } else {
+        await createItem(
+          'printers',
+          payload
+        )
+      }
+
+      notify(
+        isEditing.value
+          ? 'Impressora atualizada com sucesso.'
+          : 'Impressora cadastrada com sucesso.'
+      )
+
+      if (again) {
+        form.name = ''
+        form.model = ''
+        form.serial = ''
+        form.code = ''
+
+        return
+      }
+
+      navigateTo(
+        '/impressoras'
+      )
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível salvar a impressora.',
+        'info'
+      )
+    } finally {
+      saving.value =
+        false
+    }
   }
-}
+
+// ======================================================
+// CANCELAR
+// ======================================================
 
 const cancel = () => {
   if (
@@ -1032,6 +1880,10 @@ const cancel = () => {
 
 <template>
   <div>
+    <!-- ================================================= -->
+    <!-- CABEÇALHO                                         -->
+    <!-- ================================================= -->
+
     <div class="breadcrumb">
       <span>
         Impressoras
@@ -1075,9 +1927,7 @@ const cancel = () => {
         margin-bottom: 16px;
       "
     >
-      <h2
-        class="form-card__title"
-      >
+      <h2 class="form-card__title">
         <UiIcon
           name="printer"
         />
@@ -1098,13 +1948,15 @@ const cancel = () => {
           class="btn"
           :class="{
             'btn--primary':
-              connectionMode === 'agent'
+              connectionMode ===
+              'agent'
           }"
           style="
             min-height: 70px;
           "
           @click="
-            connectionMode = 'agent'
+            connectionMode =
+              'agent'
           "
         >
           Conectar com PrintFlow Agent
@@ -1115,13 +1967,15 @@ const cancel = () => {
           class="btn"
           :class="{
             'btn--primary':
-              connectionMode === 'manual'
+              connectionMode ===
+              'manual'
           }"
           style="
             min-height: 70px;
           "
           @click="
-            connectionMode = 'manual'
+            connectionMode =
+              'manual'
           "
         >
           Cadastrar manualmente
@@ -1136,16 +1990,15 @@ const cancel = () => {
     <div
       v-if="
         !isEditing &&
-        connectionMode === 'agent'
+        connectionMode ===
+          'agent'
       "
       class="form-card"
       style="
         margin-bottom: 16px;
       "
     >
-      <h2
-        class="form-card__title"
-      >
+      <h2 class="form-card__title">
         <UiIcon
           name="settings"
         />
@@ -1191,9 +2044,7 @@ const cancel = () => {
               margin-bottom: 14px;
             "
           >
-            <div
-              class="detail-list__row"
-            >
+            <div class="detail-list__row">
               <span>
                 Computador
               </span>
@@ -1205,25 +2056,23 @@ const cancel = () => {
               </strong>
             </div>
 
-            <div
-              class="detail-list__row"
-            >
+            <div class="detail-list__row">
               <span>
                 Status
               </span>
 
               <strong>
                 {{
-                  agentIsOnline(agent)
+                  agentIsOnline(
+                    agent
+                  )
                     ? 'Online'
                     : 'Offline'
                 }}
               </strong>
             </div>
 
-            <div
-              class="detail-list__row"
-            >
+            <div class="detail-list__row">
               <span>
                 Sistema
               </span>
@@ -1239,9 +2088,7 @@ const cancel = () => {
               </strong>
             </div>
 
-            <div
-              class="detail-list__row"
-            >
+            <div class="detail-list__row">
               <span>
                 Versão do Agent
               </span>
@@ -1253,9 +2100,7 @@ const cancel = () => {
               </strong>
             </div>
 
-            <div
-              class="detail-list__row"
-            >
+            <div class="detail-list__row">
               <span>
                 Último contato
               </span>
@@ -1282,9 +2127,13 @@ const cancel = () => {
                 type="button"
                 class="btn btn--primary"
                 :disabled="
-                  !agentIsOnline(agent) ||
+                  !agentIsOnline(
+                    agent
+                  ) ||
                   discoveringAgentId ===
-                    String(agent.id)
+                    String(
+                      agent.id
+                    )
                 "
                 @click="
                   discoverPrinters(
@@ -1294,9 +2143,13 @@ const cancel = () => {
               >
                 {{
                   discoveringAgentId ===
-                  String(agent.id)
+                  String(
+                    agent.id
+                  )
                     ? 'Procurando...'
-                    : agentIsOnline(agent)
+                    : agentIsOnline(
+                          agent
+                        )
                       ? 'Procurar impressoras'
                       : 'Agent offline'
                 }}
@@ -1310,7 +2163,9 @@ const cancel = () => {
             <div
               v-if="
                 discoveryAgentId ===
-                  String(agent.id) &&
+                  String(
+                    agent.id
+                  ) &&
                 discoveryStatus !==
                   'idle'
               "
@@ -1319,9 +2174,7 @@ const cancel = () => {
                 margin-top: 14px;
               "
             >
-              <div
-                class="detail-list__row"
-              >
+              <div class="detail-list__row">
                 <span>
                   Busca
                 </span>
@@ -1389,9 +2242,7 @@ const cancel = () => {
                   "
                   class="summary-box"
                 >
-                  <div
-                    class="detail-list__row"
-                  >
+                  <div class="detail-list__row">
                     <span>
                       Impressora
                     </span>
@@ -1405,9 +2256,7 @@ const cancel = () => {
                     </strong>
                   </div>
 
-                  <div
-                    class="detail-list__row"
-                  >
+                  <div class="detail-list__row">
                     <span>
                       Conexão
                     </span>
@@ -1510,9 +2359,7 @@ const cancel = () => {
                       gap: 10px;
                     "
                   >
-                    <div
-                      class="field"
-                    >
+                    <div class="field">
                       <label>
                         Número de série
                       </label>
@@ -1528,9 +2375,7 @@ const cancel = () => {
                       >
                     </div>
 
-                    <div
-                      class="field"
-                    >
+                    <div class="field">
                       <label>
                         LAN Access Code
                       </label>
@@ -1549,12 +2394,15 @@ const cancel = () => {
                   </div>
 
                   <!-- =================================== -->
-                  <!-- CONECTAR                            -->
+                  <!-- AÇÕES DA IMPRESSORA                 -->
                   <!-- =================================== -->
 
                   <div
                     style="
                       margin-top: 14px;
+                      display: flex;
+                      gap: 8px;
+                      flex-wrap: wrap;
                     "
                   >
                     <button
@@ -1582,14 +2430,348 @@ const cancel = () => {
                           : 'Conectar'
                       }}
                     </button>
+
+                    <button
+                      type="button"
+                      class="btn"
+                      :disabled="
+                        printerStatusLoadingKey ===
+                        getPrinterKey(
+                          printer
+                        )
+                      "
+                      @click="
+                        loadPrinterStatus(
+                          agent,
+                          printer
+                        )
+                      "
+                    >
+                      {{
+                        printerStatusLoadingKey ===
+                        getPrinterKey(
+                          printer
+                        )
+                          ? 'Atualizando...'
+                          : 'Atualizar status'
+                      }}
+                    </button>
+                  </div>
+
+                  <!-- =================================== -->
+                  <!-- CONTROLES DE IMPRESSÃO              -->
+                  <!-- =================================== -->
+
+                  <div
+                    style="
+                      margin-top: 10px;
+                      display: flex;
+                      gap: 8px;
+                      flex-wrap: wrap;
+                    "
+                  >
+                    <button
+                      type="button"
+                      class="btn"
+                      :disabled="
+                        printerControlLoadingKey !==
+                        null
+                      "
+                      @click="
+                        controlPrinter(
+                          agent,
+                          printer,
+                          'pause'
+                        )
+                      "
+                    >
+                      {{
+                        printerControlLoadingKey ===
+                        `${getPrinterKey(printer)}:pause`
+                          ? 'Pausando...'
+                          : 'Pausar'
+                      }}
+                    </button>
+
+                    <button
+                      type="button"
+                      class="btn"
+                      :disabled="
+                        printerControlLoadingKey !==
+                        null
+                      "
+                      @click="
+                        controlPrinter(
+                          agent,
+                          printer,
+                          'resume'
+                        )
+                      "
+                    >
+                      {{
+                        printerControlLoadingKey ===
+                        `${getPrinterKey(printer)}:resume`
+                          ? 'Retomando...'
+                          : 'Retomar'
+                      }}
+                    </button>
+
+                    <button
+                      type="button"
+                      class="btn"
+                      :disabled="
+                        printerControlLoadingKey !==
+                        null
+                      "
+                      @click="
+                        controlPrinter(
+                          agent,
+                          printer,
+                          'cancel'
+                        )
+                      "
+                    >
+                      {{
+                        printerControlLoadingKey ===
+                        `${getPrinterKey(printer)}:cancel`
+                          ? 'Cancelando...'
+                          : 'Cancelar impressão'
+                      }}
+                    </button>
+                  </div>
+
+                  <!-- =================================== -->
+                  <!-- TELEMETRIA                          -->
+                  <!-- =================================== -->
+
+                  <div
+                    v-if="
+                      printerStatuses[
+                        getPrinterKey(
+                          printer
+                        )
+                      ]
+                    "
+                    class="summary-box"
+                    style="
+                      margin-top: 14px;
+                    "
+                  >
+                    <div class="detail-list__row">
+                      <span>
+                        Estado
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.state ||
+                          'Desconhecido'
+                        }}
+                      </strong>
+                    </div>
+
+                    <div class="detail-list__row">
+                      <span>
+                        Progresso
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.progress ??
+                          '-'
+                        }}
+                        %
+                      </strong>
+                    </div>
+
+                    <div class="detail-list__row">
+                      <span>
+                        Camada
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.currentLayer ??
+                          '-'
+                        }}
+                        /
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.totalLayers ??
+                          '-'
+                        }}
+                      </strong>
+                    </div>
+
+                    <div class="detail-list__row">
+                      <span>
+                        Bico
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.nozzleTemperature ??
+                          '-'
+                        }}
+                        °C
+                      </strong>
+                    </div>
+
+                    <div class="detail-list__row">
+                      <span>
+                        Mesa
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.bedTemperature ??
+                          '-'
+                        }}
+                        °C
+                      </strong>
+                    </div>
+
+                    <div class="detail-list__row">
+                      <span>
+                        Tempo restante
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.remainingMinutes ??
+                          '-'
+                        }}
+                        min
+                      </strong>
+                    </div>
+
+                    <div
+                      v-if="
+                        printerStatuses[
+                          getPrinterKey(
+                            printer
+                          )
+                        ]?.file
+                      "
+                      class="detail-list__row"
+                    >
+                      <span>
+                        Arquivo
+                      </span>
+
+                      <strong>
+                        {{
+                          printerStatuses[
+                            getPrinterKey(
+                              printer
+                            )
+                          ]?.file
+                        }}
+                      </strong>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
+          <!-- =================================== -->
+<!-- ERRO DE CONEXÃO                     -->
+<!-- =================================== -->
+
+<div
+  v-if="
+    printerStatuses[
+      getPrinterKey(
+        printer
+      )
+    ]?.lastConnectionError
+  "
+  class="summary-box"
+  style="
+    margin-top: 10px;
+  "
+>
+  <div class="detail-list__row">
+    <span>
+      Problema de conexão
+    </span>
+
+    <strong>
+      {{
+        printerStatuses[
+          getPrinterKey(
+            printer
+          )
+        ]?.lastConnectionError
+      }}
+    </strong>
+  </div>
+</div>
+
+<!-- =================================== -->
+<!-- ERRO OPERACIONAL                    -->
+<!-- =================================== -->
+
+<div
+  v-if="
+    printerStatuses[
+      getPrinterKey(
+        printer
+      )
+    ]?.lastOperationError
+  "
+  class="summary-box"
+  style="
+    margin-top: 10px;
+  "
+>
+  <div class="detail-list__row">
+    <span>
+      Erro operacional
+    </span>
+
+    <strong>
+      {{
+        printerStatuses[
+          getPrinterKey(
+            printer
+          )
+        ]?.lastOperationError
+      }}
+    </strong>
+  </div>
+</div>
+
           <!-- =========================================== -->
-          <!-- AÇÕES DO AGENT                              -->
+          <!-- AÇÕES DOS AGENTS                            -->
           <!-- =========================================== -->
 
           <div
@@ -1609,7 +2791,11 @@ const cancel = () => {
                 loadAgents
               "
             >
-              Atualizar
+              {{
+                agentLoading
+                  ? 'Atualizando...'
+                  : 'Atualizar'
+              }}
             </button>
 
             <button
@@ -1670,7 +2856,7 @@ const cancel = () => {
         </div>
 
         <!-- ============================================= -->
-        <!-- CÓDIGO                                        -->
+        <!-- CÓDIGO DE PAREAMENTO                          -->
         <!-- ============================================= -->
 
         <div
@@ -1682,9 +2868,7 @@ const cancel = () => {
             margin-top: 16px;
           "
         >
-          <div
-            class="detail-list__row"
-          >
+          <div class="detail-list__row">
             <span>
               Código de conexão
             </span>
@@ -1701,9 +2885,7 @@ const cancel = () => {
             </strong>
           </div>
 
-          <div
-            class="detail-list__row"
-          >
+          <div class="detail-list__row">
             <span>
               Validade
             </span>
@@ -1715,6 +2897,14 @@ const cancel = () => {
               }}
             </strong>
           </div>
+
+          <p
+            style="
+              margin-top: 12px;
+            "
+          >
+            Abra o PrintFlow Agent no computador que possui acesso às impressoras e informe o código acima.
+          </p>
 
           <button
             type="button"
@@ -1754,12 +2944,12 @@ const cancel = () => {
           save(false)
         "
       >
-        <div
-          class="form-card"
-        >
-          <h2
-            class="form-card__title"
-          >
+        <!-- ============================================= -->
+        <!-- 1. IDENTIFICAÇÃO                              -->
+        <!-- ============================================= -->
+
+        <div class="form-card">
+          <h2 class="form-card__title">
             <UiIcon
               name="printer"
             />
@@ -1767,9 +2957,7 @@ const cancel = () => {
             1. Identificação
           </h2>
 
-          <div
-            class="form-grid"
-          >
+          <div class="form-grid">
             <div
               class="field col-5"
               data-field="name"
@@ -1863,9 +3051,7 @@ const cancel = () => {
               </small>
             </div>
 
-            <div
-              class="field col-4"
-            >
+            <div class="field col-4">
               <label>
                 Número de série
               </label>
@@ -1877,9 +3063,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-4"
-            >
+            <div class="field col-4">
               <label>
                 Código interno
               </label>
@@ -1896,12 +3080,12 @@ const cancel = () => {
           </div>
         </div>
 
-        <div
-          class="form-card"
-        >
-          <h2
-            class="form-card__title"
-          >
+        <!-- ============================================= -->
+        <!-- 2. AQUISIÇÃO                                  -->
+        <!-- ============================================= -->
+
+        <div class="form-card">
+          <h2 class="form-card__title">
             <UiIcon
               name="money"
             />
@@ -1909,12 +3093,8 @@ const cancel = () => {
             2. Aquisição
           </h2>
 
-          <div
-            class="form-grid"
-          >
-            <div
-              class="field col-4"
-            >
+          <div class="form-grid">
+            <div class="field col-4">
               <label>
                 Data de aquisição
               </label>
@@ -1927,9 +3107,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-4"
-            >
+            <div class="field col-4">
               <label>
                 Preço de compra
               </label>
@@ -1945,12 +3123,12 @@ const cancel = () => {
           </div>
         </div>
 
-        <div
-          class="form-card"
-        >
-          <h2
-            class="form-card__title"
-          >
+        <!-- ============================================= -->
+        <!-- 3. ESPECIFICAÇÕES                             -->
+        <!-- ============================================= -->
+
+        <div class="form-card">
+          <h2 class="form-card__title">
             <UiIcon
               name="settings"
             />
@@ -1958,9 +3136,7 @@ const cancel = () => {
             3. Especificações
           </h2>
 
-          <div
-            class="form-grid"
-          >
+          <div class="form-grid">
             <div
               class="field col-3"
               data-field="power"
@@ -1992,9 +3168,7 @@ const cancel = () => {
               </small>
             </div>
 
-            <div
-              class="field col-3"
-            >
+            <div class="field col-3">
               <label>
                 Consumo médio
               </label>
@@ -2008,9 +3182,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-2"
-            >
+            <div class="field col-2">
               <label>
                 X
               </label>
@@ -2023,9 +3195,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-2"
-            >
+            <div class="field col-2">
               <label>
                 Y
               </label>
@@ -2038,9 +3208,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-2"
-            >
+            <div class="field col-2">
               <label>
                 Z
               </label>
@@ -2053,9 +3221,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-3"
-            >
+            <div class="field col-3">
               <label>
                 Diâmetro do bico
               </label>
@@ -2069,9 +3235,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-4"
-            >
+            <div class="field col-4">
               <label>
                 Firmware
               </label>
@@ -2085,12 +3249,12 @@ const cancel = () => {
           </div>
         </div>
 
-        <div
-          class="form-card"
-        >
-          <h2
-            class="form-card__title"
-          >
+        <!-- ============================================= -->
+        <!-- 4. OPERAÇÃO                                   -->
+        <!-- ============================================= -->
+
+        <div class="form-card">
+          <h2 class="form-card__title">
             <UiIcon
               name="play"
             />
@@ -2098,12 +3262,8 @@ const cancel = () => {
             4. Operação
           </h2>
 
-          <div
-            class="form-grid"
-          >
-            <div
-              class="field col-3"
-            >
+          <div class="form-grid">
+            <div class="field col-3">
               <label>
                 Horas acumuladas
               </label>
@@ -2149,11 +3309,20 @@ const cancel = () => {
                   Inativa
                 </option>
               </select>
+
+              <small
+                v-if="
+                  errors.status
+                "
+                class="field__error"
+              >
+                {{
+                  errors.status
+                }}
+              </small>
             </div>
 
-            <div
-              class="field col-3"
-            >
+            <div class="field col-3">
               <label>
                 Localização
               </label>
@@ -2166,9 +3335,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-3"
-            >
+            <div class="field col-3">
               <label>
                 Filamento padrão
               </label>
@@ -2195,12 +3362,12 @@ const cancel = () => {
           </div>
         </div>
 
-        <div
-          class="form-card"
-        >
-          <h2
-            class="form-card__title"
-          >
+        <!-- ============================================= -->
+        <!-- 5. MANUTENÇÃO                                 -->
+        <!-- ============================================= -->
+
+        <div class="form-card">
+          <h2 class="form-card__title">
             <UiIcon
               name="wrench"
             />
@@ -2208,12 +3375,8 @@ const cancel = () => {
             5. Manutenção
           </h2>
 
-          <div
-            class="form-grid"
-          >
-            <div
-              class="field col-4"
-            >
+          <div class="form-grid">
+            <div class="field col-4">
               <label>
                 Última manutenção
               </label>
@@ -2226,9 +3389,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-4"
-            >
+            <div class="field col-4">
               <label>
                 Próxima manutenção
               </label>
@@ -2241,9 +3402,7 @@ const cancel = () => {
               >
             </div>
 
-            <div
-              class="field col-4"
-            >
+            <div class="field col-4">
               <label>
                 Intervalo recomendado
               </label>
@@ -2258,9 +3417,11 @@ const cancel = () => {
           </div>
         </div>
 
-        <div
-          class="form-actions"
-        >
+        <!-- ============================================= -->
+        <!-- BOTÕES                                        -->
+        <!-- ============================================= -->
+
+        <div class="form-actions">
           <button
             type="button"
             class="btn"
@@ -2305,13 +3466,13 @@ const cancel = () => {
         </div>
       </form>
 
+      <!-- ================================================= -->
+      <!-- LATERAL                                           -->
+      <!-- ================================================= -->
+
       <aside>
-        <div
-          class="detail-card"
-        >
-          <div
-            class="detail-card__head"
-          >
+        <div class="detail-card">
+          <div class="detail-card__head">
             <span
               class="product-thumb"
               style="
@@ -2363,9 +3524,7 @@ const cancel = () => {
             margin-top: 12px;
           "
         >
-          <div
-            class="field"
-          >
+          <div class="field">
             <label>
               Horas de impressão
             </label>
@@ -2378,12 +3537,8 @@ const cancel = () => {
             >
           </div>
 
-          <div
-            class="summary-box"
-          >
-            <div
-              class="detail-list__row"
-            >
+          <div class="summary-box">
+            <div class="detail-list__row">
               <span>
                 Potência
               </span>
@@ -2396,9 +3551,7 @@ const cancel = () => {
               </strong>
             </div>
 
-            <div
-              class="detail-list__row"
-            >
+            <div class="detail-list__row">
               <span>
                 Custo estimado
               </span>

@@ -3,14 +3,31 @@ import net from 'node:net'
 import axios from 'axios'
 
 // ======================================================
+// CONFIGURAÇÃO DE DESENVOLVIMENTO
+// ======================================================
+
+const isMockBambuEnabled = () => {
+  return (
+    String(
+      process.env.PRINTFLOW_DEV_MOCK_BAMBU || ''
+    ).toLowerCase() === 'true'
+  )
+}
+
+// ======================================================
 // DESCOBRIR INTERFACES DE REDE DO COMPUTADOR
 // ======================================================
 
 export const getLocalNetworks = () => {
-  const interfaces = os.networkInterfaces()
+  const interfaces =
+    os.networkInterfaces()
+
   const networks = []
 
-  for (const [name, addresses] of Object.entries(interfaces)) {
+  for (
+    const [name, addresses]
+    of Object.entries(interfaces)
+  ) {
     if (!addresses) {
       continue
     }
@@ -44,7 +61,8 @@ const checkPort = (
   timeout = 350
 ) => {
   return new Promise((resolve) => {
-    const socket = new net.Socket()
+    const socket =
+      new net.Socket()
 
     let finished = false
 
@@ -60,19 +78,30 @@ const checkPort = (
       resolve(result)
     }
 
-    socket.setTimeout(timeout)
+    socket.setTimeout(
+      timeout
+    )
 
-    socket.once('connect', () => {
-      finish(true)
-    })
+    socket.once(
+      'connect',
+      () => {
+        finish(true)
+      }
+    )
 
-    socket.once('timeout', () => {
-      finish(false)
-    })
+    socket.once(
+      'timeout',
+      () => {
+        finish(false)
+      }
+    )
 
-    socket.once('error', () => {
-      finish(false)
-    })
+    socket.once(
+      'error',
+      () => {
+        finish(false)
+      }
+    )
 
     socket.connect(
       port,
@@ -82,7 +111,7 @@ const checkPort = (
 }
 
 // ======================================================
-// TENTAR IDENTIFICAR MOONRAKER / KLIPPER
+// MOONRAKER / KLIPPER
 // ======================================================
 
 const detectMoonraker = async (
@@ -90,37 +119,55 @@ const detectMoonraker = async (
   port
 ) => {
   try {
-    const response = await axios.get(
-      `http://${ip}:${port}/server/info`,
-      {
-        timeout: 1000
-      }
-    )
+    const response =
+      await axios.get(
+        `http://${ip}:${port}/server/info`,
+        {
+          timeout: 1000
+        }
+      )
 
     if (
       response.data &&
-      typeof response.data === 'object'
+      typeof response.data ===
+        'object'
     ) {
       return {
-        connectionType: 'network',
-        protocol: 'moonraker',
-        software: 'Moonraker / Klipper',
+        connectionType:
+          'network',
+
+        protocol:
+          'moonraker',
+
+        software:
+          'Moonraker / Klipper',
+
+        manufacturer:
+          null,
+
         ip,
+
         port,
+
         name:
-          response.data?.result?.hostname ||
-          'Klipper'
+          response.data
+            ?.result
+            ?.hostname ||
+          'Klipper',
+
+        requiresCredentials:
+          false
       }
     }
   } catch {
-    // não é Moonraker
+    // Não é Moonraker.
   }
 
   return null
 }
 
 // ======================================================
-// TENTAR IDENTIFICAR OCTOPRINT
+// OCTOPRINT
 // ======================================================
 
 const detectOctoPrint = async (
@@ -128,21 +175,23 @@ const detectOctoPrint = async (
   port
 ) => {
   try {
-    const response = await axios.get(
-      `http://${ip}:${port}/api/version`,
-      {
-        timeout: 1000,
+    const response =
+      await axios.get(
+        `http://${ip}:${port}/api/version`,
+        {
+          timeout: 1000,
 
-        validateStatus:
-          status =>
-            status >= 200 &&
-            status < 500
-      }
-    )
+          validateStatus:
+            status =>
+              status >= 200 &&
+              status < 500
+        }
+      )
 
     const serverHeader =
       String(
-        response.headers?.server ||
+        response.headers
+          ?.server ||
         ''
       ).toLowerCase()
 
@@ -152,27 +201,46 @@ const detectOctoPrint = async (
       ).toLowerCase()
 
     if (
-      serverHeader.includes('octoprint') ||
-      dataText.includes('octoprint')
+      serverHeader.includes(
+        'octoprint'
+      ) ||
+      dataText.includes(
+        'octoprint'
+      )
     ) {
       return {
-        connectionType: 'network',
-        protocol: 'octoprint',
-        software: 'OctoPrint',
+        connectionType:
+          'network',
+
+        protocol:
+          'octoprint',
+
+        software:
+          'OctoPrint',
+
+        manufacturer:
+          null,
+
         ip,
+
         port,
-        name: 'OctoPrint'
+
+        name:
+          'OctoPrint',
+
+        requiresCredentials:
+          false
       }
     }
   } catch {
-    // não é OctoPrint
+    // Não é OctoPrint.
   }
 
   return null
 }
 
 // ======================================================
-// TENTAR IDENTIFICAR PRUSALINK
+// PRUSALINK
 // ======================================================
 
 const detectPrusaLink = async (
@@ -180,17 +248,18 @@ const detectPrusaLink = async (
   port
 ) => {
   try {
-    const response = await axios.get(
-      `http://${ip}:${port}/api/version`,
-      {
-        timeout: 1000,
+    const response =
+      await axios.get(
+        `http://${ip}:${port}/api/version`,
+        {
+          timeout: 1000,
 
-        validateStatus:
-          status =>
-            status >= 200 &&
-            status < 500
-      }
-    )
+          validateStatus:
+            status =>
+              status >= 200 &&
+              status < 500
+        }
+      )
 
     const headers =
       JSON.stringify(
@@ -203,60 +272,54 @@ const detectPrusaLink = async (
       ).toLowerCase()
 
     if (
-      headers.includes('prusa') ||
-      data.includes('prusalink') ||
-      data.includes('prusa')
+      headers.includes(
+        'prusa'
+      ) ||
+      data.includes(
+        'prusalink'
+      ) ||
+      data.includes(
+        'prusa'
+      )
     ) {
       return {
-        connectionType: 'network',
-        protocol: 'prusalink',
-        software: 'PrusaLink',
+        connectionType:
+          'network',
+
+        protocol:
+          'prusalink',
+
+        software:
+          'PrusaLink',
+
+        manufacturer:
+          'Prusa',
+
         ip,
+
         port,
-        name: 'Prusa'
+
+        name:
+          'Prusa',
+
+        requiresCredentials:
+          false
       }
     }
   } catch {
-    // não é PrusaLink
+    // Não é PrusaLink.
   }
 
   return null
 }
 
 // ======================================================
-// IDENTIFICAR SERVIÇO EM UM IP
+// CANDIDATO BAMBU
 // ======================================================
 
-const identifyPrinter = async (
+const createBambuCandidate = (
   ip
 ) => {
-  const commonPorts = [
-    80,
-    7125,
-    5000,
-    8883
-  ]
-
-  for (const port of commonPorts) {
-    const open =
-      await checkPort(
-        ip,
-        port
-      )
-
-    if (!open) {
-      continue
-    }
-
-    console.log(
-      `[Discovery] Porta aberta: ${ip}:${port}`
-    )
-
-    if (port === 8883) {
-  console.log(
-    `[Discovery] Possível Bambu Lab encontrada em ${ip}:8883`
-  )
-
   return {
     connectionType:
       'network',
@@ -284,9 +347,64 @@ const identifyPrinter = async (
     requiredCredentials: [
       'serial',
       'accessCode'
-    ]
+    ],
+
+    mock:
+      false
   }
 }
+
+// ======================================================
+// IDENTIFICAR SERVIÇO EM UM IP
+// ======================================================
+
+const identifyPrinter = async (
+  ip
+) => {
+  const commonPorts = [
+    80,
+    7125,
+    5000,
+    8883
+  ]
+
+  for (
+    const port
+    of commonPorts
+  ) {
+    const open =
+      await checkPort(
+        ip,
+        port
+      )
+
+    if (!open) {
+      continue
+    }
+
+    console.log(
+      `[Discovery] Porta aberta: ${ip}:${port}`
+    )
+
+    // ==================================================
+    // BAMBU
+    // ==================================================
+
+    if (
+      port === 8883
+    ) {
+      console.log(
+        `[Discovery] Possível Bambu Lab encontrada em ${ip}:8883`
+      )
+
+      return createBambuCandidate(
+        ip
+      )
+    }
+
+    // ==================================================
+    // MOONRAKER
+    // ==================================================
 
     const moonraker =
       await detectMoonraker(
@@ -298,6 +416,10 @@ const identifyPrinter = async (
       return moonraker
     }
 
+    // ==================================================
+    // OCTOPRINT
+    // ==================================================
+
     const octoprint =
       await detectOctoPrint(
         ip,
@@ -307,6 +429,10 @@ const identifyPrinter = async (
     if (octoprint) {
       return octoprint
     }
+
+    // ==================================================
+    // PRUSALINK
+    // ==================================================
 
     const prusaLink =
       await detectPrusaLink(
@@ -325,11 +451,15 @@ const identifyPrinter = async (
 // ======================================================
 // PEGAR PREFIXO DA REDE
 //
-// exemplo:
 // 192.168.2.179
 //
 // vira:
+//
 // 192.168.2
+//
+// ATENÇÃO:
+// Esta versão ainda assume rede /24.
+// Depois vamos calcular pela netmask.
 // ======================================================
 
 const getNetworkPrefix = (
@@ -338,11 +468,17 @@ const getNetworkPrefix = (
   const parts =
     address.split('.')
 
-  if (parts.length !== 4) {
+  if (
+    parts.length !== 4
+  ) {
     return null
   }
 
-  return `${parts[0]}.${parts[1]}.${parts[2]}`
+  return (
+    `${parts[0]}.` +
+    `${parts[1]}.` +
+    `${parts[2]}`
+  )
 }
 
 // ======================================================
@@ -362,14 +498,17 @@ const scanNetworkRange = async (
   }
 
   console.log('')
+
   console.log(
     `[Discovery] Escaneando rede ${prefix}.1 - ${prefix}.254`
   )
 
   const printers = []
 
-  // Fazemos em pequenos grupos para não abrir
-  // 254 conexões ao mesmo tempo.
+  /*
+   * Fazemos em pequenos grupos para evitar
+   * abrir 254 conexões simultaneamente.
+   */
 
   const batchSize = 20
 
@@ -381,8 +520,8 @@ const scanNetworkRange = async (
     const end =
       Math.min(
         start +
-        batchSize -
-        1,
+          batchSize -
+          1,
         254
       )
 
@@ -396,14 +535,19 @@ const scanNetworkRange = async (
       const ip =
         `${prefix}.${host}`
 
+      // Não precisamos testar o próprio PC.
+
       if (
-        ip === network.address
+        ip ===
+        network.address
       ) {
         continue
       }
 
       tasks.push(
-        identifyPrinter(ip)
+        identifyPrinter(
+          ip
+        )
       )
     }
 
@@ -412,35 +556,50 @@ const scanNetworkRange = async (
         tasks
       )
 
-    for (const result of results) {
-      if (result) {
-        const alreadyExists =
-          printers.some(
-            printer =>
-              printer.ip === result.ip &&
-              printer.protocol ===
-                result.protocol
-          )
-
-        if (!alreadyExists) {
-          printers.push(
-            result
-          )
-
-          console.log('')
-          console.log(
-            '[Discovery] Impressora encontrada!'
-          )
-
-          console.log(
-            `- IP: ${result.ip}`
-          )
-
-          console.log(
-            `- Tipo: ${result.software}`
-          )
-        }
+    for (
+      const result
+      of results
+    ) {
+      if (!result) {
+        continue
       }
+
+      const alreadyExists =
+        printers.some(
+          printer =>
+            printer.ip ===
+              result.ip &&
+            printer.protocol ===
+              result.protocol
+        )
+
+      if (
+        alreadyExists
+      ) {
+        continue
+      }
+
+      printers.push(
+        result
+      )
+
+      console.log('')
+
+      console.log(
+        '[Discovery] Impressora encontrada!'
+      )
+
+      console.log(
+        `- IP: ${result.ip}`
+      )
+
+      console.log(
+        `- Tipo: ${result.software}`
+      )
+
+      console.log(
+        `- Protocolo: ${result.protocol}`
+      )
     }
   }
 
@@ -448,7 +607,105 @@ const scanNetworkRange = async (
 }
 
 // ======================================================
-// SCANNER PRINCIPAL DE REDE
+// BAMBU SIMULADA PARA DESENVOLVIMENTO
+// ======================================================
+
+const addMockBambu = (
+  printers
+) => {
+  if (
+    !isMockBambuEnabled()
+  ) {
+    return
+  }
+
+  const mockIp =
+    '192.168.2.250'
+
+  const alreadyExists =
+    printers.some(
+      printer =>
+        printer.protocol ===
+          'bambu' &&
+        printer.ip ===
+          mockIp
+    )
+
+  if (
+    alreadyExists
+  ) {
+    return
+  }
+
+  const mockPrinter = {
+    connectionType:
+      'network',
+
+    protocol:
+      'bambu',
+
+    software:
+      'Bambu Lab',
+
+    manufacturer:
+      'Bambu Lab',
+
+    name:
+      'Bambu Lab - Ambiente de Teste',
+
+    ip:
+      mockIp,
+
+    port:
+      8883,
+
+    requiresCredentials:
+      true,
+
+    requiredCredentials: [
+      'serial',
+      'accessCode'
+    ],
+
+    mock:
+      true
+  }
+
+  printers.push(
+    mockPrinter
+  )
+
+  console.log('')
+
+  console.log(
+    '================================='
+  )
+
+  console.log(
+    '       BAMBU MOCK - DEV'
+  )
+
+  console.log(
+    '================================='
+  )
+
+  console.log(
+    '[DEV] Bambu simulada adicionada à descoberta.'
+  )
+
+  console.log(
+    `[DEV] IP: ${mockPrinter.ip}`
+  )
+
+  console.log(
+    `[DEV] Porta: ${mockPrinter.port}`
+  )
+
+  console.log('')
+}
+
+// ======================================================
+// SCANNER PRINCIPAL
 // ======================================================
 
 export const scanNetwork = async () => {
@@ -456,11 +713,23 @@ export const scanNetwork = async () => {
     getLocalNetworks()
 
   console.log('')
+
   console.log(
     '[Discovery] Interfaces de rede encontradas:'
   )
 
-  for (const network of networks) {
+  if (
+    networks.length === 0
+  ) {
+    console.log(
+      '[Discovery] Nenhuma interface IPv4 disponível.'
+    )
+  }
+
+  for (
+    const network
+    of networks
+  ) {
     console.log(
       `- ${network.interface}: ${network.address}`
     )
@@ -468,7 +737,14 @@ export const scanNetwork = async () => {
 
   const printers = []
 
-  for (const network of networks) {
+  // ====================================================
+  // DESCOBERTA REAL
+  // ====================================================
+
+  for (
+    const network
+    of networks
+  ) {
     const found =
       await scanNetworkRange(
         network
@@ -478,6 +754,14 @@ export const scanNetwork = async () => {
       ...found
     )
   }
+
+  // ====================================================
+  // MOCK SOMENTE SE HABILITADO
+  // ====================================================
+
+  addMockBambu(
+    printers
+  )
 
   return printers
 }

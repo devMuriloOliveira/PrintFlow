@@ -1,22 +1,33 @@
-import { sendJson } from '../http/response.js'
-import { enterRequest } from '../http/rateLimit.js'
-import { 
-  handleLogin, 
-  handleLogout, 
-  handleMe, 
-  handleRefresh, 
-  handleRegister, 
-  getAuthUser 
+import {
+  sendJson
+} from '../http/response.js'
+
+import {
+  enterRequest
+} from '../http/rateLimit.js'
+
+import {
+  handleLogin,
+  handleLogout,
+  handleMe,
+  handleRefresh,
+  handleRegister,
+  getAuthUser
 } from './auth.js'
-import { env } from '../config/env.js'
-import { 
+
+import {
+  env
+} from '../config/env.js'
+
+import {
   handleProductCreate,
-  handleResourceCreate, 
-  handleResourceDelete, 
-  handleResourceRead, 
-  handleResourceUpdate, 
+  handleResourceCreate,
+  handleResourceDelete,
+  handleResourceRead,
+  handleResourceUpdate,
   readRoutes
- } from './resources.js'
+} from './resources.js'
+
 import {
   handleAmazonWebhook,
   handleIntegrationCreate,
@@ -24,145 +35,379 @@ import {
   handleMercadoLivreWebhook,
   handleShopeeWebhook
 } from './integrations.js'
-import { 
-  handleAgentPair, 
+
+import {
+  handleAgentPair,
   handleAgentPairingCodeCreate,
   handleAgentVerify,
-  handleAgentHeartbeat, 
+  handleAgentHeartbeat,
   handleAgentsList,
   handleAgentDiscoverCreate,
   handleAgentCommandsPending,
   handleAgentCommandComplete,
   handleAgentCommandGet,
-  handleAgentConnectPrinterCreate
+  handleAgentConnectPrinterCreate,
+  handleAgentPrinterStatusCreate,
+  handleAgentPrinterControlCreate,
+  handleAgentPrintersList
 } from './agents.js'
 
-export const handleRequest = async (req, res) => {
-  try {
-    const url = new URL(req.url || '/', `http://${req.headers.host}`)
+// ======================================================
+// REQUEST HANDLER
+// ======================================================
 
-    if (req.method === 'OPTIONS') {
-      return sendJson(res, 204, null)
-    }
+export const handleRequest =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const url =
+        new URL(
+          req.url ||
+            '/',
 
-    const limit = enterRequest(req, url.pathname)
-    if (!limit.allowed) {
-      return sendJson(res, limit.status, limit.body, limit.headers)
-    }
+          `http://${req.headers.host}`
+        )
 
-    res.once('finish', limit.release)
-    res.once('close', limit.release)
+      // ==================================================
+      // CORS / OPTIONS
+      // ==================================================
 
-    if (req.method === 'GET' && url.pathname === '/') {
-      return sendJson(res, 200, {
-        name: 'PrintFlow API',
-        status: 'ok',
-        endpoints: Object.keys(readRoutes)
-      })
-    }
+      if (
+        req.method ===
+        'OPTIONS'
+      ) {
+        return sendJson(
+          res,
+          204,
+          null
+        )
+      }
 
-    if (req.method === 'GET' && url.pathname === '/healthz') {
-      return sendJson(res, 200, { status: 'ok' })
-    }
+      // ==================================================
+      // RATE LIMIT
+      // ==================================================
 
-    if (req.method === 'POST' && url.pathname === '/api/auth/register') {
-      return await handleRegister(req, res)
-    }
+      const limit =
+        enterRequest(
+          req,
+          url.pathname
+        )
 
-    if (req.method === 'POST' && url.pathname === '/api/auth/login') {
-      return await handleLogin(req, res)
-    }
+      if (
+        !limit.allowed
+      ) {
+        return sendJson(
+          res,
+          limit.status,
+          limit.body,
+          limit.headers
+        )
+      }
 
-    if (req.method === 'POST' && url.pathname === '/api/auth/refresh') {
-      return await handleRefresh(req, res)
-    }
+      res.once(
+        'finish',
+        limit.release
+      )
 
-    if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
-      return await handleLogout(req, res)
-    }
+      res.once(
+        'close',
+        limit.release
+      )
 
-    if (req.method === 'POST' && url.pathname === '/webhooks/mercadolivre') {
-      return await handleMercadoLivreWebhook(req, res)
-    }
+      // ==================================================
+      // HEALTH
+      // ==================================================
 
-    if (req.method === 'POST' && url.pathname === '/webhooks/shopee') {
-      return await handleShopeeWebhook(req, res)
-    }
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/'
+      ) {
+        return sendJson(
+          res,
+          200,
+          {
+            name:
+              'PrintFlow API',
 
-    if (req.method === 'POST' && url.pathname === '/webhooks/amazon') {
-      return await handleAmazonWebhook(req, res)
-    }
+            status:
+              'ok',
 
-    if (req.method === 'GET' && url.pathname === '/api/auth/me') {
-      return await handleMe(req, res)
-    }
-    
-    if (req.method === 'POST' && url.pathname === '/api/agents/pair') {
-     return await handleAgentPair(req, res)
-    }
+            endpoints:
+              Object.keys(
+                readRoutes
+              )
+          }
+        )
+      }
 
-    if (req.method === 'POST' && url.pathname === '/api/agents/verify') {
-      return await handleAgentVerify(req, res)
-    }
-    
-    if (req.method === 'POST' && url.pathname === '/api/agents/heartbeat') {
-      return await handleAgentHeartbeat(req, res)
-    }
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/healthz'
+      ) {
+        return sendJson(
+          res,
+          200,
+          {
+            status:
+              'ok'
+          }
+        )
+      }
 
-    if (req.method === 'GET' && url.pathname === '/api/agents/commands/pending') {
-      return await handleAgentCommandsPending(req, res)
-    }   
+      // ==================================================
+      // AUTH
+      // ==================================================
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/auth/register'
+      ) {
+        return await handleRegister(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/auth/login'
+      ) {
+        return await handleLogin(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/auth/refresh'
+      ) {
+        return await handleRefresh(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/auth/logout'
+      ) {
+        return await handleLogout(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/auth/me'
+      ) {
+        return await handleMe(
+          req,
+          res
+        )
+      }
+
+      // ==================================================
+      // WEBHOOKS
+      // ==================================================
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/webhooks/mercadolivre'
+      ) {
+        return await handleMercadoLivreWebhook(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/webhooks/shopee'
+      ) {
+        return await handleShopeeWebhook(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/webhooks/amazon'
+      ) {
+        return await handleAmazonWebhook(
+          req,
+          res
+        )
+      }
+
+      // ==================================================
+      // ROTAS PÚBLICAS DO AGENT
+      // ==================================================
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/agents/pair'
+      ) {
+        return await handleAgentPair(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/agents/verify'
+      ) {
+        return await handleAgentVerify(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/agents/heartbeat'
+      ) {
+        return await handleAgentHeartbeat(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/agents/commands/pending'
+      ) {
+        return await handleAgentCommandsPending(
+          req,
+          res
+        )
+      }
 
       const agentCommandCompleteMatch =
         url.pathname.match(
           /^\/api\/agents\/commands\/([^/]+)\/complete$/
         )
 
-          if (
-            req.method === 'POST' &&
-            agentCommandCompleteMatch
-            ) {
-            const commandId =
-              agentCommandCompleteMatch[1]
+      if (
+        req.method ===
+          'POST' &&
+        agentCommandCompleteMatch
+      ) {
+        const commandId =
+          agentCommandCompleteMatch[1]
 
         return await handleAgentCommandComplete(
           req,
           res,
           commandId
         )
-      }    
-                const isPublicAgentRoute =
+      }
+
+      // ==================================================
+      // DEFINIR ROTAS PÚBLICAS DO AGENT
+      // ==================================================
+
+      const isPublicAgentRoute =
+        (
+          req.method ===
+            'POST' &&
           (
-            req.method === 'POST' &&
-            (
-              url.pathname === '/api/agents/pair' ||
-              url.pathname === '/api/agents/verify' ||
-              url.pathname === '/api/agents/heartbeat' ||
-              /^\/api\/agents\/commands\/[^/]+\/complete$/.test(
-                url.pathname
-              )
+            url.pathname ===
+              '/api/agents/pair' ||
+
+            url.pathname ===
+              '/api/agents/verify' ||
+
+            url.pathname ===
+              '/api/agents/heartbeat' ||
+
+            /^\/api\/agents\/commands\/[^/]+\/complete$/.test(
+              url.pathname
             )
-          ) ||
-          (
-            req.method === 'GET' &&
-            url.pathname === '/api/agents/commands/pending'
           )
-    const isProtectedApi =
-      url.pathname.startsWith('/api/') &&
-        !url.pathname.startsWith('/api/auth/') &&
-          !isPublicAgentRoute
+        ) ||
+        (
+          req.method ===
+            'GET' &&
+          url.pathname ===
+            '/api/agents/commands/pending'
+        )
 
-     if (isProtectedApi && !env.allowDemoTenant && !(await getAuthUser(req))) {
-      return sendJson(res, 401, { error: 'Login necessario' })
-    }
+      // ==================================================
+      // PROTEGER /api/*
+      // ==================================================
 
-     const agentCommandGetMatch =
+      const isProtectedApi =
+        url.pathname.startsWith(
+          '/api/'
+        ) &&
+        !url.pathname.startsWith(
+          '/api/auth/'
+        ) &&
+        !isPublicAgentRoute
+
+      if (
+        isProtectedApi &&
+        !env.allowDemoTenant &&
+        !(await getAuthUser(
+          req
+        ))
+      ) {
+        return sendJson(
+          res,
+          401,
+          {
+            error:
+              'Login necessario'
+          }
+        )
+      }
+
+      // ==================================================
+      // CONSULTAR RESULTADO DE COMANDO
+      // ==================================================
+
+      const agentCommandGetMatch =
         url.pathname.match(
           /^\/api\/agent-commands\/([^/]+)$/
         )
 
       if (
-        req.method === 'GET' &&
+        req.method ===
+          'GET' &&
         agentCommandGetMatch
       ) {
         const commandId =
@@ -173,89 +418,405 @@ export const handleRequest = async (req, res) => {
           res,
           commandId
         )
-      } 
+      }
 
-    const agentDiscoverMatch =
-      url.pathname.match(/^\/api\/agents\/([^/]+)\/discover$/)
+      // ==================================================
+      // DESCOBRIR IMPRESSORAS
+      // ==================================================
 
-    if (req.method === 'POST' && agentDiscoverMatch) {
-      const agentId = agentDiscoverMatch[1]
+      const agentDiscoverMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/discover$/
+        )
 
-      return await handleAgentDiscoverCreate(
-        req,
+      if (
+        req.method ===
+          'POST' &&
+        agentDiscoverMatch
+      ) {
+        const agentId =
+          agentDiscoverMatch[1]
+
+        return await handleAgentDiscoverCreate(
+          req,
+          res,
+          agentId
+        )
+      }
+
+      // ==================================================
+      // CONECTAR IMPRESSORA
+      // ==================================================
+
+      const agentConnectPrinterMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/connect-printer$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentConnectPrinterMatch
+      ) {
+        const agentId =
+          agentConnectPrinterMatch[1]
+
+        return await handleAgentConnectPrinterCreate(
+          req,
+          res,
+          agentId
+        )
+      }
+
+      // ==================================================
+      // LISTAR IMPRESSORAS REGISTRADAS DO AGENT
+      // ==================================================
+
+      const agentPrintersListMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printers$/
+        )
+
+      if (
+        req.method ===
+          'GET' &&
+        agentPrintersListMatch
+      ) {
+        const agentId =
+          agentPrintersListMatch[1]
+
+        return await handleAgentPrintersList(
+          req,
+          res,
+          agentId
+        )
+      }
+
+      // ==================================================
+      // STATUS DA IMPRESSORA
+      // ==================================================
+
+      const agentPrinterStatusMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-status$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterStatusMatch
+      ) {
+        const agentId =
+          agentPrinterStatusMatch[1]
+
+        return await handleAgentPrinterStatusCreate(
+          req,
+          res,
+          agentId
+        )
+      }
+
+      // ==================================================
+      // PAUSAR IMPRESSÃO
+      // ==================================================
+
+      const agentPrinterPauseMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-pause$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterPauseMatch
+      ) {
+        const agentId =
+          agentPrinterPauseMatch[1]
+
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentId,
+          'pause'
+        )
+      }
+
+      // ==================================================
+      // RETOMAR IMPRESSÃO
+      // ==================================================
+
+      const agentPrinterResumeMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-resume$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterResumeMatch
+      ) {
+        const agentId =
+          agentPrinterResumeMatch[1]
+
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentId,
+          'resume'
+        )
+      }
+
+      // ==================================================
+      // CANCELAR IMPRESSÃO
+      // ==================================================
+
+      const agentPrinterCancelMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-cancel$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterCancelMatch
+      ) {
+        const agentId =
+          agentPrinterCancelMatch[1]
+
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentId,
+          'cancel'
+        )
+      }
+
+      // ==================================================
+      // LISTAR AGENTS
+      // ==================================================
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/agents'
+      ) {
+        return await handleAgentsList(
+          req,
+          res
+        )
+      }
+
+      // ==================================================
+      // GERAR CÓDIGO DE PAREAMENTO
+      // ==================================================
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/agents/pairing-code'
+      ) {
+        return await handleAgentPairingCodeCreate(
+          req,
+          res
+        )
+      }
+
+      // ==================================================
+      // READ ROUTES
+      // ==================================================
+
+      if (
+        req.method ===
+          'GET' &&
+        readRoutes[
+          url.pathname
+        ]
+      ) {
+        return sendJson(
+          res,
+          200,
+          await readRoutes[
+            url.pathname
+          ](
+            req
+          )
+        )
+      }
+
+      // ==================================================
+      // INTEGRAÇÕES
+      // ==================================================
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/marketplace-integrations'
+      ) {
+        return await handleIntegrationsList(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/marketplace-integrations'
+      ) {
+        return await handleIntegrationCreate(
+          req,
+          res
+        )
+      }
+
+      // ==================================================
+      // PRODUTOS
+      // ==================================================
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/products'
+      ) {
+        return await handleProductCreate(
+          req,
+          res
+        )
+      }
+
+      // ==================================================
+      // RESOURCES GENÉRICOS
+      // ==================================================
+
+      const resourceMatch =
+        url.pathname.match(
+          /^\/api\/([a-z-]+)(?:\/([^/]+))?$/
+        )
+
+      if (
+        resourceMatch
+      ) {
+        const [
+          ,
+          resource,
+          id
+        ] =
+          resourceMatch
+
+        if (
+          req.method ===
+            'GET' &&
+          id
+        ) {
+          return await handleResourceRead(
+            req,
+            res,
+            resource,
+            id
+          )
+        }
+
+        if (
+          req.method ===
+            'POST' &&
+          !id
+        ) {
+          return await handleResourceCreate(
+            req,
+            res,
+            resource
+          )
+        }
+
+        if (
+          req.method ===
+            'PUT' &&
+          id
+        ) {
+          return await handleResourceUpdate(
+            req,
+            res,
+            resource,
+            id
+          )
+        }
+
+        if (
+          req.method ===
+            'DELETE' &&
+          id
+        ) {
+          return await handleResourceDelete(
+            req,
+            res,
+            resource,
+            id
+          )
+        }
+      }
+
+      // ==================================================
+      // 404
+      // ==================================================
+
+      return sendJson(
         res,
-        agentId
+        404,
+        {
+          error:
+            'Endpoint nao encontrado'
+        }
+      )
+    } catch (
+      error
+    ) {
+      const expectedClientErrors =
+        new Set([
+          'Registro nao encontrado',
+          'E-mail ou senha invalidos.',
+          'Refresh token invalido.',
+          'Refresh token reutilizado.'
+        ])
+
+      const status =
+        error.message ===
+        'Registro nao encontrado'
+          ? 404
+          : 400
+
+      if (
+        !expectedClientErrors.has(
+          error.message
+        )
+      ) {
+        console.error(
+          'Erro ao processar requisicao',
+          {
+            method:
+              req.method,
+
+            url:
+              req.url,
+
+            message:
+              error.message
+          }
+        )
+      }
+
+      return sendJson(
+        res,
+        status,
+        {
+          error:
+            error.message ||
+            'Requisicao invalida'
+        }
       )
     }
-
-    if (req.method === 'GET' && url.pathname === '/api/agents') {
-      return await handleAgentsList(req, res)
-    } 
-
-    if (req.method === 'POST' && url.pathname === '/api/agents/pairing-code') {
-      return await handleAgentPairingCodeCreate(req, res)
-    }
-
-    if (req.method === 'GET' && readRoutes[url.pathname]) {
-      return sendJson(res, 200, await readRoutes[url.pathname](req))
-    }
-
-    if (req.method === 'GET' && url.pathname === '/api/marketplace-integrations') {
-      return await handleIntegrationsList(req, res)
-    }
-
-    if (req.method === 'POST' && url.pathname === '/api/marketplace-integrations') {
-      return await handleIntegrationCreate(req, res)
-    }
-
-    if (req.method === 'POST' && url.pathname === '/api/products') {
-      return await handleProductCreate(req, res)
-    }
-
-    const agentConnectPrinterMatch =
-  url.pathname.match(
-    /^\/api\/agents\/([^/]+)\/connect-printer$/
-  )
-
-if (
-  req.method === 'POST' &&
-  agentConnectPrinterMatch
-) {
-  const agentId =
-    agentConnectPrinterMatch[1]
-
-  return await handleAgentConnectPrinterCreate(
-    req,
-    res,
-    agentId
-  )
-}
-
-    const resourceMatch = url.pathname.match(/^\/api\/([a-z-]+)(?:\/([^/]+))?$/)
-    if (resourceMatch) {
-      const [, resource, id] = resourceMatch
-      if (req.method === 'GET' && id) return await handleResourceRead(req, res, resource, id)
-      if (req.method === 'POST' && !id) return await handleResourceCreate(req, res, resource)
-      if (req.method === 'PUT' && id) return await handleResourceUpdate(req, res, resource, id)
-      if (req.method === 'DELETE' && id) return await handleResourceDelete(req, res, resource, id)
-    }
-
-    return sendJson(res, 404, { error: 'Endpoint nao encontrado' })
-  } catch (error) {
-    const expectedClientErrors = new Set([
-      'Registro nao encontrado',
-      'E-mail ou senha invalidos.',
-      'Refresh token invalido.',
-      'Refresh token reutilizado.'
-    ])
-    const status = error.message === 'Registro nao encontrado' ? 404 : 400
-    if (!expectedClientErrors.has(error.message)) {
-      console.error('Erro ao processar requisicao', {
-        method: req.method,
-        url: req.url,
-        message: error.message
-      })
-    }
-    return sendJson(res, status, { error: error.message || 'Requisicao invalida' })
   }
-}

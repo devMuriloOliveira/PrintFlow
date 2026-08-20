@@ -5,8 +5,12 @@ import mqtt from 'mqtt'
 // ======================================================
 
 const DEFAULT_PORT = 8883
-const CONNECT_TIMEOUT = 8_000
-const STATUS_TIMEOUT = 8_000
+
+const CONNECT_TIMEOUT =
+  8_000
+
+const STATUS_TIMEOUT =
+  8_000
 
 // ======================================================
 // AUXILIARES
@@ -17,16 +21,22 @@ const requireValue = (
   message
 ) => {
   const normalized =
-    String(value || '').trim()
+    String(
+      value || ''
+    ).trim()
 
   if (!normalized) {
-    throw new Error(message)
+    throw new Error(
+      message
+    )
   }
 
   return normalized
 }
 
-const getTopics = (serial) => ({
+const getTopics = (
+  serial
+) => ({
   report:
     `device/${serial}/report`,
 
@@ -34,9 +44,13 @@ const getTopics = (serial) => ({
     `device/${serial}/request`
 })
 
-const safeJsonParse = (value) => {
+const safeJsonParse = (
+  value
+) => {
   try {
-    return JSON.parse(value)
+    return JSON.parse(
+      value
+    )
   } catch {
     return null
   }
@@ -54,22 +68,26 @@ const normalizeStatus = (
     payload?.print || {}
 
   return {
-    connected: true,
+    connected:
+      true,
 
-    protocol: 'bambu',
+    protocol:
+      'bambu',
 
     manufacturer:
       'Bambu Lab',
 
     name:
-      printer.name ||
+      printer?.name ||
       'Bambu Lab',
 
     serial:
-      printer.serial,
+      printer?.serial ||
+      null,
 
     ip:
-      printer.ip,
+      printer?.ip ||
+      null,
 
     state:
       print.gcode_state ||
@@ -78,7 +96,9 @@ const normalizeStatus = (
 
     progress:
       Number.isFinite(
-        Number(print.mc_percent)
+        Number(
+          print.mc_percent
+        )
       )
         ? Number(
             print.mc_percent
@@ -208,6 +228,7 @@ const createClient = (
     `mqtts://${ip}:${port}`
 
   console.log('')
+
   console.log(
     `[Bambu] Preparando conexão com ${ip}:${port}`
   )
@@ -216,7 +237,12 @@ const createClient = (
     `[Bambu] Serial: ${serial}`
   )
 
-  // NÃO mostramos accessCode no log.
+  /*
+   * IMPORTANTE:
+   *
+   * Nunca registrar accessCode
+   * em logs.
+   */
 
   const client =
     mqtt.connect(
@@ -249,16 +275,16 @@ const createClient = (
             .slice(2)}`,
 
         /*
-         * A conexão LAN da Bambu usa TLS,
-         * mas o certificado da impressora
-         * normalmente não está na trust store
-         * padrão do Node.
+         * A Bambu utiliza MQTT sobre TLS.
          *
-         * Para o MVP local permitimos a
-         * conexão. Antes de produção, vamos
-         * evoluir isso para validação/pinning
-         * de certificado.
+         * Para o nosso MVP local estamos
+         * permitindo certificado não
+         * reconhecido pela trust store.
+         *
+         * Antes de produção devemos
+         * implementar validação/pinning.
          */
+
         rejectUnauthorized:
           false
       }
@@ -270,31 +296,36 @@ const createClient = (
     serial,
 
     topics:
-      getTopics(serial)
+      getTopics(
+        serial
+      )
   }
 }
 
 // ======================================================
-// AGUARDAR CONEXÃO
+// AGUARDAR CONEXÃO MQTT
 // ======================================================
 
 const waitForConnection = (
   client
 ) => {
   return new Promise(
-    (resolve, reject) => {
-      let finished = false
+    (
+      resolve,
+      reject
+    ) => {
+      let finished =
+        false
 
-      const finish = (
-        error = null
-      ) => {
-        if (finished) {
-          return
+      let timeout =
+        null
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(
+            timeout
+          )
         }
-
-        finished = true
-
-        clearTimeout(timeout)
 
         client.removeListener(
           'connect',
@@ -305,35 +336,44 @@ const waitForConnection = (
           'error',
           onError
         )
+      }
+
+      const finish = (
+        error = null
+      ) => {
+        if (finished) {
+          return
+        }
+
+        finished =
+          true
+
+        cleanup()
 
         if (error) {
-          reject(error)
-        } else {
-          resolve(true)
+          reject(
+            error
+          )
+
+          return
         }
-      }
 
-      const onConnect = () => {
-        finish()
-      }
-
-      const onError = (
-        error
-      ) => {
-        finish(error)
-      }
-
-      const timeout =
-        setTimeout(
-          () => {
-            finish(
-              new Error(
-                'Tempo esgotado ao conectar na Bambu.'
-              )
-            )
-          },
-          CONNECT_TIMEOUT
+        resolve(
+          true
         )
+      }
+
+      const onConnect =
+        () => {
+          finish()
+        }
+
+      const onError =
+        error => {
+          finish(
+            error
+          )
+        }
 
       client.once(
         'connect',
@@ -344,12 +384,24 @@ const waitForConnection = (
         'error',
         onError
       )
+
+      timeout =
+        setTimeout(
+          () => {
+            finish(
+              new Error(
+                'Tempo esgotado ao conectar na Bambu.'
+              )
+            )
+          },
+          CONNECT_TIMEOUT
+        )
     }
   )
 }
 
 // ======================================================
-// ASSINAR STATUS
+// ASSINAR TELEMETRIA
 // ======================================================
 
 const subscribeReport = (
@@ -357,7 +409,10 @@ const subscribeReport = (
   topic
 ) => {
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
       client.subscribe(
         topic,
         {
@@ -365,11 +420,16 @@ const subscribeReport = (
         },
         error => {
           if (error) {
-            reject(error)
+            reject(
+              error
+            )
+
             return
           }
 
-          resolve(true)
+          resolve(
+            true
+          )
         }
       )
     }
@@ -377,7 +437,7 @@ const subscribeReport = (
 }
 
 // ======================================================
-// PUBLICAR COMANDO
+// PUBLICAR JSON
 // ======================================================
 
 const publishJson = (
@@ -387,7 +447,23 @@ const publishJson = (
   qos = 0
 ) => {
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
+      if (
+        !client ||
+        !client.connected
+      ) {
+        reject(
+          new Error(
+            'Cliente MQTT não está conectado.'
+          )
+        )
+
+        return
+      }
+
       client.publish(
         topic,
         JSON.stringify(
@@ -398,11 +474,16 @@ const publishJson = (
         },
         error => {
           if (error) {
-            reject(error)
+            reject(
+              error
+            )
+
             return
           }
 
-          resolve(true)
+          resolve(
+            true
+          )
         }
       )
     }
@@ -410,7 +491,7 @@ const publishJson = (
 }
 
 // ======================================================
-// PEDIR STATUS COMPLETO
+// SOLICITAR STATUS COMPLETO
 // ======================================================
 
 const requestFullStatus = async (
@@ -422,7 +503,9 @@ const requestFullStatus = async (
     {
       pushing: {
         sequence_id:
-          String(Date.now()),
+          String(
+            Date.now()
+          ),
 
         command:
           'pushall',
@@ -437,23 +520,37 @@ const requestFullStatus = async (
   )
 }
 
-// O comando pushall é útil principalmente para
-// obter um snapshot completo de status em modelos
-// que enviam apenas alterações incrementais.
-// A documentação comunitária do protocolo recomenda
-// não dispará-lo com alta frequência em P1.
-
 // ======================================================
-// AGUARDAR PRIMEIRO STATUS
+// AGUARDAR STATUS
 // ======================================================
 
 const waitForStatus = (
-  connection,
-  printer
+  connection
 ) => {
   return new Promise(
-    (resolve, reject) => {
-      let finished = false
+    (
+      resolve,
+      reject
+    ) => {
+      let finished =
+        false
+
+      let timeout =
+        null
+
+      const cleanup = () => {
+        if (timeout) {
+          clearTimeout(
+            timeout
+          )
+        }
+
+        connection.client
+          .removeListener(
+            'message',
+            onMessage
+          )
+      }
 
       const finish = (
         error,
@@ -463,21 +560,22 @@ const waitForStatus = (
           return
         }
 
-        finished = true
+        finished =
+          true
 
-        clearTimeout(timeout)
-
-        connection.client.removeListener(
-          'message',
-          onMessage
-        )
+        cleanup()
 
         if (error) {
-          reject(error)
+          reject(
+            error
+          )
+
           return
         }
 
-        resolve(result)
+        resolve(
+          result
+        )
       }
 
       const onMessage = (
@@ -486,7 +584,9 @@ const waitForStatus = (
       ) => {
         if (
           topic !==
-          connection.topics.report
+          connection
+            .topics
+            .report
         ) {
           return
         }
@@ -504,12 +604,17 @@ const waitForStatus = (
           null,
           normalizeStatus(
             payload,
-            printer
+            connection.printer
           )
         )
       }
 
-      const timeout =
+      connection.client.on(
+        'message',
+        onMessage
+      )
+
+      timeout =
         setTimeout(
           () => {
             finish(
@@ -520,17 +625,12 @@ const waitForStatus = (
           },
           STATUS_TIMEOUT
         )
-
-      connection.client.on(
-        'message',
-        onMessage
-      )
     }
   )
 }
 
 // ======================================================
-// ENCERRAR CLIENTE
+// ENCERRAR MQTT
 // ======================================================
 
 const closeClient = (
@@ -540,6 +640,7 @@ const closeClient = (
     resolve => {
       if (!client) {
         resolve()
+
         return
       }
 
@@ -559,7 +660,25 @@ const closeClient = (
 }
 
 // ======================================================
-// ADAPTER
+// VALIDAR CONEXÃO ATIVA
+// ======================================================
+
+const requireConnection = (
+  connection
+) => {
+  if (
+    !connection?.client ||
+    !connection.connected ||
+    !connection.client.connected
+  ) {
+    throw new Error(
+      'Bambu não está conectada.'
+    )
+  }
+}
+
+// ======================================================
+// ADAPTER BAMBU
 // ======================================================
 
 export const bambuAdapter = {
@@ -574,16 +693,20 @@ export const bambuAdapter = {
     printer,
     options = {}
   ) {
-    let connection = null
+    let connection =
+      null
 
     try {
       console.log('')
+
       console.log(
         '================================='
       )
+
       console.log(
         '       BAMBU LAB CONNECTION'
       )
+
       console.log(
         '================================='
       )
@@ -604,11 +727,21 @@ export const bambuAdapter = {
         topics:
           created.topics,
 
+        printer: {
+          ...printer,
+
+          serial:
+            created.serial
+        },
+
         connected:
           false,
 
         protocol:
-          'bambu'
+          'bambu',
+
+        connectedAt:
+          null
       }
 
       console.log(
@@ -621,6 +754,9 @@ export const bambuAdapter = {
 
       connection.connected =
         true
+
+      connection.connectedAt =
+        new Date()
 
       console.log(
         '[Bambu] ✅ MQTT conectado'
@@ -637,6 +773,53 @@ export const bambuAdapter = {
 
       console.log(
         '[Bambu] ✅ Canal de telemetria assinado'
+      )
+
+      /*
+       * Se o socket MQTT cair depois
+       * que já conectou, atualizamos o
+       * estado da conexão.
+       */
+
+      connection.client.on(
+        'close',
+        () => {
+          connection.connected =
+            false
+
+          console.log(
+            `[Bambu] Conexão MQTT encerrada: ${connection.serial}`
+          )
+        }
+      )
+
+      connection.client.on(
+        'offline',
+        () => {
+          connection.connected =
+            false
+
+          console.log(
+            `[Bambu] Impressora ficou offline: ${connection.serial}`
+          )
+        }
+      )
+
+      /*
+       * Não imprimimos error.message
+       * indefinidamente aqui.
+       *
+       * O erro inicial já é tratado
+       * pelo try/catch da conexão.
+       */
+
+      connection.client.on(
+        'error',
+        error => {
+          console.log(
+            `[Bambu] Erro MQTT (${connection.serial}): ${error.message}`
+          )
+        }
       )
 
       return connection
@@ -664,10 +847,13 @@ export const bambuAdapter = {
 
   // ====================================================
   // DESCONECTAR
+  //
+  // printerManager chama:
+  //
+  // adapter.disconnect(connection)
   // ====================================================
 
   async disconnect(
-    printer,
     connection
   ) {
     if (
@@ -675,12 +861,15 @@ export const bambuAdapter = {
     ) {
       return {
         disconnected:
+          true,
+
+        alreadyDisconnected:
           true
       }
     }
 
     console.log(
-      `[Bambu] Desconectando ${printer?.ip || ''}...`
+      `[Bambu] Desconectando ${connection.printer?.ip || connection.serial || ''}...`
     )
 
     await closeClient(
@@ -692,58 +881,54 @@ export const bambuAdapter = {
 
     return {
       disconnected:
-        true
+        true,
+
+      alreadyDisconnected:
+        false
     }
   },
 
   // ====================================================
   // STATUS
+  //
+  // printerManager chama:
+  //
+  // adapter.getStatus(connection)
   // ====================================================
 
   async getStatus(
-    printer,
     connection
   ) {
-    if (
-      !connection?.client ||
-      !connection.connected
-    ) {
-      throw new Error(
-        'Bambu não está conectada.'
-      )
-    }
+    requireConnection(
+      connection
+    )
 
     const statusPromise =
       waitForStatus(
-        connection,
-        printer
+        connection
       )
 
     await requestFullStatus(
       connection
     )
 
-    const status =
-      await statusPromise
-
-    return status
+    return await statusPromise
   },
 
   // ====================================================
   // PAUSAR
+  //
+  // printerManager chama:
+  //
+  // adapter.pause(connection)
   // ====================================================
 
-  async pausePrint(
-    printer,
+  async pause(
     connection
   ) {
-    if (
-      !connection?.connected
-    ) {
-      throw new Error(
-        'Bambu não está conectada.'
-      )
-    }
+    requireConnection(
+      connection
+    )
 
     await publishJson(
       connection.client,
@@ -751,7 +936,9 @@ export const bambuAdapter = {
       {
         print: {
           sequence_id:
-            String(Date.now()),
+            String(
+              Date.now()
+            ),
 
           command:
             'pause'
@@ -770,17 +957,12 @@ export const bambuAdapter = {
   // RETOMAR
   // ====================================================
 
-  async resumePrint(
-    printer,
+  async resume(
     connection
   ) {
-    if (
-      !connection?.connected
-    ) {
-      throw new Error(
-        'Bambu não está conectada.'
-      )
-    }
+    requireConnection(
+      connection
+    )
 
     await publishJson(
       connection.client,
@@ -788,7 +970,9 @@ export const bambuAdapter = {
       {
         print: {
           sequence_id:
-            String(Date.now()),
+            String(
+              Date.now()
+            ),
 
           command:
             'resume'
@@ -807,17 +991,12 @@ export const bambuAdapter = {
   // CANCELAR
   // ====================================================
 
-  async cancelPrint(
-    printer,
+  async cancel(
     connection
   ) {
-    if (
-      !connection?.connected
-    ) {
-      throw new Error(
-        'Bambu não está conectada.'
-      )
-    }
+    requireConnection(
+      connection
+    )
 
     await publishJson(
       connection.client,
@@ -825,7 +1004,9 @@ export const bambuAdapter = {
       {
         print: {
           sequence_id:
-            String(Date.now()),
+            String(
+              Date.now()
+            ),
 
           command:
             'stop',
@@ -844,10 +1025,19 @@ export const bambuAdapter = {
   },
 
   // ====================================================
-  // INICIAR ARQUIVO
+  // INICIAR IMPRESSÃO
   // ====================================================
 
-  async startPrint() {
+  async startPrint(
+    connection,
+    job
+  ) {
+    requireConnection(
+      connection
+    )
+
+    void job
+
     throw new Error(
       'Envio/início de arquivo Bambu será implementado na etapa de arquivos 3MF.'
     )
