@@ -1356,11 +1356,19 @@ const controlPrinter =
         printer
       )
 
+    // ==================================================
+    // EVITAR COMANDOS SIMULTÂNEOS
+    // ==================================================
+
     if (
       printerControlLoadingKey.value
     ) {
       return
     }
+
+    // ==================================================
+    // CONFIRMAR CANCELAMENTO
+    // ==================================================
 
     if (
       action ===
@@ -1371,7 +1379,9 @@ const controlPrinter =
           'Deseja realmente cancelar a impressão atual?'
         )
 
-      if (!confirmed) {
+      if (
+        !confirmed
+      ) {
         return
       }
     }
@@ -1380,16 +1390,26 @@ const controlPrinter =
       `${key}:${action}`
 
     try {
+      // ==================================================
+      // TOKEN
+      // ==================================================
+
       const token =
         localStorage.getItem(
           'printflow-auth-token'
         )
 
-      if (!token) {
+      if (
+        !token
+      ) {
         throw new Error(
           'Sessão não encontrada.'
         )
       }
+
+      // ==================================================
+      // LOCALIZAR IMPRESSORA REGISTRADA
+      // ==================================================
 
       const {
         agentPrinterId
@@ -1398,6 +1418,10 @@ const controlPrinter =
           agent,
           printer
         )
+
+      // ==================================================
+      // ENVIAR COMANDO
+      // ==================================================
 
       const response =
         await fetch(
@@ -1424,12 +1448,18 @@ const controlPrinter =
       const data =
         await response.json()
 
-      if (!response.ok) {
+      if (
+        !response.ok
+      ) {
         throw new Error(
           data?.error ||
           'Não foi possível enviar o comando.'
         )
       }
+
+      // ==================================================
+      // ESPERAR AGENT EXECUTAR
+      // ==================================================
 
       const result =
         await waitForCommandResult(
@@ -1448,6 +1478,10 @@ const controlPrinter =
         )
       }
 
+      // ==================================================
+      // MENSAGEM DE SUCESSO
+      // ==================================================
+
       const messages = {
         pause:
           'Impressão pausada.',
@@ -1463,6 +1497,28 @@ const controlPrinter =
         messages[action]
       )
 
+      // ==================================================
+      // LIMPAR ERRO OPERACIONAL ANTERIOR
+      // ==================================================
+
+      const currentStatus =
+        printerStatuses[key] &&
+        typeof printerStatuses[key] ===
+          'object'
+          ? printerStatuses[key]
+          : {}
+
+      printerStatuses[key] = {
+        ...currentStatus,
+
+        lastOperationError:
+          null
+      }
+
+      // ==================================================
+      // ATUALIZAR TELEMETRIA
+      // ==================================================
+
       await loadPrinterStatus(
         agent,
         printer
@@ -1470,13 +1526,38 @@ const controlPrinter =
     } catch (
       error
     ) {
-      notify(
+      // ==================================================
+      // ERRO OPERACIONAL
+      // ==================================================
+
+      const message =
         error instanceof Error
           ? error.message
-          : 'Não foi possível executar o comando.',
+          : 'Não foi possível executar o comando.'
+
+      const currentStatus =
+        printerStatuses[key] &&
+        typeof printerStatuses[key] ===
+          'object'
+          ? printerStatuses[key]
+          : {}
+
+      printerStatuses[key] = {
+        ...currentStatus,
+
+        lastOperationError:
+          message
+      }
+
+      notify(
+        message,
         'info'
       )
     } finally {
+      // ==================================================
+      // LIBERAR CONTROLE
+      // ==================================================
+
       printerControlLoadingKey.value =
         null
     }
