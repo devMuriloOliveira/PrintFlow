@@ -23,8 +23,6 @@ const route = useRoute()
 const config = useRuntimeConfig()
 const defaultAgentWindowsDownloadUrl =
   '/downloads/PrintFlow-Agent-Setup.exe'
-const defaultAgentWindowsZipDownloadUrl =
-  '/downloads/PrintFlow-Agent-Windows.zip'
 const defaultAgentWindowsDevCertificateUrl =
   '/downloads/PrintFlow-Agent-Dev-Certificate.cer'
 
@@ -33,14 +31,6 @@ const agentWindowsDownloadUrl =
     String(
       config.public.agentWindowsDownloadUrl ||
         defaultAgentWindowsDownloadUrl
-    ).trim()
-  )
-
-const agentWindowsZipDownloadUrl =
-  computed(() =>
-    String(
-      config.public.agentWindowsZipDownloadUrl ||
-        defaultAgentWindowsZipDownloadUrl
     ).trim()
   )
 
@@ -70,26 +60,6 @@ const downloadAgentWindows = () => {
 
   agentOpenMessage.value =
     'Download iniciado. Execute o instalador e, quando o Agent abrir, ele ficara disponivel para conectar por esta tela.'
-}
-
-const downloadAgentWindowsZip = () => {
-  if (!agentWindowsZipDownloadUrl.value) {
-    notify(
-      'Link do ZIP de teste do Agent ainda nao configurado.',
-      'info'
-    )
-
-    return
-  }
-
-  window.open(
-    agentWindowsZipDownloadUrl.value,
-    '_blank',
-    'noopener'
-  )
-
-  agentOpenMessage.value =
-    'ZIP de teste baixado. Extraia a pasta e execute scripts/install-windows-agent.ps1 pelo PowerShell para instalar localmente.'
 }
 
 const downloadAgentWindowsDevCertificate = () => {
@@ -2554,16 +2524,6 @@ const cancel = () => {
             "
           >
             Baixar Agent Windows
-          </button>
-
-          <button
-            type="button"
-            class="btn"
-            @click="
-              downloadAgentWindowsZip
-            "
-          >
-            Baixar ZIP de teste
           </button>
 
           <button
