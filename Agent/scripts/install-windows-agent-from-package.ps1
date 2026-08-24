@@ -18,7 +18,7 @@ $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
-$form.ClientSize = [System.Drawing.Size]::new(520, 300)
+$form.ClientSize = [System.Drawing.Size]::new(640, 520)
 $form.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
 
 if (Test-Path $iconPath) {
@@ -27,79 +27,131 @@ if (Test-Path $iconPath) {
 
 $title = New-Object System.Windows.Forms.Label
 $title.Text = "PrintFlow Agent"
-$title.Font = [System.Drawing.Font]::new("Segoe UI", 20, [System.Drawing.FontStyle]::Bold)
+$title.Font = [System.Drawing.Font]::new("Segoe UI", 22, [System.Drawing.FontStyle]::Bold)
 $title.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $title.AutoSize = $true
-$title.Location = [System.Drawing.Point]::new(32, 28)
+$title.Location = [System.Drawing.Point]::new(34, 28)
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = "Instalando o conector local das impressoras 3D."
+$subtitle.Text = "Conector local para impressoras 3D"
 $subtitle.Font = [System.Drawing.Font]::new("Segoe UI", 10)
 $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
 $subtitle.AutoSize = $true
-$subtitle.Location = [System.Drawing.Point]::new(36, 74)
+$subtitle.Location = [System.Drawing.Point]::new(38, 78)
 $form.Controls.Add($subtitle)
 
-$panel = New-Object System.Windows.Forms.Panel
-$panel.BackColor = [System.Drawing.Color]::White
-$panel.BorderStyle = "FixedSingle"
-$panel.Location = [System.Drawing.Point]::new(36, 112)
-$panel.Size = [System.Drawing.Size]::new(448, 104)
-$form.Controls.Add($panel)
+$infoPanel = New-Object System.Windows.Forms.Panel
+$infoPanel.BackColor = [System.Drawing.Color]::White
+$infoPanel.BorderStyle = "FixedSingle"
+$infoPanel.Location = [System.Drawing.Point]::new(38, 112)
+$infoPanel.Size = [System.Drawing.Size]::new(564, 258)
+$form.Controls.Add($infoPanel)
+
+$infoTitle = New-Object System.Windows.Forms.Label
+$infoTitle.Text = "Antes de instalar"
+$infoTitle.Font = [System.Drawing.Font]::new("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+$infoTitle.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+$infoTitle.AutoSize = $true
+$infoTitle.Location = [System.Drawing.Point]::new(18, 16)
+$infoPanel.Controls.Add($infoTitle)
+
+$termsBox = New-Object System.Windows.Forms.TextBox
+$termsBox.Multiline = $true
+$termsBox.ReadOnly = $true
+$termsBox.ScrollBars = "Vertical"
+$termsBox.BorderStyle = "FixedSingle"
+$termsBox.Font = [System.Drawing.Font]::new("Segoe UI", 9)
+$termsBox.ForeColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
+$termsBox.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+$termsBox.Location = [System.Drawing.Point]::new(18, 46)
+$termsBox.Size = [System.Drawing.Size]::new(526, 188)
+$termsBox.Text = @"
+O PrintFlow Agent e um aplicativo local do PrintFlow 3D.
+
+O que ele faz:
+- Encontra impressoras 3D na rede local e em portas USB deste computador.
+- Conecta este computador a conta PrintFlow autorizada pelo site.
+- Recebe comandos do PrintFlow para consultar status, conectar impressoras e iniciar/pausar/cancelar impressoes quando configurado.
+- Baixa arquivos de impressao autorizados pelo PrintFlow para enviar a impressora selecionada.
+- Fica em segundo plano e aparece na bandeja do Windows.
+
+Dados e seguranca:
+- O Agent nao acessa arquivos pessoais do usuario.
+- O Agent guarda credenciais locais apenas para manter a conexao com a conta autorizada.
+- As credenciais de impressoras ficam isoladas neste computador.
+- Cada conta PrintFlow usa pareamento proprio para evitar mistura de dados entre clientes.
+- O Agent se comunica com a API configurada: $ApiUrl
+
+Ao continuar, voce autoriza a instalacao do Agent neste Windows, a criacao de atalhos, inicializacao no login e registro do protocolo printflow-agent://.
+"@
+$infoPanel.Controls.Add($termsBox)
+
+$acceptCheck = New-Object System.Windows.Forms.CheckBox
+$acceptCheck.Text = "Li e aceito instalar o PrintFlow Agent neste computador."
+$acceptCheck.Font = [System.Drawing.Font]::new("Segoe UI", 9)
+$acceptCheck.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+$acceptCheck.AutoSize = $true
+$acceptCheck.Location = [System.Drawing.Point]::new(38, 386)
+$form.Controls.Add($acceptCheck)
+
+$statusPanel = New-Object System.Windows.Forms.Panel
+$statusPanel.BackColor = [System.Drawing.Color]::White
+$statusPanel.BorderStyle = "FixedSingle"
+$statusPanel.Location = [System.Drawing.Point]::new(38, 416)
+$statusPanel.Size = [System.Drawing.Size]::new(564, 50)
+$statusPanel.Visible = $false
+$form.Controls.Add($statusPanel)
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = "Preparando instalacao..."
-$statusLabel.Font = [System.Drawing.Font]::new("Segoe UI", 10)
+$statusLabel.Font = [System.Drawing.Font]::new("Segoe UI", 9)
 $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $statusLabel.AutoSize = $false
-$statusLabel.Location = [System.Drawing.Point]::new(18, 18)
-$statusLabel.Size = [System.Drawing.Size]::new(410, 24)
-$panel.Controls.Add($statusLabel)
-
-$detailLabel = New-Object System.Windows.Forms.Label
-$detailLabel.Text = "O Agent sera iniciado em segundo plano e aparecera na bandeja do Windows."
-$detailLabel.Font = [System.Drawing.Font]::new("Segoe UI", 8)
-$detailLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 116, 139)
-$detailLabel.AutoSize = $false
-$detailLabel.Location = [System.Drawing.Point]::new(18, 46)
-$detailLabel.Size = [System.Drawing.Size]::new(410, 20)
-$panel.Controls.Add($detailLabel)
+$statusLabel.Location = [System.Drawing.Point]::new(14, 8)
+$statusLabel.Size = [System.Drawing.Size]::new(532, 18)
+$statusPanel.Controls.Add($statusLabel)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
 $progress.Style = "Marquee"
-$progress.MarqueeAnimationSpeed = 24
-$progress.Location = [System.Drawing.Point]::new(18, 72)
-$progress.Size = [System.Drawing.Size]::new(410, 12)
-$panel.Controls.Add($progress)
+$progress.MarqueeAnimationSpeed = 0
+$progress.Location = [System.Drawing.Point]::new(14, 30)
+$progress.Size = [System.Drawing.Size]::new(532, 8)
+$statusPanel.Controls.Add($progress)
 
-$closeButton = New-Object System.Windows.Forms.Button
-$closeButton.Text = "Instalando..."
-$closeButton.Enabled = $false
-$closeButton.Width = 132
-$closeButton.Height = 36
-$closeButton.Location = [System.Drawing.Point]::new(352, 238)
-$closeButton.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
-$closeButton.ForeColor = [System.Drawing.Color]::White
-$closeButton.FlatStyle = "Flat"
-$closeButton.FlatAppearance.BorderSize = 0
-$closeButton.Add_Click({
+$cancelButton = New-Object System.Windows.Forms.Button
+$cancelButton.Text = "Cancelar"
+$cancelButton.Width = 110
+$cancelButton.Height = 36
+$cancelButton.Location = [System.Drawing.Point]::new(370, 476)
+$cancelButton.FlatStyle = "Flat"
+$cancelButton.Add_Click({
   $form.Close()
 })
-$form.Controls.Add($closeButton)
+$form.Controls.Add($cancelButton)
+
+$installButton = New-Object System.Windows.Forms.Button
+$installButton.Text = "Instalar"
+$installButton.Enabled = $false
+$installButton.Width = 122
+$installButton.Height = 36
+$installButton.Location = [System.Drawing.Point]::new(490, 476)
+$installButton.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
+$installButton.ForeColor = [System.Drawing.Color]::White
+$installButton.FlatStyle = "Flat"
+$installButton.FlatAppearance.BorderSize = 0
+$form.Controls.Add($installButton)
+
+$acceptCheck.Add_CheckedChanged({
+  $installButton.Enabled = $acceptCheck.Checked
+})
 
 function Set-InstallerStatus {
   param(
-    [string]$Message,
-    [string]$Detail = ""
+    [string]$Message
   )
 
   $statusLabel.Text = $Message
-
-  if ($Detail) {
-    $detailLabel.Text = $Detail
-  }
-
   $form.Refresh()
   [System.Windows.Forms.Application]::DoEvents()
 }
@@ -107,7 +159,6 @@ function Set-InstallerStatus {
 function Complete-Installer {
   param(
     [string]$Message,
-    [string]$Detail,
     [bool]$Success
   )
 
@@ -115,24 +166,30 @@ function Complete-Installer {
   $progress.Style = "Continuous"
   $progress.Value = if ($Success) { 100 } else { 0 }
   $statusLabel.Text = $Message
-  $detailLabel.Text = $Detail
-  $closeButton.Text = "Concluir"
-  $closeButton.Enabled = $true
+  $installButton.Text = "Concluir"
+  $installButton.Enabled = $true
+  $cancelButton.Visible = $false
 
   if (-not $Success) {
-    $closeButton.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+    $installButton.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
   }
 }
 
-$form.Add_Shown({
+function Start-Install {
   try {
+    $acceptCheck.Enabled = $false
+    $installButton.Enabled = $false
+    $cancelButton.Enabled = $false
+    $installButton.Text = "Instalando..."
+    $statusPanel.Visible = $true
+    $progress.Style = "Marquee"
+    $progress.MarqueeAnimationSpeed = 24
+
     if (-not (Test-Path $zipPath)) {
       throw "Pacote PrintFlow-Agent-Windows.zip nao encontrado."
     }
 
-    Set-InstallerStatus `
-      -Message "Extraindo arquivos..." `
-      -Detail "Preparando o PrintFlow Agent neste computador."
+    Set-InstallerStatus "Extraindo arquivos do PrintFlow Agent..."
 
     New-Item -ItemType Directory -Path $extractRoot | Out-Null
     Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
@@ -143,9 +200,7 @@ $form.Add_Shown({
       throw "Instalador interno do PrintFlow Agent nao encontrado."
     }
 
-    Set-InstallerStatus `
-      -Message "Instalando no Windows..." `
-      -Detail "Criando atalhos, inicializacao automatica e protocolo printflow-agent://."
+    Set-InstallerStatus "Registrando atalhos, inicializacao e protocolo local..."
 
     $process = Start-Process `
       -FilePath "powershell.exe" `
@@ -159,17 +214,25 @@ $form.Add_Shown({
     }
 
     Complete-Installer `
-      -Message "PrintFlow Agent instalado." `
-      -Detail "O Agent ja foi iniciado e deve aparecer na bandeja do Windows." `
+      -Message "PrintFlow Agent instalado. Ele deve aparecer na bandeja do Windows." `
       -Success $true
   } catch {
     Complete-Installer `
-      -Message "Nao foi possivel instalar." `
-      -Detail $_.Exception.Message `
+      -Message ("Nao foi possivel instalar: " + $_.Exception.Message) `
       -Success $false
   } finally {
+    $cancelButton.Enabled = $true
     Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
+}
+
+$installButton.Add_Click({
+  if ($installButton.Text -eq "Concluir") {
+    $form.Close()
+    return
+  }
+
+  Start-Install
 })
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
