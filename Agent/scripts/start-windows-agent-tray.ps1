@@ -38,8 +38,13 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $agentProcess = $null
+$agentClosing = $false
 
 function Start-AgentProcess {
+  if ($script:agentClosing) {
+    return
+  }
+
   if ($script:agentProcess -and -not $script:agentProcess.HasExited) {
     return
   }
@@ -64,19 +69,47 @@ function Start-AgentProcess {
   [void]$script:agentProcess.Start()
 }
 
+function Stop-AgentProcessTree {
+  param(
+    [int]$ProcessId
+  )
+
+  try {
+    Get-CimInstance Win32_Process |
+      Where-Object {
+        $_.ParentProcessId -eq $ProcessId
+      } |
+      ForEach-Object {
+        Stop-AgentProcessTree -ProcessId $_.ProcessId
+      }
+  } catch {
+  }
+
+  try {
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  } catch {
+  }
+}
+
 function Stop-AgentProcess {
   if ($script:agentProcess -and -not $script:agentProcess.HasExited) {
+    $processId = $script:agentProcess.Id
+
     try {
       $script:agentProcess.CloseMainWindow() | Out-Null
-      if (-not $script:agentProcess.WaitForExit(2000)) {
-        $script:agentProcess.Kill()
+
+      if ($script:agentProcess.WaitForExit(1200)) {
+        return
       }
     } catch {
-      try {
-        $script:agentProcess.Kill()
-      } catch {
-      }
     }
+
+    Stop-AgentProcessTree -ProcessId $processId
+  }
+
+  try {
+    $script:agentProcess = $null
+  } catch {
   }
 }
 
@@ -100,6 +133,10 @@ $statusItem.Enabled = $false
 $restartTimer = New-Object System.Windows.Forms.Timer
 $restartTimer.Interval = 5000
 $restartTimer.Add_Tick({
+  if ($script:agentClosing) {
+    return
+  }
+
   try {
     if (-not $script:agentProcess -or $script:agentProcess.HasExited) {
       $statusItem.Text = "PrintFlow Agent reiniciando..."
@@ -138,6 +175,9 @@ Logs: $logPath
 $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $exitItem.Text = "Fechar Agent"
 $exitItem.Add_Click({
+  $script:agentClosing = $true
+  $restartTimer.Stop()
+  $statusItem.Text = "PrintFlow Agent encerrando..."
   Stop-AgentProcess
   $notifyIcon.Visible = $false
   $notifyIcon.Dispose()
@@ -155,6 +195,7 @@ try {
   $restartTimer.Start()
   [System.Windows.Forms.Application]::Run()
 } finally {
+  $script:agentClosing = $true
   $restartTimer.Stop()
   $restartTimer.Dispose()
   Stop-AgentProcess
