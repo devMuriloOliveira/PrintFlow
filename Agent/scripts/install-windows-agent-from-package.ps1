@@ -7,6 +7,9 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+[System.Windows.Forms.Application]::EnableVisualStyles()
+[System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+
 $packageRoot = $PSScriptRoot
 $zipPath = Join-Path $packageRoot "PrintFlow-Agent-Windows.zip"
 $iconPath = Join-Path $packageRoot "printflow-agent-icon.ico"
@@ -20,6 +23,8 @@ $form.MaximizeBox = $false
 $form.MinimizeBox = $false
 $form.ClientSize = [System.Drawing.Size]::new(640, 520)
 $form.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+$form.Font = [System.Drawing.Font]::new("Segoe UI", 9)
+$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 
 if (Test-Path $iconPath) {
   $form.Icon = [System.Drawing.Icon]::new($iconPath)
@@ -43,7 +48,7 @@ $form.Controls.Add($subtitle)
 
 $infoPanel = New-Object System.Windows.Forms.Panel
 $infoPanel.BackColor = [System.Drawing.Color]::White
-$infoPanel.BorderStyle = "FixedSingle"
+$infoPanel.BorderStyle = "None"
 $infoPanel.Location = [System.Drawing.Point]::new(38, 112)
 $infoPanel.Size = [System.Drawing.Size]::new(564, 258)
 $form.Controls.Add($infoPanel)
@@ -60,10 +65,10 @@ $termsBox = New-Object System.Windows.Forms.TextBox
 $termsBox.Multiline = $true
 $termsBox.ReadOnly = $true
 $termsBox.ScrollBars = "Vertical"
-$termsBox.BorderStyle = "FixedSingle"
+$termsBox.BorderStyle = "None"
 $termsBox.Font = [System.Drawing.Font]::new("Segoe UI", 9)
 $termsBox.ForeColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
-$termsBox.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+$termsBox.BackColor = [System.Drawing.Color]::White
 $termsBox.Location = [System.Drawing.Point]::new(18, 46)
 $termsBox.Size = [System.Drawing.Size]::new(526, 188)
 $termsBox.Text = @"
@@ -96,8 +101,8 @@ $acceptCheck.Location = [System.Drawing.Point]::new(38, 386)
 $form.Controls.Add($acceptCheck)
 
 $statusPanel = New-Object System.Windows.Forms.Panel
-$statusPanel.BackColor = [System.Drawing.Color]::White
-$statusPanel.BorderStyle = "FixedSingle"
+$statusPanel.BackColor = [System.Drawing.Color]::FromArgb(239, 246, 255)
+$statusPanel.BorderStyle = "None"
 $statusPanel.Location = [System.Drawing.Point]::new(38, 416)
 $statusPanel.Size = [System.Drawing.Size]::new(564, 50)
 $statusPanel.Visible = $false
@@ -125,6 +130,10 @@ $cancelButton.Width = 110
 $cancelButton.Height = 36
 $cancelButton.Location = [System.Drawing.Point]::new(370, 476)
 $cancelButton.FlatStyle = "Flat"
+$cancelButton.BackColor = [System.Drawing.Color]::White
+$cancelButton.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+$cancelButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
+$cancelButton.Cursor = [System.Windows.Forms.Cursors]::Hand
 $cancelButton.Add_Click({
   $form.Close()
 })
@@ -140,6 +149,7 @@ $installButton.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
 $installButton.ForeColor = [System.Drawing.Color]::White
 $installButton.FlatStyle = "Flat"
 $installButton.FlatAppearance.BorderSize = 0
+$installButton.Cursor = [System.Windows.Forms.Cursors]::Hand
 $form.Controls.Add($installButton)
 
 $acceptCheck.Add_CheckedChanged({
@@ -246,5 +256,4 @@ $installButton.Add_Click({
   Start-Install
 })
 
-[System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::Run($form)

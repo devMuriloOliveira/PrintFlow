@@ -81,6 +81,9 @@ if ($Quiet) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+[System.Windows.Forms.Application]::EnableVisualStyles()
+[System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Desinstalar PrintFlow Agent"
 $form.StartPosition = "CenterScreen"
@@ -89,6 +92,8 @@ $form.MaximizeBox = $false
 $form.MinimizeBox = $false
 $form.ClientSize = [System.Drawing.Size]::new(560, 340)
 $form.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+$form.Font = [System.Drawing.Font]::new("Segoe UI", 9)
+$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 
 if (Test-Path $iconPath) {
   $form.Icon = [System.Drawing.Icon]::new($iconPath)
@@ -112,7 +117,7 @@ $form.Controls.Add($subtitle)
 
 $panel = New-Object System.Windows.Forms.Panel
 $panel.BackColor = [System.Drawing.Color]::White
-$panel.BorderStyle = "FixedSingle"
+$panel.BorderStyle = "None"
 $panel.Location = [System.Drawing.Point]::new(38, 112)
 $panel.Size = [System.Drawing.Size]::new(484, 142)
 $form.Controls.Add($panel)
@@ -158,6 +163,10 @@ $cancelButton.Width = 110
 $cancelButton.Height = 36
 $cancelButton.Location = [System.Drawing.Point]::new(288, 296)
 $cancelButton.FlatStyle = "Flat"
+$cancelButton.BackColor = [System.Drawing.Color]::White
+$cancelButton.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+$cancelButton.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
+$cancelButton.Cursor = [System.Windows.Forms.Cursors]::Hand
 $cancelButton.Add_Click({
   $form.Close()
 })
@@ -172,6 +181,7 @@ $uninstallButton.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
 $uninstallButton.ForeColor = [System.Drawing.Color]::White
 $uninstallButton.FlatStyle = "Flat"
 $uninstallButton.FlatAppearance.BorderSize = 0
+$uninstallButton.Cursor = [System.Windows.Forms.Cursors]::Hand
 $form.Controls.Add($uninstallButton)
 
 function Set-UninstallStatus {
@@ -200,6 +210,15 @@ function Complete-Uninstall {
 
   if ($Success) {
     $uninstallButton.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
+
+    $closeTimer = New-Object System.Windows.Forms.Timer
+    $closeTimer.Interval = 1200
+    $closeTimer.Add_Tick({
+      $closeTimer.Stop()
+      $closeTimer.Dispose()
+      $form.Close()
+    })
+    $closeTimer.Start()
   }
 }
 
@@ -231,5 +250,4 @@ $uninstallButton.Add_Click({
   }
 })
 
-[System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::Run($form)

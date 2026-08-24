@@ -104,7 +104,7 @@ if (-not $NoStartMenuShortcut) {
     -Path (Join-Path $folder "Desinstalar PrintFlow Agent.lnk") `
     -TargetScript $uninstallScript `
     -Description "Desinstalar PrintFlow Agent" `
-    -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
+    -Arguments "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`""
 }
 
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent"
