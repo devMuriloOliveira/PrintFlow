@@ -2513,6 +2513,21 @@ const cancel = () => {
           Use esta opcao para encontrar impressoras na rede ou conectadas por cabo USB neste computador.
         </p>
 
+        <p
+          style="
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid #bfd6ff;
+            border-radius: 8px;
+            background: #f1f6ff;
+            color: #164ea6;
+            font-size: 13px;
+            line-height: 1.45;
+          "
+        >
+          Versao de teste: antes de baixar e executar o Agent Windows, baixe o certificado de teste e instale-o no Windows como Autoridade Raiz Confiavel e Editor Confiavel. Isso ajuda este computador a reconhecer a assinatura local do instalador.
+        </p>
+
         <div
           style="
             display: flex;
@@ -2521,6 +2536,16 @@ const cancel = () => {
             margin-top: 12px;
           "
         >
+          <button
+            type="button"
+            class="btn"
+            @click="
+              downloadAgentWindowsDevCertificate
+            "
+          >
+            Baixar certificado de teste
+          </button>
+
           <button
             type="button"
             class="btn btn--primary"
@@ -2539,16 +2564,6 @@ const cancel = () => {
             "
           >
             Baixar ZIP de teste
-          </button>
-
-          <button
-            type="button"
-            class="btn"
-            @click="
-              downloadAgentWindowsDevCertificate
-            "
-          >
-            Baixar certificado de teste
           </button>
 
           <button
