@@ -63,6 +63,7 @@ New-Item -ItemType Directory -Path $installerSourceRoot | Out-Null
 
 $installerBootstrap = Join-Path $agentRoot "scripts\install-windows-agent-from-package.ps1"
 $installerBootstrapName = "install-windows-agent-from-package.ps1"
+$installerLauncherName = "install-windows-agent.vbs"
 $installerZipName = "$PackageName.zip"
 $installerIcon = Join-Path $agentRoot "assets\printflow-agent-icon.ico"
 $installerIconName = "printflow-agent-icon.ico"
@@ -70,6 +71,21 @@ $installerIconName = "printflow-agent-icon.ico"
 Copy-Item -LiteralPath $zipPath -Destination (Join-Path $installerSourceRoot $installerZipName) -Force
 Copy-Item -LiteralPath $installerBootstrap -Destination (Join-Path $installerSourceRoot $installerBootstrapName) -Force
 Copy-Item -LiteralPath $installerIcon -Destination (Join-Path $installerSourceRoot $installerIconName) -Force
+
+$escapedApiUrlForVbs = $ApiUrl.Replace("""", """""")
+$launcher = @"
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+root = fso.GetParentFolderName(WScript.ScriptFullName)
+cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\$installerBootstrapName" & """ -ApiUrl ""$escapedApiUrlForVbs"""
+code = shell.Run(cmd, 0, True)
+WScript.Quit code
+"@
+
+Set-Content `
+  -LiteralPath (Join-Path $installerSourceRoot $installerLauncherName) `
+  -Value $launcher `
+  -Encoding ASCII
 
 if (Test-Path $installerPath) {
   Remove-Item -LiteralPath $installerPath -Force
@@ -81,7 +97,7 @@ if (Test-Path $installerSedPath) {
 
 $escapedInstallerPath = $installerPath.Replace("\", "\\")
 $escapedSourceRoot = $installerSourceRoot.Replace("\", "\\")
-$appLaunched = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File $installerBootstrapName -ApiUrl `"$ApiUrl`""
+$appLaunched = "wscript.exe $installerLauncherName"
 
 $sed = @"
 [Version]
@@ -117,12 +133,14 @@ PostInstallCmd=<None>
 FILE0=$installerZipName
 FILE1=$installerBootstrapName
 FILE2=$installerIconName
+FILE3=$installerLauncherName
 [SourceFiles]
 SourceFiles0=$escapedSourceRoot
 [SourceFiles0]
 %FILE0%=
 %FILE1%=
 %FILE2%=
+%FILE3%=
 "@
 
 Set-Content -LiteralPath $installerSedPath -Value $sed -Encoding ASCII

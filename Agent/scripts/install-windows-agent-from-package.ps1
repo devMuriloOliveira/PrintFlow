@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
@@ -118,8 +119,11 @@ $statusLabel.Size = [System.Drawing.Size]::new(532, 18)
 $statusPanel.Controls.Add($statusLabel)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Style = "Marquee"
+$progress.Style = "Continuous"
 $progress.MarqueeAnimationSpeed = 0
+$progress.Minimum = 0
+$progress.Maximum = 100
+$progress.Value = 0
 $progress.Location = [System.Drawing.Point]::new(14, 30)
 $progress.Size = [System.Drawing.Size]::new(532, 8)
 $statusPanel.Controls.Add($progress)
@@ -166,6 +170,29 @@ function Set-InstallerStatus {
   [System.Windows.Forms.Application]::DoEvents()
 }
 
+function Set-InstallerProgress {
+  param(
+    [int]$Value,
+    [string]$Message = ""
+  )
+
+  if ($Value -lt $progress.Minimum) {
+    $Value = $progress.Minimum
+  }
+
+  if ($Value -gt $progress.Maximum) {
+    $Value = $progress.Maximum
+  }
+
+  if ($Message) {
+    $statusLabel.Text = $Message
+  }
+
+  $progress.Value = $Value
+  $form.Refresh()
+  [System.Windows.Forms.Application]::DoEvents()
+}
+
 function Complete-Installer {
   param(
     [string]$Message,
@@ -203,17 +230,19 @@ function Start-Install {
     $cancelButton.Enabled = $false
     $installButton.Text = "Instalando..."
     $statusPanel.Visible = $true
-    $progress.Style = "Marquee"
-    $progress.MarqueeAnimationSpeed = 24
+    $progress.Style = "Continuous"
+    $progress.MarqueeAnimationSpeed = 0
+    $progress.Value = 0
 
     if (-not (Test-Path $zipPath)) {
       throw "Pacote PrintFlow-Agent-Windows.zip nao encontrado."
     }
 
-    Set-InstallerStatus "Extraindo arquivos do PrintFlow Agent..."
+    Set-InstallerProgress 10 "Preparando arquivos do PrintFlow Agent..."
 
     New-Item -ItemType Directory -Path $extractRoot | Out-Null
-    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
+    Set-InstallerProgress 25 "Extraindo pacote local..."
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractRoot)
 
     $installScript = Join-Path $extractRoot "scripts\install-windows-agent.ps1"
 
@@ -221,18 +250,10 @@ function Start-Install {
       throw "Instalador interno do PrintFlow Agent nao encontrado."
     }
 
-    Set-InstallerStatus "Registrando atalhos, inicializacao e protocolo local..."
+    Set-InstallerProgress 55 "Registrando atalhos e protocolo local..."
+    & $installScript -ApiUrl $ApiUrl
 
-    $process = Start-Process `
-      -FilePath "powershell.exe" `
-      -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installScript`" -ApiUrl `"$ApiUrl`"" `
-      -WindowStyle Hidden `
-      -Wait `
-      -PassThru
-
-    if ($process.ExitCode -ne 0) {
-      throw "A instalacao retornou erro $($process.ExitCode)."
-    }
+    Set-InstallerProgress 90 "Iniciando Agent em segundo plano..."
 
     Complete-Installer `
       -Message "PrintFlow Agent instalado. Ele deve aparecer na bandeja do Windows." `

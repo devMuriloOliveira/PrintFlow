@@ -27,6 +27,9 @@ $iconPath = Join-Path $installRoot "assets\printflow-agent-icon.ico"
 $openScript = Join-Path $installRoot "scripts\open-windows-agent.ps1"
 $startScript = Join-Path $installRoot "scripts\start-windows-agent-tray.ps1"
 $uninstallScript = Join-Path $installRoot "scripts\uninstall-windows-agent.ps1"
+$openWrapper = Join-Path $installRoot "scripts\open-windows-agent.vbs"
+$startWrapper = Join-Path $installRoot "scripts\start-windows-agent-tray.vbs"
+$uninstallWrapper = Join-Path $installRoot "scripts\uninstall-windows-agent.vbs"
 $packagePath = Join-Path $installRoot "package.json"
 
 if (-not (Test-Path (Join-Path $installRoot "node_modules"))) {
@@ -51,9 +54,77 @@ if (Test-Path $packagePath) {
   -TaskName $TaskName `
   -NoStart
 
+function ConvertTo-VbsLiteral {
+  param(
+    [string]$Value
+  )
+
+  return $Value.Replace("""", """""")
+}
+
+function New-PowerShellWrapper {
+  param(
+    [string]$WrapperPath,
+    [string]$ScriptPath,
+    [string]$Arguments = "",
+    [bool]$AppendIncomingArguments = $false,
+    [bool]$Wait = $false
+  )
+
+  $scriptLiteral = ConvertTo-VbsLiteral $ScriptPath
+  $argumentsLiteral = ConvertTo-VbsLiteral $Arguments
+  $appendBlock = ""
+
+  if ($AppendIncomingArguments) {
+    $appendBlock = @"
+For Each arg In WScript.Arguments
+  cmd = cmd & " """ & Replace(arg, """", """""") & """"
+Next
+"@
+  }
+
+  $waitLiteral = if ($Wait) { "True" } else { "False" }
+
+  $content = @"
+Set shell = CreateObject("WScript.Shell")
+cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File ""$scriptLiteral"" $argumentsLiteral"
+$appendBlock
+code = shell.Run(cmd, 0, $waitLiteral)
+WScript.Quit code
+"@
+
+  Set-Content -LiteralPath $WrapperPath -Value $content -Encoding ASCII
+}
+
+New-PowerShellWrapper `
+  -WrapperPath $startWrapper `
+  -ScriptPath $startScript `
+  -Arguments "-ApiUrl `"$ApiUrl`""
+
+New-PowerShellWrapper `
+  -WrapperPath $uninstallWrapper `
+  -ScriptPath $uninstallScript `
+  -Wait $true
+
+$openScriptLiteral = ConvertTo-VbsLiteral $openScript
+$openApiUrlLiteral = ConvertTo-VbsLiteral $ApiUrl
+$openTaskNameLiteral = ConvertTo-VbsLiteral $TaskName
+$openWrapperContent = @"
+Set shell = CreateObject("WScript.Shell")
+protocolUrl = ""
+If WScript.Arguments.Count > 0 Then
+  protocolUrl = WScript.Arguments(0)
+End If
+protocolUrl = Replace(protocolUrl, """", """""")
+cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File ""$openScriptLiteral"" -ProtocolUrl """ & protocolUrl & """ -ApiUrl ""$openApiUrlLiteral"" -TaskName ""$openTaskNameLiteral"""
+code = shell.Run(cmd, 0, False)
+WScript.Quit code
+"@
+Set-Content -LiteralPath $openWrapper -Value $openWrapperContent -Encoding ASCII
+
 $protocolKey = "HKCU:\Software\Classes\printflow-agent"
 $protocolCommandKey = Join-Path $protocolKey "shell\open\command"
-$protocolCommand = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$openScript`" -ProtocolUrl `"%1`" -ApiUrl `"$ApiUrl`" -TaskName `"$TaskName`""
+$protocolCommand = "wscript.exe `"$openWrapper`" `"%1`""
 
 New-Item -Path $protocolCommandKey -Force | Out-Null
 Set-Item -Path $protocolKey -Value "URL:PrintFlow Agent Protocol"
@@ -70,7 +141,7 @@ function New-AgentShortcut {
 
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($Path)
-  $shortcut.TargetPath = "powershell.exe"
+  $shortcut.TargetPath = "wscript.exe"
   $shortcut.Arguments = $Arguments
   $shortcut.WorkingDirectory = $installRoot
   $shortcut.Description = $Description
@@ -86,7 +157,7 @@ if (-not $NoDesktopShortcut) {
     -Path (Join-Path $desktop "PrintFlow Agent.lnk") `
     -TargetScript $startScript `
     -Description "Iniciar PrintFlow Agent" `
-    -Arguments "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`" -ApiUrl `"$ApiUrl`""
+    -Arguments "`"$startWrapper`""
 }
 
 if (-not $NoStartMenuShortcut) {
@@ -99,16 +170,16 @@ if (-not $NoStartMenuShortcut) {
     -Path (Join-Path $folder "PrintFlow Agent.lnk") `
     -TargetScript $startScript `
     -Description "Iniciar PrintFlow Agent" `
-    -Arguments "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`" -ApiUrl `"$ApiUrl`""
+    -Arguments "`"$startWrapper`""
   New-AgentShortcut `
     -Path (Join-Path $folder "Desinstalar PrintFlow Agent.lnk") `
     -TargetScript $uninstallScript `
     -Description "Desinstalar PrintFlow Agent" `
-    -Arguments "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`""
+    -Arguments "`"$uninstallWrapper`""
 }
 
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent"
-$uninstallCommand = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`""
+$uninstallCommand = "wscript.exe `"$uninstallWrapper`""
 $quietUninstallCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`" -Quiet"
 $estimatedSizeKb = 0
 

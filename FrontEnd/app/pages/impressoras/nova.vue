@@ -34,6 +34,14 @@ const agentWindowsDownloadUrl =
     ).trim()
   )
 
+const withDownloadCacheBust = (url: string) => {
+  const separator = url.includes('?')
+    ? '&'
+    : '?'
+
+  return `${url}${separator}v=${Date.now()}`
+}
+
 const agentWindowsDevCertificateUrl =
   computed(() =>
     String(
@@ -53,7 +61,7 @@ const downloadAgentWindows = () => {
   }
 
   window.open(
-    agentWindowsDownloadUrl.value,
+    withDownloadCacheBust(agentWindowsDownloadUrl.value),
     '_blank',
     'noopener'
   )
