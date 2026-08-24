@@ -108,7 +108,8 @@ if (-not $NoStartMenuShortcut) {
 }
 
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent"
-$uninstallCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`""
+$uninstallCommand = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`""
+$quietUninstallCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`" -Quiet"
 $estimatedSizeKb = 0
 
 try {
@@ -129,7 +130,7 @@ Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "PrintFlow 3D"
 Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installRoot
 Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $iconPath
 Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value $uninstallCommand
-Set-ItemProperty -Path $uninstallKey -Name "QuietUninstallString" -Value $uninstallCommand
+Set-ItemProperty -Path $uninstallKey -Name "QuietUninstallString" -Value $quietUninstallCommand
 New-ItemProperty -Path $uninstallKey -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "NoRepair" -Value 1 -PropertyType DWord -Force | Out-Null
 
