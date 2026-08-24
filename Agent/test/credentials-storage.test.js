@@ -17,9 +17,11 @@ process.env.PRINTFLOW_AGENT_DATA_DIR =
 
 const {
   clearCredentials,
+  consumePendingPairingCode,
   getAgentDataDirectory,
   loadCredentials,
-  saveCredentials
+  saveCredentials,
+  savePendingPairingCode
 } = await import(
   '../src/storage/credentials.js'
 )
@@ -64,5 +66,21 @@ test('credenciais do Agent usam diretorio local configuravel', async () => {
   assert.equal(
     await loadCredentials(),
     null
+  )
+})
+
+test('codigo de pareamento pendente e consumido uma unica vez', async () => {
+  await savePendingPairingCode(
+    'ab12cd'
+  )
+
+  assert.equal(
+    await consumePendingPairingCode(),
+    'AB12CD'
+  )
+
+  assert.equal(
+    await consumePendingPairingCode(),
+    ''
   )
 })

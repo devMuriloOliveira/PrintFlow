@@ -22,6 +22,7 @@ const dataDirectory = process.env.PRINTFLOW_AGENT_DATA_DIR
   ? path.resolve(process.env.PRINTFLOW_AGENT_DATA_DIR)
   : resolveDefaultDataDirectory()
 const credentialsFile = path.join(dataDirectory, 'agent.json')
+const pendingPairingFile = path.join(dataDirectory, 'pending-pairing.json')
 
 export const getAgentDataDirectory = () =>
   dataDirectory
@@ -59,4 +60,60 @@ export const clearCredentials = async () => {
       force: true
     }
   )
+}
+
+export const savePendingPairingCode = async (code) => {
+  const normalizedCode =
+    String(code || '')
+      .trim()
+      .toUpperCase()
+
+  if (!normalizedCode) {
+    return
+  }
+
+  await fs.mkdir(dataDirectory, {
+    recursive: true
+  })
+
+  await fs.writeFile(
+    pendingPairingFile,
+    JSON.stringify(
+      {
+        code: normalizedCode,
+        createdAt: new Date().toISOString()
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+}
+
+export const consumePendingPairingCode = async () => {
+  try {
+    const content = await fs.readFile(
+      pendingPairingFile,
+      'utf8'
+    )
+
+    await fs.rm(
+      pendingPairingFile,
+      {
+        force: true
+      }
+    )
+
+    const data = JSON.parse(content)
+
+    return String(data?.code || '')
+      .trim()
+      .toUpperCase()
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return ''
+    }
+
+    throw error
+  }
 }

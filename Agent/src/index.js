@@ -4,7 +4,10 @@ import dotenv from 'dotenv'
 
 import { installFileLogger } from './logging/fileLogger.js'
 import { AGENT_VERSION, getAgentRuntimeInfo } from './agentInfo.js'
-import { loadCredentials } from './storage/credentials.js'
+import {
+  consumePendingPairingCode,
+  loadCredentials
+} from './storage/credentials.js'
 import { pairAgent } from './pairing/pairing.js'
 import { verifyAgent } from './cloud/auth.js'
 
@@ -28,6 +31,11 @@ const apiUrl =
 const pairingCode =
   process.env.PRINTFLOW_PAIRING_CODE ||
   ''
+
+const wait = (delay) =>
+  new Promise(resolve =>
+    setTimeout(resolve, delay)
+  )
 
 console.log('')
 console.log('=================================')
@@ -60,24 +68,34 @@ const start = async () => {
     console.log('BackEnd online')
 
     let credentials = await loadCredentials()
+    let startupPairingCode = pairingCode
 
-    if (pairingCode) {
-      credentials = await pairAgent(
-        apiUrl,
-        pairingCode,
-        credentials
-      )
-    } else if (!credentials) {
-      credentials = await pairAgent(
-        apiUrl,
-        pairingCode
-      )
-    }
+    while (!credentials) {
+      const pendingPairingCode =
+        startupPairingCode ||
+        await consumePendingPairingCode()
 
-    if (!credentials) {
-      console.log('')
-      console.log('Agent nao conectado.')
-      return
+      startupPairingCode = ''
+
+      if (pendingPairingCode) {
+        credentials = await pairAgent(
+          apiUrl,
+          pendingPairingCode,
+          credentials
+        )
+      }
+
+      if (!credentials) {
+        console.log('')
+        console.log(
+          'Agent aguardando conexao pelo site PrintFlow.'
+        )
+        console.log(
+          'Use a opcao Conectar Agent instalado na tela de impressoras.'
+        )
+
+        await wait(5000)
+      }
     }
 
     console.log('')
@@ -100,6 +118,21 @@ const start = async () => {
 
     const heartbeat = async () => {
       try {
+        const pendingPairingCode =
+          await consumePendingPairingCode()
+
+        if (pendingPairingCode) {
+          const pairedCredentials = await pairAgent(
+            apiUrl,
+            pendingPairingCode,
+            credentials
+          )
+
+          if (pairedCredentials) {
+            credentials = pairedCredentials
+          }
+        }
+
         await sendHeartbeat(
           apiUrl,
           credentials,

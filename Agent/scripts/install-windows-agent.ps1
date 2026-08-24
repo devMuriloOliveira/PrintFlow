@@ -94,6 +94,11 @@ if (-not $NoStartMenuShortcut) {
     -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
 }
 
+Start-Process `
+  -FilePath "powershell.exe" `
+  -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`" -ApiUrl `"$ApiUrl`"" `
+  -WindowStyle Hidden
+
 Write-Host "PrintFlow Agent instalado."
 Write-Host "Diretorio: $installRoot"
 Write-Host "API: $ApiUrl"

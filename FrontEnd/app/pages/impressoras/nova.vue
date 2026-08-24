@@ -22,7 +22,7 @@ const { notify } = useUi()
 const route = useRoute()
 const config = useRuntimeConfig()
 const defaultAgentWindowsDownloadUrl =
-  '/downloads/PrintFlow-Agent-Windows.zip'
+  '/downloads/PrintFlow-Agent-Setup.exe'
 
 const agentWindowsDownloadUrl =
   computed(() =>
@@ -32,17 +32,25 @@ const agentWindowsDownloadUrl =
     ).trim()
   )
 
-const handleAgentDownloadClick =
-  (event: MouseEvent) => {
-    if (agentWindowsDownloadUrl.value) return
-
-    event.preventDefault()
-
+const downloadAgentWindows = () => {
+  if (!agentWindowsDownloadUrl.value) {
     notify(
       'Link de download do Agent ainda nao configurado. Configure NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL.',
       'info'
     )
+
+    return
   }
+
+  window.open(
+    agentWindowsDownloadUrl.value,
+    '_blank',
+    'noopener'
+  )
+
+  agentOpenMessage.value =
+    'Download iniciado. Execute o instalador e, quando o Agent abrir, ele ficara disponivel para conectar por esta tela.'
+}
 
 // ======================================================
 // PRINTFLOW AGENT
@@ -396,41 +404,12 @@ const openInstalledAgent =
       true
 
     agentOpenMessage.value =
-      'Verificando se o PrintFlow Agent esta aberto...'
+      'Preparando conexao automatica com o PrintFlow Agent...'
 
     try {
-      await loadAgents()
-
-      if (
-        onlineAgents.value.length >
-        0
-      ) {
-        agentOpenMessage.value =
-          'PrintFlow Agent encontrado. Voce ja pode procurar impressoras.'
-
-        return
-      }
-
-      const allowed =
-        window.confirm(
-          'Nao encontramos o PrintFlow Agent aberto neste computador. Deseja abrir o Agent instalado agora?'
-        )
-
-      if (
-        !allowed
-      ) {
-        agentOpenMessage.value =
-          'Abra o PrintFlow Agent manualmente e clique em Atualizar.'
-
-        return
-      }
-
       if (
         !pairingCode.value
       ) {
-        agentOpenMessage.value =
-          'Gerando codigo de conexao para o Agent...'
-
         await generatePairingCode()
       }
 
@@ -438,7 +417,7 @@ const openInstalledAgent =
         !pairingCode.value
       ) {
         agentOpenMessage.value =
-          'Nao foi possivel gerar o codigo de conexao. Tente novamente.'
+          'Nao foi possivel preparar a conexao automatica. Tente novamente.'
 
         return
       }
@@ -450,7 +429,7 @@ const openInstalledAgent =
         protocolUrl
 
       agentOpenMessage.value =
-        'Solicitacao enviada ao Windows. Aguarde alguns segundos e clique em Atualizar.'
+        'Solicitacao enviada ao Windows. Se o navegador pedir permissao, confirme para abrir o PrintFlow Agent.'
 
       for (
         let attempt = 0;
@@ -2482,19 +2461,15 @@ const cancel = () => {
             margin-top: 12px;
           "
         >
-          <a
+          <button
+            type="button"
             class="btn btn--primary"
-            :href="
-              agentWindowsDownloadUrl || '#'
-            "
-            target="_blank"
-            rel="noopener"
             @click="
-              handleAgentDownloadClick
+              downloadAgentWindows
             "
           >
             Baixar Agent Windows
-          </a>
+          </button>
 
           <button
             type="button"
@@ -2509,7 +2484,7 @@ const cancel = () => {
             {{
               openingAgent
                 ? 'Verificando...'
-                : 'Ja tenho o Agent instalado'
+                : 'Conectar Agent instalado'
             }}
           </button>
 
@@ -3414,187 +3389,25 @@ const cancel = () => {
   </div>
 </div>
 
-          <!-- =========================================== -->
-          <!-- AÇÕES DOS AGENTS                            -->
-          <!-- =========================================== -->
-
-          <div
-            style="
-              display: flex;
-              gap: 10px;
-              flex-wrap: wrap;
-            "
-          >
-            <button
-              type="button"
-              class="btn"
-              :disabled="
-                agentLoading
-              "
-              @click="
-                loadAgents
-              "
-            >
-              {{
-                agentLoading
-                  ? 'Atualizando...'
-                  : 'Atualizar'
-              }}
-            </button>
-
-            <button
-              type="button"
-              class="btn"
-              :disabled="
-                pairingLoading
-              "
-              @click="
-                generatePairingCode
-              "
-            >
-              {{
-                pairingLoading
-                  ? 'Gerando...'
-                  : 'Adicionar outro Agent'
-              }}
-            </button>
-
-            <a
-              class="btn"
-              :href="
-                agentWindowsDownloadUrl || '#'
-              "
-              target="_blank"
-              rel="noopener"
-              @click="
-                handleAgentDownloadClick
-              "
-            >
-              Baixar Agent Windows
-            </a>
           </div>
-        </div>
 
-        <!-- ============================================= -->
-        <!-- SEM AGENT                                     -->
-        <!-- ============================================= -->
+          <!-- ============================================= -->
+          <!-- SEM AGENT                                     -->
+          <!-- ============================================= -->
 
-        <div v-else>
-          <p>
-            Nenhum PrintFlow Agent está conectado a esta conta.
-          </p>
+          <div v-else>
+            <p>
+              Nenhum PrintFlow Agent esta conectado a esta conta.
+            </p>
 
-          <p
-            style="
-              margin-top: 6px;
-            "
-          >
-            Gere um código de conexão e informe esse código no aplicativo PrintFlow Agent.
-          </p>
-
-          <button
-            type="button"
-            class="btn btn--primary"
-            :disabled="
-              pairingLoading
-            "
-            style="
-              margin-top: 12px;
-            "
-            @click="
-              generatePairingCode
-            "
-          >
-            {{
-              pairingLoading
-                ? 'Gerando...'
-                : 'Gerar código de conexão'
-            }}
-          </button>
-
-          <a
-            class="btn"
-            :href="
-              agentWindowsDownloadUrl || '#'
-            "
-            target="_blank"
-            rel="noopener"
-            style="
-              margin-top: 12px;
-              margin-left: 8px;
-            "
-            @click="
-              handleAgentDownloadClick
-            "
-          >
-            Baixar Agent Windows
-          </a>
-        </div>
-
-        <!-- ============================================= -->
-        <!-- CÓDIGO DE PAREAMENTO                          -->
-        <!-- ============================================= -->
-
-        <div
-          v-if="
-            pairingCode
-          "
-          class="summary-box"
-          style="
-            margin-top: 16px;
-          "
-        >
-          <div class="detail-list__row">
-            <span>
-              Código de conexão
-            </span>
-
-            <strong
+            <p
               style="
-                font-size: 22px;
-                letter-spacing: 1px;
+                margin-top: 6px;
               "
             >
-              {{
-                pairingCode
-              }}
-            </strong>
+              Baixe o Agent Windows ou abra o Agent ja instalado pelos botoes acima. A conexao com esta conta sera preparada automaticamente.
+            </p>
           </div>
-
-          <div class="detail-list__row">
-            <span>
-              Validade
-            </span>
-
-            <strong>
-              até
-              {{
-                formatPairingExpiration
-              }}
-            </strong>
-          </div>
-
-          <p
-            style="
-              margin-top: 12px;
-            "
-          >
-            Abra o PrintFlow Agent no computador que possui acesso às impressoras e informe o código acima.
-          </p>
-
-          <button
-            type="button"
-            class="btn"
-            style="
-              margin-top: 12px;
-            "
-            @click="
-              loadAgents
-            "
-          >
-            Já conectei o Agent
-          </button>
-        </div>
       </template>
     </div>
 
