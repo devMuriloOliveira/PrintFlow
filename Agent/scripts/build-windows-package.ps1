@@ -3,6 +3,7 @@ param(
   [string]$PackageName = "PrintFlow-Agent-Windows",
   [string]$InstallerName = "PrintFlow-Agent-Setup",
   [string]$ApiUrl = "http://localhost:3333",
+  [switch]$SignDev,
   [switch]$SkipInstall
 )
 
@@ -121,6 +122,11 @@ SourceFiles0=$escapedSourceRoot
 Set-Content -LiteralPath $installerSedPath -Value $sed -Encoding ASCII
 
 iexpress.exe /N /Q $installerSedPath | Out-Null
+
+if ($SignDev) {
+  & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
+    -FilePath (Join-Path $OutputDir "$InstallerName.exe")
+}
 
 Write-Host "Pacote Windows gerado:"
 Write-Host $zipPath
