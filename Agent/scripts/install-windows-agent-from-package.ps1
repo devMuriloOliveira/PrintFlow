@@ -15,6 +15,8 @@ $packageRoot = $PSScriptRoot
 $zipPath = Join-Path $packageRoot "PrintFlow-Agent-Windows.zip"
 $iconPath = Join-Path $packageRoot "printflow-agent-icon.ico"
 $extractRoot = Join-Path $env:TEMP ("PrintFlowAgentSetup-" + [guid]::NewGuid().ToString("N"))
+$script:InstallerSucceeded = $false
+$script:InstallAttempted = $false
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "PrintFlow Agent Setup"
@@ -203,15 +205,17 @@ function Complete-Installer {
   $progress.Style = "Continuous"
   $progress.Value = if ($Success) { 100 } else { 0 }
   $statusLabel.Text = $Message
-  $installButton.Text = "Concluir"
+  $installButton.Text = if ($Success) { "Concluir" } else { "Fechar" }
   $installButton.Enabled = $true
   $cancelButton.Visible = $false
 
   if (-not $Success) {
     $installButton.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+    $script:InstallerSucceeded = $false
   }
 
   if ($Success) {
+    $script:InstallerSucceeded = $true
     $closeTimer = New-Object System.Windows.Forms.Timer
     $closeTimer.Interval = 1200
     $closeTimer.Add_Tick({
@@ -225,6 +229,7 @@ function Complete-Installer {
 
 function Start-Install {
   try {
+    $script:InstallAttempted = $true
     $acceptCheck.Enabled = $false
     $installButton.Enabled = $false
     $cancelButton.Enabled = $false
@@ -269,7 +274,7 @@ function Start-Install {
 }
 
 $installButton.Add_Click({
-  if ($installButton.Text -eq "Concluir") {
+  if ($installButton.Text -eq "Concluir" -or $installButton.Text -eq "Fechar") {
     $form.Close()
     return
   }
@@ -278,3 +283,7 @@ $installButton.Add_Click({
 })
 
 [System.Windows.Forms.Application]::Run($form)
+
+if ($script:InstallAttempted -and -not $script:InstallerSucceeded) {
+  exit 1
+}

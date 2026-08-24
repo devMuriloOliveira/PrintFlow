@@ -2,13 +2,22 @@ param(
   [string]$FilePath = "dist\PrintFlow-Agent-Setup.exe",
   [string]$CertificateSubject = "CN=PrintFlow 3D Local Dev",
   [string]$TimestampUrl = "http://timestamp.digicert.com",
-  [string]$ExportPublicCertificatePath = ""
+  [string]$ExportPublicCertificatePath = "",
+  [string]$CertificatePfxPath = "certs\PrintFlow-Agent-Dev-CodeSigning.pfx"
 )
 
 $ErrorActionPreference = "Stop"
 
 $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $targetPath = [System.IO.Path]::GetFullPath((Join-Path $agentRoot $FilePath))
+$pfxPath = [System.IO.Path]::GetFullPath((Join-Path $agentRoot $CertificatePfxPath))
+$pfxPasswordText = $env:PRINTFLOW_AGENT_DEV_CERT_PASSWORD
+
+if (-not $pfxPasswordText) {
+  $pfxPasswordText = "printflow-agent-local-dev-only"
+}
+
+$pfxPassword = ConvertTo-SecureString $pfxPasswordText -AsPlainText -Force
 
 function Find-SignTool {
   $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
@@ -44,6 +53,39 @@ if (-not $signTool) {
   throw "signtool.exe nao encontrado. Instale o Windows SDK e selecione o componente Windows SDK Signing Tools for Desktop Apps."
 }
 
+function Trust-DevCertificate {
+  param(
+    [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+  )
+
+  $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+    "Root",
+    "CurrentUser"
+  )
+  $rootStore.Open("ReadWrite")
+  $rootStore.Add($Certificate)
+  $rootStore.Close()
+
+  $publisherStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+    "TrustedPublisher",
+    "CurrentUser"
+  )
+  $publisherStore.Open("ReadWrite")
+  $publisherStore.Add($Certificate)
+  $publisherStore.Close()
+}
+
+$certificate = $null
+
+if (Test-Path $pfxPath) {
+  Import-PfxCertificate `
+    -FilePath $pfxPath `
+    -CertStoreLocation Cert:\CurrentUser\My `
+    -Password $pfxPassword | Out-Null
+
+  Write-Host "Certificado local de desenvolvimento importado do PFX persistido."
+}
+
 $certificate = Get-ChildItem Cert:\CurrentUser\My |
   Where-Object {
     $_.Subject -eq $CertificateSubject -and
@@ -61,25 +103,31 @@ if (-not $certificate) {
     -KeyAlgorithm RSA `
     -KeyLength 3072 `
     -HashAlgorithm SHA256 `
+    -KeyExportPolicy Exportable `
     -NotAfter (Get-Date).AddYears(3)
 
-  $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-    "Root",
-    "CurrentUser"
-  )
-  $rootStore.Open("ReadWrite")
-  $rootStore.Add($certificate)
-  $rootStore.Close()
+  Write-Host "Certificado local de desenvolvimento criado."
+}
 
-  $publisherStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-    "TrustedPublisher",
-    "CurrentUser"
-  )
-  $publisherStore.Open("ReadWrite")
-  $publisherStore.Add($certificate)
-  $publisherStore.Close()
+Trust-DevCertificate -Certificate $certificate
 
-  Write-Host "Certificado local de desenvolvimento criado e confiado no usuario atual."
+$pfxDir = Split-Path -Parent $pfxPath
+if (-not (Test-Path $pfxDir)) {
+  New-Item -ItemType Directory -Path $pfxDir | Out-Null
+}
+
+if (-not (Test-Path $pfxPath)) {
+  try {
+    Export-PfxCertificate `
+      -Cert $certificate `
+      -FilePath $pfxPath `
+      -Password $pfxPassword | Out-Null
+
+    Write-Host "Certificado local de desenvolvimento persistido em PFX privado local:"
+    Write-Host $pfxPath
+  } catch {
+    Write-Warning ("Nao foi possivel exportar o PFX local. Builds futuros podem criar outro certificado se este sair do Windows: " + $_.Exception.Message)
+  }
 }
 
 if ($ExportPublicCertificatePath) {

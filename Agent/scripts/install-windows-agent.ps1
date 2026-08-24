@@ -11,6 +11,35 @@ $ErrorActionPreference = "Stop"
 $sourceRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $installRoot = [System.IO.Path]::GetFullPath($InstallDir)
 
+function Stop-ExistingAgentInstall {
+  if (-not (Test-Path $installRoot)) {
+    return
+  }
+
+  try {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  } catch {
+  }
+
+  try {
+    $escapedInstallRoot = [regex]::Escape($installRoot)
+    Get-CimInstance Win32_Process |
+      Where-Object {
+        $_.ProcessId -ne $PID -and
+        $_.CommandLine -and
+        $_.CommandLine -match $escapedInstallRoot
+      } |
+      ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
+  } catch {
+  }
+
+  Start-Sleep -Milliseconds 1200
+}
+
+Stop-ExistingAgentInstall
+
 if (-not (Test-Path $installRoot)) {
   New-Item -ItemType Directory -Path $installRoot | Out-Null
 }

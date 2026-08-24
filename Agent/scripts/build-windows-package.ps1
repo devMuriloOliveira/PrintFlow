@@ -125,7 +125,7 @@ SourceFiles=SourceFiles
 [Strings]
 InstallPrompt=
 DisplayLicense=
-FinishMessage=PrintFlow Agent instalado.
+FinishMessage=
 TargetName=$escapedInstallerPath
 FriendlyName=PrintFlow Agent Setup
 AppLaunched=$appLaunched
