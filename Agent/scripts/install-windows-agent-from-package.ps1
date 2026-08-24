@@ -173,6 +173,17 @@ function Complete-Installer {
   if (-not $Success) {
     $installButton.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
   }
+
+  if ($Success) {
+    $closeTimer = New-Object System.Windows.Forms.Timer
+    $closeTimer.Interval = 1200
+    $closeTimer.Add_Tick({
+      $closeTimer.Stop()
+      $closeTimer.Dispose()
+      $form.Close()
+    })
+    $closeTimer.Start()
+  }
 }
 
 function Start-Install {

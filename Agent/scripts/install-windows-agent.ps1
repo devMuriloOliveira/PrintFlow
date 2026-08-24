@@ -138,10 +138,8 @@ if ($estimatedSizeKb -gt 0) {
   New-ItemProperty -Path $uninstallKey -Name "EstimatedSize" -Value $estimatedSizeKb -PropertyType DWord -Force | Out-Null
 }
 
-Start-Process `
-  -FilePath "powershell.exe" `
-  -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`" -ApiUrl `"$ApiUrl`"" `
-  -WindowStyle Hidden
+Start-ScheduledTask `
+  -TaskName $TaskName
 
 Write-Host "PrintFlow Agent instalado."
 Write-Host "Diretorio: $installRoot"
