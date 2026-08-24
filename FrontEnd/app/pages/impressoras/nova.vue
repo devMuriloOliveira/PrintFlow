@@ -21,14 +21,28 @@ const { notify } = useUi()
 
 const route = useRoute()
 const config = useRuntimeConfig()
+const defaultAgentWindowsDownloadUrl =
+  '/downloads/PrintFlow-Agent-Windows.zip'
 
 const agentWindowsDownloadUrl =
   computed(() =>
     String(
       config.public.agentWindowsDownloadUrl ||
-        ''
+        defaultAgentWindowsDownloadUrl
     ).trim()
   )
+
+const handleAgentDownloadClick =
+  (event: MouseEvent) => {
+    if (agentWindowsDownloadUrl.value) return
+
+    event.preventDefault()
+
+    notify(
+      'Link de download do Agent ainda nao configurado. Configure NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL.',
+      'info'
+    )
+  }
 
 // ======================================================
 // PRINTFLOW AGENT
@@ -2469,15 +2483,15 @@ const cancel = () => {
           "
         >
           <a
-            v-if="
-              agentWindowsDownloadUrl
-            "
             class="btn btn--primary"
             :href="
-              agentWindowsDownloadUrl
+              agentWindowsDownloadUrl || '#'
             "
             target="_blank"
             rel="noopener"
+            @click="
+              handleAgentDownloadClick
+            "
           >
             Baixar Agent Windows
           </a>
@@ -3446,15 +3460,15 @@ const cancel = () => {
             </button>
 
             <a
-              v-if="
-                agentWindowsDownloadUrl
-              "
               class="btn"
               :href="
-                agentWindowsDownloadUrl
+                agentWindowsDownloadUrl || '#'
               "
               target="_blank"
               rel="noopener"
+              @click="
+                handleAgentDownloadClick
+              "
             >
               Baixar Agent Windows
             </a>
@@ -3499,18 +3513,18 @@ const cancel = () => {
           </button>
 
           <a
-            v-if="
-              agentWindowsDownloadUrl
-            "
             class="btn"
             :href="
-              agentWindowsDownloadUrl
+              agentWindowsDownloadUrl || '#'
             "
             target="_blank"
             rel="noopener"
             style="
               margin-top: 12px;
               margin-left: 8px;
+            "
+            @click="
+              handleAgentDownloadClick
             "
           >
             Baixar Agent Windows
