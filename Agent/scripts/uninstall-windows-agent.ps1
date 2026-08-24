@@ -8,6 +8,9 @@ $ErrorActionPreference = "Stop"
 
 $installRoot = [System.IO.Path]::GetFullPath($InstallDir)
 $iconPath = Join-Path $installRoot "assets\printflow-agent-icon.ico"
+$script:UninstallSucceeded = $false
+$script:UninstallAttempted = $false
+$script:UninstallForm = $null
 
 function Invoke-AgentUninstall {
   param(
@@ -85,6 +88,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
 $form = New-Object System.Windows.Forms.Form
+$script:UninstallForm = $form
 $form.Text = "Desinstalar PrintFlow Agent"
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -204,31 +208,45 @@ function Complete-Uninstall {
   $progress.Style = "Continuous"
   $progress.Value = if ($Success) { 100 } else { 0 }
   $statusLabel.Text = $Message
-  $uninstallButton.Text = "Concluir"
+  $uninstallButton.Text = if ($Success) { "Concluir" } else { "Fechar" }
   $uninstallButton.Enabled = $true
   $cancelButton.Visible = $false
 
   if ($Success) {
+    $script:UninstallSucceeded = $true
     $uninstallButton.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
 
     $closeTimer = New-Object System.Windows.Forms.Timer
     $closeTimer.Interval = 1200
     $closeTimer.Add_Tick({
-      $closeTimer.Stop()
-      $closeTimer.Dispose()
-      $form.Close()
+      param($sender, $eventArgs)
+
+      try {
+        if ($sender) {
+          $sender.Stop()
+          $sender.Dispose()
+        }
+
+        if ($script:UninstallForm -and -not $script:UninstallForm.IsDisposed) {
+          $script:UninstallForm.Close()
+        }
+      } catch {
+      }
     })
     $closeTimer.Start()
+  } else {
+    $script:UninstallSucceeded = $false
   }
 }
 
 $uninstallButton.Add_Click({
-  if ($uninstallButton.Text -eq "Concluir") {
+  if ($uninstallButton.Text -eq "Concluir" -or $uninstallButton.Text -eq "Fechar") {
     $form.Close()
     return
   }
 
   try {
+    $script:UninstallAttempted = $true
     $uninstallButton.Enabled = $false
     $cancelButton.Enabled = $false
     $uninstallButton.Text = "Desinstalando..."
@@ -251,3 +269,7 @@ $uninstallButton.Add_Click({
 })
 
 [System.Windows.Forms.Application]::Run($form)
+
+if ($script:UninstallAttempted -and -not $script:UninstallSucceeded) {
+  exit 1
+}

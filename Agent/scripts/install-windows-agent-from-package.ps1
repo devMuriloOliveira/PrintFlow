@@ -17,8 +17,10 @@ $iconPath = Join-Path $packageRoot "printflow-agent-icon.ico"
 $extractRoot = Join-Path $env:TEMP ("PrintFlowAgentSetup-" + [guid]::NewGuid().ToString("N"))
 $script:InstallerSucceeded = $false
 $script:InstallAttempted = $false
+$script:InstallerForm = $null
 
 $form = New-Object System.Windows.Forms.Form
+$script:InstallerForm = $form
 $form.Text = "PrintFlow Agent Setup"
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -219,9 +221,19 @@ function Complete-Installer {
     $closeTimer = New-Object System.Windows.Forms.Timer
     $closeTimer.Interval = 1200
     $closeTimer.Add_Tick({
-      $closeTimer.Stop()
-      $closeTimer.Dispose()
-      $form.Close()
+      param($sender, $eventArgs)
+
+      try {
+        if ($sender) {
+          $sender.Stop()
+          $sender.Dispose()
+        }
+
+        if ($script:InstallerForm -and -not $script:InstallerForm.IsDisposed) {
+          $script:InstallerForm.Close()
+        }
+      } catch {
+      }
     })
     $closeTimer.Start()
   }
