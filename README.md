@@ -109,11 +109,13 @@ Variaveis publicas:
 
 - `NUXT_PUBLIC_API_BASE`: URL base da API.
 - `NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL`: URL publica do pacote Windows do Agent.
+- `NUXT_PUBLIC_AGENT_WINDOWS_DEV_CERTIFICATE_URL`: URL publica do certificado de teste do Agent.
+- `NUXT_PUBLIC_AGENT_LOCAL_URL`: URL local usada pelo site para detectar o Agent aberto no computador. Padrao: `http://127.0.0.1:17873`.
 
 Fluxo de impressoras pelo Agent:
 
 1. O usuario escolhe adicionar impressora pelo Agent.
-2. O site mostra a opcao de baixar o Agent ou abrir o Agent ja instalado.
+2. O site detecta o Agent local quando ele esta aberto. Se detectar, esconde os downloads e usa o Agent instalado.
 3. O site gera um codigo temporario de pareamento.
 4. O Agent se vincula a conta e fica online.
 5. O site lista as impressoras encontradas.

@@ -18,6 +18,7 @@ import {
 } from './cloud/apiClient.js'
 
 import { handleCommand } from './commands/commandHandler.js'
+import { startLocalServer } from './localServer.js'
 
 dotenv.config()
 
@@ -51,6 +52,8 @@ console.log('Arquitetura:', os.arch())
 console.log('')
 console.log('API:', apiUrl)
 console.log('Log:', logger.logPath)
+
+startLocalServer()
 
 const start = async () => {
   try {

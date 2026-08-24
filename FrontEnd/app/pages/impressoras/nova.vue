@@ -50,6 +50,17 @@ const agentWindowsDevCertificateUrl =
     ).trim()
   )
 
+const agentLocalUrl =
+  computed(() =>
+    String(
+      config.public.agentLocalUrl ||
+        'http://127.0.0.1:17873'
+    ).replace(
+      /\/$/,
+      ''
+    )
+  )
+
 const downloadAgentWindows = () => {
   if (!agentWindowsDownloadUrl.value) {
     notify(
@@ -129,6 +140,19 @@ const discoveryMessage =
 
 const agentOpenMessage =
   ref('')
+
+const agentLocalChecking =
+  ref(false)
+
+const agentLocalStatus =
+  ref<any | null>(null)
+
+const agentLocalAvailable =
+  computed(() =>
+    Boolean(
+      agentLocalStatus.value?.ok
+    )
+  )
 
 const printerStatuses =
   reactive<Record<string, any>>({})
@@ -430,6 +454,107 @@ const formatLastSeen = (
 // ABRIR AGENT INSTALADO
 // ======================================================
 
+const checkLocalAgent =
+  async () => {
+    if (
+      !process.client ||
+      agentLocalChecking.value
+    ) {
+      return agentLocalStatus.value
+    }
+
+    agentLocalChecking.value =
+      true
+
+    const controller =
+      new AbortController()
+
+    const timeout =
+      window.setTimeout(
+        () =>
+          controller.abort(),
+        1200
+      )
+
+    try {
+      const response =
+        await fetch(
+          `${agentLocalUrl.value}/healthz`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal
+          }
+        )
+
+      const data =
+        await response.json()
+
+      if (
+        response.ok &&
+        data?.app ===
+          'printflow-agent'
+      ) {
+        agentLocalStatus.value =
+          data
+
+        return data
+      }
+
+      agentLocalStatus.value =
+        null
+
+      return null
+    } catch {
+      agentLocalStatus.value =
+        null
+
+      return null
+    } finally {
+      window.clearTimeout(
+        timeout
+      )
+
+      agentLocalChecking.value =
+        false
+    }
+  }
+
+const queueLocalAgentPairing =
+  async (
+    code: string
+  ) => {
+    const response =
+      await fetch(
+        `${agentLocalUrl.value}/pair`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json'
+          },
+          body: JSON.stringify({
+            code
+          })
+        }
+      )
+
+    const data =
+      await response.json()
+
+    if (
+      !response.ok ||
+      !data?.ok
+    ) {
+      throw new Error(
+        data?.error ||
+        'Nao foi possivel enviar o codigo ao Agent local.'
+      )
+    }
+
+    return data
+  }
+
 const openInstalledAgent =
   async () => {
     if (
@@ -456,6 +581,51 @@ const openInstalledAgent =
       ) {
         agentOpenMessage.value =
           'Nao foi possivel preparar a conexao automatica. Tente novamente.'
+
+        return
+      }
+
+      const localAgent =
+        await checkLocalAgent()
+
+      if (
+        localAgent
+      ) {
+        await queueLocalAgentPairing(
+          pairingCode.value
+        )
+
+        agentOpenMessage.value =
+          'Agent local detectado. Conexao enviada para pareamento automatico.'
+
+        for (
+          let attempt = 0;
+          attempt < 6;
+          attempt++
+        ) {
+          await new Promise(
+            resolve =>
+              setTimeout(
+                resolve,
+                5000
+              )
+          )
+
+          await loadAgents()
+
+          if (
+            onlineAgents.value.length >
+            0
+          ) {
+            agentOpenMessage.value =
+              'PrintFlow Agent aberto e conectado.'
+
+            return
+          }
+        }
+
+        agentOpenMessage.value =
+          'Agent local recebeu a conexao, mas ainda nao apareceu online nesta conta. Aguarde alguns segundos e clique em Atualizar.'
 
         return
       }
@@ -1947,6 +2117,7 @@ const controlPrinter =
 // ======================================================
 
 onMounted(() => {
+  checkLocalAgent()
   loadAgents()
 })
 
@@ -2492,6 +2663,9 @@ const cancel = () => {
         </p>
 
         <p
+          v-if="
+            !agentLocalAvailable
+          "
           style="
             margin-top: 10px;
             padding: 10px 12px;
@@ -2506,6 +2680,22 @@ const cancel = () => {
           Versao de teste: antes de baixar e executar o Agent Windows, baixe o certificado de teste e instale-o no Windows como Autoridade Raiz Confiavel e Editor Confiavel. Isso ajuda este computador a reconhecer a assinatura local do instalador.
         </p>
 
+        <p
+          v-else
+          style="
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            background: #f0fdf4;
+            color: #166534;
+            font-size: 13px;
+            line-height: 1.45;
+          "
+        >
+          PrintFlow Agent detectado neste computador. Use Conectar Agent instalado para vincular este computador a sua conta.
+        </p>
+
         <div
           style="
             display: flex;
@@ -2515,6 +2705,9 @@ const cancel = () => {
           "
         >
           <button
+            v-if="
+              !agentLocalAvailable
+            "
             type="button"
             class="btn"
             @click="
@@ -2525,6 +2718,9 @@ const cancel = () => {
           </button>
 
           <button
+            v-if="
+              !agentLocalAvailable
+            "
             type="button"
             class="btn btn--primary"
             @click="
@@ -2537,8 +2733,13 @@ const cancel = () => {
           <button
             type="button"
             class="btn"
+            :class="{
+              'btn--primary':
+                agentLocalAvailable
+            }"
             :disabled="
-              openingAgent
+              openingAgent ||
+              agentLocalChecking
             "
             @click="
               openInstalledAgent
@@ -2547,7 +2748,9 @@ const cancel = () => {
             {{
               openingAgent
                 ? 'Verificando...'
-                : 'Conectar Agent instalado'
+                : agentLocalChecking
+                  ? 'Procurando Agent...'
+                  : 'Conectar Agent instalado'
             }}
           </button>
 
@@ -2558,7 +2761,10 @@ const cancel = () => {
               agentLoading
             "
             @click="
-              loadAgents
+              () => {
+                checkLocalAgent()
+                loadAgents()
+              }
             "
           >
             {{
