@@ -135,6 +135,16 @@ const discoveryStatus = ref<
 const discoveredPrinters =
   ref<any[]>([])
 
+const visibleDiscoveredPrinters =
+  computed(() =>
+    discoveredPrinters.value.filter(
+      printer =>
+        printer &&
+        typeof printer ===
+          'object'
+    )
+  )
+
 const discoveryMessage =
   ref('')
 
@@ -219,6 +229,14 @@ const printerConnectionOptions =
 const getPrinterKey = (
   printer: any
 ) => {
+  if (
+    !printer ||
+    typeof printer !==
+      'object'
+  ) {
+    return 'unknown:unknown:unknown'
+  }
+
   return [
     printer.connectionType ||
       'unknown',
@@ -235,6 +253,20 @@ const getPrinterKey = (
 const getPrinterConnectionOptions = (
   printer: any
 ) => {
+  if (
+    !printer ||
+    typeof printer !==
+      'object'
+  ) {
+    return {
+      serial: '',
+      accessCode: '',
+      apiKey: '',
+      username: '',
+      password: ''
+    }
+  }
+
   const key =
     getPrinterKey(
       printer
@@ -1264,7 +1296,12 @@ const discoverPrinters =
         Array.isArray(
           result?.printers
         )
-          ? result.printers
+          ? result.printers.filter(
+              (printer: any) =>
+                printer &&
+                typeof printer ===
+                  'object'
+            )
           : []
 
       discoveredPrinters.value =
@@ -3003,8 +3040,8 @@ const cancel = () => {
                 v-if="
                   discoveryStatus ===
                     'completed' &&
-                  discoveredPrinters.length ===
-                    0
+                  visibleDiscoveredPrinters.length ===
+                  0
                 "
                 style="
                   margin-top: 10px;
@@ -3021,8 +3058,8 @@ const cancel = () => {
                 v-if="
                   discoveryStatus ===
                     'completed' &&
-                  discoveredPrinters.length >
-                    0
+                  visibleDiscoveredPrinters.length >
+                  0
                 "
                 style="
                   margin-top: 14px;
@@ -3032,7 +3069,7 @@ const cancel = () => {
               >
                 <div
                   v-for="
-                    printer in discoveredPrinters
+                    printer in visibleDiscoveredPrinters
                   "
                   :key="
                     getPrinterKey(
