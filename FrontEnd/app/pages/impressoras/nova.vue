@@ -64,7 +64,7 @@ const agentLocalUrl =
 const downloadAgentWindows = () => {
   if (!agentWindowsDownloadUrl.value) {
     notify(
-      'Link de download do Agent ainda nao configurado. Configure NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL.',
+      'Link de download do Agent ainda não configurado. Configure NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL.',
       'info'
     )
 
@@ -78,13 +78,13 @@ const downloadAgentWindows = () => {
   )
 
   agentOpenMessage.value =
-    'Download iniciado. Execute o instalador e, quando o Agent abrir, ele ficara disponivel para conectar por esta tela.'
+    'Download iniciado. Execute o instalador e, quando o Agent abrir, ele ficará disponível para conectar por esta tela.'
 }
 
 const downloadAgentWindowsDevCertificate = () => {
   if (!agentWindowsDevCertificateUrl.value) {
     notify(
-      'Certificado de teste do Agent ainda nao configurado.',
+      'Certificado de teste do Agent ainda não configurado.',
       'info'
     )
 
@@ -98,7 +98,7 @@ const downloadAgentWindowsDevCertificate = () => {
   )
 
   agentOpenMessage.value =
-    'Certificado de teste baixado. Instale-o no Windows como Autoridade Raiz Confiavel e Editor Confiavel antes de executar o instalador do Agent.'
+    'Certificado de teste baixado. Instale-o no Windows como Autoridade Raiz Confiável e Editor Confiável antes de executar o instalador do Agent.'
 }
 
 // ======================================================
@@ -597,7 +597,7 @@ const queueLocalAgentPairing =
     ) {
       throw new Error(
         data?.error ||
-        'Nao foi possivel enviar o codigo ao Agent local.'
+        'Não foi possível enviar o código ao Agent local.'
       )
     }
 
@@ -622,7 +622,7 @@ const openInstalledAgent =
       true
 
     agentOpenMessage.value =
-      'Preparando conexao automatica com o PrintFlow Agent...'
+      'Preparando conexão automática com o PrintFlow Agent...'
 
     try {
       if (
@@ -635,7 +635,7 @@ const openInstalledAgent =
         !pairingCode.value
       ) {
         agentOpenMessage.value =
-          'Nao foi possivel preparar a conexao automatica. Tente novamente.'
+          'Não foi possível preparar a conexão automática. Tente novamente.'
 
         return
       }
@@ -651,7 +651,7 @@ const openInstalledAgent =
         )
 
         agentOpenMessage.value =
-          'Agent local detectado. Conexao enviada para pareamento automatico.'
+          'Agent local detectado. Conexão enviada para pareamento automático.'
 
         for (
           let attempt = 0;
@@ -680,7 +680,7 @@ const openInstalledAgent =
         }
 
         agentOpenMessage.value =
-          'Agent local recebeu a conexao, mas ainda nao apareceu online nesta conta. Aguarde alguns segundos e clique em Atualizar.'
+          'Agent local recebeu a conexão, mas ainda não apareceu online nesta conta. Aguarde alguns segundos e clique em Atualizar.'
 
         return
       }
@@ -692,7 +692,7 @@ const openInstalledAgent =
         protocolUrl
 
       agentOpenMessage.value =
-        'Solicitacao enviada ao Windows. Se o navegador pedir permissao, confirme para abrir o PrintFlow Agent.'
+        'Solicitação enviada ao Windows. Se o navegador pedir permissão, confirme para abrir o PrintFlow Agent.'
 
       for (
         let attempt = 0;
@@ -721,7 +721,7 @@ const openInstalledAgent =
       }
 
       agentOpenMessage.value =
-        'Ainda nao recebemos contato do Agent. Se ele nao abrir, use o atalho PrintFlow Agent no Windows.'
+        'Ainda não recebemos contato do Agent. Se ele não abrir, use o atalho PrintFlow Agent no Windows.'
     } finally {
       openingAgent.value =
         false
@@ -1627,7 +1627,7 @@ const connectDiscoveredPrinter =
           0,
 
         status:
-          'DisponÃ­vel',
+          'Disponível',
 
         maintenance:
           existingPrinter?.maintenance ||
@@ -1687,7 +1687,7 @@ const connectDiscoveredPrinter =
       }
 
       notify(
-        'Impressora conectada e adicionada Ã  lista.'
+        'Impressora conectada e adicionada à lista.'
       )
 
       navigateTo(
@@ -2706,7 +2706,7 @@ const cancel = () => {
       >
         <div class="detail-list__row">
           <span>
-            Conexao automatica
+            Conexão automática
           </span>
 
           <strong>
@@ -2719,7 +2719,7 @@ const cancel = () => {
             margin-top: 8px;
           "
         >
-          Use esta opcao para encontrar impressoras na rede ou conectadas por cabo USB neste computador.
+          Use esta opção para encontrar impressoras na rede ou conectadas por cabo USB neste computador.
         </p>
 
         <p
@@ -2737,7 +2737,7 @@ const cancel = () => {
             line-height: 1.45;
           "
         >
-          Versao de teste: antes de baixar e executar o Agent Windows, baixe o certificado de teste e instale-o no Windows como Autoridade Raiz Confiavel e Editor Confiavel. Isso ajuda este computador a reconhecer a assinatura local do instalador.
+          Versão de teste: antes de baixar e executar o Agent Windows, baixe o certificado de teste e instale-o no Windows como Autoridade Raiz Confiável e Editor Confiável. Isso ajuda este computador a reconhecer a assinatura local do instalador.
         </p>
 
         <p
@@ -3719,7 +3719,7 @@ const cancel = () => {
 
           <div v-else>
             <p>
-              Nenhum PrintFlow Agent esta conectado a esta conta.
+              Nenhum PrintFlow Agent está conectado a esta conta.
             </p>
 
             <p
@@ -3727,7 +3727,7 @@ const cancel = () => {
                 margin-top: 6px;
               "
             >
-              Baixe o Agent Windows ou abra o Agent ja instalado pelos botoes acima. A conexao com esta conta sera preparada automaticamente.
+              Baixe o Agent Windows ou abra o Agent já instalado pelos botões acima. A conexão com esta conta será preparada automaticamente.
             </p>
           </div>
       </template>

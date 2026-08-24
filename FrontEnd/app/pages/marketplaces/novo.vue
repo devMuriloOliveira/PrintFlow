@@ -77,9 +77,9 @@ const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
   if (!form.name.trim()) errors.name = 'Informe o nome do canal.'
   if (requiresToken.value && !form.accountExternalId.trim()) errors.accountExternalId = 'Informe o ID da conta externa.'
-  if (requiresToken.value && !form.accessToken.trim()) errors.accessToken = 'Informe o access token da integracao.'
-  if (form.commission < 0) errors.commission = 'Informe uma comissao valida.'
-  if (!form.startDate.trim()) errors.startDate = 'Informe a data de inicio.'
+  if (requiresToken.value && !form.accessToken.trim()) errors.accessToken = 'Informe o access token da integração.'
+  if (form.commission < 0) errors.commission = 'Informe uma comissão válida.'
+  if (!form.startDate.trim()) errors.startDate = 'Informe a data de início.'
   const first = Object.keys(errors)[0]
   if (first) nextTick(() => document.querySelector(`[data-field="${first}"] input,[data-field="${first}"] select`)?.focus())
   return !first
@@ -127,28 +127,28 @@ const save = async () => {
     notify(isEditing.value ? 'Marketplace atualizado com sucesso.' : requiresToken.value ? 'Marketplace conectado com sucesso.' : 'Marketplace cadastrado com sucesso.')
     navigateTo('/marketplaces')
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Nao foi possivel salvar o marketplace.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível salvar o marketplace.', 'info')
   } finally {
     saving.value = false
   }
 }
 
 const cancel = () => {
-  if ((!form.accountExternalId && !form.startDate) || window.confirm('Descartar alteracoes?\n\nAs informacoes preenchidas ainda nao foram salvas.')) navigateTo('/marketplaces')
+  if ((!form.accountExternalId && !form.startDate) || window.confirm('Descartar alterações?\n\nAs informações preenchidas ainda não foram salvas.')) navigateTo('/marketplaces')
 }
 </script>
 
 <template>
   <div>
     <div class="breadcrumb"><span>Marketplaces</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar Marketplace' : 'Novo Marketplace' }}</strong></div>
-    <PageHeader :title="isEditing ? 'Editar Marketplace' : 'Novo Marketplace'" :subtitle="isEditing ? 'Atualize taxas, status e identificacao do canal.' : 'Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente.'" />
+    <PageHeader :title="isEditing ? 'Editar Marketplace' : 'Novo Marketplace'" :subtitle="isEditing ? 'Atualize taxas, status e identificação do canal.' : 'Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente.'" />
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <form @submit.prevent="save">
-        <div class="form-card"><h2 class="form-card__title"><UiIcon name="store" />1. Servico de venda</h2><div class="integration-grid">
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="store" />1. Serviço de venda</h2><div class="integration-grid">
           <button v-for="platform in platforms" :key="platform.id" class="integration-card" :class="{active:form.platform===platform.id}" type="button" @click="form.platform=platform.id">
             <span class="market-logo" :style="{background:platform.color,color:platform.id==='mercado_livre'?'#17233c':'#fff'}">{{platform.short}}</span>
             <strong>{{platform.name}}</strong>
-            <small>{{platform.id==='custom' ? 'Controle manual de taxas' : 'Webhook e token obrigatorio'}}</small>
+            <small>{{platform.id==='custom' ? 'Controle manual de taxas' : 'Webhook e token obrigatório'}}</small>
           </button>
         </div><div class="form-grid" style="margin-top:14px">
           <div class="field col-5" data-field="name" :class="{'field--error':errors.name}"><label>Nome no PrintFlow *</label><input v-model="form.name"><small v-if="errors.name" class="field__error">{{errors.name}}</small></div>
@@ -159,27 +159,27 @@ const cancel = () => {
 
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais e webhook</h2><div class="form-grid">
           <div v-if="requiresToken" class="field col-4" data-field="accountExternalId" :class="{'field--error':errors.accountExternalId}"><label>ID da conta externa *</label><input v-model="form.accountExternalId" :placeholder="form.platform==='shopee'?'Shop ID':'Seller/User ID'"><small v-if="errors.accountExternalId" class="field__error">{{errors.accountExternalId}}</small></div>
-          <div class="field col-4"><label>Nome da conexao</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
+          <div class="field col-4"><label>Nome da conexão</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
           <div v-if="requiresToken" class="field col-4"><label>Expira em</label><input v-model="form.tokenExpiresAt" type="datetime-local"></div>
-          <div v-if="requiresToken" class="field col-6" data-field="accessToken" :class="{'field--error':errors.accessToken}"><label>Access token *</label><input v-model="form.accessToken" type="password" autocomplete="off" placeholder="Obrigatorio e criptografado"><small v-if="errors.accessToken" class="field__error">{{errors.accessToken}}</small></div>
+          <div v-if="requiresToken" class="field col-6" data-field="accessToken" :class="{'field--error':errors.accessToken}"><label>Access token *</label><input v-model="form.accessToken" type="password" autocomplete="off" placeholder="Obrigatório e criptografado"><small v-if="errors.accessToken" class="field__error">{{errors.accessToken}}</small></div>
           <div v-if="requiresToken" class="field col-6"><label>Refresh token</label><input v-model="form.refreshToken" type="password" autocomplete="off" placeholder="Opcional e criptografado"></div>
-          <div v-if="requiresToken" class="field col-12"><label>Escopos/permissoes</label><input v-model="form.scopes" placeholder="orders.read, finances.read"></div>
-          <div v-if="webhookUrl" class="field col-12"><label>URL do webhook para configurar no servico</label><div class="copy-field"><input :value="webhookUrl" readonly><button class="btn" type="button" @click="copyWebhook"><UiIcon name="download" :size="15"/>Copiar</button></div></div>
+          <div v-if="requiresToken" class="field col-12"><label>Escopos/permissões</label><input v-model="form.scopes" placeholder="orders.read, finances.read"></div>
+          <div v-if="webhookUrl" class="field col-12"><label>URL do webhook para configurar no serviço</label><div class="copy-field"><input :value="webhookUrl" readonly><button class="btn" type="button" @click="copyWebhook"><UiIcon name="download" :size="15"/>Copiar</button></div></div>
         </div></div>
 
-        <div class="form-card"><h2 class="form-card__title"><UiIcon name="percent" />3. Taxas e vigencia</h2><div class="form-grid">
-          <div class="field col-3" data-field="commission" :class="{'field--error':errors.commission}"><label>Comissao (%) *</label><input v-model.number="form.commission" type="number" step=".01"><small v-if="errors.commission" class="field__error">{{errors.commission}}</small></div>
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="percent" />3. Taxas e vigência</h2><div class="form-grid">
+          <div class="field col-3" data-field="commission" :class="{'field--error':errors.commission}"><label>Comissão (%) *</label><input v-model.number="form.commission" type="number" step=".01"><small v-if="errors.commission" class="field__error">{{errors.commission}}</small></div>
           <div class="field col-3"><label>Tarifa fixa</label><input v-model.number="form.fixed" type="number" step=".01"></div>
           <div class="field col-3"><label>Taxa financeira (%)</label><input v-model.number="form.financial" type="number" step=".01"></div>
-          <div class="field col-3"><label>Anuncios (%)</label><input v-model.number="form.ads" type="number" step=".01"></div>
+          <div class="field col-3"><label>Anúncios (%)</label><input v-model.number="form.ads" type="number" step=".01"></div>
           <div class="field col-3"><label>Outras taxas (%)</label><input v-model.number="form.others" type="number" step=".01"></div>
-          <div class="field col-4" data-field="startDate" :class="{'field--error':errors.startDate}"><label>Inicio das taxas *</label><input v-model="form.startDate" type="date"><small v-if="errors.startDate" class="field__error">{{errors.startDate}}</small></div>
-          <div class="col-5 info-note"><UiIcon name="info" :size="18" />Essas regras entram quando a plataforma nao enviar o detalhamento completo das taxas.</div>
+          <div class="field col-4" data-field="startDate" :class="{'field--error':errors.startDate}"><label>Início das taxas *</label><input v-model="form.startDate" type="date"><small v-if="errors.startDate" class="field__error">{{errors.startDate}}</small></div>
+          <div class="col-5 info-note"><UiIcon name="info" :size="18" />Essas regras entram quando a plataforma não enviar o detalhamento completo das taxas.</div>
         </div></div>
 
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alteracoes' : 'Salvar e conectar' }}</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alterações' : 'Salvar e conectar' }}</button></div>
       </form>
-      <aside><PanelCard title="Previa de resultado"><div class="field"><label>Valor da venda</label><input v-model.number="saleValue" type="number"></div><div class="detail-list" style="margin-top:10px"><div class="detail-list__row"><span>Venda bruta</span><strong>{{formatCurrency(saleValue)}}</strong></div><div class="detail-list__row"><span>Total de taxas</span><strong>- {{formatCurrency(totalFees)}}</strong></div><div class="detail-list__row"><span>Receita liquida</span><strong class="money-positive">{{formatCurrency(netPreview)}}</strong></div></div><div class="summary-box"><small>Status da conexao</small><strong style="display:block;font-size:18px;margin-top:6px">{{connectionStatus === 'connected' ? 'Conectado' : 'Manual'}}</strong><span class="badge badge--green" style="margin-top:7px">{{netPreview && saleValue ? (netPreview/saleValue*100).toFixed(1) : '0.0'}}% do bruto</span></div></PanelCard></aside>
+      <aside><PanelCard title="Prévia de resultado"><div class="field"><label>Valor da venda</label><input v-model.number="saleValue" type="number"></div><div class="detail-list" style="margin-top:10px"><div class="detail-list__row"><span>Venda bruta</span><strong>{{formatCurrency(saleValue)}}</strong></div><div class="detail-list__row"><span>Total de taxas</span><strong>- {{formatCurrency(totalFees)}}</strong></div><div class="detail-list__row"><span>Receita líquida</span><strong class="money-positive">{{formatCurrency(netPreview)}}</strong></div></div><div class="summary-box"><small>Status da conexão</small><strong style="display:block;font-size:18px;margin-top:6px">{{connectionStatus === 'connected' ? 'Conectado' : 'Manual'}}</strong><span class="badge badge--green" style="margin-top:7px">{{netPreview && saleValue ? (netPreview/saleValue*100).toFixed(1) : '0.0'}}% do bruto</span></div></PanelCard></aside>
     </div>
   </div>
 </template>

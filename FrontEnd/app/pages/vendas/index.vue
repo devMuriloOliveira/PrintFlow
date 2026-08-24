@@ -14,15 +14,15 @@ const filtered = computed(() => orders.value.filter(o => (status.value === 'Todo
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const metricCards = computed(() => [
   { key: 'gross' as const, label: 'Receita Bruta', value: formatCurrency(metrics.revenue.value), icon: 'money', note: 'Dados do banco', color: 'green' },
-  { key: 'net' as const, label: 'Receita Liquida', value: formatCurrency(metrics.netRevenue.value), icon: 'wallet', note: 'Dados do banco', color: 'blue' },
+  { key: 'net' as const, label: 'Receita Líquida', value: formatCurrency(metrics.netRevenue.value), icon: 'wallet', note: 'Dados do banco', color: 'blue' },
   { key: 'profit' as const, label: 'Lucro Total', value: formatCurrency(metrics.profit.value), icon: 'money', change: `Margem ${metrics.percent(metrics.margin.value)}`, color: 'green' },
-  { key: 'orders' as const, label: 'Pedidos no Mes', value: formatNumber(metrics.orderCount.value), icon: 'bag', note: 'Dados do banco', color: 'purple' }
+  { key: 'orders' as const, label: 'Pedidos no Mês', value: formatNumber(metrics.orderCount.value), icon: 'bag', note: 'Dados do banco', color: 'purple' }
 ])
 const metricDetails = {
-  gross: { title: 'Evolucao da Receita Bruta', color: '#0da566', totalLabel: 'Total no periodo', formatter: formatCurrency },
-  net: { title: 'Evolucao da Receita Liquida', color: '#1768f2', totalLabel: 'Total no periodo', formatter: formatCurrency },
-  profit: { title: 'Evolucao do Lucro Total', color: '#0da566', totalLabel: 'Total no periodo', formatter: formatCurrency },
-  orders: { title: 'Quantidade de Pedidos', color: '#7c3aed', totalLabel: 'Pedidos no periodo', formatter: formatNumber }
+  gross: { title: 'Evolução da Receita Bruta', color: '#0da566', totalLabel: 'Total no período', formatter: formatCurrency },
+  net: { title: 'Evolução da Receita Líquida', color: '#1768f2', totalLabel: 'Total no período', formatter: formatCurrency },
+  profit: { title: 'Evolução do Lucro Total', color: '#0da566', totalLabel: 'Total no período', formatter: formatCurrency },
+  orders: { title: 'Quantidade de Pedidos', color: '#7c3aed', totalLabel: 'Pedidos no período', formatter: formatNumber }
 }
 const badgeClass = (s: string) => ({ Novo: '', Producao: 'badge--orange', Impresso: 'badge--purple', Embalando: 'badge--orange', Enviado: '', Entregue: 'badge--green', Cancelado: 'badge--red' }[s] || '')
 const parseOrderDate = (date: string) => {
@@ -147,7 +147,7 @@ const saveManualQuantity = async (product: any, rawQty: number) => {
     else await createItem('orders', payload)
     notify('Venda por produto salva.')
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Nao foi possivel salvar a venda manual.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível salvar a venda manual.', 'info')
     syncManualQuantities()
   } finally {
     savingProduct[key] = false
@@ -198,9 +198,9 @@ const editOrder = (order: any) => {
 }
 const removeOrder = async (order: any) => {
   const id = order.dbId || order.id
-  if (!id || !window.confirm(`Tem certeza que deseja excluir este pedido?\n\n${order.id} - ${order.product}\n\nEsta acao nao podera ser desfeita.`)) return
+  if (!id || !window.confirm(`Tem certeza que deseja excluir este pedido?\n\n${order.id} - ${order.product}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('orders', id)
-  notify('Pedido excluido com sucesso.')
+  notify('Pedido excluído com sucesso.')
 }
 const statusSegments = computed(() => {
   const totals = new Map<string, number>()
@@ -236,9 +236,9 @@ const marketplaceBars = computed(() => {
     </div>
     <PanelCard :title="selectedDetail.title" :subtitle="`${selectedDetail.totalLabel}: ${selectedDetail.formatter(detailedChart.total)}`">
       <template #actions>
-        <div class="segmented-control" aria-label="Periodo do grafico">
+        <div class="segmented-control" aria-label="Período do gráfico">
           <button type="button" :class="{ active: chartPeriod === 'week' }" @click="chartPeriod = 'week'">Semana</button>
-          <button type="button" :class="{ active: chartPeriod === 'month' }" @click="chartPeriod = 'month'">Mes</button>
+          <button type="button" :class="{ active: chartPeriod === 'month' }" @click="chartPeriod = 'month'">Mês</button>
           <button type="button" :class="{ active: chartPeriod === 'year' }" @click="chartPeriod = 'year'">Ano</button>
         </div>
       </template>
@@ -277,15 +277,15 @@ const marketplaceBars = computed(() => {
     <div class="split-layout">
       <PanelCard title="Pedidos">
         <div class="table-scroll"><table class="data-table">
-          <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Impressora</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Liquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr v-if="!filtered.length"><td colspan="14"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para comecar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><div class="table-product table-product--editable"><strong>{{ o.id }}</strong><button class="row-action row-action--edit" title="Editar pedido" @click.stop="editOrder(o)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td><select class="select-compact" :disabled="assigningPrinter[orderKey(o)]" :value="printJobForOrder(o)?.printerId || ''" @change="assignOrderPrinter(o, ($event.target as HTMLSelectElement).value)"><option value="">Fila</option><option v-for="printer in printers" :key="printer.id" :value="printer.id">{{ printer.name }} - {{ printerBusyLabel(printer.id || '') }}</option></select><small v-if="printJobForOrder(o)" style="display:block;margin-top:4px;color:var(--muted)">{{ printJobForOrder(o)?.status }} · {{ printJobForOrder(o)?.printerName || 'Sem impressora' }}</small></td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click.stop="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
+          <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Impressora</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Líquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
+          <tbody><tr v-if="!filtered.length"><td colspan="14"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para começar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><div class="table-product table-product--editable"><strong>{{ o.id }}</strong><button class="row-action row-action--edit" title="Editar pedido" @click.stop="editOrder(o)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td><select class="select-compact" :disabled="assigningPrinter[orderKey(o)]" :value="printJobForOrder(o)?.printerId || ''" @change="assignOrderPrinter(o, ($event.target as HTMLSelectElement).value)"><option value="">Fila</option><option v-for="printer in printers" :key="printer.id" :value="printer.id">{{ printer.name }} - {{ printerBusyLabel(printer.id || '') }}</option></select><small v-if="printJobForOrder(o)" style="display:block;margin-top:4px;color:var(--muted)">{{ printJobForOrder(o)?.status }} · {{ printJobForOrder(o)?.printerName || 'Sem impressora' }}</small></td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click.stop="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
         <div class="table-footer"><span>Mostrando {{ filtered.length ? 1 : 0 }} a {{ filtered.length }} de {{ orders.length }} pedidos</span><div class="pagination"><button class="page-btn active">1</button></div><select class="select-compact"><option>10 por pagina</option></select></div>
       </PanelCard>
       <aside>
         <PanelCard title="Vendas por Status"><DonutChart :segments="statusSegments" :total="formatNumber(metrics.orderCount.value)" caption="Pedidos" /></PanelCard>
         <PanelCard title="Vendas por Marketplace" style="margin-top:12px">
-          <div class="bar-list"><div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este grafico.</p></div></div><div v-for="bar in marketplaceBars" :key="bar.label" class="bar-row"><span>{{bar.label}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${bar.percent}%`,background:bar.color}"/></div><strong>{{ formatCurrency(bar.value) }}</strong></div></div>
+          <div class="bar-list"><div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este gráfico.</p></div></div><div v-for="bar in marketplaceBars" :key="bar.label" class="bar-row"><span>{{bar.label}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${bar.percent}%`,background:bar.color}"/></div><strong>{{ formatCurrency(bar.value) }}</strong></div></div>
         </PanelCard>
       </aside>
     </div>

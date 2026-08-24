@@ -21,7 +21,7 @@ const removeExpense = async (expense: any) => {
 
 <template>
   <div>
-    <PageHeader title="Despesas" subtitle="Acompanhe e gerencie todos os gastos do seu negocio de impressao 3D." />
+    <PageHeader title="Despesas" subtitle="Acompanhe e gerencie todos os gastos do seu negócio de impressão 3D." />
     <div class="metrics-grid metrics-grid--4">
       <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative />
       <MetricCard label="Despesas Recorrentes" :value="formatCurrency(metrics.recurringExpenses.value)" icon="calendar" :change="`${metrics.percent(metrics.expenseTotal.value ? metrics.recurringExpenses.value / metrics.expenseTotal.value * 100 : 0)} do total`" color="orange" />

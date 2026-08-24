@@ -34,7 +34,7 @@ const save = async () => {
     notify(isEditing.value ? 'Venda atualizada com sucesso.' : 'Venda cadastrada com sucesso.')
     await navigateTo('/vendas')
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Nao foi possivel salvar a venda.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível salvar a venda.', 'info')
   } finally {
     saving.value = false
   }
@@ -47,7 +47,7 @@ const save = async () => {
     <PageHeader :title="isEditing ? 'Editar Venda' : 'Nova Venda'" :subtitle="isEditing ? 'Atualize os dados do pedido.' : 'Registre um pedido real para atualizar o dashboard.'" />
     <form class="form-card" @submit.prevent="save">
       <div class="form-grid">
-        <div class="field col-3"><label>Numero do pedido</label><input v-model="form.id" placeholder="Automatico"></div>
+        <div class="field col-3"><label>Número do pedido</label><input v-model="form.id" placeholder="Automático"></div>
         <div class="field col-3" :class="{'field--error':errors.date}"><label>Data *</label><input v-model="form.date" type="date"><small v-if="errors.date" class="field__error">{{ errors.date }}</small></div>
         <div class="field col-3"><label>Cliente</label><input v-model="form.client"></div>
         <div class="field col-3"><label>Marketplace</label><input v-model="form.marketplace"></div>
@@ -57,10 +57,10 @@ const save = async () => {
         <div class="field col-2"><label>Taxas</label><input v-model.number="form.fee" type="number" step=".01"></div>
         <div class="field col-2"><label>Frete</label><input v-model.number="form.shipping" type="number" step=".01"></div>
         <div class="field col-2"><label>Custo</label><input v-model.number="form.cost" type="number" step=".01"></div>
-        <div class="field col-2"><label>Status</label><select v-model="form.status"><option>Novo</option><option>Producao</option><option>Enviado</option><option>Entregue</option><option>Cancelado</option></select></div>
+        <div class="field col-2"><label>Status</label><select v-model="form.status"><option>Novo</option><option value="Producao">Produção</option><option>Enviado</option><option>Entregue</option><option>Cancelado</option></select></div>
       </div>
-      <div class="summary-box"><div class="detail-list__row"><span>Receita liquida</span><strong>{{ formatCurrency(net) }}</strong></div><div class="detail-list__row"><span>Lucro</span><strong>{{ formatCurrency(profit) }}</strong></div></div>
-      <div class="form-actions"><NuxtLink class="btn" to="/vendas">Cancelar</NuxtLink><button class="btn btn--primary" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alteracoes' : 'Salvar Venda' }}</button></div>
+      <div class="summary-box"><div class="detail-list__row"><span>Receita líquida</span><strong>{{ formatCurrency(net) }}</strong></div><div class="detail-list__row"><span>Lucro</span><strong>{{ formatCurrency(profit) }}</strong></div></div>
+      <div class="form-actions"><NuxtLink class="btn" to="/vendas">Cancelar</NuxtLink><button class="btn btn--primary" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alterações' : 'Salvar Venda' }}</button></div>
     </form>
   </div>
 </template>

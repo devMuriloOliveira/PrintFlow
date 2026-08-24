@@ -69,18 +69,18 @@ const formatDateTime = (value: any) => value ? new Intl.DateTimeFormat('pt-BR', 
 const printReadinessError = (job: any) => {
   const product = productForJob(job) || job
   const printer = printers.value.find((item: any) => String(item.id || '') === String(job.printerId || (selected.value as any).id || '')) as any
-  if (!product) return 'Produto da fila nao encontrado.'
+  if (!product) return 'Produto da fila não encontrado.'
   const quantity = Number(job.quantity || 0)
   if (!Number.isInteger(quantity) || quantity <= 0) return 'Quantidade da fila precisa ser maior que zero.'
-  if (product.validationStatus !== 'validated') return product.validationMessage || 'Produto ainda nao possui receita de impressao validada.'
-  if (!product.printFileName || !product.printFileFormat) return 'Produto sem arquivo de impressao validado.'
+  if (product.validationStatus !== 'validated') return product.validationMessage || 'Produto ainda não possui receita de impressão validada.'
+  if (!product.printFileName || !product.printFileFormat) return 'Produto sem arquivo de impressão validado.'
   const format = String(product.printFileFormat || '').toLowerCase()
-  if (!readyPrintFormats.includes(format)) return `Formato ${format.toUpperCase()} ainda nao esta liberado para impressao automatica.`
+  if (!readyPrintFormats.includes(format)) return `Formato ${format.toUpperCase()} ainda não está liberado para impressão automática.`
   const extension = String(product.printFileName || '').split('.').pop()?.toLowerCase() || ''
-  if (extension && extension !== format) return 'Extensao do arquivo nao confere com o formato informado.'
+  if (extension && extension !== format) return 'Extensão do arquivo não confere com o formato informado.'
   const protocol = String(printer?.agentProtocol || '').toLowerCase()
   const allowed = allowedFormatsByProtocol[protocol] || readyPrintFormats
-  if (protocol && !allowed.includes(format)) return `Formato ${format.toUpperCase()} nao e recomendado para esta impressora.`
+  if (protocol && !allowed.includes(format)) return `Formato ${format.toUpperCase()} não é recomendado para esta impressora.`
   const productDimensions = parseDimensions(product.dimensions)
   if (!productDimensions) return 'Produto sem dimensoes reais informadas.'
   const printerVolume = parseDimensions(printer?.volume)
@@ -88,13 +88,13 @@ const printReadinessError = (job: any) => {
   const materials = normalizeList(product.compatibility?.materials)
   const filament = filaments.value.find((item: any) => String(item.id || '') === String(product.filamentId || '')) as any
   const material = String(filament?.material || product.filament || '').trim().toLowerCase()
-  if (materials.length && material && !materials.includes(material)) return `Material ${material.toUpperCase()} nao esta liberado para este produto.`
-  if (Number(product.compatibility?.nozzleMm || 0) <= 0) return 'Diametro do bico nao informado no produto.'
-  if (Number(product.layer || product.printProfile?.layerHeightMm || 0) <= 0) return 'Altura de camada nao informada no produto.'
-  if (Number(product.infill || product.printProfile?.infillPercent || 0) <= 0) return 'Preenchimento nao informado no produto.'
+  if (materials.length && material && !materials.includes(material)) return `Material ${material.toUpperCase()} não está liberado para este produto.`
+  if (Number(product.compatibility?.nozzleMm || 0) <= 0) return 'Diâmetro do bico não informado no produto.'
+  if (Number(product.layer || product.printProfile?.layerHeightMm || 0) <= 0) return 'Altura de camada não informada no produto.'
+  if (Number(product.infill || product.printProfile?.infillPercent || 0) <= 0) return 'Preenchimento não informado no produto.'
   return ''
 }
-const printJobStatusLabel = (status: string) => ({ queued: 'Na fila', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluido', cancelled: 'Cancelado' }[status] || status || '-')
+const printJobStatusLabel = (status: string) => ({ queued: 'Na fila', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluído', cancelled: 'Cancelado' }[status] || status || '-')
 const printJobBadgeClass = (status: string) => ({ queued: '', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', cancelled: 'badge--red' }[status] || '')
 const editPrinter = (printer: any) => {
   if (!printer.id) return
@@ -223,7 +223,7 @@ const controlPrinter = async (printer: any, action: 'pause' | 'resume' | 'cancel
 const revokeSelectedAgent = async () => {
   const agent = selectedAgent.value
   if (!agent?.id || printerControlLoadingId.value) return
-  if (!window.confirm(`Revogar o Agent deste computador?\n\n${agent.machineName || agent.name || 'PrintFlow Agent'}\n\nEle deixara de receber comandos ate ser pareado novamente.`)) return
+  if (!window.confirm(`Revogar o Agent deste computador?\n\n${agent.machineName || agent.name || 'PrintFlow Agent'}\n\nEle deixará de receber comandos até ser pareado novamente.`)) return
   printerControlLoadingId.value = `agent:${agent.id}:revoke`
   try {
     const response = await fetch(`${config.public.apiBase}/api/agents/${agent.id}`, {
@@ -231,12 +231,12 @@ const revokeSelectedAgent = async () => {
       headers: tokenHeaders()
     })
     const data = await response.json()
-    if (!response.ok) throw new Error(data?.error || 'Nao foi possivel revogar o Agent.')
+    if (!response.ok) throw new Error(data?.error || 'Não foi possível revogar o Agent.')
     notify('Agent revogado. Pareie novamente para usar este computador.')
     await loadAgents()
     await refreshAppData()
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Nao foi possivel revogar o Agent.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível revogar o Agent.', 'info')
   } finally {
     printerControlLoadingId.value = ''
   }
@@ -301,7 +301,7 @@ const movePrintJob = async (job: any, direction: 'up' | 'down') => {
     await updateItem('printJobs' as any, { ...target, priority: currentPriority })
     notify('Ordem da fila atualizada.')
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Nao foi possivel atualizar a fila.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível atualizar a fila.', 'info')
   } finally {
     queueLoadingId.value = ''
   }
