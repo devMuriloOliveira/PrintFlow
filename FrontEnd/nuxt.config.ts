@@ -6,7 +6,8 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com',
-      agentWindowsDownloadUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL || ''
+      agentWindowsDownloadUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL || '',
+      agentWindowsDevCertificateUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DEV_CERTIFICATE_URL || ''
     }
   },
   css: ['~/assets/css/main.css'],

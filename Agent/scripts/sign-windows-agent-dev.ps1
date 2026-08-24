@@ -1,7 +1,8 @@
 param(
   [string]$FilePath = "dist\PrintFlow-Agent-Setup.exe",
   [string]$CertificateSubject = "CN=PrintFlow 3D Local Dev",
-  [string]$TimestampUrl = "http://timestamp.digicert.com"
+  [string]$TimestampUrl = "http://timestamp.digicert.com",
+  [string]$ExportPublicCertificatePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,6 +80,23 @@ if (-not $certificate) {
   $publisherStore.Close()
 
   Write-Host "Certificado local de desenvolvimento criado e confiado no usuario atual."
+}
+
+if ($ExportPublicCertificatePath) {
+  $exportPath = [System.IO.Path]::GetFullPath((Join-Path $agentRoot $ExportPublicCertificatePath))
+  $exportDir = Split-Path -Parent $exportPath
+
+  if (-not (Test-Path $exportDir)) {
+    New-Item -ItemType Directory -Path $exportDir | Out-Null
+  }
+
+  Export-Certificate `
+    -Cert $certificate `
+    -FilePath $exportPath `
+    -Type CERT | Out-Null
+
+  Write-Host "Certificado publico exportado para:"
+  Write-Host $exportPath
 }
 
 & $signTool sign `

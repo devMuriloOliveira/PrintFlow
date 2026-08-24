@@ -12,6 +12,7 @@
     "build:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1",
     "build:windows:dev-signed": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1 -SignDev",
     "sign:windows:dev": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows-agent-dev.ps1",
+    "trust:windows:dev-cert": "powershell -ExecutionPolicy Bypass -File scripts/trust-windows-agent-dev-certificate.ps1",
     "install:agent": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-agent.ps1",
     "uninstall:agent": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-agent.ps1",
     "install:startup": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-startup.ps1",

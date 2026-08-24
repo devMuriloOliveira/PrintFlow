@@ -153,6 +153,8 @@ O mock permite validar descoberta, conexao, status, pausa, retomada, cancelament
 - `npm.cmd run uninstall:agent`: remove instalacao local.
 - `npm.cmd run generate:icon`: gera PNG/ICO a partir do SVG.
 - `npm.cmd run build:windows`: gera o pacote Windows baixavel.
+- `npm.cmd run build:windows:dev-signed`: gera o instalador e assina com certificado local de teste.
+- `npm.cmd run trust:windows:dev-cert`: confia o certificado local de teste no Windows atual.
 
 ## Gerar Pacote Windows
 
@@ -165,6 +167,27 @@ O pacote final e gerado em:
 ```text
 Agent/dist/PrintFlow-Agent-Windows.zip
 ```
+
+Quando gerado com assinatura local de desenvolvimento:
+
+```powershell
+npm.cmd run build:windows:dev-signed
+```
+
+tambem sao gerados:
+
+```text
+Agent/dist/PrintFlow-Agent-Setup.exe
+Agent/dist/PrintFlow-Agent-Dev-Certificate.cer
+```
+
+Para uma maquina de teste confiar nesse certificado antes de executar o instalador:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/trust-windows-agent-dev-certificate.ps1 -CertificatePath "dist\PrintFlow-Agent-Dev-Certificate.cer"
+```
+
+Use esse certificado somente para desenvolvimento/testes internos. Para distribuicao publica, use um certificado real de assinatura de codigo.
 
 Depois de extraido, o instalador copia o Agent para `%LOCALAPPDATA%\PrintFlowAgent`, registra a inicializacao no login, cria atalhos e registra o protocolo local.
 
@@ -199,4 +222,3 @@ Os testes atuais cobrem:
 - Validar formato e compatibilidade antes de iniciar impressao.
 - Confirmar comandos avancados com impressoras reais antes de considerar suporte final.
 - Manter comportamento simples para o usuario: instalar, parear e deixar rodando.
-

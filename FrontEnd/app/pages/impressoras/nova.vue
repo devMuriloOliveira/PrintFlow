@@ -25,6 +25,8 @@ const defaultAgentWindowsDownloadUrl =
   '/downloads/PrintFlow-Agent-Setup.exe'
 const defaultAgentWindowsZipDownloadUrl =
   '/downloads/PrintFlow-Agent-Windows.zip'
+const defaultAgentWindowsDevCertificateUrl =
+  '/downloads/PrintFlow-Agent-Dev-Certificate.cer'
 
 const agentWindowsDownloadUrl =
   computed(() =>
@@ -39,6 +41,14 @@ const agentWindowsZipDownloadUrl =
     String(
       config.public.agentWindowsZipDownloadUrl ||
         defaultAgentWindowsZipDownloadUrl
+    ).trim()
+  )
+
+const agentWindowsDevCertificateUrl =
+  computed(() =>
+    String(
+      config.public.agentWindowsDevCertificateUrl ||
+        defaultAgentWindowsDevCertificateUrl
     ).trim()
   )
 
@@ -80,6 +90,26 @@ const downloadAgentWindowsZip = () => {
 
   agentOpenMessage.value =
     'ZIP de teste baixado. Extraia a pasta e execute scripts/install-windows-agent.ps1 pelo PowerShell para instalar localmente.'
+}
+
+const downloadAgentWindowsDevCertificate = () => {
+  if (!agentWindowsDevCertificateUrl.value) {
+    notify(
+      'Certificado de teste do Agent ainda nao configurado.',
+      'info'
+    )
+
+    return
+  }
+
+  window.open(
+    agentWindowsDevCertificateUrl.value,
+    '_blank',
+    'noopener'
+  )
+
+  agentOpenMessage.value =
+    'Certificado de teste baixado. Instale-o no Windows como Autoridade Raiz Confiavel e Editor Confiavel antes de executar o instalador do Agent.'
 }
 
 // ======================================================
@@ -2509,6 +2539,16 @@ const cancel = () => {
             "
           >
             Baixar ZIP de teste
+          </button>
+
+          <button
+            type="button"
+            class="btn"
+            @click="
+              downloadAgentWindowsDevCertificate
+            "
+          >
+            Baixar certificado de teste
           </button>
 
           <button

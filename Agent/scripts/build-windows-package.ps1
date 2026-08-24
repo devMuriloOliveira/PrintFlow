@@ -16,6 +16,7 @@ $zipPath = Join-Path $outputRoot "$PackageName.zip"
 $installerSourceRoot = Join-Path $outputRoot "$InstallerName-source"
 $installerPath = Join-Path $outputRoot "$InstallerName.exe"
 $installerSedPath = Join-Path $outputRoot "$InstallerName.sed"
+$devCertificatePath = Join-Path $outputRoot "PrintFlow-Agent-Dev-Certificate.cer"
 
 Set-Location $agentRoot
 
@@ -130,7 +131,11 @@ iexpress.exe /N /Q $installerSedPath | Out-Null
 
 if ($SignDev) {
   & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
-    -FilePath (Join-Path $OutputDir "$InstallerName.exe")
+    -FilePath (Join-Path $OutputDir "$InstallerName.exe") `
+    -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer")
+
+  Write-Host "Certificado publico de teste:"
+  Write-Host $devCertificatePath
 }
 
 Write-Host "Pacote Windows gerado:"
