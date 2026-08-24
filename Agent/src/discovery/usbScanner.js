@@ -2,6 +2,10 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { SerialPort } from 'serialport'
 
+import {
+  getPrinterProfile
+} from '../printers/printerProfiles.js'
+
 const execFileAsync = promisify(execFile)
 
 // ======================================================
@@ -44,7 +48,7 @@ const getWindowsSerialPorts = async () => {
       : [parsed]
   } catch (error) {
     console.log(
-      '[USB] Não foi possível consultar as portas seriais:',
+      '[USB] Nao foi possivel consultar as portas seriais:',
       error.message
     )
 
@@ -147,7 +151,15 @@ const testMarlin = async (
 
           baudRate,
 
-          identified: true
+          identified: true,
+
+          requiresCredentials:
+            false,
+
+          requiredCredentials:
+            getPrinterProfile(
+              'marlin'
+            ).requiredOptionFields
         })
       }
     })
@@ -236,7 +248,7 @@ export const scanUsb = async () => {
     process.platform !== 'win32'
   ) {
     console.log(
-      '[USB] Scanner serial desta versão disponível apenas para Windows.'
+      '[USB] Scanner serial desta versao disponivel apenas para Windows.'
     )
 
     return []
@@ -296,7 +308,7 @@ export const scanUsb = async () => {
       )
     } else {
       console.log(
-        `[USB] ${device.port} não foi identificada como impressora Marlin.`
+        `[USB] ${device.port} nao foi identificada como impressora Marlin.`
       )
     }
   }

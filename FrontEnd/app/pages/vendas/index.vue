@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, orders, createItem, updateItem, deleteItem } = useAppData()
+const { products, orders, printers, printJobs, createItem, updateItem, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -9,6 +9,7 @@ const selectedMetric = ref<'gross' | 'net' | 'profit' | 'orders'>('gross')
 const chartPeriod = ref<'week' | 'month' | 'year'>('month')
 const manualQuantities = reactive<Record<string, number>>({})
 const savingProduct = reactive<Record<string, boolean>>({})
+const assigningPrinter = reactive<Record<string, boolean>>({})
 const filtered = computed(() => orders.value.filter(o => (status.value === 'Todos' || o.status === status.value) && Object.values(o).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const metricCards = computed(() => [
@@ -45,6 +46,59 @@ const manualProductRows = computed(() => products.value.map(product => {
   const cost = Number(product.cost || 0) * qty
   return { product, qty, gross, fee, net, cost, profit: net - cost }
 }))
+const orderKey = (order: any) => String(order.dbId || order.id || '')
+const printJobForOrder = (order: any) => printJobs.value.find((job: any) =>
+  String(job.orderId || '') === String(order.dbId || '') ||
+  (job.externalOrderId && String(job.externalOrderId) === String(order.id || ''))
+)
+const printerQueue = (printerId: string) => printJobs.value.filter((job: any) =>
+  String(job.printerId || '') === String(printerId || '') &&
+  ['queued', 'printing', 'paused'].includes(String(job.status || ''))
+)
+const printerBusyLabel = (printerId: string) => {
+  if (!printerId) return ''
+  const active = printerQueue(printerId)
+  const printing = active.find((job: any) => job.status === 'printing')
+  if (printing) return 'Ocupada'
+  if (active.length) return `${active.length} na fila`
+  return 'Livre'
+}
+const assignOrderPrinter = async (order: any, printerId: string) => {
+  const key = orderKey(order)
+  if (!key || assigningPrinter[key]) return
+  assigningPrinter[key] = true
+  try {
+    const printer = printers.value.find((item: any) => String(item.id) === String(printerId))
+    const currentJob = printJobForOrder(order) as any
+    const product = products.value.find((item: any) => String(item.id || '') === String(order.productId || ''))
+    if (!printerId) {
+      if (currentJob?.id) await deleteItem('printJobs' as any, currentJob.id)
+      notify('Pedido removido da fila de impressão.')
+      return
+    }
+    const payload = {
+      id: currentJob?.id,
+      orderId: order.dbId,
+      productId: order.productId || product?.id || '',
+      printerId,
+      agentPrinterId: (printer as any)?.agentPrinterId || '',
+      source: order.marketplace === 'Manual' ? 'manual' : 'marketplace',
+      title: order.product || product?.name || `Pedido ${order.id}`,
+      productName: order.product || product?.name || '',
+      quantity: Number(order.qty || 1),
+      priority: 0,
+      status: currentJob?.status || 'queued',
+      notes: `Pedido ${order.id}`
+    }
+    if (currentJob?.id) await updateItem('printJobs' as any, payload)
+    else await createItem('printJobs' as any, payload)
+    notify(`Pedido enviado para ${printer?.name || 'a impressora'}.`)
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível atualizar a fila de impressão.', 'info')
+  } finally {
+    assigningPrinter[key] = false
+  }
+}
 const syncManualQuantities = () => {
   const currentDate = today()
   for (const product of products.value) {
@@ -223,8 +277,8 @@ const marketplaceBars = computed(() => {
     <div class="split-layout">
       <PanelCard title="Pedidos">
         <div class="table-scroll"><table class="data-table">
-          <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Liquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr v-if="!filtered.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para comecar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><div class="table-product table-product--editable"><strong>{{ o.id }}</strong><button class="row-action row-action--edit" title="Editar pedido" @click.stop="editOrder(o)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click.stop="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
+          <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Impressora</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Liquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
+          <tbody><tr v-if="!filtered.length"><td colspan="14"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para comecar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.id"><td><div class="table-product table-product--editable"><strong>{{ o.id }}</strong><button class="row-action row-action--edit" title="Editar pedido" @click.stop="editOrder(o)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td><select class="select-compact" :disabled="assigningPrinter[orderKey(o)]" :value="printJobForOrder(o)?.printerId || ''" @change="assignOrderPrinter(o, ($event.target as HTMLSelectElement).value)"><option value="">Fila</option><option v-for="printer in printers" :key="printer.id" :value="printer.id">{{ printer.name }} - {{ printerBusyLabel(printer.id || '') }}</option></select><small v-if="printJobForOrder(o)" style="display:block;margin-top:4px;color:var(--muted)">{{ printJobForOrder(o)?.status }} · {{ printJobForOrder(o)?.printerName || 'Sem impressora' }}</small></td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button class="row-action" title="Excluir pedido" @click.stop="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
         <div class="table-footer"><span>Mostrando {{ filtered.length ? 1 : 0 }} a {{ filtered.length }} de {{ orders.length }} pedidos</span><div class="pagination"><button class="page-btn active">1</button></div><select class="select-compact"><option>10 por pagina</option></select></div>
       </PanelCard>

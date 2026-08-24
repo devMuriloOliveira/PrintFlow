@@ -2,8 +2,12 @@ import os from 'node:os'
 import net from 'node:net'
 import axios from 'axios'
 
+import {
+  getPrinterProfile
+} from '../printers/printerProfiles.js'
+
 // ======================================================
-// CONFIGURAÇÃO DE DESENVOLVIMENTO
+// CONFIGURACAO DE DESENVOLVIMENTO
 // ======================================================
 
 const isMockBambuEnabled = () => {
@@ -52,7 +56,7 @@ export const getLocalNetworks = () => {
 }
 
 // ======================================================
-// TESTAR SE UMA PORTA ESTÁ ABERTA
+// TESTAR SE UMA PORTA ESTA ABERTA
 // ======================================================
 
 const checkPort = (
@@ -156,11 +160,16 @@ const detectMoonraker = async (
           'Klipper',
 
         requiresCredentials:
-          false
+          false,
+
+        requiredCredentials:
+          getPrinterProfile(
+            'moonraker'
+          ).requiredOptionFields
       }
     }
   } catch {
-    // Não é Moonraker.
+    // Nao e Moonraker.
   }
 
   return null
@@ -229,11 +238,16 @@ const detectOctoPrint = async (
           'OctoPrint',
 
         requiresCredentials:
-          false
+          true,
+
+        requiredCredentials:
+          getPrinterProfile(
+            'octoprint'
+          ).requiredOptionFields
       }
     }
   } catch {
-    // Não é OctoPrint.
+    // Nao e OctoPrint.
   }
 
   return null
@@ -303,11 +317,16 @@ const detectPrusaLink = async (
           'Prusa',
 
         requiresCredentials:
-          false
+          true,
+
+        requiredCredentials:
+          getPrinterProfile(
+            'prusalink'
+          ).requiredOptionFields
       }
     }
   } catch {
-    // Não é PrusaLink.
+    // Nao e PrusaLink.
   }
 
   return null
@@ -355,7 +374,7 @@ const createBambuCandidate = (
 }
 
 // ======================================================
-// IDENTIFICAR SERVIÇO EM UM IP
+// IDENTIFICAR SERVICO EM UM IP
 // ======================================================
 
 const identifyPrinter = async (
@@ -394,7 +413,7 @@ const identifyPrinter = async (
       port === 8883
     ) {
       console.log(
-        `[Discovery] Possível Bambu Lab encontrada em ${ip}:8883`
+        `[Discovery] Possivel Bambu Lab encontrada em ${ip}:8883`
       )
 
       return createBambuCandidate(
@@ -457,8 +476,8 @@ const identifyPrinter = async (
 //
 // 192.168.2
 //
-// ATENÇÃO:
-// Esta versão ainda assume rede /24.
+// ATENCAO:
+// Esta versao ainda assume rede /24.
 // Depois vamos calcular pela netmask.
 // ======================================================
 
@@ -507,7 +526,7 @@ const scanNetworkRange = async (
 
   /*
    * Fazemos em pequenos grupos para evitar
-   * abrir 254 conexões simultaneamente.
+   * abrir 254 conexoes simultaneamente.
    */
 
   const batchSize = 20
@@ -535,7 +554,7 @@ const scanNetworkRange = async (
       const ip =
         `${prefix}.${host}`
 
-      // Não precisamos testar o próprio PC.
+      // Nao precisamos testar o proprio PC.
 
       if (
         ip ===
@@ -653,6 +672,9 @@ const addMockBambu = (
     name:
       'Bambu Lab - Ambiente de Teste',
 
+    serial:
+      'PFMOCKBAMBU001',
+
     ip:
       mockIp,
 
@@ -660,11 +682,10 @@ const addMockBambu = (
       8883,
 
     requiresCredentials:
-      true,
+      false,
 
     requiredCredentials: [
-      'serial',
-      'accessCode'
+      'serial'
     ],
 
     mock:
@@ -690,7 +711,7 @@ const addMockBambu = (
   )
 
   console.log(
-    '[DEV] Bambu simulada adicionada à descoberta.'
+    '[DEV] Bambu simulada adicionada a descoberta.'
   )
 
   console.log(
@@ -709,6 +730,18 @@ const addMockBambu = (
 // ======================================================
 
 export const scanNetwork = async () => {
+  if (
+    isMockBambuEnabled()
+  ) {
+    const printers = []
+
+    addMockBambu(
+      printers
+    )
+
+    return printers
+  }
+
   const networks =
     getLocalNetworks()
 
@@ -722,7 +755,7 @@ export const scanNetwork = async () => {
     networks.length === 0
   ) {
     console.log(
-      '[Discovery] Nenhuma interface IPv4 disponível.'
+      '[Discovery] Nenhuma interface IPv4 disponivel.'
     )
   }
 

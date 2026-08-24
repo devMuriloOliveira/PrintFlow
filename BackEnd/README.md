@@ -1,84 +1,143 @@
-# BackEnd
+# PrintFlow BackEnd
 
-API do PrintFlow 3D separada do front-end.
+API HTTP do PrintFlow 3D. Ela centraliza autenticacao, isolamento por tenant, cadastros, fila de impressao, arquivos de impressao, marketplaces e comunicacao com o PrintFlow Agent.
+
+## Para Que Serve
+
+O BackEnd e o ponto confiavel do sistema. Ele:
+
+- Autentica usuarios e controla sessoes.
+- Resolve o tenant a partir do token autenticado.
+- Persiste dados de produtos, pedidos, filamentos, impressoras, clientes, metas e configuracoes.
+- Valida compatibilidade de produto/impressora antes da impressao.
+- Cria comandos para o Agent executar localmente.
+- Recebe heartbeat, status e resultado de comandos do Agent.
+- Entrega arquivos de impressao ao Agent sem guardar o arquivo pesado no banco.
 
 ## Estrutura
 
-- `src/server.js`: ponto de entrada do servidor HTTP.
-- `src/config`: configuracoes de ambiente.
-- `src/http`: utilitarios HTTP, CORS, JSON e leitura de payload.
-- `src/routes`: definicao das rotas e handlers da API.
-- `src/db`: conexao PostgreSQL, migracoes e carga inicial isolada por espaco.
-- `src/repositories`: consultas ao banco por recurso.
-- `src/data.js`: dados temporarios em memoria.
+- `src/server.js`: entrada do servidor HTTP.
+- `src/config`: leitura e validacao de ambiente.
+- `src/http`: helpers HTTP, CORS, JSON e resposta.
+- `src/routes`: handlers das rotas da API.
+- `src/repositories`: acesso a dados por recurso.
+- `src/services`: regras de negocio compartilhadas, validacao e armazenamento de arquivos.
+- `src/db`: conexao PostgreSQL, migracoes e scripts auxiliares.
+- `test`: testes automatizados.
 
-## Variaveis de ambiente
+## Variaveis de Ambiente
 
-Copie `.env.example` para `.env` somente no ambiente local e preencha os valores reais. O arquivo `.env` nao deve ir para o Git.
+Crie um `.env` local a partir de `.env.example`, quando existir, e preencha os valores reais somente no ambiente local ou no provedor de hospedagem.
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-- `DATABASE_URL`: URL privada de conexao com o Neon/PostgreSQL.
-- `PORT`: porta local da API.
-- `AUTH_SECRET`: segredo usado para assinar os tokens de login. Use um valor forte em producao.
-- `AUTH_TOKEN_TTL_SECONDS`: duracao do access token em segundos. Padrao: 900.
-- `REFRESH_TOKEN_TTL_SECONDS`: duracao do refresh token em segundos. Padrao: 30 dias.
-- `DATA_ENCRYPTION_KEY`: chave privada usada para criptografar dados pessoais no banco. Use um valor longo e diferente do `AUTH_SECRET` em producao.
-- `ALLOW_DEMO_TENANT`: somente para testes sem identificador. Mantenha `false` no Render.
+Variaveis principais:
 
-## Rodar localmente
+- `DATABASE_URL`: string privada de conexao PostgreSQL.
+- `PORT`: porta HTTP da API.
+- `AUTH_SECRET`: segredo forte para assinatura dos access tokens.
+- `AUTH_TOKEN_TTL_SECONDS`: duracao do access token.
+- `REFRESH_TOKEN_TTL_SECONDS`: duracao do refresh token.
+- `DATA_ENCRYPTION_KEY`: chave privada para criptografia de dados sensiveis.
+- `LEGACY_DATA_ENCRYPTION_KEYS`: chaves antigas usadas apenas para rotacao.
+- `WEBHOOK_SHARED_SECRET`: segredo compartilhado para webhooks.
+- `ALLOW_DEMO_TENANT`: habilita tenant demonstrativo apenas em ambiente local/teste.
+- `RATE_LIMIT_WINDOW_MS`: janela do rate limit.
+- `RATE_LIMIT_MAX_REQUESTS`: limite geral por janela.
+- `RATE_LIMIT_AUTH_MAX_REQUESTS`: limite para rotas de autenticacao.
+- `MAX_CONCURRENT_REQUESTS_PER_IP`: limite de concorrencia por IP.
+- `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
+- `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
+
+Nao publique valores reais dessas variaveis.
+
+## Rodar Localmente
 
 ```powershell
+npm.cmd install
 npm.cmd run dev
 ```
 
-Servidor: `http://localhost:3333`.
+Por padrao, a API local usa a porta configurada em `PORT` ou `3333`.
 
-Para remover dados antigos de demonstracao em um banco ja existente:
+Rodar migracoes:
+
+```powershell
+npm.cmd run migrate
+```
+
+Limpar dados demonstrativos em ambiente local:
 
 ```powershell
 npm.cmd run clean:demo
 ```
 
-## Deploy
+## Testes
 
-No Render, configure o servico usando:
+```powershell
+npm.cmd test
+```
 
-- Build command: vazio ou `npm install`
-- Start command: `npm start`
-- Root directory: `BackEnd`
-- Environment variable: `DATABASE_URL` com a URL privada do Neon.
-- Environment variable: `AUTH_SECRET` com um segredo longo.
-- Environment variable: `AUTH_TOKEN_TTL_SECONDS` opcional para ajustar a duracao curta do access token.
-- Environment variable: `REFRESH_TOKEN_TTL_SECONDS` opcional para ajustar a duracao do refresh token.
-- Environment variable: `DATA_ENCRYPTION_KEY` com uma chave longa e privada.
+## Rotas Principais
 
-O front-end consome `https://printflow-api-4y5l.onrender.com` por padrao. Para apontar para outra API, configure a variavel `NUXT_PUBLIC_API_BASE`.
+Autenticacao:
 
-## Autenticacao
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
 
-A API possui cadastro, login e validacao de sessao:
+Dados do aplicativo:
 
-- `POST /api/auth/register`: cria empresa, usuario administrador e retorna token.
-- `POST /api/auth/login`: valida e-mail/senha e retorna access token curto e refresh token rotativo.
-- `POST /api/auth/refresh`: rotaciona o refresh token e retorna uma nova sessao.
-- `POST /api/auth/logout`: revoga a sessao e invalida access tokens vinculados a ela.
-- `GET /api/auth/me`: retorna o usuario autenticado pelo token.
+- `GET /api/app-data`
+- `GET /api/products`
+- `POST /api/products`
+- `GET /api/orders`
+- `GET /api/expenses`
+- `GET /api/filaments`
+- `GET /api/printers`
+- `GET /api/marketplaces`
+- `GET /api/clients`
+- `GET /api/goals`
+- `GET /api/settings`
 
-As rotas de negocio usam `Authorization: Bearer <token>`. O tenant e resolvido no backend a partir do token, entao o front nao decide qual base de dados acessar.
+Agent:
 
-## Modelo de dados e isolamento
+- `POST /api/agents/pairing-code`: gera codigo de pareamento para o usuario logado.
+- `POST /api/agents/pair`: pareia o Agent usando o codigo.
+- `POST /api/agents/verify`: valida a credencial local do Agent.
+- `POST /api/agents/heartbeat`: marca Agent online e atualiza metadados.
+- `GET /api/agents`: lista Agents da conta.
+- `POST /api/agents/:id/discover`: cria comando de descoberta.
+- `POST /api/agents/:id/connect-printer`: cria comando de conexao.
+- `POST /api/agents/:id/printer-status`: cria comando de status.
+- `POST /api/agents/:id/printer-start`: cria comando para iniciar impressao.
+- `POST /api/agents/:id/printer-pause`: cria comando de pausa.
+- `POST /api/agents/:id/printer-resume`: cria comando de retomada.
+- `POST /api/agents/:id/printer-cancel`: cria comando de cancelamento.
+- `POST /api/agents/:id/printer-disconnect`: cria comando de desconexao.
 
-As migracoes criam as tabelas `tenants`, `users`, `products`, `orders`, `expenses`, `filaments`, `printers`, `marketplaces`, `clients`, `goals`, `company_settings`, `calculator_simulations` e `export_history`. Todos os dados de negocio possuem `tenant_id`, indices por tenant e politicas de Row Level Security no PostgreSQL.
+## Arquivos de Impressao
 
-Cada conta criada recebe um tenant proprio. Com `ALLOW_DEMO_TENANT=false`, as rotas de negocio exigem login e ignoram tenant escolhido manualmente pelo usuario.
+Arquivos de impressao nao devem ser salvos diretamente no banco. O banco guarda metadados, como nome, formato, hash, tamanho e chave de armazenamento. O arquivo fica em storage local ou externo, conforme configuracao.
 
-Regras importantes:
+Antes de enviar um arquivo ao Agent, o BackEnd valida:
 
-- Toda tabela nova que guardar dado do cliente precisa ter `tenant_id`.
-- Toda busca, criacao, atualizacao e exclusao precisa usar o `tenant_id` resolvido no backend.
-- Chaves unicas de dados do cliente devem incluir o tenant, por exemplo `unique (tenant_id, sku)`.
-- Dados sensiveis devem ficar apenas em variaveis de ambiente privadas, nunca commitados no front ou no backend.
-- Campos pessoais como e-mail, telefone, documento e endereco devem ser gravados criptografados. Quando precisar buscar por algum deles, use hash cego em coluna auxiliar, nunca texto puro.
+- formato aceito pelo protocolo da impressora;
+- volume da impressora;
+- dimensoes do produto;
+- material/filamento;
+- status de validacao do produto;
+- vinculo correto entre fila, impressora e tenant.
+
+## Isolamento e Seguranca
+
+- Toda rota de negocio deve usar o tenant resolvido pelo token.
+- Acesso cruzado entre tenants deve retornar como recurso inexistente quando aplicavel.
+- Tabelas de dados do cliente devem ter `tenant_id`.
+- Indices e chaves unicas de dados do cliente devem incluir `tenant_id`.
+- Dados sensiveis devem ser criptografados ou protegidos por hash cego quando busca for necessaria.
+- Segredos de Agent e comandos nao devem ser salvos nem logados em texto puro.

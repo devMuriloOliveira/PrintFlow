@@ -10,6 +10,7 @@ import {
 const tenantTables = [
   'products',
   'orders',
+  'print_jobs',
   'expenses',
   'filaments',
   'printers',
@@ -422,6 +423,51 @@ export const migrate =
 
           dimensions text,
 
+          print_file_name
+            text
+            not null
+            default '',
+
+          print_file_format
+            text
+            not null
+            default '',
+
+          print_file_hash
+            text
+            not null
+            default '',
+
+          print_file_size_bytes
+            bigint
+            not null
+            default 0,
+
+          print_file_storage_key
+            text
+            not null
+            default '',
+
+          print_profile
+            jsonb
+            not null
+            default '{}'::jsonb,
+
+          compatibility
+            jsonb
+            not null
+            default '{}'::jsonb,
+
+          validation_status
+            text
+            not null
+            default 'needs_validation',
+
+          validation_message
+            text
+            not null
+            default '',
+
           filament text,
 
           filament_color text,
@@ -509,6 +555,24 @@ export const migrate =
       'infill numeric(6,2) not null default 0',
 
       'dimensions text',
+
+      "print_file_name text not null default ''",
+
+      "print_file_format text not null default ''",
+
+      "print_file_hash text not null default ''",
+
+      'print_file_size_bytes bigint not null default 0',
+
+      "print_file_storage_key text not null default ''",
+
+      "print_profile jsonb not null default '{}'::jsonb",
+
+      "compatibility jsonb not null default '{}'::jsonb",
+
+      "validation_status text not null default 'needs_validation'",
+
+      "validation_message text not null default ''",
 
       'printer_id bigint',
 
@@ -1030,6 +1094,128 @@ export const migrate =
     )
 
     // ==================================================
+    // PRINT JOBS / FILA DE IMPRESSAO
+    // ==================================================
+
+    await query(
+      `
+        create table if not exists print_jobs (
+          id bigserial primary key,
+
+          tenant_id
+            text
+            not null
+            references tenants(id)
+            on delete cascade,
+
+          order_id
+            bigint
+            references orders(id)
+            on delete cascade,
+
+          tracked_sale_id
+            bigint
+            references tracked_sales(id)
+            on delete set null,
+
+          product_id
+            bigint
+            references products(id)
+            on delete set null,
+
+          printer_id
+            bigint
+            references printers(id)
+            on delete set null,
+
+          agent_printer_id
+            bigint
+            references agent_printers(id)
+            on delete set null,
+
+          source
+            text
+            not null
+            default 'manual',
+
+          title
+            text
+            not null
+            default '',
+
+          quantity
+            integer
+            not null
+            default 1,
+
+          priority
+            integer
+            not null
+            default 0,
+
+          status
+            text
+            not null
+            default 'queued',
+
+          notes
+            text
+            not null
+            default '',
+
+          scheduled_at
+            timestamptz,
+
+          started_at
+            timestamptz,
+
+          completed_at
+            timestamptz,
+
+          cancelled_at
+            timestamptz,
+
+          created_at
+            timestamptz
+            not null
+            default now(),
+
+          updated_at
+            timestamptz
+            not null
+            default now()
+        )
+      `
+    )
+
+    await query(
+      `
+        create index if not exists
+          print_jobs_printer_queue_idx
+
+        on print_jobs (
+          tenant_id,
+          printer_id,
+          status,
+          priority desc,
+          created_at asc
+        )
+      `
+    )
+
+    await query(
+      `
+        create index if not exists
+          print_jobs_order_idx
+
+        on print_jobs (
+          tenant_id,
+          order_id
+        )
+      `
+    )
+
+    // ==================================================
     // EXPENSES
     // ==================================================
 
@@ -1263,6 +1449,27 @@ export const migrate =
             not null
             default '',
 
+          agent_id
+            bigint,
+
+          agent_printer_id
+            bigint,
+
+          agent_connection_key
+            text
+            not null
+            default '',
+
+          agent_protocol
+            text
+            not null
+            default '',
+
+          agent_connection_type
+            text
+            not null
+            default '',
+
           created_at
             timestamptz
             not null
@@ -1280,6 +1487,31 @@ export const migrate =
         )
       `
     )
+
+    const printerAgentColumns = [
+      'agent_id bigint',
+
+      'agent_printer_id bigint',
+
+      "agent_connection_key text not null default ''",
+
+      "agent_protocol text not null default ''",
+
+      "agent_connection_type text not null default ''"
+    ]
+
+    for (
+      const column
+      of printerAgentColumns
+    ) {
+      await query(
+        `
+          alter table printers
+          add column if not exists
+            ${column}
+        `
+      )
+    }
 
     // ==================================================
     // AGENTS

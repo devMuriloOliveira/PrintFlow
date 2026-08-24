@@ -14,6 +14,38 @@ const idOrNull = (value) => {
   return Number.isFinite(id) && id > 0 ? id : null
 }
 
+const syncPrinterAgentLink = async (
+  client,
+  tenantId,
+  printerId,
+  item
+) => {
+  const agentPrinterId =
+    idOrNull(
+      item.agentPrinterId
+    )
+
+  if (!agentPrinterId) {
+    return
+  }
+
+  await client.query(
+    `
+      update agent_printers
+      set
+        printer_id = $3,
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+    `,
+    [
+      tenantId,
+      agentPrinterId,
+      printerId
+    ]
+  )
+}
+
 const findOrCreateClientId = async (client, tenantId, name) => {
   const cleanName = textOrNull(name)
   if (!cleanName) return null
@@ -72,6 +104,15 @@ const resourceConfig = {
       layer_height: number(item.layer),
       infill: number(item.infill),
       dimensions: item.dimensions || '',
+      print_file_name: item.printFileName || '',
+      print_file_format: item.printFileFormat || '',
+      print_file_hash: item.printFileHash || '',
+      print_file_size_bytes: number(item.printFileSizeBytes),
+      print_file_storage_key: item.printFileStorageKey || '',
+      print_profile: item.printProfile || {},
+      compatibility: item.compatibility || {},
+      validation_status: item.validationStatus || 'needs_validation',
+      validation_message: item.validationMessage || '',
       filament_id: idOrNull(item.filamentId),
       filament: item.filament || '',
       filament_color: item.filamentColor || '#1768f2',
@@ -134,7 +175,12 @@ const resourceConfig = {
       serial: item.serial || '',
       location: item.location || '',
       volume: item.volume || '',
-      default_filament: item.defaultFilament || ''
+      default_filament: item.defaultFilament || '',
+      ...(item.agentId !== undefined ? { agent_id: idOrNull(item.agentId) } : {}),
+      ...(item.agentPrinterId !== undefined ? { agent_printer_id: idOrNull(item.agentPrinterId) } : {}),
+      ...(item.agentConnectionKey !== undefined ? { agent_connection_key: item.agentConnectionKey || '' } : {}),
+      ...(item.agentProtocol !== undefined ? { agent_protocol: item.agentProtocol || '' } : {}),
+      ...(item.agentConnectionType !== undefined ? { agent_connection_type: item.agentConnectionType || '' } : {})
     })
   },
   marketplaces: {
@@ -190,6 +236,26 @@ const resourceConfig = {
       profit: number(item.profit),
       status: item.status || 'Novo'
     })
+  },
+  printJobs: {
+    table: 'print_jobs',
+    patch: (item) => ({
+      order_id: idOrNull(item.orderId),
+      tracked_sale_id: idOrNull(item.trackedSaleId),
+      product_id: idOrNull(item.productId),
+      printer_id: idOrNull(item.printerId),
+      agent_printer_id: idOrNull(item.agentPrinterId),
+      source: item.source || 'manual',
+      title: item.title || item.productName || '',
+      quantity: number(item.quantity) || 1,
+      priority: number(item.priority),
+      status: item.status || 'queued',
+      notes: item.notes || '',
+      scheduled_at: item.scheduledAt || null,
+      started_at: item.startedAt || null,
+      completed_at: item.completedAt || null,
+      cancelled_at: item.cancelledAt || null
+    })
   }
 }
 
@@ -215,11 +281,14 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
     const assignments = keys.map((key, index) => `${key} = $${index + 3}`).join(', ')
     const params = [tenantId, id, ...keys.map((key) => values[key])]
     const result = await client.query(
-      `update ${config.table} set ${assignments}${config.table === 'products' || config.table === 'clients' || config.table === 'filaments' || config.table === 'printers' ? ', updated_at = now()' : ''}
+      `update ${config.table} set ${assignments}${config.table === 'products' || config.table === 'clients' || config.table === 'filaments' || config.table === 'printers' || config.table === 'print_jobs' ? ', updated_at = now()' : ''}
        where tenant_id = $1 and id = $2 returning id`,
       params
     )
     if (!result.rowCount) throw new Error('Registro nao encontrado')
+    if (resource === 'printers') {
+      await syncPrinterAgentLink(client, tenantId, result.rows[0].id, item)
+    }
     return null
   }
 
@@ -228,10 +297,13 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
   const conflictClause = resource === 'orders'
     ? ` on conflict (tenant_id, external_id) do update set ${keys.map((key) => `${key} = excluded.${key}`).join(', ')}`
     : ''
-  await client.query(
-    `insert into ${config.table} (${columns.join(', ')}) values (${placeholders})${conflictClause}`,
+  const result = await client.query(
+    `insert into ${config.table} (${columns.join(', ')}) values (${placeholders})${conflictClause} returning id`,
     [tenantId, ...keys.map((key) => values[key])]
   )
+  if (resource === 'printers') {
+    await syncPrinterAgentLink(client, tenantId, result.rows[0].id, item)
+  }
   return null
 }
 

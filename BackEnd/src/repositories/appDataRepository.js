@@ -13,6 +13,9 @@ const mapProduct = (row) => ({
   id: String(row.id), name: row.name, subtitle: row.subtitle || '', sku: row.sku, category: row.category || '',
   description: row.description || '', printerId: row.printer_id ? String(row.printer_id) : '', printer: row.printer_name || row.printer || '', price: number(row.price), weight: number(row.weight),
   time: row.print_time || '', layer: number(row.layer_height), infill: number(row.infill), dimensions: row.dimensions || '',
+  printFileName: row.print_file_name || '', printFileFormat: row.print_file_format || '', printFileHash: row.print_file_hash || '',
+  printFileSizeBytes: number(row.print_file_size_bytes), printFileStorageKey: row.print_file_storage_key || '', printProfile: row.print_profile || {},
+  compatibility: row.compatibility || {}, validationStatus: row.validation_status || 'needs_validation', validationMessage: row.validation_message || '',
   filamentId: row.filament_id ? String(row.filament_id) : '', filament: row.filament_name || row.filament || '', filamentColor: row.filament_color || row.linked_filament_color || '#1768f2',
   packaging: number(row.packaging_cost), materials: number(row.additional_materials_cost), labor: number(row.labor_cost),
   energy: row.energy_enabled, marketplaceFee: number(row.marketplace_fee), desiredMargin: number(row.desired_margin),
@@ -23,7 +26,10 @@ const mapProduct = (row) => ({
 const readProducts = async (client, tenantId) => {
   const result = await client.query(`
     select p.id, p.name, p.subtitle, p.sku, p.category, p.description, p.printer_id, p.printer, pr.name as printer_name,
-      p.price, p.weight, p.print_time, p.layer_height, p.infill, p.dimensions, p.filament_id, p.filament,
+      p.price, p.weight, p.print_time, p.layer_height, p.infill, p.dimensions,
+      p.print_file_name, p.print_file_format, p.print_file_hash, p.print_file_size_bytes,
+      p.print_file_storage_key, p.print_profile, p.compatibility, p.validation_status, p.validation_message,
+      p.filament_id, p.filament,
       f.name as filament_name, p.filament_color, f.color_hex as linked_filament_color, p.packaging_cost,
       p.additional_materials_cost, p.labor_cost, p.energy_enabled, p.marketplace_fee, p.desired_margin,
       p.cost, p.profit, p.margin, p.cost_breakdown, p.status, p.thumb,
@@ -51,6 +57,86 @@ const readOrders = async (client, tenantId) => {
     net: number(row.net), profit: number(row.profit), status: row.status }))
 }
 
+const readPrintJobs = async (client, tenantId) => {
+  const result = await client.query(`
+    select
+      j.id,
+      j.order_id,
+      o.external_id,
+      j.tracked_sale_id,
+      j.product_id,
+      coalesce(p.name, j.title) as product_name,
+      j.printer_id,
+      pr.name as printer_name,
+      j.agent_printer_id,
+      ap.status as agent_printer_status,
+      ap.last_status as agent_last_status,
+      p.print_file_name,
+      p.print_file_format,
+      p.validation_status,
+      p.validation_message,
+      j.source,
+      j.title,
+      j.quantity,
+      j.priority,
+      j.status,
+      j.notes,
+      j.scheduled_at,
+      j.started_at,
+      j.completed_at,
+      j.cancelled_at,
+      j.created_at,
+      j.updated_at
+    from print_jobs j
+    left join orders o on o.id = j.order_id and o.tenant_id = j.tenant_id
+    left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id
+    left join printers pr on pr.id = j.printer_id and pr.tenant_id = j.tenant_id
+    left join agent_printers ap on ap.id = j.agent_printer_id and ap.tenant_id = j.tenant_id
+    where j.tenant_id = $1
+    order by
+      case j.status
+        when 'printing' then 0
+        when 'queued' then 1
+        when 'paused' then 2
+        when 'completed' then 3
+        when 'cancelled' then 4
+        else 5
+      end,
+      j.priority desc,
+      j.created_at asc
+  `, [tenantId])
+
+  return result.rows.map((row) => ({
+    id: String(row.id),
+    orderId: row.order_id ? String(row.order_id) : '',
+    externalOrderId: row.external_id || '',
+    trackedSaleId: row.tracked_sale_id ? String(row.tracked_sale_id) : '',
+    productId: row.product_id ? String(row.product_id) : '',
+    productName: row.product_name || '',
+    printerId: row.printer_id ? String(row.printer_id) : '',
+    printerName: row.printer_name || '',
+    agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
+    agentPrinterStatus: row.agent_printer_status || '',
+    agentLastStatus: row.agent_last_status || {},
+    printFileName: row.print_file_name || '',
+    printFileFormat: row.print_file_format || '',
+    validationStatus: row.validation_status || 'needs_validation',
+    validationMessage: row.validation_message || '',
+    source: row.source || 'manual',
+    title: row.title || '',
+    quantity: Number(row.quantity || 1),
+    priority: Number(row.priority || 0),
+    status: row.status || 'queued',
+    notes: row.notes || '',
+    scheduledAt: row.scheduled_at || null,
+    startedAt: row.started_at || null,
+    completedAt: row.completed_at || null,
+    cancelledAt: row.cancelled_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null
+  }))
+}
+
 const readExpenses = async (client, tenantId) => {
   const result = await client.query(`
     select id, description, category, supplier, amount as value, to_char(expense_date, 'DD/MM/YYYY') as date,
@@ -72,12 +158,15 @@ const readFilaments = async (client, tenantId) => {
 const readPrinters = async (client, tenantId) => {
   const result = await client.query(`
     select id, name, code, maker, model, to_char(acquired_at, 'DD/MM/YYYY') as acquired, power_w, accumulated_hours,
-      status, to_char(last_maintenance_at, 'DD/MM/YYYY') as maintenance, serial, location, volume, default_filament
+      status, to_char(last_maintenance_at, 'DD/MM/YYYY') as maintenance, serial, location, volume, default_filament,
+      agent_id, agent_printer_id, agent_connection_key, agent_protocol, agent_connection_type
     from printers where tenant_id = $1 order by created_at desc
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, code: row.code, maker: row.maker, model: row.model, acquired: row.acquired || '',
     power: number(row.power_w), hours: number(row.accumulated_hours), status: row.status, maintenance: row.maintenance || '',
-    serial: row.serial, location: row.location, volume: row.volume, defaultFilament: row.default_filament }))
+    serial: row.serial, location: row.location, volume: row.volume, defaultFilament: row.default_filament,
+    agentId: row.agent_id ? String(row.agent_id) : '', agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
+    agentConnectionKey: row.agent_connection_key || '', agentProtocol: row.agent_protocol || '', agentConnectionType: row.agent_connection_type || '' }))
 }
 
 const readMarketplaces = async (client, tenantId) => {
@@ -177,12 +266,12 @@ const readMarketplaceIntegrations = async (client, tenantId) => {
 }
 
 export const loadAppData = async (tenantId) => withTenant(tenantId, async (client) => {
-  const [products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations] = await Promise.all([
-    readProducts(client, tenantId), readOrders(client, tenantId), readExpenses(client, tenantId), readFilaments(client, tenantId),
+  const [products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations] = await Promise.all([
+    readProducts(client, tenantId), readOrders(client, tenantId), readPrintJobs(client, tenantId), readExpenses(client, tenantId), readFilaments(client, tenantId),
     readPrinters(client, tenantId), readMarketplaces(client, tenantId), readClients(client, tenantId), readExpenseSegments(client, tenantId),
     readGoals(client, tenantId), readSettings(client, tenantId), readMarketplaceIntegrations(client, tenantId)
   ])
-  return { products, orders, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations }
+  return { products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations }
 })
 
 export const listResource = async (tenantId, resource) => {

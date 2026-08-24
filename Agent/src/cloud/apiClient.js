@@ -6,15 +6,17 @@ import axios from 'axios'
 
 export const sendHeartbeat = async (
   apiUrl,
-  credentials
+  credentials,
+  runtimeInfo = {}
 ) => {
   const response = await axios.post(
     `${apiUrl}/api/agents/heartbeat`,
-    null,
+    runtimeInfo,
     {
       headers: {
         'x-agent-id': credentials.agentId,
-        'x-agent-secret': credentials.agentSecret
+        'x-agent-secret': credentials.agentSecret,
+        'Content-Type': 'application/json'
       }
     }
   )

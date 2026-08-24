@@ -17,17 +17,25 @@ import {
   getAuthUser
 } from './auth.js'
 
+import {
+  validatePrintCompatibility
+} from '../services/printValidation.js'
+
+import {
+  openPrintFileReadStream
+} from '../services/printFileStorage.js'
+
 // ======================================================
-// CONFIGURAÇÕES
+// CONFIGURAÃ‡Ã•ES
 // ======================================================
 
-// Evita caracteres fáceis de confundir,
+// Evita caracteres fÃ¡ceis de confundir,
 // como 0/O e 1/I.
 const alphabet =
   'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 // ======================================================
-// CÓDIGO DE PAREAMENTO
+// CÃ“DIGO DE PAREAMENTO
 // ======================================================
 
 const randomPart = (
@@ -74,7 +82,7 @@ const hashPairingCode = (
 }
 
 // ======================================================
-// PROTEÇÃO DE SEGREDOS DOS COMANDOS
+// PROTEÃ‡ÃƒO DE SEGREDOS DOS COMANDOS
 // ======================================================
 //
 // DATA_ENCRYPTION_KEY fica somente no BackEnd.
@@ -82,17 +90,17 @@ const hashPairingCode = (
 // O LAN Access Code da Bambu:
 //
 // FrontEnd
-//   ↓
+//   â†“
 // BackEnd recebe em texto
-//   ↓
+//   â†“
 // AES-256-GCM
-//   ↓
+//   â†“
 // banco recebe somente ciphertext
-//   ↓
+//   â†“
 // Agent autenticado busca comando
-//   ↓
-// BackEnd descriptografa em memória
-//   ↓
+//   â†“
+// BackEnd descriptografa em memÃ³ria
+//   â†“
 // Agent recebe accessCode
 //
 // O Agent nunca recebe DATA_ENCRYPTION_KEY.
@@ -173,7 +181,7 @@ const encryptCommandSecret = (
   }
 
   /*
-   * 12 bytes é o tamanho recomendado
+   * 12 bytes Ã© o tamanho recomendado
    * para IV no AES-GCM.
    */
   const iv =
@@ -241,6 +249,69 @@ const encryptCommandSecret = (
       )
   }
 }
+
+const authenticateAgentRequest =
+  async (
+    req
+  ) => {
+    const agentId =
+      String(
+        req.headers[
+          'x-agent-id'
+        ] ||
+        ''
+      ).trim()
+
+    const agentSecret =
+      String(
+        req.headers[
+          'x-agent-secret'
+        ] ||
+        ''
+      ).trim()
+
+    if (
+      !agentId ||
+      !agentSecret
+    ) {
+      return null
+    }
+
+    const secretHash =
+      crypto
+        .createHash(
+          'sha256'
+        )
+        .update(
+          agentSecret
+        )
+        .digest(
+          'hex'
+        )
+
+    const result =
+      await query(
+        `
+          select
+            id,
+            tenant_id
+          from agents
+          where id = $1
+            and secret_hash = $2
+            and secret_hash is not null
+            and status <> 'revoked'
+          limit 1
+        `,
+        [
+          agentId,
+          secretHash
+        ]
+      )
+
+    return result
+      .rows[0] ||
+      null
+  }
 
 // ======================================================
 // DESCRIPTOGRAFAR SEGREDO
@@ -327,7 +398,7 @@ const sanitizeCommandPayloadForUser = (
     )
 
   /*
-   * O usuário não precisa receber
+   * O usuÃ¡rio nÃ£o precisa receber
    * o accessCode novamente quando
    * consulta o resultado do comando.
    */
@@ -348,7 +419,7 @@ const sanitizeCommandPayloadForUser = (
 }
 
 // ======================================================
-// GERAR CÓDIGO DE PAREAMENTO
+// GERAR CÃ“DIGO DE PAREAMENTO
 // ======================================================
 
 export const handleAgentPairingCodeCreate =
@@ -380,7 +451,7 @@ export const handleAgentPairingCodeCreate =
         code
       )
 
-    // Código válido por 10 minutos.
+    // CÃ³digo vÃ¡lido por 10 minutos.
     const expiresAt =
       new Date(
         Date.now() +
@@ -496,7 +567,7 @@ export const handleAgentPair =
       )
 
     /*
-     * Aqui ainda não sabemos
+     * Aqui ainda nÃ£o sabemos
      * o tenant do Agent.
      */
     const pairingResult =
@@ -641,7 +712,13 @@ export const handleAgentPair =
           returning
             id,
             tenant_id,
-            machine_name
+            machine_name,
+            (
+              select name
+              from tenants
+              where id = $1
+              limit 1
+            ) as tenant_name
         `,
         [
           pairing.tenant_id,
@@ -655,7 +732,7 @@ export const handleAgentPair =
       )
 
     /*
-     * Código de pareamento é
+     * CÃ³digo de pareamento Ã©
      * utilizado somente uma vez.
      */
     await query(
@@ -684,6 +761,13 @@ export const handleAgentPair =
           ),
 
         agentSecret,
+
+        tenantId:
+          agent.tenant_id,
+
+        tenantName:
+          agent.tenant_name ||
+          '',
 
         machineName:
           agent.machine_name
@@ -730,6 +814,7 @@ export const handleAgentVerify =
       )
     }
 
+
     const secretHash =
       crypto
         .createHash(
@@ -756,6 +841,8 @@ export const handleAgentVerify =
           from agents
           where id = $1
             and secret_hash = $2
+            and secret_hash is not null
+            and status <> 'revoked'
           limit 1
         `,
         [
@@ -784,6 +871,7 @@ export const handleAgentVerify =
         set
           status =
             'online',
+
 
           last_seen_at =
             now(),
@@ -866,6 +954,29 @@ export const handleAgentHeartbeat =
       )
     }
 
+    const body =
+      await readJsonBody(
+        req
+      )
+
+    const version =
+      String(
+        body.version ||
+        ''
+      ).trim()
+
+    const platform =
+      String(
+        body.platform ||
+        ''
+      ).trim()
+
+    const architecture =
+      String(
+        body.architecture ||
+        ''
+      ).trim()
+
     const secretHash =
       crypto
         .createHash(
@@ -886,6 +997,24 @@ export const handleAgentHeartbeat =
             status =
               'online',
 
+
+            agent_version =
+              case
+                when $3 <> '' then $3
+                else agent_version
+              end,
+
+            platform =
+              case
+                when $4 <> '' then $4
+                else platform
+              end,
+
+            architecture =
+              case
+                when $5 <> '' then $5
+                else architecture
+              end,
             last_seen_at =
               now(),
 
@@ -894,6 +1023,8 @@ export const handleAgentHeartbeat =
 
           where id = $1
             and secret_hash = $2
+            and secret_hash is not null
+            and status <> 'revoked'
 
           returning
             id,
@@ -902,7 +1033,10 @@ export const handleAgentHeartbeat =
         `,
         [
           agentId,
-          secretHash
+          secretHash,
+          version,
+          platform,
+          architecture
         ]
       )
 
@@ -1025,6 +1159,108 @@ export const handleAgentsList =
       200,
       {
         agents
+      }
+    )
+  }
+
+// ======================================================
+// REVOGAR AGENT
+// ======================================================
+
+export const handleAgentRevoke =
+  async (
+    req,
+    res,
+    agentId
+  ) => {
+    const user =
+      await getAuthUser(
+        req
+      )
+
+    if (!user) {
+      return sendJson(
+        res,
+        401,
+        {
+          error:
+            'Login necessario'
+        }
+      )
+    }
+
+    if (!agentId) {
+      return sendJson(
+        res,
+        400,
+        {
+          error:
+            'Agent obrigatorio'
+        }
+      )
+    }
+
+    const result =
+      await tenantQuery(
+        user.tenantId,
+        `
+          update agents
+          set
+            status = 'revoked',
+            secret_hash = null,
+            updated_at = now()
+          where tenant_id = $1
+            and id = $2
+          returning
+            id
+        `,
+        [
+          user.tenantId,
+          agentId
+        ]
+      )
+
+    if (!result.rows[0]) {
+      return sendJson(
+        res,
+        404,
+        {
+          error:
+            'Agent nao encontrado'
+        }
+      )
+    }
+
+    await tenantQuery(
+      user.tenantId,
+      `
+        update agent_commands
+        set
+          status = 'failed',
+          result = $3::jsonb,
+          completed_at = now()
+        where tenant_id = $1
+          and agent_id = $2
+          and status in ('pending', 'running')
+      `,
+      [
+        user.tenantId,
+        agentId,
+        JSON.stringify({
+          success:
+            false,
+          error:
+            'Agent revogado pelo usuario.'
+        })
+      ]
+    )
+
+    return sendJson(
+      res,
+      200,
+      {
+        status:
+          'revoked'
       }
     )
   }
@@ -1172,7 +1408,7 @@ export const handleAgentDiscoverCreate =
   }
 
 // ======================================================
-// BUSCAR PRÓXIMO COMANDO DO AGENT
+// BUSCAR PRÃ“XIMO COMANDO DO AGENT
 // ======================================================
 
 export const handleAgentCommandsPending =
@@ -1235,6 +1471,8 @@ export const handleAgentCommandsPending =
           from agents
           where id = $1
             and secret_hash = $2
+            and secret_hash is not null
+            and status <> 'revoked'
           limit 1
         `,
         [
@@ -1257,6 +1495,39 @@ export const handleAgentCommandsPending =
         }
       )
     }
+
+    // ==================================================
+    // EXPIRAR COMANDOS TRAVADOS
+    // ==================================================
+    //
+    // Se o Agent cair depois de buscar um comando,
+    // ele ficava indefinidamente como running.
+    // ==================================================
+
+    await query(
+      `
+        update agent_commands
+        set
+          status = 'failed',
+          result = $3::jsonb,
+          completed_at = now()
+        where agent_id = $1
+          and tenant_id = $2
+          and status = 'running'
+          and started_at < now() - interval '3 minutes'
+      `,
+      [
+        agent.id,
+        agent.tenant_id,
+        JSON.stringify({
+          success:
+            false,
+
+          error:
+            'O Agent nao concluiu o comando dentro do tempo esperado.'
+        })
+      ]
+    )
 
     // ==================================================
     // BUSCAR COMANDO
@@ -1359,10 +1630,10 @@ export const handleAgentCommandsPending =
           )
       } else {
         /*
-         * Compatibilidade temporária
+         * Compatibilidade temporÃ¡ria
          * com comandos antigos que
          * possam ter sido salvos antes
-         * desta implementação.
+         * desta implementaÃ§Ã£o.
          *
          * Isso pode ser removido depois.
          */
@@ -1374,7 +1645,7 @@ export const handleAgentCommandsPending =
       }
 
       /*
-       * Clonamos para não alterar
+       * Clonamos para nÃ£o alterar
        * acidentalmente o objeto do banco.
        */
       payloadForAgent =
@@ -1534,12 +1805,12 @@ const registerConnectedAgentPrinter =
         .toLowerCase()
 
     // ==================================================
-    // SEGURANÇA / CONSISTÊNCIA
+    // SEGURANÃ‡A / CONSISTÃŠNCIA
     // ==================================================
 
     if (!connectionKey) {
       console.log(
-        '[AgentPrinters] Conexão concluída sem connection_key.'
+        '[AgentPrinters] Conexao concluida sem connection_key.'
       )
 
       return
@@ -1547,7 +1818,7 @@ const registerConnectedAgentPrinter =
 
     if (!protocol) {
       console.log(
-        '[AgentPrinters] Conexão concluída sem protocolo.'
+        '[AgentPrinters] Conexao concluida sem protocolo.'
       )
 
       return
@@ -1604,7 +1875,7 @@ const registerConnectedAgentPrinter =
         : ''
 
     // ==================================================
-    // METADATA NÃO SENSÍVEL
+    // METADATA NÃƒO SENSÃVEL
     // ==================================================
     //
     // Nunca colocar aqui:
@@ -1621,9 +1892,22 @@ const registerConnectedAgentPrinter =
         printer.software ||
         null,
 
+      baudRate:
+        printer.baudRate ||
+        null,
+
+      firmware:
+        printer.firmware ||
+        null,
+
       mock:
         printer.mock ===
-        true
+        true,
+
+      capabilities:
+        connection.capabilities ||
+        printer.capabilities ||
+        {}
     }
 
     // ==================================================
@@ -1748,7 +2032,7 @@ const registerConnectedAgentPrinter =
     )
 
     console.log(
-      `[AgentPrinters] ✅ Impressora registrada: ${connectionKey}`
+      `[AgentPrinters] Impressora registrada: ${connectionKey}`
     )
   }
 
@@ -1773,15 +2057,17 @@ const updateAgentPrinterFromCommand =
     }
 
     // ==================================================
-    // SOMENTE COMANDOS RELACIONADOS À IMPRESSORA
+    // SOMENTE COMANDOS RELACIONADOS Ã€ IMPRESSORA
     // ==================================================
 
     const supportedCommands =
       new Set([
         'printer_status',
+        'start_print',
         'printer_pause',
         'printer_resume',
-        'printer_cancel'
+        'printer_cancel',
+        'disconnect_printer'
       ])
 
     if (
@@ -1844,11 +2130,17 @@ const updateAgentPrinterFromCommand =
       command.command ===
         'printer_status'
 
+    const isDisconnectCommand =
+      command.command ===
+        'disconnect_printer'
+
     const isOperationCommand =
       [
+        'start_print',
         'printer_pause',
         'printer_resume',
-        'printer_cancel'
+        'printer_cancel',
+        'disconnect_printer'
       ].includes(
         command.command
       )
@@ -1858,13 +2150,13 @@ const updateAgentPrinterFromCommand =
     // ==================================================
     //
     // printer_status:
-    //   trata erro como problema de comunicação.
+    //   trata erro como problema de comunicaÃ§Ã£o.
     //
     // pause / resume / cancel:
     //   trata erro como problema operacional.
     //
     // Quando o comando correspondente tem sucesso,
-    // errorMessage será '', limpando o erro anterior
+    // errorMessage serÃ¡ '', limpando o erro anterior
     // daquele tipo.
     //
     // ==================================================
@@ -1880,29 +2172,36 @@ const updateAgentPrinterFromCommand =
         : null
 
     // ==================================================
-    // ESTADO DA CONEXÃO
+    // ESTADO DA CONEXÃƒO
     // ==================================================
     //
     // Nem toda falha significa que a impressora
     // desconectou.
     //
     // printer_status falhou:
-    //   podemos considerar perda de comunicação.
+    //   podemos considerar perda de comunicaÃ§Ã£o.
     //
     // pause/resume/cancel falhou:
-    //   mantém o estado atual da conexão.
+    //   mantÃ©m o estado atual da conexÃ£o.
     //
     // Qualquer comando bem-sucedido prova que houve
-    // comunicação com a impressora.
+    // comunicaÃ§Ã£o com a impressora.
     //
     // ==================================================
 
     const shouldMarkDisconnected =
-      isStatusCommand &&
-      !commandSucceeded
+      (
+        isStatusCommand &&
+        !commandSucceeded
+      ) ||
+      (
+        isDisconnectCommand &&
+        commandSucceeded
+      )
 
     const shouldMarkConnected =
-      commandSucceeded
+      commandSucceeded &&
+      !isDisconnectCommand
 
     const connectionStatus =
       shouldMarkConnected
@@ -1915,10 +2214,10 @@ const updateAgentPrinterFromCommand =
     // TELEMETRIA
     // ==================================================
     //
-    // Somente printer_status concluído com sucesso
+    // Somente printer_status concluÃ­do com sucesso
     // pode atualizar last_status.
     //
-    // Em caso de falha, mantemos a última telemetria
+    // Em caso de falha, mantemos a Ãºltima telemetria
     // conhecida.
     //
     // ==================================================
@@ -2021,7 +2320,7 @@ const updateAgentPrinterFromCommand =
 
           operationError,
 
-          commandSucceeded,
+          shouldMarkConnected,
 
           shouldMarkDisconnected,
 
@@ -2051,7 +2350,7 @@ const updateAgentPrinterFromCommand =
       !updatedPrinter
     ) {
       console.log(
-        `[AgentPrinters] agentPrinterId ${agentPrinterId} não encontrado para o Agent ${agent.id}.`
+        `[AgentPrinters] agentPrinterId ${agentPrinterId} nao encontrado para o Agent ${agent.id}.`
       )
 
       return
@@ -2065,7 +2364,7 @@ const updateAgentPrinterFromCommand =
       commandSucceeded
     ) {
       console.log(
-        `[AgentPrinters] ✅ Comando ${command.command} concluído: ${updatedPrinter.connection_key}`
+        `[AgentPrinters] Comando ${command.command} concluido: ${updatedPrinter.connection_key}`
       )
 
       return
@@ -2075,15 +2374,205 @@ const updateAgentPrinterFromCommand =
       shouldMarkDisconnected
     ) {
       console.log(
-        `[AgentPrinters] ⚠ Impressora marcada como desconectada: ${updatedPrinter.connection_key} - ${errorMessage}`
+        `[AgentPrinters] Impressora marcada como desconectada: ${updatedPrinter.connection_key} - ${errorMessage}`
       )
 
       return
     }
 
     console.log(
-      `[AgentPrinters] ⚠ Erro operacional em ${command.command}: ${updatedPrinter.connection_key} - ${errorMessage}`
+      `[AgentPrinters] Erro operacional em ${command.command}: ${updatedPrinter.connection_key} - ${errorMessage}`
     )
+  }
+
+// ======================================================
+// ATUALIZAR FILA DE IMPRESSAO A PARTIR DO COMANDO
+// ======================================================
+
+const updatePrintJobFromCommand =
+  async (
+    agent,
+    command
+  ) => {
+    if (
+      !agent ||
+      !command ||
+      command.command !==
+        'start_print'
+    ) {
+      return
+    }
+
+    const printJobId =
+      String(
+        command.payload
+          ?.printJobId ||
+        command.payload
+          ?.job
+          ?.id ||
+        ''
+      ).trim()
+
+    if (!printJobId) {
+      return
+    }
+
+    const commandSucceeded =
+      command.status ===
+        'completed' &&
+      command.result
+        ?.success !==
+        false
+
+    if (!commandSucceeded) {
+      return
+    }
+
+    await tenantQuery(
+      agent.tenant_id,
+      `
+        update print_jobs
+        set
+          status = 'printing',
+          started_at = coalesce(started_at, now()),
+          updated_at = now()
+        where tenant_id = $1
+          and id = $2
+      `,
+      [
+        agent.tenant_id,
+        printJobId
+      ]
+    )
+  }
+
+// ======================================================
+// AGENT BAIXA ARQUIVO DE IMPRESSAO
+// ======================================================
+
+export const handleAgentPrintFileGet =
+  async (
+    req,
+    res,
+    url
+  ) => {
+    const agent =
+      await authenticateAgentRequest(
+        req
+      )
+
+    if (!agent) {
+      return sendJson(
+        res,
+        401,
+        {
+          error:
+            'Agent invalido'
+        }
+      )
+    }
+
+    const storageKey =
+      String(
+        url.searchParams.get(
+          'key'
+        ) ||
+        ''
+      ).trim()
+
+    if (!storageKey) {
+      return sendJson(
+        res,
+        400,
+        {
+          error:
+            'Chave do arquivo obrigatoria'
+        }
+      )
+    }
+
+    const fileResult =
+      await tenantQuery(
+        agent.tenant_id,
+        `
+          select
+            id,
+            print_file_name,
+            print_file_format,
+            print_file_hash,
+            print_file_size_bytes,
+            print_file_storage_key
+          from products
+          where tenant_id = $1
+            and print_file_storage_key = $2
+          limit 1
+        `,
+        [
+          agent.tenant_id,
+          storageKey
+        ]
+      )
+
+    const product =
+      fileResult
+        .rows[0]
+
+    if (!product) {
+      return sendJson(
+        res,
+        404,
+        {
+          error:
+            'Arquivo nao encontrado'
+        }
+      )
+    }
+
+    try {
+      const file =
+        await openPrintFileReadStream(
+          storageKey
+        )
+
+      res.writeHead(
+        200,
+        {
+          'Content-Type':
+            'application/octet-stream',
+          'Content-Length':
+            String(
+              file.sizeBytes
+            ),
+          'X-PrintFlow-File-Name':
+            encodeURIComponent(
+              product.print_file_name ||
+              'print-file'
+            ),
+          'X-PrintFlow-File-Format':
+            product.print_file_format ||
+            '',
+          'X-PrintFlow-File-Hash':
+            product.print_file_hash ||
+            '',
+          'Access-Control-Allow-Origin':
+            '*'
+        }
+      )
+
+      file.stream.pipe(
+        res
+      )
+    } catch (error) {
+      return sendJson(
+        res,
+        404,
+        {
+          error:
+            error.message ||
+            'Arquivo nao encontrado'
+        }
+      )
+    }
   }
 
 // ======================================================
@@ -2155,6 +2644,8 @@ export const handleAgentCommandComplete =
           from agents
           where id = $1
             and secret_hash = $2
+            and secret_hash is not null
+            and status <> 'revoked'
           limit 1
         `,
         [
@@ -2204,12 +2695,12 @@ export const handleAgentCommandComplete =
     // FINALIZAR COMANDO
     // ==================================================
     //
-    // Também retornamos payload porque,
+    // TambÃ©m retornamos payload porque,
     // no caso do connect_printer,
-    // precisamos dos dados não sensíveis
+    // precisamos dos dados nÃ£o sensÃ­veis
     // da impressora.
     //
-    // O accessCode já foi removido do
+    // O accessCode jÃ¡ foi removido do
     // payload quando o Agent buscou
     // o comando.
     // ==================================================
@@ -2290,10 +2781,10 @@ export const handleAgentCommandComplete =
         error
       ) {
         /*
-         * A conexão da impressora já aconteceu.
+         * A conexÃ£o da impressora jÃ¡ aconteceu.
          *
-         * Uma falha ao registrar no banco não deve
-         * transformar o comando físico em failed.
+         * Uma falha ao registrar no banco nÃ£o deve
+         * transformar o comando fÃ­sico em failed.
          *
          * Mas registramos o erro no servidor.
          */
@@ -2322,6 +2813,19 @@ try {
   )
 }
 
+try {
+  await updatePrintJobFromCommand(
+    agent,
+    command
+  )
+} catch (
+  error
+) {
+  console.error(
+    '[PrintJobs] Falha ao atualizar fila de impressao:',
+    error
+  )
+}
 
     // ==================================================
     // RESPOSTA PARA O AGENT
@@ -2625,13 +3129,17 @@ export const handleAgentConnectPrinterCreate =
     }
 
     // ==================================================
-    // VALIDAÇÃO BAMBU
+    // VALIDAÃ‡ÃƒO BAMBU
     // ==================================================
 
     if (
       protocol ===
       'bambu'
     ) {
+      const isMockPrinter =
+        printer.mock ===
+        true
+
       if (
         !printer.ip
       ) {
@@ -2646,7 +3154,8 @@ export const handleAgentConnectPrinterCreate =
       }
 
       if (
-        !printer.serial
+        !printer.serial &&
+        !isMockPrinter
       ) {
         return sendJson(
           res,
@@ -2659,7 +3168,8 @@ export const handleAgentConnectPrinterCreate =
       }
 
       if (
-        !options.accessCode
+        !options.accessCode &&
+        !isMockPrinter
       ) {
         return sendJson(
           res,
@@ -2682,7 +3192,9 @@ export const handleAgentConnectPrinterCreate =
 
     if (
       protocol ===
-      'bambu'
+        'bambu' &&
+      printer.mock !==
+        true
     ) {
       const context =
         buildCommandSecretContext(
@@ -2695,7 +3207,7 @@ export const handleAgentConnectPrinterCreate =
        * IMPORTANTE:
        *
        * accessCode puro existe somente
-       * durante esta requisição.
+       * durante esta requisiÃ§Ã£o.
        *
        * O banco recebe exclusivamente
        * o objeto criptografado.
@@ -2813,7 +3325,7 @@ export const handleAgentPrinterStatusCreate =
     agentId
   ) => {
     // ==================================================
-    // AUTENTICAR USUÁRIO
+    // AUTENTICAR USUÃRIO
     // ==================================================
 
     const user =
@@ -2914,7 +3426,7 @@ export const handleAgentPrinterStatusCreate =
     }
 
     // ==================================================
-    // BUSCAR IMPRESSORA CONFIÁVEL NO BANCO
+    // BUSCAR IMPRESSORA CONFIÃVEL NO BANCO
     // ==================================================
 
     const printerResult =
@@ -2924,6 +3436,7 @@ export const handleAgentPrinterStatusCreate =
           select
             id,
             agent_id,
+            printer_id,
             connection_key,
             protocol,
             connection_type,
@@ -2967,7 +3480,7 @@ export const handleAgentPrinterStatusCreate =
     }
 
     // ==================================================
-    // MONTAR OBJETO CONFIÁVEL
+    // MONTAR OBJETO CONFIÃVEL
     // ==================================================
 
     const printer = {
@@ -3001,7 +3514,7 @@ export const handleAgentPrinterStatusCreate =
     }
 
     // ==================================================
-    // ADICIONAR METADATA NÃO SENSÍVEL
+    // ADICIONAR METADATA NÃƒO SENSÃVEL
     // ==================================================
 
     if (
@@ -3014,6 +3527,22 @@ export const handleAgentPrinterStatusCreate =
       ) {
         printer.software =
           storedPrinter.metadata.software
+      }
+
+      if (
+        storedPrinter.metadata.baudRate
+      ) {
+        printer.baudRate =
+          Number(
+            storedPrinter.metadata.baudRate
+          )
+      }
+
+      if (
+        storedPrinter.metadata.firmware
+      ) {
+        printer.firmware =
+          storedPrinter.metadata.firmware
       }
 
       if (
@@ -3140,7 +3669,7 @@ export const handleAgentPrinterStatusCreate =
 
 // ======================================================
 // CONTROLE DA IMPRESSORA
-// pause / resume / cancel
+// pause / resume / cancel / disconnect
 // ======================================================
 
 export const handleAgentPrinterControlCreate =
@@ -3151,7 +3680,7 @@ export const handleAgentPrinterControlCreate =
     action
   ) => {
     // ==================================================
-    // AUTENTICAR USUÁRIO
+    // AUTENTICAR USUÃRIO
     // ==================================================
 
     const user =
@@ -3186,14 +3715,16 @@ export const handleAgentPrinterControlCreate =
     }
 
     // ==================================================
-    // AÇÕES PERMITIDAS
+    // AÃ‡Ã•ES PERMITIDAS
     // ==================================================
 
     const allowedActions =
       new Set([
+        'start',
         'pause',
         'resume',
-        'cancel'
+        'cancel',
+        'disconnect'
       ])
 
     if (
@@ -3266,6 +3797,12 @@ export const handleAgentPrinterControlCreate =
         ''
       ).trim()
 
+    const printJobId =
+      String(
+        body?.printJobId ||
+        ''
+      ).trim()
+
     if (!agentPrinterId) {
       return sendJson(
         res,
@@ -3277,8 +3814,23 @@ export const handleAgentPrinterControlCreate =
       )
     }
 
+    if (
+      action ===
+        'start' &&
+      !printJobId
+    ) {
+      return sendJson(
+        res,
+        400,
+        {
+          error:
+            'printJobId obrigatorio'
+        }
+      )
+    }
+
     // ==================================================
-    // BUSCAR IMPRESSORA CONFIÁVEL
+    // BUSCAR IMPRESSORA CONFIÃVEL
     // ==================================================
 
     const printerResult =
@@ -3288,6 +3840,7 @@ export const handleAgentPrinterControlCreate =
           select
             id,
             agent_id,
+            printer_id,
             connection_key,
             protocol,
             connection_type,
@@ -3330,8 +3883,269 @@ export const handleAgentPrinterControlCreate =
       )
     }
 
+    let printJob =
+      null
+
+    if (
+      action ===
+      'start'
+    ) {
+      const jobResult =
+        await tenantQuery(
+          user.tenantId,
+          `
+            select
+              j.id,
+              j.order_id,
+              o.external_id,
+              j.product_id,
+              coalesce(p.name, j.title) as product_name,
+              j.printer_id,
+              j.agent_printer_id,
+              j.source,
+              j.title,
+              j.quantity,
+              j.priority,
+              j.status,
+              j.notes,
+              p.dimensions,
+              p.weight,
+              p.layer_height,
+              p.infill,
+              p.print_file_name,
+              p.print_file_format,
+              p.print_file_hash,
+              p.print_file_size_bytes,
+              p.print_file_storage_key,
+              p.print_profile,
+              p.compatibility,
+              p.validation_status,
+              p.validation_message,
+              pr.volume as printer_volume,
+              pr.agent_protocol as printer_protocol,
+              f.material as filament_material
+
+            from print_jobs j
+
+            left join orders o
+              on o.id = j.order_id
+             and o.tenant_id = j.tenant_id
+
+            left join products p
+              on p.id = j.product_id
+             and p.tenant_id = j.tenant_id
+
+            left join printers pr
+              on pr.id = j.printer_id
+             and pr.tenant_id = j.tenant_id
+
+            left join filaments f
+              on f.id = p.filament_id
+             and f.tenant_id = p.tenant_id
+
+            where j.tenant_id = $1
+              and j.id = $2
+              and j.printer_id is not distinct from $3::bigint
+              and j.agent_printer_id is not distinct from $4::bigint
+
+            limit 1
+          `,
+          [
+            user.tenantId,
+            printJobId,
+            storedPrinter.printer_id,
+            storedPrinter.id
+          ]
+        )
+
+      const storedJob =
+        jobResult
+          .rows[0]
+
+      if (!storedJob) {
+        return sendJson(
+          res,
+          404,
+          {
+            error:
+              'Item da fila nao encontrado'
+          }
+        )
+      }
+
+      const validation =
+        validatePrintCompatibility(
+          {
+            product: {
+              ...storedJob,
+              print_file_format:
+                storedJob.print_file_format,
+              validation_status:
+                storedJob.validation_status,
+              compatibility:
+                storedJob.compatibility ||
+                {},
+              print_profile:
+                storedJob.print_profile ||
+                {}
+            },
+
+            printer: {
+              ...storedPrinter,
+              volume:
+                storedJob.printer_volume,
+              agent_protocol:
+                storedJob.printer_protocol ||
+                storedPrinter.protocol
+            },
+
+            filament: {
+              material:
+                storedJob.filament_material ||
+                ''
+            },
+
+            job: {
+              quantity:
+                Number(
+                  storedJob.quantity ||
+                  0
+                )
+            }
+          }
+        )
+
+      if (
+        !validation.valid
+      ) {
+        return sendJson(
+          res,
+          400,
+          {
+            error:
+              validation.errors[0] ||
+              'Produto incompativel com a impressora selecionada.',
+
+            validation
+          }
+        )
+      }
+
+      printJob = {
+        id:
+          String(
+            storedJob.id
+          ),
+
+        orderId:
+          storedJob.order_id
+            ? String(
+                storedJob.order_id
+              )
+            : '',
+
+        externalOrderId:
+          storedJob.external_id ||
+          '',
+
+        productId:
+          storedJob.product_id
+            ? String(
+                storedJob.product_id
+              )
+            : '',
+
+        productName:
+          storedJob.product_name ||
+          '',
+
+        printerId:
+          storedJob.printer_id
+            ? String(
+                storedJob.printer_id
+              )
+            : '',
+
+        agentPrinterId:
+          storedJob.agent_printer_id
+            ? String(
+                storedJob.agent_printer_id
+              )
+            : '',
+
+        source:
+          storedJob.source ||
+          'manual',
+
+        title:
+          storedJob.title ||
+          storedJob.product_name ||
+          '',
+
+        quantity:
+          Number(
+            storedJob.quantity ||
+            1
+          ),
+
+        priority:
+          Number(
+            storedJob.priority ||
+            0
+          ),
+
+        status:
+          storedJob.status ||
+          'queued',
+
+        notes:
+          storedJob.notes ||
+          '',
+
+        printFile: {
+          name:
+            storedJob.print_file_name ||
+            '',
+
+          format:
+            storedJob.print_file_format ||
+            '',
+
+          hash:
+            storedJob.print_file_hash ||
+            '',
+
+          sizeBytes:
+            Number(
+              storedJob.print_file_size_bytes ||
+              0
+            ),
+
+          storageKey:
+            storedJob.print_file_storage_key ||
+            ''
+        },
+
+        printProfile:
+          storedJob.print_profile ||
+          {},
+
+        compatibility:
+          storedJob.compatibility ||
+          {},
+
+        validationStatus:
+          storedJob.validation_status ||
+          'needs_validation',
+
+        validationWarnings:
+          validation.warnings ||
+          ''
+      }
+    }
+
     // ==================================================
-    // MONTAR OBJETO CONFIÁVEL
+    // MONTAR OBJETO CONFIÃVEL
     // ==================================================
 
     const printer = {
@@ -3365,7 +4179,7 @@ export const handleAgentPrinterControlCreate =
     }
 
     // ==================================================
-    // METADATA NÃO SENSÍVEL
+    // METADATA NÃƒO SENSÃVEL
     // ==================================================
 
     if (
@@ -3378,6 +4192,22 @@ export const handleAgentPrinterControlCreate =
       ) {
         printer.software =
           storedPrinter.metadata.software
+      }
+
+      if (
+        storedPrinter.metadata.baudRate
+      ) {
+        printer.baudRate =
+          Number(
+            storedPrinter.metadata.baudRate
+          )
+      }
+
+      if (
+        storedPrinter.metadata.firmware
+      ) {
+        printer.firmware =
+          storedPrinter.metadata.firmware
       }
 
       if (
@@ -3394,7 +4224,13 @@ export const handleAgentPrinterControlCreate =
     // ==================================================
 
     const commandType =
-      `printer_${action}`
+      action ===
+        'disconnect'
+        ? 'disconnect_printer'
+        : action ===
+            'start'
+          ? 'start_print'
+          : `printer_${action}`
 
     // ==================================================
     // PAYLOAD
@@ -3409,7 +4245,17 @@ export const handleAgentPrinterControlCreate =
       connectionKey:
         storedPrinter.connection_key,
 
-      printer
+      printer,
+
+      ...(printJob
+        ? {
+            printJobId:
+              printJob.id,
+
+            job:
+              printJob
+          }
+        : {})
     }
 
     // ==================================================
@@ -3521,7 +4367,7 @@ export const handleAgentPrintersList =
     agentId
   ) => {
     // ==================================================
-    // AUTENTICAR USUÁRIO
+    // AUTENTICAR USUÃRIO
     // ==================================================
 
     const user =

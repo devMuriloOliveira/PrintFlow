@@ -1,21 +1,135 @@
-import {
+﻿import {
   discoverPrinters
 } from '../discovery/scanner.js'
 
 import {
   connectPrinter,
+  disconnectPrinter,
   getPrinterStatus,
+  hasActiveConnection,
+  startPrinterJob,
   pausePrinter,
   resumePrinter,
   cancelPrinter
 } from '../printers/printerManager.js'
+
+import {
+  ensurePrintFileCached
+} from '../files/printFileCache.js'
+
+import {
+  loadPrinterCredentials,
+  savePrinterCredentials
+} from '../storage/printerCredentials.js'
+
+const allowedPrintFormatsByProtocol = {
+  bambu:
+    new Set(['3mf', 'gcode', 'bgcode']),
+  marlin:
+    new Set(['gcode']),
+  octoprint:
+    new Set(['gcode']),
+  moonraker:
+    new Set(['gcode']),
+  prusalink:
+    new Set(['gcode', 'bgcode'])
+}
+
+const normalizeText = (
+  value
+) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+
+const assertPrintFileFormat = (
+  printer,
+  job
+) => {
+  const protocol =
+    normalizeText(
+      printer?.protocol
+    )
+
+  const format =
+    normalizeText(
+      job?.printFile
+        ?.format
+    )
+
+  const allowed =
+    allowedPrintFormatsByProtocol[
+      protocol
+    ]
+
+  if (
+    allowed &&
+    !allowed.has(
+      format
+    )
+  ) {
+    throw new Error(
+      `Formato ${format.toUpperCase()} nao suportado para ${protocol}.`
+    )
+  }
+}
+
+const getOptionsWithStoredCredentials =
+  async (
+    printer,
+    options = {}
+  ) => {
+    const stored =
+      await loadPrinterCredentials(
+        printer
+      )
+
+    return {
+      ...stored,
+      ...options
+    }
+  }
+
+const ensurePrinterConnection =
+  async (
+    printer
+  ) => {
+    if (
+      hasActiveConnection(
+        printer
+      )
+    ) {
+      return {
+        reconnected:
+          false
+      }
+    }
+
+    const options =
+      await loadPrinterCredentials(
+        printer
+      )
+
+    const connection =
+      await connectPrinter(
+        printer,
+        options
+      )
+
+    return {
+      reconnected:
+        true,
+      connection
+    }
+  }
 
 // ======================================================
 // HANDLER PRINCIPAL
 // ======================================================
 
 export const handleCommand = async (
-  command
+  command,
+  context = {}
 ) => {
   console.log('')
   console.log(
@@ -64,7 +178,7 @@ export const handleCommand = async (
     const printer =
       command.payload?.printer
 
-    const options =
+    const commandOptions =
       command.payload?.options ||
       {}
 
@@ -72,7 +186,7 @@ export const handleCommand = async (
       return {
         success: false,
         error:
-          'Dados da impressora não foram enviados.'
+          'Dados da impressora nao foram enviados.'
       }
     }
 
@@ -82,14 +196,14 @@ export const handleCommand = async (
       return {
         success: false,
         error:
-          'Protocolo da impressora não informado.'
+          'Protocolo da impressora nao informado.'
       }
     }
 
     try {
       console.log('')
       console.log(
-        'Iniciando conexão com impressora...'
+        'Iniciando conexao com impressora...'
       )
 
       console.log(
@@ -114,15 +228,26 @@ export const handleCommand = async (
         )
       }
 
+      const options =
+        await getOptionsWithStoredCredentials(
+          printer,
+          commandOptions
+        )
+
       const connection =
         await connectPrinter(
           printer,
           options
         )
 
+      await savePrinterCredentials(
+        printer,
+        options
+      )
+
       console.log('')
       console.log(
-        '✅ Impressora conectada pelo adapter.'
+        'Impressora conectada pelo adapter.'
       )
 
       return {
@@ -144,6 +269,14 @@ export const handleCommand = async (
             printer.manufacturer ||
             null,
 
+          model:
+            printer.model ||
+            null,
+
+          software:
+            printer.software ||
+            null,
+
           ip:
             printer.ip ||
             null,
@@ -152,9 +285,23 @@ export const handleCommand = async (
             printer.port ||
             null,
 
+          baudRate:
+            printer.baudRate ||
+            connection?.baudRate ||
+            null,
+
           serial:
             printer.serial ||
-            null
+            null,
+
+          firmware:
+            printer.firmware ||
+            connection?.firmware ||
+            null,
+
+          mock:
+            printer.mock ===
+            true
         },
 
         connection: {
@@ -172,13 +319,17 @@ export const handleCommand = async (
 
           key:
             connection?.key ||
-            null
+            null,
+
+          capabilities:
+            connection?.capabilities ||
+            {}
         }
       }
     } catch (error) {
       console.log('')
       console.log(
-        '❌ Não foi possível conectar à impressora.'
+        'Nao foi possivel conectar a impressora.'
       )
 
       console.log(
@@ -191,7 +342,199 @@ export const handleCommand = async (
 
         error:
           error.message ||
-          'Falha ao conectar à impressora.'
+          'Falha ao conectar a impressora.'
+      }
+    }
+  }
+
+  // ====================================================
+  // DESCONECTAR IMPRESSORA
+  // ====================================================
+
+  if (
+    command.type ===
+    'disconnect_printer'
+  ) {
+    const printer =
+      command.payload?.printer
+
+    if (!printer) {
+      return {
+        success: false,
+        error:
+          'Dados da impressora nao foram enviados.'
+      }
+    }
+
+    try {
+      console.log('')
+      console.log(
+        'Desconectando impressora...'
+      )
+
+      const result =
+        await disconnectPrinter(
+          printer
+        )
+
+      console.log(
+        'Impressora desconectada.'
+      )
+
+      return {
+        success: true,
+        result
+      }
+    } catch (error) {
+      console.log(
+        'Nao foi possivel desconectar.'
+      )
+
+      console.log(
+        'Erro:',
+        error.message
+      )
+
+      return {
+        success: false,
+
+        error:
+          error.message ||
+          'Falha ao desconectar impressora.'
+      }
+    }
+  }
+
+  // ====================================================
+  // INICIAR IMPRESSAO
+  // ====================================================
+
+  if (
+    command.type ===
+    'start_print'
+  ) {
+    const printer =
+      command.payload?.printer
+
+    let job =
+      command.payload?.job ||
+      {}
+
+    if (
+      printer &&
+      (
+        job.validationStatus !==
+          'validated' ||
+        !job.printFile
+          ?.name ||
+        !job.printFile
+          ?.format
+      )
+    ) {
+      return {
+        success: false,
+        error:
+          'Receita de impressao nao validada para envio ao Agent.'
+      }
+    }
+
+    if (
+      printer &&
+      !printer.mock &&
+      !job.printFile
+        ?.storageKey
+    ) {
+      return {
+        success: false,
+        error:
+          'Arquivo de impressao nao foi disponibilizado para download.'
+      }
+    }
+
+    if (!printer) {
+      return {
+        success: false,
+        error:
+          'Dados da impressora nao foram enviados.'
+      }
+    }
+
+    try {
+      console.log('')
+      console.log(
+        'Iniciando impressao...'
+      )
+
+      assertPrintFileFormat(
+        printer,
+        job
+      )
+
+      await ensurePrinterConnection(
+        printer
+      )
+
+      if (
+        job.printFile
+          ?.storageKey
+      ) {
+        if (
+          !context.apiUrl ||
+          !context.credentials
+        ) {
+          throw new Error(
+            'Contexto do Agent ausente para baixar o arquivo.'
+          )
+        }
+
+        const cachedFile =
+          await ensurePrintFileCached(
+            context.apiUrl,
+            context.credentials,
+            job.printFile
+          )
+
+        job = {
+          ...job,
+          printFile:
+            cachedFile
+        }
+
+        console.log(
+          `[PrintFile] Arquivo pronto: ${cachedFile.localPath}`
+        )
+      }
+
+      const result =
+        await startPrinterJob(
+          printer,
+          job
+        )
+
+      console.log(
+        'Impressao iniciada.'
+      )
+
+      return {
+        success: true,
+        result
+      }
+    } catch (error) {
+      console.log(
+        'Nao foi possivel iniciar a impressao.'
+      )
+
+      console.log(
+        'Erro:',
+        error.message
+      )
+
+      return {
+        success: false,
+
+        error:
+          error.message ||
+          'Falha ao iniciar impressao.'
       }
     }
   }
@@ -211,7 +554,7 @@ export const handleCommand = async (
       return {
         success: false,
         error:
-          'Dados da impressora não foram enviados.'
+          'Dados da impressora nao foram enviados.'
       }
     }
 
@@ -221,6 +564,10 @@ export const handleCommand = async (
         'Consultando status da impressora...'
       )
 
+      await ensurePrinterConnection(
+        printer
+      )
+
       const status =
         await getPrinterStatus(
           printer
@@ -228,7 +575,7 @@ export const handleCommand = async (
 
       console.log('')
       console.log(
-        '✅ Status recebido.'
+        'Status recebido.'
       )
 
       return {
@@ -238,7 +585,7 @@ export const handleCommand = async (
     } catch (error) {
       console.log('')
       console.log(
-        '❌ Não foi possível consultar o status.'
+        'Nao foi possivel consultar o status.'
       )
 
       console.log(
@@ -256,8 +603,9 @@ export const handleCommand = async (
     }
   }
 
+
   // ====================================================
-  // PAUSAR IMPRESSÃO
+  // PAUSAR IMPRESSAO
   // ====================================================
 
   if (
@@ -271,14 +619,18 @@ export const handleCommand = async (
       return {
         success: false,
         error:
-          'Dados da impressora não foram enviados.'
+          'Dados da impressora nao foram enviados.'
       }
     }
 
     try {
       console.log('')
       console.log(
-        'Pausando impressão...'
+        'Pausando impressao...'
+      )
+
+      await ensurePrinterConnection(
+        printer
       )
 
       const result =
@@ -287,7 +639,7 @@ export const handleCommand = async (
         )
 
       console.log(
-        '✅ Comando de pausa enviado.'
+        'Comando de pausa enviado.'
       )
 
       return {
@@ -296,7 +648,7 @@ export const handleCommand = async (
       }
     } catch (error) {
       console.log(
-        '❌ Não foi possível pausar.'
+        'Nao foi possivel pausar.'
       )
 
       console.log(
@@ -309,13 +661,13 @@ export const handleCommand = async (
 
         error:
           error.message ||
-          'Falha ao pausar impressão.'
+          'Falha ao pausar impressao.'
       }
     }
   }
 
   // ====================================================
-  // RETOMAR IMPRESSÃO
+  // RETOMAR IMPRESSAO
   // ====================================================
 
   if (
@@ -329,14 +681,18 @@ export const handleCommand = async (
       return {
         success: false,
         error:
-          'Dados da impressora não foram enviados.'
+          'Dados da impressora nao foram enviados.'
       }
     }
 
     try {
       console.log('')
       console.log(
-        'Retomando impressão...'
+        'Retomando impressao...'
+      )
+
+      await ensurePrinterConnection(
+        printer
       )
 
       const result =
@@ -345,7 +701,7 @@ export const handleCommand = async (
         )
 
       console.log(
-        '✅ Comando de retomada enviado.'
+        'Comando de retomada enviado.'
       )
 
       return {
@@ -354,7 +710,7 @@ export const handleCommand = async (
       }
     } catch (error) {
       console.log(
-        '❌ Não foi possível retomar.'
+        'Nao foi possivel retomar.'
       )
 
       console.log(
@@ -367,13 +723,13 @@ export const handleCommand = async (
 
         error:
           error.message ||
-          'Falha ao retomar impressão.'
+          'Falha ao retomar impressao.'
       }
     }
   }
 
   // ====================================================
-  // CANCELAR IMPRESSÃO
+  // CANCELAR IMPRESSAO
   // ====================================================
 
   if (
@@ -387,14 +743,18 @@ export const handleCommand = async (
       return {
         success: false,
         error:
-          'Dados da impressora não foram enviados.'
+          'Dados da impressora nao foram enviados.'
       }
     }
 
     try {
       console.log('')
       console.log(
-        'Cancelando impressão...'
+        'Cancelando impressao...'
+      )
+
+      await ensurePrinterConnection(
+        printer
       )
 
       const result =
@@ -403,7 +763,7 @@ export const handleCommand = async (
         )
 
       console.log(
-        '✅ Comando de cancelamento enviado.'
+        'Comando de cancelamento enviado.'
       )
 
       return {
@@ -412,7 +772,7 @@ export const handleCommand = async (
       }
     } catch (error) {
       console.log(
-        '❌ Não foi possível cancelar.'
+        'Nao foi possivel cancelar.'
       )
 
       console.log(
@@ -425,7 +785,7 @@ export const handleCommand = async (
 
         error:
           error.message ||
-          'Falha ao cancelar impressão.'
+          'Falha ao cancelar impressao.'
       }
     }
   }

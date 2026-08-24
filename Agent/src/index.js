@@ -2,6 +2,8 @@ import os from 'node:os'
 import axios from 'axios'
 import dotenv from 'dotenv'
 
+import { installFileLogger } from './logging/fileLogger.js'
+import { AGENT_VERSION, getAgentRuntimeInfo } from './agentInfo.js'
 import { loadCredentials } from './storage/credentials.js'
 import { pairAgent } from './pairing/pairing.js'
 import { verifyAgent } from './cloud/auth.js'
@@ -16,9 +18,16 @@ import { handleCommand } from './commands/commandHandler.js'
 
 dotenv.config()
 
+const logger =
+  installFileLogger()
+
 const apiUrl =
   process.env.PRINTFLOW_API_URL ||
   'http://localhost:3333'
+
+const pairingCode =
+  process.env.PRINTFLOW_PAIRING_CODE ||
+  ''
 
 console.log('')
 console.log('=================================')
@@ -26,13 +35,14 @@ console.log('        PRINTFLOW AGENT')
 console.log('=================================')
 
 console.log('')
-console.log('Versão: 0.1.0')
+console.log('Versao:', AGENT_VERSION)
 console.log('Computador:', os.hostname())
 console.log('Sistema:', os.platform())
 console.log('Arquitetura:', os.arch())
 
 console.log('')
 console.log('API:', apiUrl)
+console.log('Log:', logger.logPath)
 
 const start = async () => {
   try {
@@ -44,20 +54,29 @@ const start = async () => {
     )
 
     if (response.status !== 200) {
-      throw new Error('BackEnd indisponível')
+      throw new Error('BackEnd indisponivel')
     }
 
-    console.log('✅ BackEnd online')
+    console.log('BackEnd online')
 
     let credentials = await loadCredentials()
 
-    if (!credentials) {
-      credentials = await pairAgent(apiUrl)
+    if (pairingCode) {
+      credentials = await pairAgent(
+        apiUrl,
+        pairingCode,
+        credentials
+      )
+    } else if (!credentials) {
+      credentials = await pairAgent(
+        apiUrl,
+        pairingCode
+      )
     }
 
     if (!credentials) {
       console.log('')
-      console.log('Agent não conectado.')
+      console.log('Agent nao conectado.')
       return
     }
 
@@ -69,7 +88,7 @@ const start = async () => {
       credentials
     )
 
-    console.log('✅ Agent autenticado pelo PrintFlow')
+    console.log('Agent autenticado pelo PrintFlow')
     console.log('Status:', authResult.status)
 
     // =====================================================
@@ -83,7 +102,8 @@ const start = async () => {
       try {
         await sendHeartbeat(
           apiUrl,
-          credentials
+          credentials,
+          getAgentRuntimeInfo()
         )
 
         console.log(
@@ -114,9 +134,20 @@ console.log('')
 console.log('Iniciando busca de comandos...')
 
 let processingCommand = false
+let commandPollDelay = 5_000
+
+const scheduleCommandCheck = (
+  delay = commandPollDelay
+) => {
+  setTimeout(
+    checkCommands,
+    delay
+  )
+}
 
 const checkCommands = async () => {
   if (processingCommand) {
+    scheduleCommandCheck()
     return
   }
 
@@ -126,13 +157,21 @@ const checkCommands = async () => {
       credentials
     )
 
+    commandPollDelay = 5_000
+
     if (!command) {
       return
     }
 
     processingCommand = true
 
-    const result = await handleCommand(command)
+    const result = await handleCommand(
+      command,
+      {
+        apiUrl,
+        credentials
+      }
+    )
 
     await completeCommand(
       apiUrl,
@@ -142,25 +181,31 @@ const checkCommands = async () => {
     )
 
     console.log(
-      `[Commands] Comando ${command.id} concluído.`
+      `[Commands] Comando ${command.id} concluido.`
     )
   } catch (error) {
+    commandPollDelay =
+      Math.min(
+        commandPollDelay * 2,
+        30_000
+      )
+
     console.log(
       '[Commands] Falha ao processar comando:',
       error.response?.data?.error ||
       error.message
     )
+
+    console.log(
+      `[Commands] Nova tentativa em ${Math.round(commandPollDelay / 1000)}s.`
+    )
   } finally {
     processingCommand = false
+    scheduleCommandCheck()
   }
 }
 
 await checkCommands()
-
-setInterval(
-  checkCommands,
-  5_000
-)
 
     // =====================================================
     // AGENT PRONTO
@@ -177,16 +222,24 @@ setInterval(
       credentials.agentId
     )
 
+    if (credentials.tenantName || credentials.tenantId) {
+      console.log(
+        'Empresa:',
+        credentials.tenantName ||
+          credentials.tenantId
+      )
+    }
+
     console.log(
       'Computador:',
       credentials.machineName
     )
 
     console.log('')
-    console.log('✅ PrintFlow Agent pronto.')
+    console.log('PrintFlow Agent pronto.')
   } catch (error) {
     console.log('')
-    console.log('❌ Não foi possível iniciar o Agent.')
+    console.log('Nao foi possivel iniciar o Agent.')
 
     console.log(
       'Erro:',

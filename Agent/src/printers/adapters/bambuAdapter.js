@@ -1,7 +1,12 @@
 import mqtt from 'mqtt'
 
+import {
+  createMockBambuConnection,
+  getMockBambuStatus
+} from './mockBambu.js'
+
 // ======================================================
-// CONFIGURAÇÃO
+// CONFIGURACAO
 // ======================================================
 
 const DEFAULT_PORT = 8883
@@ -11,6 +16,9 @@ const CONNECT_TIMEOUT =
 
 const STATUS_TIMEOUT =
   8_000
+
+const MOCK_BAMBU_IP =
+  '192.168.2.250'
 
 // ======================================================
 // AUXILIARES
@@ -54,6 +62,27 @@ const safeJsonParse = (
   } catch {
     return null
   }
+}
+
+const isMockPrinter = (
+  printer
+) => {
+  return (
+    printer?.mock ===
+      true ||
+    (
+      String(
+        process.env.PRINTFLOW_DEV_MOCK_BAMBU ||
+          ''
+      ).toLowerCase() ===
+        'true' &&
+      String(
+        printer?.ip ||
+          ''
+      ).trim() ===
+        MOCK_BAMBU_IP
+    )
+  )
 }
 
 // ======================================================
@@ -202,20 +231,20 @@ const createClient = (
   const ip =
     requireValue(
       printer.ip,
-      'IP da Bambu obrigatório.'
+      'IP da Bambu obrigatorio.'
     )
 
   const serial =
     requireValue(
       printer.serial ||
       options.serial,
-      'Número de série da Bambu obrigatório.'
+      'Numero de serie da Bambu obrigatorio.'
     )
 
   const accessCode =
     requireValue(
       options.accessCode,
-      'LAN Access Code da Bambu obrigatório.'
+      'LAN Access Code da Bambu obrigatorio.'
     )
 
   const port =
@@ -230,7 +259,7 @@ const createClient = (
   console.log('')
 
   console.log(
-    `[Bambu] Preparando conexão com ${ip}:${port}`
+    `[Bambu] Preparando conexao com ${ip}:${port}`
   )
 
   console.log(
@@ -278,11 +307,11 @@ const createClient = (
          * A Bambu utiliza MQTT sobre TLS.
          *
          * Para o nosso MVP local estamos
-         * permitindo certificado não
+         * permitindo certificado nao
          * reconhecido pela trust store.
          *
-         * Antes de produção devemos
-         * implementar validação/pinning.
+         * Antes de producao devemos
+         * implementar validacao/pinning.
          */
 
         rejectUnauthorized:
@@ -303,7 +332,7 @@ const createClient = (
 }
 
 // ======================================================
-// AGUARDAR CONEXÃO MQTT
+// AGUARDAR CONEXAO MQTT
 // ======================================================
 
 const waitForConnection = (
@@ -457,7 +486,7 @@ const publishJson = (
       ) {
         reject(
           new Error(
-            'Cliente MQTT não está conectado.'
+            'Cliente MQTT nao esta conectado.'
           )
         )
 
@@ -619,7 +648,7 @@ const waitForStatus = (
           () => {
             finish(
               new Error(
-                'Bambu conectou, mas não enviou telemetria dentro do tempo esperado.'
+                'Bambu conectou, mas nao enviou telemetria dentro do tempo esperado.'
               )
             )
           },
@@ -660,7 +689,7 @@ const closeClient = (
 }
 
 // ======================================================
-// VALIDAR CONEXÃO ATIVA
+// VALIDAR CONEXAO ATIVA
 // ======================================================
 
 const requireConnection = (
@@ -672,7 +701,7 @@ const requireConnection = (
     !connection.client.connected
   ) {
     throw new Error(
-      'Bambu não está conectada.'
+      'Bambu nao esta conectada.'
     )
   }
 }
@@ -685,6 +714,29 @@ export const bambuAdapter = {
   protocol:
     'bambu',
 
+  capabilities: {
+    status:
+      true,
+
+    pause:
+      true,
+
+    resume:
+      true,
+
+    cancel:
+      true,
+
+    disconnect:
+      true,
+
+    upload:
+      false,
+
+    startPrint:
+      false
+  },
+
   // ====================================================
   // CONECTAR
   // ====================================================
@@ -693,6 +745,31 @@ export const bambuAdapter = {
     printer,
     options = {}
   ) {
+    if (
+      isMockPrinter(
+        printer
+      )
+    ) {
+      console.log('')
+      console.log(
+        '================================='
+      )
+      console.log(
+        '       BAMBU MOCK CONNECTION'
+      )
+      console.log(
+        '================================='
+      )
+      console.log(
+        '[Bambu Mock] Conexao simulada ativa.'
+      )
+
+      return createMockBambuConnection(
+        printer,
+        options
+      )
+    }
+
     let connection =
       null
 
@@ -759,7 +836,7 @@ export const bambuAdapter = {
         new Date()
 
       console.log(
-        '[Bambu] ✅ MQTT conectado'
+        '[Bambu] MQTT conectado'
       )
 
       console.log(
@@ -772,13 +849,13 @@ export const bambuAdapter = {
       )
 
       console.log(
-        '[Bambu] ✅ Canal de telemetria assinado'
+        '[Bambu] Canal de telemetria assinado'
       )
 
       /*
        * Se o socket MQTT cair depois
-       * que já conectou, atualizamos o
-       * estado da conexão.
+       * que ja conectou, atualizamos o
+       * estado da conexao.
        */
 
       connection.client.on(
@@ -788,7 +865,7 @@ export const bambuAdapter = {
             false
 
           console.log(
-            `[Bambu] Conexão MQTT encerrada: ${connection.serial}`
+            `[Bambu] Conexao MQTT encerrada: ${connection.serial}`
           )
         }
       )
@@ -806,11 +883,11 @@ export const bambuAdapter = {
       )
 
       /*
-       * Não imprimimos error.message
+       * Nao imprimimos error.message
        * indefinidamente aqui.
        *
-       * O erro inicial já é tratado
-       * pelo try/catch da conexão.
+       * O erro inicial ja e tratado
+       * pelo try/catch da conexao.
        */
 
       connection.client.on(
@@ -833,7 +910,7 @@ export const bambuAdapter = {
       }
 
       console.log(
-        '[Bambu] ❌ Não foi possível conectar.'
+        '[Bambu] Nao foi possivel conectar.'
       )
 
       console.log(
@@ -856,6 +933,25 @@ export const bambuAdapter = {
   async disconnect(
     connection
   ) {
+    if (
+      connection?.mock ===
+      true
+    ) {
+      connection.connected =
+        false
+
+      return {
+        disconnected:
+          true,
+
+        alreadyDisconnected:
+          false,
+
+        mock:
+          true
+      }
+    }
+
     if (
       !connection?.client
     ) {
@@ -899,6 +995,15 @@ export const bambuAdapter = {
   async getStatus(
     connection
   ) {
+    if (
+      connection?.mock ===
+      true
+    ) {
+      return getMockBambuStatus(
+        connection
+      )
+    }
+
     requireConnection(
       connection
     )
@@ -926,6 +1031,22 @@ export const bambuAdapter = {
   async pause(
     connection
   ) {
+    if (
+      connection?.mock ===
+      true
+    ) {
+      connection.printState =
+        'PAUSE'
+
+      return {
+        success:
+          true,
+
+        mock:
+          true
+      }
+    }
+
     requireConnection(
       connection
     )
@@ -960,6 +1081,22 @@ export const bambuAdapter = {
   async resume(
     connection
   ) {
+    if (
+      connection?.mock ===
+      true
+    ) {
+      connection.printState =
+        'RUNNING'
+
+      return {
+        success:
+          true,
+
+        mock:
+          true
+      }
+    }
+
     requireConnection(
       connection
     )
@@ -994,6 +1131,22 @@ export const bambuAdapter = {
   async cancel(
     connection
   ) {
+    if (
+      connection?.mock ===
+      true
+    ) {
+      connection.printState =
+        'CANCELLED'
+
+      return {
+        success:
+          true,
+
+        mock:
+          true
+      }
+    }
+
     requireConnection(
       connection
     )
@@ -1025,13 +1178,44 @@ export const bambuAdapter = {
   },
 
   // ====================================================
-  // INICIAR IMPRESSÃO
+  // INICIAR IMPRESSAO
   // ====================================================
 
   async startPrint(
     connection,
     job
   ) {
+    if (
+      connection?.mock ===
+      true
+    ) {
+      connection.printState =
+        'RUNNING'
+
+      connection.currentJob =
+        {
+          ...(job || {}),
+
+          startedAt:
+            new Date()
+              .toISOString()
+        }
+
+      connection.connectedAt =
+        new Date()
+
+      return {
+        success:
+          true,
+
+        mock:
+          true,
+
+        job:
+          connection.currentJob
+      }
+    }
+
     requireConnection(
       connection
     )
@@ -1039,7 +1223,7 @@ export const bambuAdapter = {
     void job
 
     throw new Error(
-      'Envio/início de arquivo Bambu será implementado na etapa de arquivos 3MF.'
+      'Envio/inicio de arquivo Bambu sera implementado na etapa de arquivos 3MF.'
     )
   }
 }

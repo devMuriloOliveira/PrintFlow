@@ -4,8 +4,10 @@ import { Readable } from 'node:stream'
 import test from 'node:test'
 
 process.env.ALLOW_DEMO_TENANT = 'false'
-process.env.AUTH_SECRET = 'tenant-isolation-test-secret'
-delete process.env.DATABASE_URL
+process.env.AUTH_SECRET = 'tenant-isolation-test-secret-32-characters'
+process.env.DATA_ENCRYPTION_KEY = 'tenant-isolation-data-key-32-characters'
+process.env.WEBHOOK_SHARED_SECRET = 'tenant-isolation-webhook-secret-32-characters'
+process.env.DATABASE_URL = ''
 
 const { handleRequest } = await import('../src/routes/index.js')
 

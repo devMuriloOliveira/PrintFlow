@@ -1,12 +1,30 @@
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const resolveDefaultDataDirectory = () => {
+  if (process.platform === 'win32') {
+    return path.join(
+      process.env.APPDATA ||
+        path.join(os.homedir(), 'AppData', 'Roaming'),
+      'PrintFlow Agent'
+    )
+  }
 
-const dataDirectory = path.resolve(__dirname, '../../data')
+  return path.join(
+    process.env.XDG_CONFIG_HOME ||
+      path.join(os.homedir(), '.config'),
+    'printflow-agent'
+  )
+}
+
+const dataDirectory = process.env.PRINTFLOW_AGENT_DATA_DIR
+  ? path.resolve(process.env.PRINTFLOW_AGENT_DATA_DIR)
+  : resolveDefaultDataDirectory()
 const credentialsFile = path.join(dataDirectory, 'agent.json')
+
+export const getAgentDataDirectory = () =>
+  dataDirectory
 
 export const loadCredentials = async () => {
   try {
@@ -31,5 +49,14 @@ export const saveCredentials = async (credentials) => {
     credentialsFile,
     JSON.stringify(credentials, null, 2),
     'utf8'
+  )
+}
+
+export const clearCredentials = async () => {
+  await fs.rm(
+    credentialsFile,
+    {
+      force: true
+    }
   )
 }

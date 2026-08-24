@@ -22,12 +22,21 @@ const { notify } = useUi()
 const route = useRoute()
 const config = useRuntimeConfig()
 
+const agentWindowsDownloadUrl =
+  computed(() =>
+    String(
+      config.public.agentWindowsDownloadUrl ||
+        ''
+    ).trim()
+  )
+
 // ======================================================
 // PRINTFLOW AGENT
 // ======================================================
 
 const agentLoading = ref(false)
 const pairingLoading = ref(false)
+const openingAgent = ref(false)
 
 const discoveringAgentId =
   ref<string | null>(null)
@@ -58,6 +67,9 @@ const discoveredPrinters =
 const discoveryMessage =
   ref('')
 
+const agentOpenMessage =
+  ref('')
+
 const printerStatuses =
   reactive<Record<string, any>>({})
 
@@ -75,17 +87,30 @@ const connectionMode =
     'agent'
   )
 
+const onlineAgents =
+  computed(() =>
+    agents.value.filter(
+      agent =>
+        agentIsOnline(
+          agent
+        )
+    )
+  )
+
 // ======================================================
-// CREDENCIAIS BAMBU
+// OPCOES DE CONEXAO POR IMPRESSORA
 // ======================================================
 
-const bambuCredentials =
+const printerConnectionOptions =
   reactive<
     Record<
       string,
       {
         serial: string
         accessCode: string
+        apiKey: string
+        username: string
+        password: string
       }
     >
   >({})
@@ -106,7 +131,7 @@ const getPrinterKey = (
   ].join(':')
 }
 
-const getBambuCredentials = (
+const getPrinterConnectionOptions = (
   printer: any
 ) => {
   const key =
@@ -115,15 +140,22 @@ const getBambuCredentials = (
     )
 
   if (
-    !bambuCredentials[key]
+    !printerConnectionOptions[key]
   ) {
-    bambuCredentials[key] = {
+    printerConnectionOptions[key] = {
       serial: '',
-      accessCode: ''
+      accessCode: '',
+      apiKey: '',
+      username:
+        printer.protocol ===
+        'prusalink'
+          ? 'maker'
+          : '',
+      password: ''
     }
   }
 
-  return bambuCredentials[key]
+  return printerConnectionOptions[key]
 }
 
 // ======================================================
@@ -234,6 +266,8 @@ const generatePairingCode =
 
       pairingExpiresAt.value =
         data.expiresAt
+
+      return data.code
     } catch (error) {
       notify(
         error instanceof Error
@@ -331,6 +365,112 @@ const formatLastSeen = (
     'pt-BR'
   )
 }
+
+// ======================================================
+// ABRIR AGENT INSTALADO
+// ======================================================
+
+const openInstalledAgent =
+  async () => {
+    if (
+      openingAgent.value
+    ) {
+      return
+    }
+
+    openingAgent.value =
+      true
+
+    agentOpenMessage.value =
+      'Verificando se o PrintFlow Agent esta aberto...'
+
+    try {
+      await loadAgents()
+
+      if (
+        onlineAgents.value.length >
+        0
+      ) {
+        agentOpenMessage.value =
+          'PrintFlow Agent encontrado. Voce ja pode procurar impressoras.'
+
+        return
+      }
+
+      const allowed =
+        window.confirm(
+          'Nao encontramos o PrintFlow Agent aberto neste computador. Deseja abrir o Agent instalado agora?'
+        )
+
+      if (
+        !allowed
+      ) {
+        agentOpenMessage.value =
+          'Abra o PrintFlow Agent manualmente e clique em Atualizar.'
+
+        return
+      }
+
+      if (
+        !pairingCode.value
+      ) {
+        agentOpenMessage.value =
+          'Gerando codigo de conexao para o Agent...'
+
+        await generatePairingCode()
+      }
+
+      if (
+        !pairingCode.value
+      ) {
+        agentOpenMessage.value =
+          'Nao foi possivel gerar o codigo de conexao. Tente novamente.'
+
+        return
+      }
+
+      const protocolUrl =
+        `printflow-agent://pair?code=${encodeURIComponent(pairingCode.value)}`
+
+      window.location.href =
+        protocolUrl
+
+      agentOpenMessage.value =
+        'Solicitacao enviada ao Windows. Aguarde alguns segundos e clique em Atualizar.'
+
+      for (
+        let attempt = 0;
+        attempt < 6;
+        attempt++
+      ) {
+        await new Promise(
+          resolve =>
+            setTimeout(
+              resolve,
+              5000
+            )
+        )
+
+        await loadAgents()
+
+        if (
+          onlineAgents.value.length >
+          0
+        ) {
+          agentOpenMessage.value =
+            'PrintFlow Agent aberto e conectado.'
+
+          return
+        }
+      }
+
+      agentOpenMessage.value =
+        'Ainda nao recebemos contato do Agent. Se ele nao abrir, use o atalho PrintFlow Agent no Windows.'
+    } finally {
+      openingAgent.value =
+        false
+    }
+  }
 
 // ======================================================
 // VALIDADE DO CÓDIGO
@@ -495,7 +635,7 @@ const findRegisteredAgentPrinter =
       'bambu'
     ) {
       const credentials =
-        getBambuCredentials(
+        getPrinterConnectionOptions(
           printer
         )
 
@@ -989,42 +1129,123 @@ const connectDiscoveredPrinter =
         printer.protocol ===
         'bambu'
       ) {
-        const credentials =
-          getBambuCredentials(
-            printer
-          )
+        if (
+          printer.mock ===
+          true
+        ) {
+          printerPayload.serial =
+            printer.serial ||
+            'PFMOCKBAMBU001'
+        } else {
+          const credentials =
+            getPrinterConnectionOptions(
+              printer
+            )
 
-        const serial =
-          credentials
-            .serial
-            .trim()
+          const serial =
+            credentials
+              .serial
+              .trim()
 
-        const accessCode =
-          credentials
-            .accessCode
-            .trim()
+          const accessCode =
+            credentials
+              .accessCode
+              .trim()
 
-        if (!serial) {
-          throw new Error(
-            'Informe o número de série da Bambu.'
-          )
+          if (!serial) {
+            throw new Error(
+              'Informe o número de série da Bambu.'
+            )
+          }
+
+          if (!accessCode) {
+            throw new Error(
+              'Informe o LAN Access Code da Bambu.'
+            )
+          }
+
+          printerPayload.serial =
+            serial
+
+          options.accessCode =
+            accessCode
         }
-
-        if (!accessCode) {
-          throw new Error(
-            'Informe o LAN Access Code da Bambu.'
-          )
-        }
-
-        printerPayload.serial =
-          serial
-
-        options.accessCode =
-          accessCode
       }
 
       discoveryMessage.value =
         'Testando conexão com a impressora...'
+
+      const connectionOptions =
+        getPrinterConnectionOptions(
+          printer
+        )
+
+      if (
+        printer.protocol ===
+        'octoprint'
+      ) {
+        const apiKey =
+          connectionOptions
+            .apiKey
+            .trim()
+
+        if (!apiKey) {
+          throw new Error(
+            'Informe a API Key do OctoPrint.'
+          )
+        }
+
+        options.apiKey =
+          apiKey
+      }
+
+      if (
+        printer.protocol ===
+        'moonraker'
+      ) {
+        const apiKey =
+          connectionOptions
+            .apiKey
+            .trim()
+
+        if (apiKey) {
+          options.apiKey =
+            apiKey
+        }
+      }
+
+      if (
+        printer.protocol ===
+        'prusalink'
+      ) {
+        const username =
+          connectionOptions
+            .username
+            .trim()
+
+        const password =
+          connectionOptions
+            .password
+            .trim()
+
+        if (!username) {
+          throw new Error(
+            'Informe o usuario do PrusaLink.'
+          )
+        }
+
+        if (!password) {
+          throw new Error(
+            'Informe a senha/API Key do PrusaLink.'
+          )
+        }
+
+        options.username =
+          username
+
+        options.password =
+          password
+      }
 
       const response =
         await fetch(
@@ -1080,8 +1301,136 @@ const connectDiscoveredPrinter =
       discoveryMessage.value =
         'Impressora conectada com sucesso.'
 
+      const {
+        agentPrinterId,
+        registeredPrinter
+      } =
+        await findRegisteredAgentPrinter(
+          agent,
+          printerPayload
+        )
+
+      const serial =
+        String(
+          printerPayload.serial ||
+          registeredPrinter.serial ||
+          ''
+        ).trim()
+
+      const existingPrinter =
+        printers.value.find(
+          item =>
+            item.agentPrinterId ===
+              agentPrinterId ||
+            (
+              serial &&
+              item.serial ===
+                serial
+            )
+        )
+
+      const printerRecord = {
+        id:
+          existingPrinter?.id,
+
+        name:
+          printerPayload.name ||
+          registeredPrinter.name ||
+          'Bambu Lab',
+
+        code:
+          existingPrinter?.code ||
+          nextCode.value,
+
+        maker:
+          printerPayload.manufacturer ||
+          registeredPrinter.manufacturer ||
+          'Bambu Lab',
+
+        model:
+          printerPayload.model ||
+          registeredPrinter.model ||
+          printerPayload.software ||
+          'Bambu Lab',
+
+        acquired:
+          existingPrinter?.acquired ||
+          null,
+
+        power:
+          existingPrinter?.power ||
+          350,
+
+        hours:
+          existingPrinter?.hours ||
+          0,
+
+        status:
+          'DisponÃ­vel',
+
+        maintenance:
+          existingPrinter?.maintenance ||
+          null,
+
+        serial:
+          serial ||
+          '-',
+
+        location:
+          existingPrinter?.location ||
+          '',
+
+        volume:
+          existingPrinter?.volume ||
+          '',
+
+        defaultFilament:
+          existingPrinter?.defaultFilament ||
+          '',
+
+        agentId:
+          String(
+            agent.id
+          ),
+
+        agentPrinterId,
+
+        agentConnectionKey:
+          registeredPrinter.connectionKey ||
+          result?.connection?.key ||
+          '',
+
+        agentProtocol:
+          printerPayload.protocol ||
+          registeredPrinter.protocol ||
+          '',
+
+        agentConnectionType:
+          printerPayload.connectionType ||
+          registeredPrinter.connectionType ||
+          ''
+      }
+
+      if (
+        existingPrinter?.id
+      ) {
+        await updateItem(
+          'printers',
+          printerRecord
+        )
+      } else {
+        await createItem(
+          'printers',
+          printerRecord
+        )
+      }
+
       notify(
-        'Impressora conectada com sucesso.'
+        'Impressora conectada e adicionada Ã  lista.'
+      )
+
+      navigateTo(
+        '/impressoras'
       )
     } catch (error) {
       const message =
@@ -2088,6 +2437,101 @@ const cancel = () => {
       </h2>
 
       <div
+        class="summary-box"
+        style="
+          margin-bottom: 14px;
+        "
+      >
+        <div class="detail-list__row">
+          <span>
+            Conexao automatica
+          </span>
+
+          <strong>
+            Agent local
+          </strong>
+        </div>
+
+        <p
+          style="
+            margin-top: 8px;
+          "
+        >
+          Use esta opcao para encontrar impressoras na rede ou conectadas por cabo USB neste computador.
+        </p>
+
+        <div
+          style="
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+          "
+        >
+          <a
+            v-if="
+              agentWindowsDownloadUrl
+            "
+            class="btn btn--primary"
+            :href="
+              agentWindowsDownloadUrl
+            "
+            target="_blank"
+            rel="noopener"
+          >
+            Baixar Agent Windows
+          </a>
+
+          <button
+            type="button"
+            class="btn"
+            :disabled="
+              openingAgent
+            "
+            @click="
+              openInstalledAgent
+            "
+          >
+            {{
+              openingAgent
+                ? 'Verificando...'
+                : 'Ja tenho o Agent instalado'
+            }}
+          </button>
+
+          <button
+            type="button"
+            class="btn"
+            :disabled="
+              agentLoading
+            "
+            @click="
+              loadAgents
+            "
+          >
+            {{
+              agentLoading
+                ? 'Atualizando...'
+                : 'Atualizar'
+            }}
+          </button>
+        </div>
+
+        <p
+          v-if="
+            agentOpenMessage
+          "
+          style="
+            margin-top: 10px;
+          "
+        >
+          {{
+            agentOpenMessage
+          }}
+        </p>
+      </div>
+
+      <div
         v-if="
           agentLoading
         "
@@ -2425,6 +2869,109 @@ const cancel = () => {
                     </strong>
                   </div>
 
+                  <div
+                    v-if="
+                      printer.protocol ===
+                      'octoprint'
+                    "
+                    style="
+                      margin-top: 14px;
+                      display: grid;
+                      gap: 10px;
+                    "
+                  >
+                    <div class="field">
+                      <label>
+                        API Key do OctoPrint
+                      </label>
+
+                      <input
+                        v-model="
+                          getPrinterConnectionOptions(
+                            printer
+                          ).apiKey
+                        "
+                        type="password"
+                        placeholder="API Key"
+                        autocomplete="off"
+                      >
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="
+                      printer.protocol ===
+                      'moonraker'
+                    "
+                    style="
+                      margin-top: 14px;
+                      display: grid;
+                      gap: 10px;
+                    "
+                  >
+                    <div class="field">
+                      <label>
+                        Token Moonraker
+                      </label>
+
+                      <input
+                        v-model="
+                          getPrinterConnectionOptions(
+                            printer
+                          ).apiKey
+                        "
+                        type="password"
+                        placeholder="Opcional"
+                        autocomplete="off"
+                      >
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="
+                      printer.protocol ===
+                      'prusalink'
+                    "
+                    style="
+                      margin-top: 14px;
+                      display: grid;
+                      gap: 10px;
+                    "
+                  >
+                    <div class="field">
+                      <label>
+                        Usuario PrusaLink
+                      </label>
+
+                      <input
+                        v-model="
+                          getPrinterConnectionOptions(
+                            printer
+                          ).username
+                        "
+                        placeholder="maker"
+                        autocomplete="off"
+                      >
+                    </div>
+
+                    <div class="field">
+                      <label>
+                        Senha/API Key PrusaLink
+                      </label>
+
+                      <input
+                        v-model="
+                          getPrinterConnectionOptions(
+                            printer
+                          ).password
+                        "
+                        type="password"
+                        placeholder="Senha ou API Key"
+                        autocomplete="off"
+                      >
+                    </div>
+                  </div>
+
                   <!-- =================================== -->
                   <!-- BAMBU                               -->
                   <!-- =================================== -->
@@ -2432,7 +2979,9 @@ const cancel = () => {
                   <div
                     v-if="
                       printer.protocol ===
-                      'bambu'
+                      'bambu' &&
+                      printer.mock !==
+                        true
                     "
                     style="
                       margin-top: 14px;
@@ -2447,7 +2996,7 @@ const cancel = () => {
 
                       <input
                         v-model="
-                          getBambuCredentials(
+                          getPrinterConnectionOptions(
                             printer
                           ).serial
                         "
@@ -2463,7 +3012,7 @@ const cancel = () => {
 
                       <input
                         v-model="
-                          getBambuCredentials(
+                          getPrinterConnectionOptions(
                             printer
                           ).accessCode
                         "
@@ -2895,6 +3444,20 @@ const cancel = () => {
                   : 'Adicionar outro Agent'
               }}
             </button>
+
+            <a
+              v-if="
+                agentWindowsDownloadUrl
+              "
+              class="btn"
+              :href="
+                agentWindowsDownloadUrl
+              "
+              target="_blank"
+              rel="noopener"
+            >
+              Baixar Agent Windows
+            </a>
           </div>
         </div>
 
@@ -2934,6 +3497,24 @@ const cancel = () => {
                 : 'Gerar código de conexão'
             }}
           </button>
+
+          <a
+            v-if="
+              agentWindowsDownloadUrl
+            "
+            class="btn"
+            :href="
+              agentWindowsDownloadUrl
+            "
+            target="_blank"
+            rel="noopener"
+            style="
+              margin-top: 12px;
+              margin-left: 8px;
+            "
+          >
+            Baixar Agent Windows
+          </a>
         </div>
 
         <!-- ============================================= -->

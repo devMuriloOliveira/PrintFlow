@@ -5,7 +5,8 @@ export default defineNuxtConfig({
   nitro: { preset: 'static' },
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com'
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com',
+      agentWindowsDownloadUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL || ''
     }
   },
   css: ['~/assets/css/main.css'],

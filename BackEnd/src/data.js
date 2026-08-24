@@ -1,6 +1,7 @@
 export const emptyData = () => ({
   products: [],
   orders: [],
+  printJobs: [],
   expenses: [],
   filaments: [],
   printers: [],

@@ -15,6 +15,15 @@ const mapProduct = (row) => ({
   layer: Number(row.layer_height),
   infill: Number(row.infill),
   dimensions: row.dimensions || '',
+  printFileName: row.print_file_name || '',
+  printFileFormat: row.print_file_format || '',
+  printFileHash: row.print_file_hash || '',
+  printFileSizeBytes: Number(row.print_file_size_bytes || 0),
+  printFileStorageKey: row.print_file_storage_key || '',
+  printProfile: row.print_profile || {},
+  compatibility: row.compatibility || {},
+  validationStatus: row.validation_status || 'needs_validation',
+  validationMessage: row.validation_message || '',
   filamentId: row.filament_id ? String(row.filament_id) : '',
   filament: row.filament_name || row.filament || '',
   filamentColor: row.filament_color || row.linked_filament_color || '#1768f2',
@@ -43,6 +52,8 @@ export const listProducts = async (tenantId) => {
   const result = await tenantQuery(tenantId,
     `select p.id, p.name, p.subtitle, p.sku, p.category, p.description, p.printer_id, p.printer,
       pr.name as printer_name, p.price, p.weight, p.print_time, p.layer_height, p.infill, p.dimensions,
+      p.print_file_name, p.print_file_format, p.print_file_hash, p.print_file_size_bytes,
+      p.print_file_storage_key, p.print_profile, p.compatibility, p.validation_status, p.validation_message,
       p.filament_id, p.filament, f.name as filament_name, p.filament_color, f.color_hex as linked_filament_color, p.packaging_cost,
       additional_materials_cost, labor_cost, energy_enabled, marketplace_fee, desired_margin,
       p.cost, p.profit, p.margin, p.cost_breakdown, p.status, p.thumb, to_char(p.created_at, 'YYYY-MM-DD') as created_at, to_char(p.updated_at, 'YYYY-MM-DD') as updated_at
@@ -69,11 +80,12 @@ export const createProduct = async (tenantId, product) => {
     return client.query(
     `insert into products (
       tenant_id, name, subtitle, sku, category, description, printer_id, printer, price, weight, print_time,
-      layer_height, infill, dimensions, filament_id, filament, filament_color, packaging_cost,
+      layer_height, infill, dimensions, print_file_name, print_file_format, print_file_hash, print_file_size_bytes,
+      print_file_storage_key, print_profile, compatibility, validation_status, validation_message, filament_id, filament, filament_color, packaging_cost,
       additional_materials_cost, labor_cost, energy_enabled, marketplace_fee, desired_margin,
       cost, profit, margin, cost_breakdown, status, thumb
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)
     on conflict (tenant_id, sku) do update set
       name = excluded.name,
       subtitle = excluded.subtitle,
@@ -87,6 +99,15 @@ export const createProduct = async (tenantId, product) => {
       layer_height = excluded.layer_height,
       infill = excluded.infill,
       dimensions = excluded.dimensions,
+      print_file_name = excluded.print_file_name,
+      print_file_format = excluded.print_file_format,
+      print_file_hash = excluded.print_file_hash,
+      print_file_size_bytes = excluded.print_file_size_bytes,
+      print_file_storage_key = excluded.print_file_storage_key,
+      print_profile = excluded.print_profile,
+      compatibility = excluded.compatibility,
+      validation_status = excluded.validation_status,
+      validation_message = excluded.validation_message,
       filament_id = excluded.filament_id,
       filament = excluded.filament,
       filament_color = excluded.filament_color,
@@ -104,7 +125,8 @@ export const createProduct = async (tenantId, product) => {
       thumb = excluded.thumb,
       updated_at = now()
     returning id, name, subtitle, sku, category, description, printer_id, printer, price, weight, print_time,
-      layer_height, infill, dimensions, filament_id, filament, filament_color, packaging_cost,
+      layer_height, infill, dimensions, print_file_name, print_file_format, print_file_hash, print_file_size_bytes,
+      print_file_storage_key, print_profile, compatibility, validation_status, validation_message, filament_id, filament, filament_color, packaging_cost,
       additional_materials_cost, labor_cost, energy_enabled, marketplace_fee, desired_margin,
       cost, profit, margin, cost_breakdown, status, thumb, to_char(created_at, 'YYYY-MM-DD') as created_at, to_char(updated_at, 'YYYY-MM-DD') as updated_at`,
       [
@@ -122,6 +144,15 @@ export const createProduct = async (tenantId, product) => {
       Number(product.layer || 0),
       Number(product.infill || 0),
       product.dimensions || '',
+      product.printFileName || '',
+      product.printFileFormat || '',
+      product.printFileHash || '',
+      Number(product.printFileSizeBytes || 0),
+      product.printFileStorageKey || '',
+      JSON.stringify(product.printProfile || {}),
+      JSON.stringify(product.compatibility || {}),
+      product.validationStatus || 'needs_validation',
+      product.validationMessage || '',
       idOrNull(product.filamentId),
       product.filament || '',
       product.filamentColor || '#1768f2',

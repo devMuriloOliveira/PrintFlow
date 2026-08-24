@@ -21,6 +21,7 @@ import {
 
 import {
   handleProductCreate,
+  handleProductPrintFileUpload,
   handleResourceCreate,
   handleResourceDelete,
   handleResourceRead,
@@ -42,10 +43,12 @@ import {
   handleAgentVerify,
   handleAgentHeartbeat,
   handleAgentsList,
+  handleAgentRevoke,
   handleAgentDiscoverCreate,
   handleAgentCommandsPending,
   handleAgentCommandComplete,
   handleAgentCommandGet,
+  handleAgentPrintFileGet,
   handleAgentConnectPrinterCreate,
   handleAgentPrinterStatusCreate,
   handleAgentPrinterControlCreate,
@@ -316,6 +319,19 @@ export const handleRequest =
         )
       }
 
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/agents/print-file'
+      ) {
+        return await handleAgentPrintFileGet(
+          req,
+          res,
+          url
+        )
+      }
+
       const agentCommandCompleteMatch =
         url.pathname.match(
           /^\/api\/agents\/commands\/([^/]+)\/complete$/
@@ -364,6 +380,12 @@ export const handleRequest =
             'GET' &&
           url.pathname ===
             '/api/agents/commands/pending'
+        ) ||
+        (
+          req.method ===
+            'GET' &&
+          url.pathname ===
+            '/api/agents/print-file'
         )
 
       // ==================================================
@@ -520,6 +542,27 @@ export const handleRequest =
       // PAUSAR IMPRESSÃO
       // ==================================================
 
+      const agentPrinterStartMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-start$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterStartMatch
+      ) {
+        const agentId =
+          agentPrinterStartMatch[1]
+
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentId,
+          'start'
+        )
+      }
+
       const agentPrinterPauseMatch =
         url.pathname.match(
           /^\/api\/agents\/([^/]+)\/printer-pause$/
@@ -592,6 +635,31 @@ export const handleRequest =
       }
 
       // ==================================================
+      // DESCONECTAR IMPRESSORA
+      // ==================================================
+
+      const agentPrinterDisconnectMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-disconnect$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterDisconnectMatch
+      ) {
+        const agentId =
+          agentPrinterDisconnectMatch[1]
+
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentId,
+          'disconnect'
+        )
+      }
+
+      // ==================================================
       // LISTAR AGENTS
       // ==================================================
 
@@ -604,6 +672,23 @@ export const handleRequest =
         return await handleAgentsList(
           req,
           res
+        )
+      }
+
+      const agentRevokeMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)$/
+        )
+
+      if (
+        req.method ===
+          'DELETE' &&
+        agentRevokeMatch
+      ) {
+        return await handleAgentRevoke(
+          req,
+          res,
+          agentRevokeMatch[1]
         )
       }
 
@@ -686,6 +771,24 @@ export const handleRequest =
         return await handleProductCreate(
           req,
           res
+        )
+      }
+
+      const productPrintFileMatch =
+        url.pathname.match(
+          /^\/api\/products\/([^/]+)\/print-file$/
+        )
+
+      if (
+        req.method ===
+          'PUT' &&
+        productPrintFileMatch
+      ) {
+        return await handleProductPrintFileUpload(
+          req,
+          res,
+          productPrintFileMatch[1],
+          url
         )
       }
 

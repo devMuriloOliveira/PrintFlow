@@ -6,6 +6,14 @@ import { sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
+import {
+  resolvePrintFilePath,
+  savePrintFileStream
+} from '../services/printFileStorage.js'
+import {
+  applyPrintFileMetadataToProduct,
+  extractPrintFileMetadata
+} from '../services/printFileMetadata.js'
 
 const readResource = (resource) => async (req) => {
   const tenantId = await getTenantId(req)
@@ -53,7 +61,7 @@ export const handleProductCreate = async (req, res) => {
   }
 }
 
-const validResources = new Set(['products', 'orders', 'expenses', 'filaments', 'printers', 'marketplaces', 'clients', 'goals'])
+const validResources = new Set(['products', 'orders', 'printJobs', 'expenses', 'filaments', 'printers', 'marketplaces', 'clients', 'goals'])
 const localId = () => String(Date.now() + Math.floor(Math.random() * 1000))
 const itemMatchesId = (item, id) => String(item.dbId || item.id) === String(id)
 
@@ -90,6 +98,103 @@ const deleteLocalResource = (tenantId, resource, id) => {
   if (index < 0) throw new Error('Registro nao encontrado')
   list.splice(index, 1)
   return list
+}
+
+export const handleProductPrintFileUpload = async (req, res, productId, url) => {
+  try {
+    const tenantId = await getTenantId(req)
+    const rawFileName = String(req.headers['x-printflow-file-name'] || url.searchParams.get('fileName') || '').trim()
+    const fileName = decodeURIComponent(rawFileName)
+    const format = String(req.headers['x-printflow-file-format'] || url.searchParams.get('format') || '').trim()
+
+    if (!fileName) {
+      return sendJson(res, 400, { error: 'Nome do arquivo obrigatorio' })
+    }
+
+    if (hasDatabase) {
+      try {
+        await assertResourceBelongsToTenant(tenantId, 'products', productId)
+      } catch {
+        return sendJson(res, 404, { error: 'Registro nao encontrado' })
+      }
+
+      const stored = await savePrintFileStream({
+        tenantId,
+        productId,
+        fileName,
+        format,
+        stream: req
+      })
+
+      const current = await listProducts(tenantId)
+      const product = current.find((item) => String(item.id) === String(productId))
+      if (!product) return sendJson(res, 404, { error: 'Registro nao encontrado' })
+
+      const metadataFilePath = resolvePrintFilePath(stored.storageKey)
+      const metadata = await extractPrintFileMetadata({
+        filePath: metadataFilePath,
+        format: stored.format
+      })
+
+      const productWithFile = {
+        ...product,
+        printFileName: stored.fileName,
+        printFileFormat: stored.format,
+        printFileHash: stored.hash,
+        printFileSizeBytes: stored.sizeBytes,
+        printFileStorageKey: stored.storageKey,
+        validationStatus: 'needs_validation',
+        validationMessage: metadata.message || 'Arquivo enviado. Confira dimensoes, material e perfil antes de validar.'
+      }
+
+      const updated = await updateResource(tenantId, 'products', productId, applyPrintFileMetadataToProduct(productWithFile, metadata))
+
+      const savedProduct = Array.isArray(updated)
+        ? updated.find((item) => String(item.id) === String(productId))
+        : null
+
+      return sendJson(res, 200, {
+        file: stored,
+        product: savedProduct || null
+      })
+    }
+
+    const tenantData = getTenantData(tenantId)
+    const product = tenantData.products.find((item) => String(item.id) === String(productId))
+    if (!product) return sendJson(res, 404, { error: 'Registro nao encontrado' })
+
+    const stored = await savePrintFileStream({
+      tenantId,
+      productId,
+      fileName,
+      format,
+      stream: req
+    })
+
+    const metadataFilePath = resolvePrintFilePath(stored.storageKey)
+    const metadata = await extractPrintFileMetadata({
+      filePath: metadataFilePath,
+      format: stored.format
+    })
+
+    Object.assign(product, applyPrintFileMetadataToProduct({
+      ...product,
+      printFileName: stored.fileName,
+      printFileFormat: stored.format,
+      printFileHash: stored.hash,
+      printFileSizeBytes: stored.sizeBytes,
+      printFileStorageKey: stored.storageKey,
+      validationStatus: 'needs_validation',
+      validationMessage: metadata.message || 'Arquivo enviado. Confira dimensoes, material e perfil antes de validar.'
+    }, metadata))
+
+    return sendJson(res, 200, {
+      file: stored,
+      product
+    })
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || 'Nao foi possivel enviar o arquivo' })
+  }
 }
 
 export const handleResourceRead = async (req, res, resource, id) => {

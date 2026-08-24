@@ -4,10 +4,12 @@ import { Readable } from 'node:stream'
 import test from 'node:test'
 
 process.env.ALLOW_DEMO_TENANT = 'false'
-process.env.AUTH_SECRET = 'auth-security-test-secret'
+process.env.AUTH_SECRET = 'auth-security-test-secret-32-characters'
+process.env.DATA_ENCRYPTION_KEY = 'auth-security-data-key-32-characters'
+process.env.WEBHOOK_SHARED_SECRET = 'auth-security-webhook-secret-32-characters'
 process.env.RATE_LIMIT_AUTH_MAX_REQUESTS = '2'
 process.env.RATE_LIMIT_WINDOW_MS = '60000'
-delete process.env.DATABASE_URL
+process.env.DATABASE_URL = ''
 
 const { hashPassword, validatePasswordPolicy, verifyPassword } = await import('../src/auth/password.js')
 const { handleRequest } = await import('../src/routes/index.js')

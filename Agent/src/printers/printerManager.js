@@ -18,8 +18,12 @@ import {
   marlinSerialAdapter
 } from './adapters/marlinSerialAdapter.js'
 
+import {
+  normalizePrinterConfig
+} from './printerProfiles.js'
+
 // ======================================================
-// ADAPTERS DISPONÍVEIS
+// ADAPTERS DISPONIVEIS
 // ======================================================
 
 const adapters = {
@@ -40,22 +44,22 @@ const adapters = {
 }
 
 // ======================================================
-// REGISTRO DE CONEXÕES ATIVAS
+// REGISTRO DE CONEXOES ATIVAS
 // ======================================================
 //
 // IMPORTANTE:
 //
-// Este Map existe apenas na memória do Agent.
+// Este Map existe apenas na memoria do Agent.
 //
-// Não devemos armazenar:
+// Nao devemos armazenar:
 // - LAN Access Code
 // - senha
 // - token
 // - options com credenciais
 //
-// A conexão do adapter pode internamente precisar das
-// informações necessárias para funcionar, mas o
-// PrinterManager não mantém uma cópia das credenciais.
+// A conexao do adapter pode internamente precisar das
+// informacoes necessarias para funcionar, mas o
+// PrinterManager nao mantem uma copia das credenciais.
 // ======================================================
 
 const activeConnections =
@@ -90,7 +94,7 @@ const normalizeSerial = (
 }
 
 // ======================================================
-// GERAR CHAVE ÚNICA DA IMPRESSORA
+// GERAR CHAVE UNICA DA IMPRESSORA
 // ======================================================
 
 export const getPrinterKey = (
@@ -109,8 +113,8 @@ export const getPrinterKey = (
   // BAMBU
   // ==================================================
   //
-  // O serial é mais confiável que o IP porque
-  // o endereço IP pode mudar via DHCP.
+  // O serial e mais confiavel que o IP porque
+  // o endereco IP pode mudar via DHCP.
   // ==================================================
 
   if (
@@ -191,7 +195,7 @@ export const getPrinterAdapter = (
     !printer?.protocol
   ) {
     throw new Error(
-      'Protocolo da impressora não informado.'
+      'Protocolo da impressora nao informado.'
     )
   }
 
@@ -207,7 +211,7 @@ export const getPrinterAdapter = (
 
   if (!adapter) {
     throw new Error(
-      `Protocolo não suportado: ${protocol}`
+      `Protocolo nao suportado: ${protocol}`
     )
   }
 
@@ -215,16 +219,16 @@ export const getPrinterAdapter = (
 }
 
 // ======================================================
-// VERIFICAR SE ENTRY AINDA ESTÁ CONECTADA
+// VERIFICAR SE ENTRY AINDA ESTA CONECTADA
 // ======================================================
 //
 // O problema antigo era:
 //
 // activeConnections.has(key)
 //
-// retornar true mesmo se o MQTT já tivesse caído.
+// retornar true mesmo se o MQTT ja tivesse caido.
 //
-// Agora validamos também:
+// Agora validamos tambem:
 // connection.connected === true
 // ======================================================
 
@@ -267,13 +271,13 @@ const removeStaleConnection = (
     )
 
     console.log(
-      `[PrinterManager] Conexão inativa removida: ${key}`
+      `[PrinterManager] Conexao inativa removida: ${key}`
     )
   }
 }
 
 // ======================================================
-// VERIFICAR SE EXISTE CONEXÃO ATIVA
+// VERIFICAR SE EXISTE CONEXAO ATIVA
 // ======================================================
 
 export const hasActiveConnection = (
@@ -309,7 +313,7 @@ export const hasActiveConnection = (
 }
 
 // ======================================================
-// PEGAR CONEXÃO ATIVA
+// PEGAR CONEXAO ATIVA
 // ======================================================
 
 export const getActiveConnection = (
@@ -334,7 +338,7 @@ export const getActiveConnection = (
   }
 
   // ==================================================
-  // ENTRY EXISTE, MAS CONEXÃO MORREU
+  // ENTRY EXISTE, MAS CONEXAO MORREU
   // ==================================================
 
   if (
@@ -353,7 +357,7 @@ export const getActiveConnection = (
 }
 
 // ======================================================
-// LISTAR CONEXÕES ATIVAS
+// LISTAR CONEXOES ATIVAS
 // ======================================================
 
 export const listActiveConnections =
@@ -369,7 +373,7 @@ export const listActiveConnections =
       of activeConnections.entries()
     ) {
       // ================================================
-      // NÃO DEVOLVER CONEXÕES MORTAS
+      // NAO DEVOLVER CONEXOES MORTAS
       // ================================================
 
       if (
@@ -418,6 +422,18 @@ export const connectPrinter = async (
   printer,
   options = {}
 ) => {
+  const normalized =
+    normalizePrinterConfig(
+      printer,
+      options
+    )
+
+  printer =
+    normalized.printer
+
+  options =
+    normalized.options
+
   const adapter =
     getPrinterAdapter(
       printer
@@ -430,12 +446,12 @@ export const connectPrinter = async (
 
   if (!key) {
     throw new Error(
-      'Não foi possível gerar a identificação da impressora.'
+      'Nao foi possivel gerar a identificacao da impressora.'
     )
   }
 
   // ==================================================
-  // VERIFICAR CONEXÃO EXISTENTE
+  // VERIFICAR CONEXAO EXISTENTE
   // ==================================================
 
   const existing =
@@ -445,7 +461,7 @@ export const connectPrinter = async (
 
   if (existing) {
     // ================================================
-    // CONEXÃO REALMENTE ESTÁ ATIVA
+    // CONEXAO REALMENTE ESTA ATIVA
     // ================================================
 
     if (
@@ -454,7 +470,7 @@ export const connectPrinter = async (
       )
     ) {
       console.log(
-        `[PrinterManager] Conexão já ativa: ${key}`
+        `[PrinterManager] Conexao ja ativa: ${key}`
       )
 
       return {
@@ -469,21 +485,26 @@ export const connectPrinter = async (
         reused:
           true,
 
-        key
+        key,
+
+        capabilities:
+          existing.adapter
+            ?.capabilities ||
+          {}
       }
     }
 
     // ================================================
-    // ENTRY EXISTE, MAS ESTÁ MORTA
+    // ENTRY EXISTE, MAS ESTA MORTA
     // ================================================
 
     console.log(
-      `[PrinterManager] Conexão antiga está inativa: ${key}`
+      `[PrinterManager] Conexao antiga esta inativa: ${key}`
     )
 
     /*
      * Tentamos fechar recursos antigos antes
-     * de iniciar uma nova conexão.
+     * de iniciar uma nova conexao.
      */
     try {
       if (
@@ -501,7 +522,7 @@ export const connectPrinter = async (
       error
     ) {
       console.log(
-        `[PrinterManager] Aviso ao limpar conexão antiga: ${error.message}`
+        `[PrinterManager] Aviso ao limpar conexao antiga: ${error.message}`
       )
     }
 
@@ -511,7 +532,7 @@ export const connectPrinter = async (
   }
 
   // ==================================================
-  // NOVA CONEXÃO
+  // NOVA CONEXAO
   // ==================================================
 
   console.log(
@@ -534,27 +555,27 @@ export const connectPrinter = async (
       true
   ) {
     /*
-     * Não criamos nenhuma entrada no Map
-     * caso a conexão tenha falhado.
+     * Nao criamos nenhuma entrada no Map
+     * caso a conexao tenha falhado.
      */
     throw new Error(
-      'O adapter não confirmou a conexão com a impressora.'
+      'O adapter nao confirmou a conexao com a impressora.'
     )
   }
 
   // ==================================================
-  // REGISTRAR CONEXÃO
+  // REGISTRAR CONEXAO
   // ==================================================
   //
   // IMPORTANTE:
   //
-  // NÃO fazemos mais:
+  // NAO fazemos mais:
   //
   // options: {
   //   ...options
   // }
   //
-  // Portanto accessCode não fica duplicado
+  // Portanto accessCode nao fica duplicado
   // dentro do PrinterManager.
   // ==================================================
 
@@ -592,7 +613,7 @@ export const connectPrinter = async (
   )
 
   console.log(
-    `[PrinterManager] ✅ Conexão registrada: ${key}`
+    `[PrinterManager] Conexao registrada: ${key}`
   )
 
   return {
@@ -607,7 +628,11 @@ export const connectPrinter = async (
     reused:
       false,
 
-    key
+    key,
+
+    capabilities:
+      adapter.capabilities ||
+      {}
   }
 }
 
@@ -626,7 +651,7 @@ export const disconnectPrinter =
 
     if (!key) {
       throw new Error(
-        'Impressora inválida.'
+        'Impressora invalida.'
       )
     }
 
@@ -636,7 +661,7 @@ export const disconnectPrinter =
       )
 
     // ==================================================
-    // JÁ ESTAVA DESCONECTADA
+    // JA ESTAVA DESCONECTADA
     // ==================================================
 
     if (!entry) {
@@ -665,7 +690,7 @@ export const disconnectPrinter =
       /*
        * Mesmo se o adapter gerar erro
        * durante disconnect, removemos
-       * a referência local.
+       * a referencia local.
        */
       activeConnections.delete(
         key
@@ -673,7 +698,7 @@ export const disconnectPrinter =
     }
 
     console.log(
-      `[PrinterManager] Conexão removida: ${key}`
+      `[PrinterManager] Conexao removida: ${key}`
     )
 
     return {
@@ -700,7 +725,7 @@ export const getPrinterStatus =
 
     if (!key) {
       throw new Error(
-        'Impressora inválida.'
+        'Impressora invalida.'
       )
     }
 
@@ -711,7 +736,7 @@ export const getPrinterStatus =
 
     if (!entry) {
       throw new Error(
-        'A impressora não possui conexão ativa.'
+        'A impressora nao possui conexao ativa.'
       )
     }
 
@@ -734,7 +759,7 @@ export const getPrinterStatus =
       error
     ) {
       // ================================================
-      // SE O ADAPTER MARCOU A CONEXÃO COMO MORTA
+      // SE O ADAPTER MARCOU A CONEXAO COMO MORTA
       // ================================================
 
       if (
@@ -752,7 +777,7 @@ export const getPrinterStatus =
   }
 
 // ======================================================
-// INICIAR IMPRESSÃO
+// INICIAR IMPRESSAO
 // ======================================================
 
 export const startPrinterJob =
@@ -767,7 +792,7 @@ export const startPrinterJob =
 
     if (!entry) {
       throw new Error(
-        'A impressora não possui conexão ativa.'
+        'A impressora nao possui conexao ativa.'
       )
     }
 
@@ -777,7 +802,7 @@ export const startPrinterJob =
       'function'
     ) {
       throw new Error(
-        'Este adapter ainda não suporta início de impressão.'
+        'Este adapter ainda nao suporta inicio de impressao.'
       )
     }
 
@@ -825,7 +850,7 @@ export const pausePrinter =
 
     if (!entry) {
       throw new Error(
-        'A impressora não possui conexão ativa.'
+        'A impressora nao possui conexao ativa.'
       )
     }
 
@@ -835,7 +860,7 @@ export const pausePrinter =
       'function'
     ) {
       throw new Error(
-        'Este adapter não suporta pausa.'
+        'Este adapter nao suporta pausa.'
       )
     }
 
@@ -882,7 +907,7 @@ export const resumePrinter =
 
     if (!entry) {
       throw new Error(
-        'A impressora não possui conexão ativa.'
+        'A impressora nao possui conexao ativa.'
       )
     }
 
@@ -892,7 +917,7 @@ export const resumePrinter =
       'function'
     ) {
       throw new Error(
-        'Este adapter não suporta retomada.'
+        'Este adapter nao suporta retomada.'
       )
     }
 
@@ -939,7 +964,7 @@ export const cancelPrinter =
 
     if (!entry) {
       throw new Error(
-        'A impressora não possui conexão ativa.'
+        'A impressora nao possui conexao ativa.'
       )
     }
 
@@ -949,7 +974,7 @@ export const cancelPrinter =
       'function'
     ) {
       throw new Error(
-        'Este adapter não suporta cancelamento.'
+        'Este adapter nao suporta cancelamento.'
       )
     }
 

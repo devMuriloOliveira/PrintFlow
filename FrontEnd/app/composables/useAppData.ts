@@ -4,10 +4,24 @@ export type Order = {
   gross: number; fee: number; shipping: number; net: number; profit: number; status: string
 }
 
+export type PrintJob = {
+  id?: string;
+  orderId?: string; externalOrderId?: string; trackedSaleId?: string; productId?: string; productName?: string;
+  printerId?: string; printerName?: string; agentPrinterId?: string; agentPrinterStatus?: string;
+  printFileName?: string; printFileFormat?: string; validationStatus?: string; validationMessage?: string;
+  agentLastStatus?: Record<string, unknown>; source: string; title: string; quantity: number; priority: number;
+  status: string; notes?: string; scheduledAt?: string | null; startedAt?: string | null; completedAt?: string | null;
+  cancelledAt?: string | null; createdAt?: string | null; updatedAt?: string | null
+}
+
 export type Product = {
   id?: string;
   name: string; subtitle: string; sku: string; category: string; price: number; weight: number;
   description?: string; printerId?: string; printer?: string; layer?: number; infill?: number; dimensions?: string;
+  printFileName?: string; printFileFormat?: string; printFileHash?: string; printFileSizeBytes?: number; printFileStorageKey?: string;
+  printProfile?: Record<string, number | string | boolean | null | undefined>;
+  compatibility?: Record<string, number | string | boolean | string[] | null | undefined>;
+  validationStatus?: string; validationMessage?: string;
   packaging?: number; materials?: number; labor?: number; energy?: boolean; marketplaceFee?: number; desiredMargin?: number;
   costBreakdown?: Record<string, number | string | boolean | null | undefined>;
   time: string; filamentId?: string; filament: string; filamentColor: string; cost: number; profit: number; margin: number;
@@ -29,7 +43,8 @@ export type Filament = {
 export type Printer = {
   id?: string;
   name: string; code: string; maker: string; model: string; acquired: string; power: number;
-  hours: number; status: string; maintenance: string; serial: string; location?: string; volume?: string; defaultFilament?: string
+  hours: number; status: string; maintenance: string; serial: string; location?: string; volume?: string; defaultFilament?: string;
+  agentId?: string; agentPrinterId?: string; agentConnectionKey?: string; agentProtocol?: string; agentConnectionType?: string
 }
 
 export type Marketplace = {
@@ -71,6 +86,7 @@ export type Goal = {
 type AppData = {
   products: Product[]
   orders: Order[]
+  printJobs: PrintJob[]
   expenses: Expense[]
   filaments: Filament[]
   printers: Printer[]
@@ -85,6 +101,7 @@ type AppData = {
 const emptyData = (): AppData => ({
   products: [],
   orders: [],
+  printJobs: [],
   expenses: [],
   filaments: [],
   printers: [],
@@ -187,6 +204,25 @@ export const useAppData = () => {
     return created
   }
 
+  const uploadProductPrintFile = async (productId: string, file: File) => {
+    const response = await $fetch<{ file: Record<string, unknown>; product: Product | null }>(apiUrl(`/api/products/${productId}/print-file`), {
+      method: 'PUT',
+      body: file,
+      headers: {
+        ...resourceHeaders(),
+        'Content-Type': 'application/octet-stream',
+        'X-PrintFlow-File-Name': encodeURIComponent(file.name),
+        'X-PrintFlow-File-Format': file.name.split('.').pop() || ''
+      }
+    })
+
+    if (response.product) {
+      data.value.products = data.value.products.map((item) => String(item.id) === String(productId) ? response.product as Product : item)
+    }
+
+    return response
+  }
+
   const createMarketplaceIntegration = async (integration: Partial<MarketplaceIntegration> & Record<string, unknown>) => {
     const created = await $fetch<MarketplaceIntegration>(apiUrl('/api/marketplace-integrations'), {
       method: 'POST',
@@ -203,6 +239,7 @@ export const useAppData = () => {
   return {
     products: computed(() => data.value.products),
     orders: computed(() => data.value.orders),
+    printJobs: computed(() => data.value.printJobs),
     expenses: computed(() => data.value.expenses),
     filaments: computed(() => data.value.filaments),
     printers: computed(() => data.value.printers),
@@ -218,6 +255,7 @@ export const useAppData = () => {
     error,
     refreshAppData: loadAppData,
     createProduct
+    , uploadProductPrintFile
     , createMarketplaceIntegration
     , createItem
     , updateItem
