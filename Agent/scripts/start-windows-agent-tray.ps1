@@ -97,6 +97,20 @@ $statusItem.Text = "PrintFlow Agent ativo"
 $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
 
+$restartTimer = New-Object System.Windows.Forms.Timer
+$restartTimer.Interval = 5000
+$restartTimer.Add_Tick({
+  try {
+    if (-not $script:agentProcess -or $script:agentProcess.HasExited) {
+      $statusItem.Text = "PrintFlow Agent reiniciando..."
+      Start-AgentProcess
+      $statusItem.Text = "PrintFlow Agent ativo"
+    }
+  } catch {
+    $statusItem.Text = "PrintFlow Agent com erro"
+  }
+})
+
 $infoItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $infoItem.Text = "Informacoes"
 $infoItem.Add_Click({
@@ -138,8 +152,11 @@ $notifyIcon.Add_DoubleClick({
 
 try {
   Start-AgentProcess
+  $restartTimer.Start()
   [System.Windows.Forms.Application]::Run()
 } finally {
+  $restartTimer.Stop()
+  $restartTimer.Dispose()
   Stop-AgentProcess
   $notifyIcon.Visible = $false
   $notifyIcon.Dispose()

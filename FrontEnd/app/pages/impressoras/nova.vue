@@ -154,6 +154,23 @@ const agentLocalAvailable =
     )
   )
 
+const agentInstalledButtonLabel =
+  computed(() => {
+    if (
+      openingAgent.value
+    ) {
+      return 'Verificando...'
+    }
+
+    if (
+      agentLocalChecking.value
+    ) {
+      return 'Procurando Agent...'
+    }
+
+    return 'Conectar Agent instalado'
+  })
+
 const printerStatuses =
   reactive<Record<string, any>>({})
 
@@ -553,6 +570,12 @@ const queueLocalAgentPairing =
     }
 
     return data
+  }
+
+const refreshAgentState =
+  () => {
+    checkLocalAgent()
+    loadAgents()
   }
 
 const openInstalledAgent =
@@ -2746,11 +2769,7 @@ const cancel = () => {
             "
           >
             {{
-              openingAgent
-                ? 'Verificando...'
-                : agentLocalChecking
-                  ? 'Procurando Agent...'
-                  : 'Conectar Agent instalado'
+              agentInstalledButtonLabel
             }}
           </button>
 
@@ -2761,10 +2780,7 @@ const cancel = () => {
               agentLoading
             "
             @click="
-              () => {
-                checkLocalAgent()
-                loadAgents()
-              }
+              refreshAgentState
             "
           >
             {{

@@ -10,12 +10,20 @@ import {
 const DEFAULT_LOCAL_PORT = 17873
 
 const json = (response, statusCode, payload) => {
+  if (
+    response.destroyed ||
+    response.writableEnded
+  ) {
+    return
+  }
+
   response.writeHead(
     statusCode,
     {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Max-Age': '600',
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store'
@@ -126,6 +134,20 @@ export const startLocalServer = ({
         ok: false,
         error: error.message || 'Erro local do Agent.'
       })
+    }
+  })
+
+  server.on('clientError', (error, socket) => {
+    console.log(
+      '[Local] Requisicao local invalida:',
+      error.message
+    )
+
+    try {
+      socket.end(
+        'HTTP/1.1 400 Bad Request\r\n\r\n'
+      )
+    } catch {
     }
   })
 

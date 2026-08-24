@@ -53,6 +53,24 @@ console.log('')
 console.log('API:', apiUrl)
 console.log('Log:', logger.logPath)
 
+process.on('uncaughtException', error => {
+  console.log(
+    '[Fatal] Excecao nao tratada:',
+    error?.stack ||
+      error?.message ||
+      error
+  )
+})
+
+process.on('unhandledRejection', error => {
+  console.log(
+    '[Fatal] Promise rejeitada sem tratamento:',
+    error?.stack ||
+      error?.message ||
+      error
+  )
+})
+
 startLocalServer()
 
 const start = async () => {
