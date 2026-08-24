@@ -11,6 +11,20 @@ if (Test-Path (Join-Path $installRoot "scripts\uninstall-windows-startup.ps1")) 
   & (Join-Path $installRoot "scripts\uninstall-windows-startup.ps1") -TaskName $TaskName
 }
 
+try {
+  $escapedInstallRoot = [regex]::Escape($installRoot)
+  Get-CimInstance Win32_Process |
+    Where-Object {
+      $_.ProcessId -ne $PID -and
+      $_.CommandLine -and
+      $_.CommandLine -match $escapedInstallRoot
+    } |
+    ForEach-Object {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+}
+
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "PrintFlow Agent.lnk"
 $startMenuFolder = Join-Path ([Environment]::GetFolderPath("Programs")) "PrintFlow 3D"
 $startMenuShortcut = Join-Path $startMenuFolder "PrintFlow Agent.lnk"
@@ -29,6 +43,11 @@ if ((Test-Path $startMenuFolder) -and -not (Get-ChildItem -LiteralPath $startMen
 $protocolKey = "HKCU:\Software\Classes\printflow-agent"
 if (Test-Path $protocolKey) {
   Remove-Item -LiteralPath $protocolKey -Recurse -Force
+}
+
+$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent"
+if (Test-Path $uninstallKey) {
+  Remove-Item -LiteralPath $uninstallKey -Recurse -Force
 }
 
 if (Test-Path $installRoot) {

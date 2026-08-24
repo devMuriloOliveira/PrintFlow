@@ -27,10 +27,23 @@ $iconPath = Join-Path $installRoot "assets\printflow-agent-icon.ico"
 $openScript = Join-Path $installRoot "scripts\open-windows-agent.ps1"
 $startScript = Join-Path $installRoot "scripts\start-windows-agent-tray.ps1"
 $uninstallScript = Join-Path $installRoot "scripts\uninstall-windows-agent.ps1"
+$packagePath = Join-Path $installRoot "package.json"
 
 if (-not (Test-Path (Join-Path $installRoot "node_modules"))) {
   Set-Location $installRoot
   npm ci --omit=dev
+}
+
+$version = "0.1.0"
+if (Test-Path $packagePath) {
+  try {
+    $package = Get-Content -Raw $packagePath | ConvertFrom-Json
+    if ($package.version) {
+      $version = $package.version
+    }
+  } catch {
+    $version = "0.1.0"
+  }
 }
 
 & (Join-Path $installRoot "scripts\install-windows-startup.ps1") `
@@ -92,6 +105,36 @@ if (-not $NoStartMenuShortcut) {
     -TargetScript $uninstallScript `
     -Description "Desinstalar PrintFlow Agent" `
     -Arguments "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
+}
+
+$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent"
+$uninstallCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstallScript`""
+$estimatedSizeKb = 0
+
+try {
+  $estimatedSizeKb = [int](
+    (
+      Get-ChildItem -LiteralPath $installRoot -Recurse -File -ErrorAction SilentlyContinue |
+        Measure-Object -Property Length -Sum
+    ).Sum / 1KB
+  )
+} catch {
+  $estimatedSizeKb = 0
+}
+
+New-Item -Path $uninstallKey -Force | Out-Null
+Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "PrintFlow Agent"
+Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value $version
+Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "PrintFlow 3D"
+Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installRoot
+Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $iconPath
+Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value $uninstallCommand
+Set-ItemProperty -Path $uninstallKey -Name "QuietUninstallString" -Value $uninstallCommand
+New-ItemProperty -Path $uninstallKey -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
+New-ItemProperty -Path $uninstallKey -Name "NoRepair" -Value 1 -PropertyType DWord -Force | Out-Null
+
+if ($estimatedSizeKb -gt 0) {
+  New-ItemProperty -Path $uninstallKey -Name "EstimatedSize" -Value $estimatedSizeKb -PropertyType DWord -Force | Out-Null
 }
 
 Start-Process `
