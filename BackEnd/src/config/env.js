@@ -55,6 +55,10 @@ export const env = {
   dataEncryptionKey,
   legacyDataEncryptionKeys,
   webhookSharedSecret,
+  platformSuperAdminEmails: String(process.env.PLATFORM_SUPER_ADMIN_EMAILS || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean),
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || defaultAuthTokenTtlSeconds),
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS || defaultRefreshTokenTtlSeconds),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
@@ -70,6 +74,8 @@ export const env = {
   printCommandTimeoutMs: Number(process.env.PRINT_COMMAND_TIMEOUT_MS || 5 * 60 * 1000),
   printJobStartTimeoutMs: Number(process.env.PRINT_JOB_START_TIMEOUT_MS || 5 * 60 * 1000),
   printQueueWatchdogIntervalMs: Number(process.env.PRINT_QUEUE_WATCHDOG_INTERVAL_MS || 60 * 1000),
+  agentOfflineAfterMs: Number(process.env.AGENT_OFFLINE_AFTER_MS || 90 * 1000),
+  agentHealthWatchdogIntervalMs: Number(process.env.AGENT_HEALTH_WATCHDOG_INTERVAL_MS || 30 * 1000),
   appPublicUrl: process.env.APP_PUBLIC_URL || '',
   apiPublicUrl: process.env.API_PUBLIC_URL || '',
   mercadoLivreClientId: process.env.MERCADO_LIVRE_CLIENT_ID || '',

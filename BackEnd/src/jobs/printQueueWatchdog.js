@@ -1,5 +1,6 @@
 import { env } from '../config/env.js'
 import { hasDatabase, query, withTenant } from '../db/pool.js'
+import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
 const timeoutResult = (message) =>
   JSON.stringify({
@@ -69,6 +70,18 @@ export const runPrintQueueWatchdog = async ({
 
       expiredCommands += expired.rowCount
       restoredJobs += expired.rowCount
+
+      for (const job of expired.rows) {
+        const printJobId = String(job.id)
+        await writeOperationalNotification(tenant.id, {
+          type: 'print.start_timeout', severity: 'warning', title: 'Inicio de impressao expirou',
+          message: 'O Agent nao confirmou o inicio. O item voltou para a fila para revisao.',
+          entityType: 'print_job', entityId: printJobId, dedupeKey: `print-start-timeout:${printJobId}`
+        }, client)
+        await writeAuditEvent(tenant.id, {
+          action: 'print_job.start_timeout', actorType: 'system', entityType: 'print_job', entityId: printJobId
+        }, client)
+      }
 
       const restored = await client.query(
         `update print_jobs

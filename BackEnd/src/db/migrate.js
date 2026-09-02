@@ -29,7 +29,9 @@ const tenantTables = [
   'marketplace_integrations',
   'marketplace_product_links',
   'tracked_sales',
-  'marketplace_webhook_events'
+  'marketplace_webhook_events',
+  'operational_notifications',
+  'operational_audit_events'
 ]
 
 // ======================================================
@@ -189,6 +191,10 @@ export const migrate =
       `
     )
 
+    await query(`alter table tenants add column if not exists account_status text not null default 'active'`)
+    await query(`alter table tenants add column if not exists billing_status text not null default 'not_configured'`)
+    await query(`alter table tenants add column if not exists billing_due_at timestamptz`)
+
     // ==================================================
     // USERS
     // ==================================================
@@ -306,6 +312,39 @@ export const migrate =
         where email_hash is not null
       `
     )
+
+    // ==================================================
+    // ADMINISTRACAO DA PLATAFORMA
+    // ==================================================
+
+    await query(`
+      create table if not exists platform_super_admins (
+        user_id bigint primary key references users(id) on delete cascade,
+        email_hash text not null unique,
+        status text not null default 'active',
+        granted_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+
+    await query(`
+      create table if not exists platform_admin_audit_events (
+        id bigserial primary key,
+        actor_user_id bigint references users(id) on delete set null,
+        action text not null,
+        target_tenant_id text references tenants(id) on delete set null,
+        target_resource text not null default '',
+        target_resource_id text not null default '',
+        reason text not null default '',
+        ip_hash text not null default '',
+        user_agent text not null default '',
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      )
+    `)
+
+    await query(`create index if not exists platform_admin_audit_events_created_at_idx on platform_admin_audit_events (created_at desc)`)
+    await query(`create index if not exists platform_admin_audit_events_target_tenant_idx on platform_admin_audit_events (target_tenant_id, created_at desc)`)
 
     // ==================================================
     // REFRESH TOKENS
@@ -2345,6 +2384,45 @@ export const migrate =
             timestamptz
             not null
             default now()
+        )
+      `
+    )
+
+    // ==================================================
+    // EVENTOS OPERACIONAIS
+    // ==================================================
+
+    await query(
+      `
+        create table if not exists operational_notifications (
+          id bigserial primary key,
+          tenant_id text not null references tenants(id) on delete cascade,
+          type text not null default 'system',
+          severity text not null default 'info',
+          title text not null,
+          message text not null default '',
+          entity_type text not null default '',
+          entity_id text not null default '',
+          dedupe_key text,
+          read_at timestamptz,
+          created_at timestamptz not null default now(),
+          unique (tenant_id, dedupe_key)
+        )
+      `
+    )
+
+    await query(
+      `
+        create table if not exists operational_audit_events (
+          id bigserial primary key,
+          tenant_id text not null references tenants(id) on delete cascade,
+          action text not null,
+          actor_type text not null default 'system',
+          actor_id text not null default '',
+          entity_type text not null default '',
+          entity_id text not null default '',
+          details jsonb not null default '{}'::jsonb,
+          created_at timestamptz not null default now()
         )
       `
     )
