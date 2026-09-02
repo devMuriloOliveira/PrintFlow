@@ -16,3 +16,6 @@ FrontEnd/.output
 FrontEnd/dist
 BackEnd/node_modules
 BackEnd/.env
+Agent/data/
+Agent/.env
+Agent/certs/

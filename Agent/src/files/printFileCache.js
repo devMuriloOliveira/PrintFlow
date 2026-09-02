@@ -18,6 +18,33 @@ const cacheDirectory =
     'print-files'
   )
 
+const defaultCacheMaxAgeMs =
+  Number(
+    process.env.PRINTFLOW_AGENT_CACHE_MAX_AGE_DAYS ||
+      14
+  ) *
+  24 *
+  60 *
+  60 *
+  1000
+
+const defaultCacheMaxBytes =
+  Number(
+    process.env.PRINTFLOW_AGENT_CACHE_MAX_BYTES ||
+      2 *
+        1024 *
+        1024 *
+        1024
+  )
+
+const defaultTempMaxAgeMs =
+  Number(
+    process.env.PRINTFLOW_AGENT_CACHE_TEMP_MAX_AGE_MS ||
+      60 *
+        60 *
+        1000
+  )
+
 const safeName =
   (value) =>
     String(
@@ -62,6 +89,188 @@ const hashFile =
     return hash.digest(
       'hex'
     )
+  }
+
+const listCacheFiles =
+  async (
+    directory
+  ) => {
+    let entries =
+      []
+
+    try {
+      entries =
+        await fs.readdir(
+          directory,
+          {
+            withFileTypes:
+              true
+          }
+        )
+    } catch (error) {
+      if (
+        error.code ===
+        'ENOENT'
+      ) {
+        return []
+      }
+
+      throw error
+    }
+
+    const files =
+      []
+
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue
+      }
+
+      const filePath =
+        path.join(
+          directory,
+          entry.name
+        )
+
+      const info =
+        await fs.stat(
+          filePath
+        )
+
+      files.push({
+        filePath,
+        name:
+          entry.name,
+        size:
+          info.size,
+        mtimeMs:
+          info.mtimeMs,
+        isTemp:
+          entry.name.includes(
+            '.tmp-'
+          )
+      })
+    }
+
+    return files
+  }
+
+export const cleanupPrintFileCache =
+  async ({
+    directory = cacheDirectory,
+    now = Date.now(),
+    maxAgeMs = defaultCacheMaxAgeMs,
+    maxTotalBytes = defaultCacheMaxBytes,
+    tempMaxAgeMs = defaultTempMaxAgeMs
+  } = {}) => {
+    const files =
+      await listCacheFiles(
+        directory
+      )
+
+    const removedFiles =
+      new Set()
+
+    let removedBytes =
+      0
+
+    for (const file of files) {
+      const ageMs =
+        now -
+        file.mtimeMs
+
+      if (
+        (
+          file.isTemp &&
+          ageMs >=
+            tempMaxAgeMs
+        ) ||
+        (
+          !file.isTemp &&
+          maxAgeMs > 0 &&
+          ageMs >=
+            maxAgeMs
+        )
+      ) {
+        await fs.rm(
+          file.filePath,
+          {
+            force:
+              true
+          }
+        )
+
+        removedFiles.add(
+          file.filePath
+        )
+
+        removedBytes +=
+          file.size
+      }
+    }
+
+    const remaining =
+      files
+        .filter((file) =>
+          !removedFiles.has(
+            file.filePath
+          )
+        )
+
+    let remainingBytes =
+      remaining.reduce(
+        (total, file) =>
+          total +
+          file.size,
+        0
+      )
+
+    const removable =
+      remaining
+        .filter((file) =>
+          !file.isTemp
+        )
+        .sort((a, b) =>
+          a.mtimeMs -
+          b.mtimeMs
+        )
+
+    for (const file of removable) {
+      if (
+        remainingBytes <=
+        maxTotalBytes
+      ) {
+        break
+      }
+
+      await fs.rm(
+        file.filePath,
+        {
+          force:
+            true
+        }
+      )
+
+      removedFiles.add(
+        file.filePath
+      )
+
+      removedBytes +=
+        file.size
+
+      remainingBytes -=
+        file.size
+    }
+
+    return {
+      removed:
+        removedFiles.size,
+      removedBytes,
+      kept:
+        files.length -
+        removedFiles.size,
+      remainingBytes
+    }
   }
 
 export const ensurePrintFileCached =
@@ -110,6 +319,8 @@ export const ensurePrintFileCached =
       }
     )
 
+    await cleanupPrintFileCache()
+
     try {
       const existingHash =
         await hashFile(
@@ -120,6 +331,12 @@ export const ensurePrintFileCached =
         existingHash ===
         printFile.hash
       ) {
+        await fs.utimes(
+          finalPath,
+          new Date(),
+          new Date()
+        )
+
         return {
           ...printFile,
           localPath:
@@ -234,6 +451,8 @@ export const ensurePrintFileCached =
         tempPath,
         finalPath
       )
+
+      await cleanupPrintFileCache()
 
       return {
         ...printFile,

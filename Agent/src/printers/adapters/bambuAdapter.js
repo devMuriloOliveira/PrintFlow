@@ -1,5 +1,8 @@
 import mqtt from 'mqtt'
 
+import { spawn } from 'node:child_process'
+import path from 'node:path'
+
 import {
   createMockBambuConnection,
   getMockBambuStatus
@@ -16,6 +19,9 @@ const CONNECT_TIMEOUT =
 
 const STATUS_TIMEOUT =
   8_000
+
+const FTPS_TIMEOUT =
+  120_000
 
 const MOCK_BAMBU_IP =
   '192.168.2.250'
@@ -83,6 +89,496 @@ const isMockPrinter = (
         MOCK_BAMBU_IP
     )
   )
+}
+
+const sanitizeRemoteName = (
+  value
+) => {
+  const baseName =
+    path
+      .basename(
+        String(
+          value ||
+            'printflow-job.gcode.3mf'
+        )
+      )
+      .replace(
+        /[^a-zA-Z0-9._-]/g,
+        '_'
+      )
+
+  const withoutDanger =
+    baseName
+      .replace(
+        /^\.+/,
+        ''
+      )
+      .slice(
+        0,
+        120
+      )
+
+  const normalized =
+    withoutDanger ||
+    'printflow-job.gcode.3mf'
+
+  return /\.gcode\.3mf$/i.test(
+    normalized
+  )
+    ? normalized
+    : normalized.replace(
+        /\.3mf$/i,
+        ''
+      ) + '.gcode.3mf'
+}
+
+const normalizeRemoteDirectory = (
+  value
+) => {
+  const raw =
+    String(
+      value ||
+        '/cache'
+    )
+      .trim()
+      .replace(
+        /\\/g,
+        '/'
+      )
+
+  const safe =
+    raw
+      .split(
+        '/'
+      )
+      .map(part =>
+        part.replace(
+          /[^a-zA-Z0-9._-]/g,
+          ''
+        )
+      )
+      .filter(Boolean)
+      .join('/')
+
+  return safe
+    ? `/${safe}`
+    : ''
+}
+
+const joinRemotePath = (
+  directory,
+  name
+) => {
+  const normalizedDirectory =
+    normalizeRemoteDirectory(
+      directory
+    )
+
+  return normalizedDirectory
+    ? `${normalizedDirectory}/${name}`
+    : `/${name}`
+}
+
+const getPrintFile = (
+  job
+) => {
+  const printFile =
+    job?.printFile ||
+    {}
+
+  const localPath =
+    String(
+      printFile.localPath ||
+        job?.localPath ||
+        ''
+    ).trim()
+
+  if (!localPath) {
+    throw new Error(
+      'Arquivo 3MF local obrigatorio para impressao Bambu.'
+    )
+  }
+
+  const name =
+    String(
+      printFile.name ||
+        job?.title ||
+        path.basename(
+          localPath
+        )
+    )
+
+  const format =
+    String(
+      printFile.format ||
+        name.split('.').pop() ||
+        ''
+    )
+      .trim()
+      .toLowerCase()
+
+  if (
+    format !==
+      '3mf' &&
+    !/\.gcode\.3mf$/i.test(
+      name
+    )
+  ) {
+    throw new Error(
+      'Bambu aceita apenas arquivo .3mf ou .gcode.3mf.'
+    )
+  }
+
+  return {
+    localPath,
+    name
+  }
+}
+
+const runCurl = (
+  args,
+  {
+    timeout = FTPS_TIMEOUT
+  } = {}
+) =>
+  new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+      const child =
+        spawn(
+          process.env.PRINTFLOW_CURL_PATH ||
+            'curl',
+          args,
+          {
+            windowsHide:
+              true
+          }
+        )
+
+      let stderr =
+        ''
+
+      let stdout =
+        ''
+
+      const timer =
+        setTimeout(
+          () => {
+            child.kill()
+
+            reject(
+              new Error(
+                'Tempo esgotado ao enviar arquivo para a Bambu via FTPS.'
+              )
+            )
+          },
+          timeout
+        )
+
+      child.stdout.on(
+        'data',
+        data => {
+          stdout +=
+            data.toString()
+        }
+      )
+
+      child.stderr.on(
+        'data',
+        data => {
+          stderr +=
+            data.toString()
+        }
+      )
+
+      child.on(
+        'error',
+        error => {
+          clearTimeout(
+            timer
+          )
+
+          reject(
+            error
+          )
+        }
+      )
+
+      child.on(
+        'close',
+        code => {
+          clearTimeout(
+            timer
+          )
+
+          if (
+            code ===
+            0
+          ) {
+            resolve({
+              stdout,
+              stderr
+            })
+
+            return
+          }
+
+          reject(
+            new Error(
+              `Falha no upload FTPS para Bambu. Codigo ${code}. ${stderr.trim()}`
+            )
+          )
+        }
+      )
+    }
+  )
+
+const uploadBambuPrintFile = async (
+  connection,
+  printFile,
+  remotePath
+) => {
+  if (
+    typeof connection.ftpsUploader ===
+    'function'
+  ) {
+    return connection.ftpsUploader({
+      connection,
+      printFile,
+      remotePath
+    })
+  }
+
+  const ip =
+    requireValue(
+      connection.printer?.ip,
+      'IP da Bambu obrigatorio para upload FTPS.'
+    )
+
+  const accessCode =
+    requireValue(
+      connection.accessCode,
+      'LAN Access Code da Bambu obrigatorio para upload FTPS.'
+    )
+
+  const port =
+    Number(
+      connection.printer?.ftpPort ||
+        connection.printer?.ftpsPort ||
+        990
+    )
+
+  const uploadUrl =
+    `ftps://${ip}:${port}${remotePath
+      .split('/')
+      .map(part => encodeURIComponent(part))
+      .join('/')}`
+
+  await runCurl([
+    '-k',
+    '--ftp-pasv',
+    '--ssl-reqd',
+    '--connect-timeout',
+    '20',
+    '--max-time',
+    String(
+      Math.ceil(
+        FTPS_TIMEOUT /
+        1000
+      )
+    ),
+    '-u',
+    `bblp:${accessCode}`,
+    '-T',
+    printFile.localPath,
+    uploadUrl
+  ])
+
+  return {
+    uploaded:
+      true,
+    remotePath,
+    uploadUrl:
+      uploadUrl.replace(
+        accessCode,
+        '***'
+      )
+  }
+}
+
+const buildProjectFilePayload = (
+  connection,
+  job,
+  remotePath,
+  remoteName
+) => {
+  const profile =
+    job?.printProfile ||
+    {}
+
+  const plate =
+    Number(
+      profile.plate ||
+        profile.plateIndex ||
+        1
+    )
+
+  const plateNumber =
+    Number.isInteger(
+      plate
+    ) &&
+    plate > 0
+      ? plate
+      : 1
+
+  const boolOption = (
+    key,
+    fallback
+  ) => {
+    if (
+      profile[key] ===
+      false
+    ) {
+      return false
+    }
+
+    if (
+      profile[key] ===
+      true
+    ) {
+      return true
+    }
+
+    return fallback
+  }
+
+  return {
+    print: {
+      sequence_id:
+        String(
+          Date.now()
+        ),
+
+      command:
+        'project_file',
+
+      url:
+        `ftp://${remotePath}`,
+
+      file:
+        remotePath,
+
+      param:
+        String(
+          profile.param ||
+            `Metadata/plate_${plateNumber}.gcode`
+        ),
+
+      subtask_id:
+        String(
+          profile.subtaskId ||
+            profile.subtask_id ||
+            '0'
+        ),
+
+      subtask_name:
+        String(
+          job?.title ||
+            job?.productName ||
+            remoteName
+        ),
+
+      use_ams:
+        boolOption(
+          'useAms',
+          Boolean(
+            profile.use_ams
+          )
+        ),
+
+      ams_mapping:
+        Array.isArray(
+          profile.amsMapping
+        )
+          ? profile.amsMapping
+          : Array.isArray(
+              profile.ams_mapping
+            )
+            ? profile.ams_mapping
+            : undefined,
+
+      timelapse:
+        boolOption(
+          'timelapse',
+          false
+        ),
+
+      flow_cali:
+        boolOption(
+          'flowCalibration',
+          true
+        ),
+
+      bed_leveling:
+        boolOption(
+          'bedLeveling',
+          true
+        ),
+
+      layer_inspect:
+        boolOption(
+          'layerInspect',
+          true
+        ),
+
+      vibration_cali:
+        boolOption(
+          'vibrationCalibration',
+          false
+        )
+    }
+  }
+}
+
+const stripUndefined = (
+  value
+) => {
+  if (
+    Array.isArray(
+      value
+    )
+  ) {
+    return value.map(
+      stripUndefined
+    )
+  }
+
+  if (
+    value &&
+    typeof value ===
+      'object'
+  ) {
+    return Object.fromEntries(
+      Object
+        .entries(
+          value
+        )
+        .filter(([, item]) =>
+          item !==
+          undefined
+        )
+        .map(([key, item]) => [
+          key,
+          stripUndefined(
+            item
+          )
+        ])
+    )
+  }
+
+  return value
 }
 
 // ======================================================
@@ -323,6 +819,8 @@ const createClient = (
     client,
 
     serial,
+
+    accessCode,
 
     topics:
       getTopics(
@@ -731,10 +1229,10 @@ export const bambuAdapter = {
       true,
 
     upload:
-      false,
+      true,
 
     startPrint:
-      false
+      true
   },
 
   // ====================================================
@@ -818,7 +1316,10 @@ export const bambuAdapter = {
           'bambu',
 
         connectedAt:
-          null
+          null,
+
+        accessCode:
+          created.accessCode
       }
 
       console.log(
@@ -1220,10 +1721,75 @@ export const bambuAdapter = {
       connection
     )
 
-    void job
+    const printFile =
+      getPrintFile(
+        job
+      )
 
-    throw new Error(
-      'Envio/inicio de arquivo Bambu sera implementado na etapa de arquivos 3MF.'
+    const remoteName =
+      sanitizeRemoteName(
+        printFile.name
+      )
+
+    const remotePath =
+      joinRemotePath(
+        job?.printProfile
+          ?.bambuRemoteDirectory ||
+          connection.printer
+            ?.bambuRemoteDirectory ||
+          '/cache',
+        remoteName
+      )
+
+    console.log(
+      `[Bambu] Enviando arquivo para ${remotePath}`
     )
+
+    await uploadBambuPrintFile(
+      connection,
+      printFile,
+      remotePath
+    )
+
+    const payload =
+      stripUndefined(
+        buildProjectFilePayload(
+          connection,
+          job,
+          remotePath,
+          remoteName
+        )
+      )
+
+    await publishJson(
+      connection.client,
+      connection.topics.request,
+      payload,
+      1
+    )
+
+    connection.currentJob = {
+      ...(job || {}),
+      remotePath,
+      startedAt:
+        new Date()
+          .toISOString()
+    }
+
+    return {
+      success:
+        true,
+
+      started:
+        true,
+
+      uploaded:
+        true,
+
+      remotePath,
+
+      command:
+        'project_file'
+    }
   }
 }
