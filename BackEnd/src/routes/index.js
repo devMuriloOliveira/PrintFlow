@@ -52,6 +52,13 @@ import {
 } from './operations.js'
 
 import {
+  handlePlatformOverview,
+  handlePlatformTenantAudit,
+  handlePlatformTenantsList,
+  handlePlatformTenantStatusUpdate
+} from './platformAdmin.js'
+
+import {
   handlePrintJobApprove,
   handlePrintJobCancel,
   handlePrintJobComplete,
@@ -764,6 +771,24 @@ export const handleRequest =
       // ==================================================
       // OPERACAO / NOTIFICACOES
       // ==================================================
+
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/overview') {
+        return await handlePlatformOverview(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenants') {
+        return await handlePlatformTenantsList(req, res)
+      }
+
+      const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)
+      if (req.method === 'GET' && platformTenantAuditMatch) {
+        return await handlePlatformTenantAudit(req, res, platformTenantAuditMatch[1], url)
+      }
+
+      const platformTenantStatusMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/status$/)
+      if (req.method === 'POST' && platformTenantStatusMatch) {
+        return await handlePlatformTenantStatusUpdate(req, res, platformTenantStatusMatch[1])
+      }
 
       if (
         req.method === 'GET' &&

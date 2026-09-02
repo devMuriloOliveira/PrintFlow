@@ -4,6 +4,7 @@ import { migrate } from './db/migrate.js'
 import { startPrintFileStorageCleanup } from './jobs/printFileStorageCleanup.js'
 import { startPrintQueueWatchdog } from './jobs/printQueueWatchdog.js'
 import { startAgentHealthWatchdog } from './jobs/agentHealthWatchdog.js'
+import { syncConfiguredPlatformSuperAdmins } from './services/platformAdmin.js'
 import { handleRequest } from './routes/index.js'
 
 process.on('uncaughtException', (error) => {
@@ -20,6 +21,7 @@ server.headersTimeout = 120_000
 
 try {
   await migrate()
+  await syncConfiguredPlatformSuperAdmins()
   startPrintFileStorageCleanup()
   startPrintQueueWatchdog()
   startAgentHealthWatchdog()

@@ -5,8 +5,10 @@
     "dev:back": "npm --prefix BackEnd run dev",
     "start:back": "npm --prefix BackEnd run start",
     "dev:front": "npm --prefix FrontEnd run dev",
+    "dev:admin": "npm --prefix AdminFrontEnd run dev",
     "dev:front:local-api": "powershell -Command \"$env:NUXT_PUBLIC_API_BASE='http://localhost:3333'; npm --prefix FrontEnd run dev\"",
     "build:front": "npm --prefix FrontEnd run build",
+    "build:admin": "npm --prefix AdminFrontEnd run build",
     "generate:front": "npm --prefix FrontEnd run generate",
     "preview:front": "npm --prefix FrontEnd run preview"
   }

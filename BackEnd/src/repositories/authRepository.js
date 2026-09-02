@@ -10,6 +10,7 @@ const memoryUsersById = new Map()
 const memoryRefreshTokens = new Map()
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase()
+const isConfiguredPlatformSuperAdmin = (email) => env.platformSuperAdminEmails.includes(normalizeEmail(email))
 const refreshTokenHash = (token) => createHash('sha256').update(String(token || '')).digest('hex')
 const createRefreshTokenValue = () => `refresh_${randomBytes(32).toString('base64url')}`
 const refreshExpiresAt = () => new Date(Date.now() + env.refreshTokenTtlSeconds * 1000)
@@ -205,7 +206,7 @@ export const registerUser = async ({ name, email, password, company }) => {
 
   if (!hasDatabase) {
     if (memoryUsers.has(normalizedEmail)) throw new Error('Este e-mail ja esta cadastrado.')
-    const user = { id: createOpaqueId('user'), tenant_id: tenantId, name: cleanName, email: normalizedEmail, password_hash: passwordHash, role: 'admin', status: 'active', token_version: 0 }
+    const user = { id: createOpaqueId('user'), tenant_id: tenantId, name: cleanName, email: normalizedEmail, password_hash: passwordHash, role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin', status: 'active', token_version: 0 }
     memoryUsers.set(normalizedEmail, user)
     memoryUsersById.set(String(user.id), user)
     return publicUser(user)
@@ -223,10 +224,14 @@ export const registerUser = async ({ name, email, password, company }) => {
 
   const result = await query(
     `insert into users (tenant_id, name, email, email_hash, password_hash, role, status, token_version)
-     values ($1, $2, $3, $4, $5, 'admin', 'active', 0)
+     values ($1, $2, $3, $4, $5, $6, 'active', 0)
      returning id, tenant_id, name, email, role, status, token_version`,
-    [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, passwordHash]
+    [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, passwordHash, isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin']
   )
+
+  if (isConfiguredPlatformSuperAdmin(normalizedEmail)) {
+    await query(`insert into platform_super_admins (user_id, email_hash) values ($1, $2) on conflict (user_id) do update set email_hash = excluded.email_hash, status = 'active', updated_at = now()`, [result.rows[0].id, emailHash])
+  }
 
   return publicUser(result.rows[0])
 }

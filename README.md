@@ -9,6 +9,7 @@ O sistema e dividido em tres partes:
 - `FrontEnd`: interface web em Nuxt/Vue usada pelo usuario.
 - `BackEnd`: API HTTP responsavel por autenticacao, dados do tenant, validacoes, fila de impressao e comandos para o Agent.
 - `Agent`: programa local para Windows que conecta o computador do usuario as impressoras 3D por rede ou USB.
+- `AdminFrontEnd`: portal interno separado para administracao da plataforma. Nao deve ser publicado junto ao painel de clientes.
 
 ## Como Funciona
 
