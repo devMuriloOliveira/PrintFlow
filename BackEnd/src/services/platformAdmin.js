@@ -110,6 +110,20 @@ export const listTenantOperationalAudit = async (tenantId, limit = 100) => withT
   }))
 })
 
+export const listPlatformAdminAudit = async (limit = 100) => {
+  const result = await query(`
+    select id, action, target_tenant_id, target_resource, target_resource_id, reason, details, created_at
+      from platform_admin_audit_events
+     order by created_at desc
+     limit $1
+  `, [Math.min(200, Math.max(1, Number(limit) || 100))])
+  return result.rows.map((row) => ({
+    id: String(row.id), action: row.action, targetTenantId: row.target_tenant_id,
+    targetResource: row.target_resource, targetResourceId: row.target_resource_id,
+    reason: row.reason, details: row.details || {}, createdAt: row.created_at
+  }))
+}
+
 export const updatePlatformTenantStatus = async (tenantId, payload = {}) => {
   const accountStatus = ['active', 'suspended', 'blocked'].includes(payload.accountStatus) ? payload.accountStatus : ''
   const billingStatus = ['not_configured', 'active', 'pending', 'overdue', 'cancelled'].includes(payload.billingStatus) ? payload.billingStatus : ''
