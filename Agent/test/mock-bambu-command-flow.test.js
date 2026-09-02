@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
+import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import test from 'node:test'
+
+import axios from 'axios'
 
 process.env.PRINTFLOW_DEV_MOCK_BAMBU =
   'true'
@@ -277,5 +281,235 @@ test(
       reconnectedStatus.status.state,
       'RUNNING'
     )
+  }
+)
+
+test(
+  'mock local baixa arquivo, valida hash e inicia impressao pelo Agent',
+  async () => {
+    const fileContent =
+      Buffer.from(
+        'PRINTFLOW_MOCK_3MF_FILE_CONTENT',
+        'utf8'
+      )
+
+    const fileHash =
+      crypto
+        .createHash(
+          'sha256'
+        )
+        .update(
+          fileContent
+        )
+        .digest(
+          'hex'
+        )
+
+    const originalGet =
+      axios.get
+
+    const requests =
+      []
+
+    axios.get =
+      async (
+        url,
+        options
+      ) => {
+        requests.push({
+          url,
+          options
+        })
+
+        return {
+          data:
+            Readable.from([
+              fileContent
+            ])
+        }
+      }
+
+    try {
+      const result =
+        await handleCommand(
+          command(
+            'start_print',
+            {
+              printer,
+              job: {
+                id:
+                  'job-file-flow-1',
+
+                title:
+                  'Produto mock com arquivo',
+
+                quantity:
+                  1,
+
+                validationStatus:
+                  'validated',
+
+                printFile: {
+                  name:
+                    'produto-mock.3mf',
+
+                  format:
+                    '3mf',
+
+                  hash:
+                    fileHash,
+
+                  sizeBytes:
+                    fileContent.length,
+
+                  storageKey:
+                    'mock/tenant/produto-mock.3mf'
+                }
+              }
+            }
+          ),
+          {
+            apiUrl:
+              'http://printflow-api.test',
+
+            credentials: {
+              agentId:
+                'agent-mock-id',
+
+              agentSecret:
+                'agent-mock-secret'
+            }
+          }
+        )
+
+      assert.equal(
+        result.success,
+        true
+      )
+
+      assert.equal(
+        result.result.job.id,
+        'job-file-flow-1'
+      )
+
+      assert.equal(
+        result.result.job.printFile.hash,
+        fileHash
+      )
+
+      assert.equal(
+        await fs.readFile(
+          result.result.job.printFile.localPath,
+          'utf8'
+        ),
+        fileContent.toString(
+          'utf8'
+        )
+      )
+
+      assert.equal(
+        requests.length,
+        1
+      )
+
+      assert.equal(
+        requests[0].url,
+        'http://printflow-api.test/api/agents/print-file?key=mock%2Ftenant%2Fproduto-mock.3mf'
+      )
+
+      assert.equal(
+        requests[0].options.headers['x-agent-id'],
+        'agent-mock-id'
+      )
+    } finally {
+      axios.get =
+        originalGet
+    }
+  }
+)
+
+test(
+  'mock local bloqueia impressao quando hash do arquivo nao confere',
+  async () => {
+    const originalGet =
+      axios.get
+
+    axios.get =
+      async () => ({
+        data:
+          Readable.from([
+            Buffer.from(
+              'CONTEUDO_DIFERENTE_DO_PRODUTO',
+              'utf8'
+            )
+          ])
+      })
+
+    try {
+      const result =
+        await handleCommand(
+          command(
+            'start_print',
+            {
+              printer,
+              job: {
+                id:
+                  'job-file-flow-invalid',
+
+                title:
+                  'Produto mock invalido',
+
+                quantity:
+                  1,
+
+                validationStatus:
+                  'validated',
+
+                printFile: {
+                  name:
+                    'produto-mock.3mf',
+
+                  format:
+                    '3mf',
+
+                  hash:
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+
+                  sizeBytes:
+                    29,
+
+                  storageKey:
+                    'mock/tenant/produto-mock.3mf'
+                }
+              }
+            }
+          ),
+          {
+            apiUrl:
+              'http://printflow-api.test',
+
+            credentials: {
+              agentId:
+                'agent-mock-id',
+
+              agentSecret:
+                'agent-mock-secret'
+            }
+          }
+        )
+
+      assert.equal(
+        result.success,
+        false
+      )
+
+      assert.match(
+        result.error,
+        /Hash do arquivo baixado nao confere/
+      )
+    } finally {
+      axios.get =
+        originalGet
+    }
   }
 )

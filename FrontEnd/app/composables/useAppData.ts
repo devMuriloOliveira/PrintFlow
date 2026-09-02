@@ -44,7 +44,9 @@ export type Printer = {
   id?: string;
   name: string; code: string; maker: string; model: string; acquired: string; power: number;
   hours: number; status: string; maintenance: string; serial: string; location?: string; volume?: string; defaultFilament?: string;
+  nozzleMm?: number; supportedMaterials?: string; minLayerHeight?: number; maxLayerHeight?: number;
   agentId?: string; agentPrinterId?: string; agentConnectionKey?: string; agentProtocol?: string; agentConnectionType?: string
+  agentPrinterStatus?: string; agentLastStatus?: Record<string, unknown>; agentLastConnectionError?: string; agentLastSeenAt?: string | null
 }
 
 export type Marketplace = {
@@ -66,6 +68,14 @@ export type MarketplaceIntegration = {
   hasRefreshToken?: boolean;
   tokenExpiresAt?: string | null;
   lastSyncAt?: string | null
+}
+
+export type MarketplaceOrder = {
+  id: string;
+  integrationId?: string; marketplaceId?: string; platform: string; externalOrderId: string; externalSku: string;
+  productName: string; quantity: number; gross: number; marketplaceFee: number; shipping: number; net: number; profit: number;
+  status: string; soldAt?: string | null; printJobId?: string; printJobStatus?: string;
+  mappedProductId?: string; mappedProductName?: string; suggestedProductId?: string; suggestedProductName?: string
 }
 
 export type Client = {
@@ -91,6 +101,7 @@ type AppData = {
   filaments: Filament[]
   printers: Printer[]
   marketplaces: Marketplace[]
+  marketplaceOrders?: MarketplaceOrder[]
   marketplaceIntegrations?: MarketplaceIntegration[]
   clients: Client[]
   expenseSegments: ChartSegment[]
@@ -106,6 +117,7 @@ const emptyData = (): AppData => ({
   filaments: [],
   printers: [],
   marketplaces: [],
+  marketplaceOrders: [],
   marketplaceIntegrations: [],
   clients: [],
   expenseSegments: [],
@@ -194,6 +206,40 @@ export const useAppData = () => {
     return list
   }
 
+  const requestPrintJobAction = async (path: string, body: Record<string, unknown> = {}, statusMessage = 'Nao foi possivel atualizar a fila.') => {
+    const list = await $fetch<PrintJob[]>(apiUrl(path), {
+      method: 'POST',
+      body,
+      headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || statusMessage)
+    })
+
+    data.value.printJobs = list
+    return list
+  }
+
+  const enqueuePrintJob = (item: Partial<PrintJob> & Record<string, unknown>) =>
+    requestPrintJobAction('/api/print-jobs/enqueue', item, 'Nao foi possivel adicionar na fila.')
+
+  const reorderPrintJob = (id: string, direction: 'up' | 'down') =>
+    requestPrintJobAction(`/api/print-jobs/${id}/reorder`, { direction }, 'Nao foi possivel atualizar a ordem da fila.')
+
+  const movePrintJobPrinter = (id: string, printerId: string, agentPrinterId = '') =>
+    requestPrintJobAction(`/api/print-jobs/${id}/move-printer`, { printerId, agentPrinterId }, 'Nao foi possivel mover o item da fila.')
+
+  const cancelQueuedPrintJob = (id: string) =>
+    requestPrintJobAction(`/api/print-jobs/${id}/cancel`, {}, 'Nao foi possivel cancelar o item da fila.')
+
+  const approveMarketplacePrintJob = (id: string) =>
+    requestPrintJobAction(`/api/print-jobs/${id}/approve`, {}, 'Nao foi possivel liberar o pedido para impressao.')
+
+  const startManualPrintJob = (id: string) =>
+    requestPrintJobAction(`/api/print-jobs/${id}/start-manual`, {}, 'Nao foi possivel iniciar o item da fila.')
+
+  const completeQueuedPrintJob = (id: string) =>
+    requestPrintJobAction(`/api/print-jobs/${id}/complete`, {}, 'Nao foi possivel concluir o item da fila.')
+
   const createProduct = async (product: Product) => {
     const created = await $fetch<Product>(apiUrl('/api/products'), {
       method: 'POST',
@@ -236,6 +282,37 @@ export const useAppData = () => {
     return created
   }
 
+  const startMarketplaceOAuth = async (platform: string) => {
+    const response = await $fetch<{ url: string }>(apiUrl(`/api/marketplace-integrations/${platform}/oauth-start`), {
+      method: 'POST',
+      headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || 'Nao foi possivel iniciar OAuth do marketplace.')
+    })
+    return response.url
+  }
+
+  const refreshMarketplaceOrders = async () => {
+    const list = await $fetch<MarketplaceOrder[]>(apiUrl('/api/marketplace-orders'), {
+      headers: resourceHeaders()
+    })
+    data.value.marketplaceOrders = list
+    return list
+  }
+
+  const linkMarketplaceOrderProduct = async (id: string, productId: string) => {
+    const list = await $fetch<MarketplaceOrder[]>(apiUrl(`/api/marketplace-orders/${id}/link-product`), {
+      method: 'POST',
+      body: { productId },
+      headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || 'Nao foi possivel vincular o pedido ao produto.')
+    })
+    data.value.marketplaceOrders = list
+    await loadAppData()
+    return list
+  }
+
   return {
     products: computed(() => data.value.products),
     orders: computed(() => data.value.orders),
@@ -244,6 +321,7 @@ export const useAppData = () => {
     filaments: computed(() => data.value.filaments),
     printers: computed(() => data.value.printers),
     marketplaces: computed(() => data.value.marketplaces),
+    marketplaceOrders: computed(() => data.value.marketplaceOrders || []),
     marketplaceIntegrations: computed(() => data.value.marketplaceIntegrations || []),
     clients: computed(() => data.value.clients),
     goals,
@@ -257,6 +335,16 @@ export const useAppData = () => {
     createProduct
     , uploadProductPrintFile
     , createMarketplaceIntegration
+    , startMarketplaceOAuth
+    , refreshMarketplaceOrders
+    , linkMarketplaceOrderProduct
+    , enqueuePrintJob
+    , reorderPrintJob
+    , movePrintJobPrinter
+    , cancelQueuedPrintJob
+    , approveMarketplacePrintJob
+    , startManualPrintJob
+    , completeQueuedPrintJob
     , createItem
     , updateItem
     , deleteItem

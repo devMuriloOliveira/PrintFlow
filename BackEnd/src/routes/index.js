@@ -33,9 +33,27 @@ import {
   handleAmazonWebhook,
   handleIntegrationCreate,
   handleIntegrationsList,
+  handleMarketplaceOAuthCallback,
+  handleMarketplaceOAuthStart,
+  handleMarketplaceOrderSync,
   handleMercadoLivreWebhook,
   handleShopeeWebhook
 } from './integrations.js'
+
+import {
+  handleMarketplaceOrderLinkProduct,
+  handleMarketplaceOrdersList
+} from './marketplaceOrders.js'
+
+import {
+  handlePrintJobApprove,
+  handlePrintJobCancel,
+  handlePrintJobComplete,
+  handlePrintJobEnqueue,
+  handlePrintJobMovePrinter,
+  handlePrintJobReorder,
+  handlePrintJobStartManual
+} from './printJobs.js'
 
 import {
   handleAgentPair,
@@ -388,6 +406,12 @@ export const handleRequest =
             '/api/agents/print-file'
         )
 
+      const isPublicMarketplaceOAuthRoute =
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/marketplace-integrations/oauth-callback'
+
       // ==================================================
       // PROTEGER /api/*
       // ==================================================
@@ -399,7 +423,8 @@ export const handleRequest =
         !url.pathname.startsWith(
           '/api/auth/'
         ) &&
-        !isPublicAgentRoute
+        !isPublicAgentRoute &&
+        !isPublicMarketplaceOAuthRoute
 
       if (
         isProtectedApi &&
@@ -756,6 +781,186 @@ export const handleRequest =
           req,
           res
         )
+      }
+
+      const marketplaceOAuthStartMatch =
+        url.pathname.match(
+          /^\/api\/marketplace-integrations\/([^/]+)\/oauth-start$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        marketplaceOAuthStartMatch
+      ) {
+        return await handleMarketplaceOAuthStart(
+          req,
+          res,
+          marketplaceOAuthStartMatch[1]
+        )
+      }
+
+      const marketplaceOrderSyncMatch =
+        url.pathname.match(
+          /^\/api\/marketplace-integrations\/([^/]+)\/sync-order$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        marketplaceOrderSyncMatch
+      ) {
+        return await handleMarketplaceOrderSync(
+          req,
+          res,
+          marketplaceOrderSyncMatch[1]
+        )
+      }
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/marketplace-integrations/oauth-callback'
+      ) {
+        return await handleMarketplaceOAuthCallback(
+          req,
+          res,
+          url
+        )
+      }
+
+      // ==================================================
+      // PEDIDOS DE MARKETPLACE
+      // ==================================================
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/marketplace-orders'
+      ) {
+        return await handleMarketplaceOrdersList(
+          req,
+          res
+        )
+      }
+
+      const marketplaceOrderLinkMatch =
+        url.pathname.match(
+          /^\/api\/marketplace-orders\/([^/]+)\/link-product$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        marketplaceOrderLinkMatch
+      ) {
+        return await handleMarketplaceOrderLinkProduct(
+          req,
+          res,
+          marketplaceOrderLinkMatch[1]
+        )
+      }
+
+      // ==================================================
+      // FILA DE IMPRESSAO
+      // ==================================================
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/print-jobs/enqueue'
+      ) {
+        return await handlePrintJobEnqueue(
+          req,
+          res
+        )
+      }
+
+      const printJobActionMatch =
+        url.pathname.match(
+          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete)$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        printJobActionMatch
+      ) {
+        const [
+          ,
+          printJobId,
+          action
+        ] =
+          printJobActionMatch
+
+        if (
+          action ===
+          'approve'
+        ) {
+          return await handlePrintJobApprove(
+            req,
+            res,
+            printJobId
+          )
+        }
+
+        if (
+          action ===
+          'reorder'
+        ) {
+          return await handlePrintJobReorder(
+            req,
+            res,
+            printJobId
+          )
+        }
+
+        if (
+          action ===
+          'move-printer'
+        ) {
+          return await handlePrintJobMovePrinter(
+            req,
+            res,
+            printJobId
+          )
+        }
+
+        if (
+          action ===
+          'start-manual'
+        ) {
+          return await handlePrintJobStartManual(
+            req,
+            res,
+            printJobId
+          )
+        }
+
+        if (
+          action ===
+          'cancel'
+        ) {
+          return await handlePrintJobCancel(
+            req,
+            res,
+            printJobId
+          )
+        }
+
+        if (
+          action ===
+          'complete'
+        ) {
+          return await handlePrintJobComplete(
+            req,
+            res,
+            printJobId
+          )
+        }
       }
 
       // ==================================================

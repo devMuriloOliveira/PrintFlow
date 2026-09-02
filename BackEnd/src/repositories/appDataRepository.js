@@ -96,11 +96,12 @@ const readPrintJobs = async (client, tenantId) => {
     order by
       case j.status
         when 'printing' then 0
-        when 'queued' then 1
-        when 'paused' then 2
-        when 'completed' then 3
-        when 'cancelled' then 4
-        else 5
+        when 'paused' then 1
+        when 'awaiting_confirmation' then 2
+        when 'queued' then 3
+        when 'completed' then 4
+        when 'cancelled' then 5
+        else 6
       end,
       j.priority desc,
       j.created_at asc
@@ -157,16 +158,48 @@ const readFilaments = async (client, tenantId) => {
 
 const readPrinters = async (client, tenantId) => {
   const result = await client.query(`
-    select id, name, code, maker, model, to_char(acquired_at, 'DD/MM/YYYY') as acquired, power_w, accumulated_hours,
-      status, to_char(last_maintenance_at, 'DD/MM/YYYY') as maintenance, serial, location, volume, default_filament,
-      agent_id, agent_printer_id, agent_connection_key, agent_protocol, agent_connection_type
-    from printers where tenant_id = $1 order by created_at desc
+    select
+      p.id,
+      p.name,
+      p.code,
+      p.maker,
+      p.model,
+      to_char(p.acquired_at, 'DD/MM/YYYY') as acquired,
+      p.power_w,
+      p.accumulated_hours,
+      p.status,
+      to_char(p.last_maintenance_at, 'DD/MM/YYYY') as maintenance,
+      p.serial,
+      p.location,
+      p.volume,
+      p.default_filament,
+      p.nozzle_mm,
+      p.supported_materials,
+      p.min_layer_height,
+      p.max_layer_height,
+      p.agent_id,
+      p.agent_printer_id,
+      p.agent_connection_key,
+      p.agent_protocol,
+      p.agent_connection_type,
+      ap.status as agent_printer_status,
+      ap.last_status as agent_last_status,
+      ap.last_connection_error as agent_last_connection_error,
+      ap.last_seen_at as agent_last_seen_at
+    from printers p
+    left join agent_printers ap on ap.id = p.agent_printer_id and ap.tenant_id = p.tenant_id
+    where p.tenant_id = $1
+    order by p.created_at desc
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, code: row.code, maker: row.maker, model: row.model, acquired: row.acquired || '',
     power: number(row.power_w), hours: number(row.accumulated_hours), status: row.status, maintenance: row.maintenance || '',
     serial: row.serial, location: row.location, volume: row.volume, defaultFilament: row.default_filament,
+    nozzleMm: number(row.nozzle_mm), supportedMaterials: row.supported_materials || '',
+    minLayerHeight: number(row.min_layer_height), maxLayerHeight: number(row.max_layer_height),
     agentId: row.agent_id ? String(row.agent_id) : '', agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
-    agentConnectionKey: row.agent_connection_key || '', agentProtocol: row.agent_protocol || '', agentConnectionType: row.agent_connection_type || '' }))
+    agentConnectionKey: row.agent_connection_key || '', agentProtocol: row.agent_protocol || '', agentConnectionType: row.agent_connection_type || '',
+    agentPrinterStatus: row.agent_printer_status || '', agentLastStatus: row.agent_last_status || {},
+    agentLastConnectionError: row.agent_last_connection_error || '', agentLastSeenAt: row.agent_last_seen_at || null }))
 }
 
 const readMarketplaces = async (client, tenantId) => {

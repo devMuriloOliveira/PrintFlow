@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -295,5 +295,256 @@ export const openPrintFileReadStream =
         info.size,
       filePath:
         resolved
+    }
+  }
+
+const listStorageFiles =
+  async (
+    root,
+    current = root
+  ) => {
+    const entries =
+      await readdir(
+        current,
+        {
+          withFileTypes:
+            true
+        }
+      )
+
+    const files =
+      []
+
+    for (const entry of entries) {
+      const entryPath =
+        path.join(
+          current,
+          entry.name
+        )
+
+      if (entry.isDirectory()) {
+        files.push(
+          ...await listStorageFiles(
+            root,
+            entryPath
+          )
+        )
+        continue
+      }
+
+      if (!entry.isFile()) {
+        continue
+      }
+
+      const info =
+        await stat(
+          entryPath
+        )
+
+      files.push({
+        filePath:
+          entryPath,
+        storageKey:
+          path
+            .relative(
+              root,
+              entryPath
+            )
+            .split(path.sep)
+            .join('/'),
+        size:
+          info.size,
+        mtimeMs:
+          info.mtimeMs,
+        isTemp:
+          entry.name.includes(
+            '.tmp'
+          )
+      })
+    }
+
+    return files
+  }
+
+const removeFile =
+  async (
+    filePath
+  ) => {
+    await rm(
+      filePath,
+      {
+        force:
+          true
+      }
+    )
+  }
+
+export const cleanupPrintFileStorage =
+  async ({
+    activeStorageKeys = [],
+    storageDir = env.printFileStorageDir,
+    now = Date.now(),
+    maxTotalBytes = env.printFileStorageMaxBytes,
+    retentionDays = env.printFileStorageRetentionDays,
+    tempMaxAgeMs = env.printFileTempMaxAgeMs
+  } = {}) => {
+    const root =
+      path.resolve(
+        storageDir
+      )
+
+    let files =
+      []
+
+    try {
+      files =
+        await listStorageFiles(
+          root
+        )
+    } catch (error) {
+      if (
+        error.code ===
+        'ENOENT'
+      ) {
+        return {
+          removed:
+            0,
+          removedBytes:
+            0,
+          kept:
+            0,
+          remainingBytes:
+            0
+        }
+      }
+
+      throw error
+    }
+
+    const active =
+      new Set(
+        activeStorageKeys
+          .map((key) =>
+            String(
+              key ||
+                ''
+            )
+              .replace(/\\/g, '/')
+          )
+          .filter(Boolean)
+      )
+
+    const retentionMs =
+      Math.max(
+        0,
+        Number(retentionDays) || 0
+      ) *
+      24 *
+      60 *
+      60 *
+      1000
+
+    const removedFiles =
+      new Set()
+
+    let removedBytes =
+      0
+
+    for (const file of files) {
+      const ageMs =
+        now -
+        file.mtimeMs
+
+      const expiredTemp =
+        file.isTemp &&
+        ageMs >=
+          tempMaxAgeMs
+
+      const expiredInactive =
+        !file.isTemp &&
+        !active.has(
+          file.storageKey
+        ) &&
+        retentionMs > 0 &&
+        ageMs >=
+          retentionMs
+
+      if (
+        expiredTemp ||
+        expiredInactive
+      ) {
+        await removeFile(
+          file.filePath
+        )
+
+        removedFiles.add(
+          file.filePath
+        )
+
+        removedBytes +=
+          file.size
+      }
+    }
+
+    const remaining =
+      files
+        .filter((file) =>
+          !removedFiles.has(
+            file.filePath
+          )
+        )
+
+    let remainingBytes =
+      remaining.reduce(
+        (total, file) =>
+          total +
+          file.size,
+        0
+      )
+
+    const removable =
+      remaining
+        .filter((file) =>
+          !file.isTemp &&
+          !active.has(
+            file.storageKey
+          )
+        )
+        .sort((a, b) =>
+          a.mtimeMs -
+          b.mtimeMs
+        )
+
+    for (const file of removable) {
+      if (
+        remainingBytes <=
+        maxTotalBytes
+      ) {
+        break
+      }
+
+      await removeFile(
+        file.filePath
+      )
+
+      removedFiles.add(
+        file.filePath
+      )
+
+      removedBytes +=
+        file.size
+
+      remainingBytes -=
+        file.size
+    }
+
+    return {
+      removed:
+        removedFiles.size,
+      removedBytes,
+      kept:
+        files.length -
+        removedFiles.size,
+      remainingBytes
     }
   }

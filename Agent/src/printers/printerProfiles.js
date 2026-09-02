@@ -14,8 +14,8 @@ const PROFILES = {
       resume: true,
       cancel: true,
       disconnect: true,
-      upload: false,
-      startPrint: false
+      upload: true,
+      startPrint: true
     }
   },
 
@@ -35,7 +35,7 @@ const PROFILES = {
       cancel: true,
       disconnect: true,
       upload: false,
-      startPrint: false
+      startPrint: true
     }
   },
 

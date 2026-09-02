@@ -99,6 +99,27 @@ const resolveAllowedFormats =
       new Set(['gcode', '3mf', 'bgcode'])
   }
 
+const firstPositiveNumber =
+  (...values) => {
+    for (const value of values) {
+      const numericValue =
+        number(value)
+
+      if (numericValue > 0) {
+        return numericValue
+      }
+    }
+
+    return 0
+  }
+
+const almostEqual =
+  (left, right, tolerance = 0.01) =>
+    Math.abs(
+      Number(left) -
+        Number(right)
+    ) <= tolerance
+
 export const validatePrintCompatibility =
   ({
     product,
@@ -176,7 +197,7 @@ export const validatePrintCompatibility =
 
     const quantity =
       Number(
-        job?.quantity ||
+        job?.quantity ??
           1
       )
 
@@ -270,8 +291,28 @@ export const validatePrintCompatibility =
       )
 
     if (nozzle <= 0) {
-      warnings.push(
+      errors.push(
         'Diametro do bico nao informado.'
+      )
+    }
+
+    const printerNozzle =
+      firstPositiveNumber(
+        printer?.nozzle_mm,
+        printer?.nozzleMm,
+        printer?.metadata?.nozzleMm
+      )
+
+    if (
+      nozzle > 0 &&
+      printerNozzle > 0 &&
+      !almostEqual(
+        nozzle,
+        printerNozzle
+      )
+    ) {
+      errors.push(
+        `Receita exige bico de ${nozzle} mm, mas a impressora esta configurada com bico de ${printerNozzle} mm.`
       )
     }
 
@@ -279,29 +320,73 @@ export const validatePrintCompatibility =
       product.print_profile ||
       {}
 
-    if (
-      number(
-        product.layer_height
-      ) <= 0 &&
-      number(
+    const layerHeight =
+      firstPositiveNumber(
+        product.layer_height,
         profile.layerHeightMm
-      ) <= 0
+      )
+
+    if (
+      layerHeight <=
+      0
     ) {
-      warnings.push(
+      errors.push(
         'Altura de camada nao informada.'
       )
     }
 
+    const minLayerHeight =
+      firstPositiveNumber(
+        printer?.min_layer_height,
+        printer?.minLayerHeight,
+        printer?.metadata?.minLayerHeight
+      )
+
+    const maxLayerHeight =
+      firstPositiveNumber(
+        printer?.max_layer_height,
+        printer?.maxLayerHeight,
+        printer?.metadata?.maxLayerHeight
+      )
+
     if (
-      number(
-        product.infill
-      ) <= 0 &&
-      number(
-        profile.infillPercent
-      ) <= 0
+      layerHeight > 0 &&
+      minLayerHeight > 0 &&
+      layerHeight < minLayerHeight
     ) {
-      warnings.push(
+      errors.push(
+        `Altura de camada ${layerHeight} mm abaixo do minimo da impressora (${minLayerHeight} mm).`
+      )
+    }
+
+    if (
+      layerHeight > 0 &&
+      maxLayerHeight > 0 &&
+      layerHeight > maxLayerHeight
+    ) {
+      errors.push(
+        `Altura de camada ${layerHeight} mm acima do maximo da impressora (${maxLayerHeight} mm).`
+      )
+    }
+
+    const infill =
+      firstPositiveNumber(
+        product.infill,
+        profile.infillPercent
+      )
+
+    if (
+      infill <=
+      0
+    ) {
+      errors.push(
         'Preenchimento nao informado.'
+      )
+    } else if (
+      infill > 100
+    ) {
+      errors.push(
+        'Preenchimento precisa estar entre 1% e 100%.'
       )
     }
 

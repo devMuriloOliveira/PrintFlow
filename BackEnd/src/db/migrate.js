@@ -27,6 +27,7 @@ const tenantTables = [
   'calculator_simulations',
   'export_history',
   'marketplace_integrations',
+  'marketplace_product_links',
   'tracked_sales',
   'marketplace_webhook_events'
 ]
@@ -896,6 +897,26 @@ export const migrate =
             not null
             default '',
 
+          external_sku
+            text
+            not null
+            default '',
+
+          external_sku_hash
+            text
+            not null
+            default '',
+
+          product_name
+            text
+            not null
+            default '',
+
+          quantity
+            integer
+            not null
+            default 1,
+
           gross
             numeric(12,2)
             not null
@@ -945,6 +966,92 @@ export const migrate =
             tenant_id,
             platform,
             external_order_hash
+          )
+        )
+      `
+    )
+
+    for (
+      const columnDefinition of [
+        "external_sku text not null default ''",
+        "external_sku_hash text not null default ''",
+        "product_name text not null default ''",
+        'quantity integer not null default 1'
+      ]
+    ) {
+      await query(
+        `
+          alter table tracked_sales
+          add column if not exists ${columnDefinition}
+        `
+      )
+    }
+
+    // ==================================================
+    // MARKETPLACE PRODUCT LINKS
+    // ==================================================
+
+    await query(
+      `
+        create table if not exists marketplace_product_links (
+          id bigserial primary key,
+
+          tenant_id
+            text
+            not null
+            references tenants(id)
+            on delete cascade,
+
+          integration_id
+            bigint
+            references marketplace_integrations(id)
+            on delete cascade,
+
+          marketplace_id
+            bigint
+            references marketplaces(id)
+            on delete cascade,
+
+          platform
+            text
+            not null
+            default '',
+
+          external_sku
+            text
+            not null
+            default '',
+
+          external_sku_hash
+            text
+            not null
+            default '',
+
+          external_name
+            text
+            not null
+            default '',
+
+          product_id
+            bigint
+            not null
+            references products(id)
+            on delete cascade,
+
+          created_at
+            timestamptz
+            not null
+            default now(),
+
+          updated_at
+            timestamptz
+            not null
+            default now(),
+
+          unique (
+            tenant_id,
+            platform,
+            external_sku_hash
           )
         )
       `
@@ -1215,6 +1322,20 @@ export const migrate =
       `
     )
 
+    await query(
+      `
+        create unique index if not exists
+          print_jobs_tracked_sale_unique_idx
+
+        on print_jobs (
+          tenant_id,
+          tracked_sale_id
+        )
+
+        where tracked_sale_id is not null
+      `
+    )
+
     // ==================================================
     // EXPENSES
     // ==================================================
@@ -1449,6 +1570,26 @@ export const migrate =
             not null
             default '',
 
+          nozzle_mm
+            numeric(6,3)
+            not null
+            default 0,
+
+          supported_materials
+            text
+            not null
+            default '',
+
+          min_layer_height
+            numeric(6,3)
+            not null
+            default 0,
+
+          max_layer_height
+            numeric(6,3)
+            not null
+            default 0,
+
           agent_id
             bigint,
 
@@ -1497,7 +1638,15 @@ export const migrate =
 
       "agent_protocol text not null default ''",
 
-      "agent_connection_type text not null default ''"
+      "agent_connection_type text not null default ''",
+
+      'nozzle_mm numeric(6,3) not null default 0',
+
+      "supported_materials text not null default ''",
+
+      'min_layer_height numeric(6,3) not null default 0',
+
+      'max_layer_height numeric(6,3) not null default 0'
     ]
 
     for (

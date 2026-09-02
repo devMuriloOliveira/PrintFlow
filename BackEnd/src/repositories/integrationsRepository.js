@@ -105,6 +105,19 @@ export const findIntegrationByExternalAccount = async (platform, accountExternal
   return result.rows[0] || null
 }
 
+export const findIntegrationById = async (tenantId, integrationId) => {
+  if (!hasDatabase) return null
+  const result = await withTenant(tenantId, (client) => client.query(`
+    select id, tenant_id, marketplace_id, platform, connection_name, account_external_id,
+      access_token, refresh_token, token_expires_at, status
+    from marketplace_integrations
+    where tenant_id = $1
+      and id = $2
+    limit 1
+  `, [tenantId, integrationId]))
+  return result.rows[0] || null
+}
+
 export const recordTrackedSale = async (integration, sale) => {
   const tenantId = integration.tenant_id
   const platform = platformName(sale.platform || integration.platform)
@@ -117,14 +130,21 @@ export const recordTrackedSale = async (integration, sale) => {
   const cost = number(sale.cost)
   const net = sale.net === undefined ? gross - marketplaceFee - shipping : number(sale.net)
   const profit = sale.profit === undefined ? net - cost : number(sale.profit)
+  const sku = text(sale.sku)
+  const productName = text(sale.productName)
+  const quantity = Math.max(1, Math.floor(Number(sale.quantity || 1)))
 
   const result = await withTenant(tenantId, (client) => client.query(`
     insert into tracked_sales (
       tenant_id, integration_id, marketplace_id, platform, external_order_id, external_order_hash,
-      gross, marketplace_fee, shipping, net, cost, profit, status, sold_at
+      external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, sold_at
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, coalesce($14::timestamptz, now()))
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, coalesce($18::timestamptz, now()))
     on conflict (tenant_id, platform, external_order_hash) do update set
+      external_sku = excluded.external_sku,
+      external_sku_hash = excluded.external_sku_hash,
+      product_name = excluded.product_name,
+      quantity = excluded.quantity,
       gross = excluded.gross,
       marketplace_fee = excluded.marketplace_fee,
       shipping = excluded.shipping,
@@ -142,6 +162,10 @@ export const recordTrackedSale = async (integration, sale) => {
     platform,
     encryptField(externalOrderId),
     blindIndex(externalOrderId),
+    sku,
+    blindIndex(sku),
+    productName,
+    quantity,
     gross,
     marketplaceFee,
     shipping,

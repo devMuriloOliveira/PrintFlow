@@ -19,6 +19,7 @@ import {
 
 import { handleCommand } from './commands/commandHandler.js'
 import { startLocalServer } from './localServer.js'
+import { cleanupPrintFileCache } from './files/printFileCache.js'
 
 dotenv.config()
 
@@ -37,6 +38,56 @@ const wait = (delay) =>
   new Promise(resolve =>
     setTimeout(resolve, delay)
   )
+
+const startCacheCleanup =
+  () => {
+    const intervalMs =
+      Math.max(
+        60_000,
+        Number(
+          process.env.PRINTFLOW_AGENT_CACHE_CLEANUP_INTERVAL_MS ||
+            6 *
+              60 *
+              60 *
+              1000
+        )
+      )
+
+    const run =
+      async () => {
+        try {
+          const result =
+            await cleanupPrintFileCache()
+
+          if (
+            result.removed >
+            0
+          ) {
+            console.log(
+              `[Cache] Limpeza removeu ${result.removed} arquivo(s), ${result.removedBytes} bytes.`
+            )
+          }
+        } catch (error) {
+          console.log(
+            '[Cache] Falha ao limpar arquivos antigos:',
+            error.message ||
+              error
+          )
+        }
+      }
+
+    void run()
+
+    const timer =
+      setInterval(
+        run,
+        intervalMs
+      )
+
+    timer.unref?.()
+
+    return timer
+  }
 
 console.log('')
 console.log('=================================')
@@ -72,6 +123,7 @@ process.on('unhandledRejection', error => {
 })
 
 startLocalServer()
+startCacheCleanup()
 
 const start = async () => {
   try {

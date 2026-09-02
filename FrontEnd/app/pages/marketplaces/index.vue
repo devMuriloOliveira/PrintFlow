@@ -1,14 +1,17 @@
 <script setup lang="ts">
-const { marketplaces, deleteItem } = useAppData()
+const { marketplaces, products, marketplaceOrders, deleteItem, refreshMarketplaceOrders, linkMarketplaceOrderProduct } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
 const saleValue = ref(100)
 const selectedName = ref('Shopee')
+const linkingOrderId = ref('')
+const selectedProductByOrder = reactive<Record<string, string>>({})
 const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
 const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
 const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
+const pendingMarketplaceOrders = computed(() => marketplaceOrders.value.filter((order: any) => !['completed', 'cancelled', 'canceled', 'refunded'].includes(String(order.printJobStatus || order.status || '').toLowerCase())))
 const editMarketplace = (marketplace: any) => {
   if (!marketplace.id) return
   router.push(`/marketplaces/novo?id=${marketplace.id}`)
@@ -18,6 +21,34 @@ const removeMarketplace = async (marketplace: any) => {
   await deleteItem('marketplaces', marketplace.id)
   notify('Marketplace excluído com sucesso.')
 }
+const marketplaceOrderLabel = (order: any) => {
+  if (order.printJobStatus === 'awaiting_confirmation') return 'Aguardando confirmação'
+  if (order.printJobStatus === 'queued') return 'Liberado para fila'
+  if (order.printJobStatus) return order.printJobStatus
+  return 'Aguardando vínculo'
+}
+const marketplaceOrderBadgeClass = (order: any) => {
+  if (order.printJobStatus === 'awaiting_confirmation') return 'badge--orange'
+  if (order.printJobStatus === 'queued') return 'badge--green'
+  if (order.printJobStatus === 'cancelled') return 'badge--red'
+  return 'badge--gray'
+}
+const linkOrderProduct = async (order: any) => {
+  const productId = selectedProductByOrder[order.id] || order.suggestedProductId || order.mappedProductId || ''
+  if (!order.id || !productId || linkingOrderId.value) return
+  linkingOrderId.value = order.id
+  try {
+    await linkMarketplaceOrderProduct(order.id, productId)
+    notify('Pedido vinculado ao produto. Confirme na tela de impressoras antes de imprimir.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível vincular o pedido.', 'info')
+  } finally {
+    linkingOrderId.value = ''
+  }
+}
+onMounted(() => {
+  void refreshMarketplaceOrders().catch(() => {})
+})
 </script>
 
 <template>
@@ -33,7 +64,7 @@ const removeMarketplace = async (marketplace: any) => {
               <thead><tr><th>Marketplace</th><th>Conexão</th><th>Comissão</th><th>Tarifa Fixa</th><th>Taxa Financeira</th><th>Custo Anúncio</th><th>Outras Tarifas</th><th>Receita Bruta</th><th>Receita Líquida</th><th>Pedidos</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 <tr v-for="m in marketplaces" :key="m.id || m.name">
-                  <td><div class="table-product table-product--editable"><span class="market-logo" :style="{background:m.color}">{{m.short}}</span><strong>{{m.name}}</strong><button class="row-action row-action--edit" title="Editar marketplace" @click.stop="editMarketplace(m)"><UiIcon name="edit" :size="15" /></button></div></td>
+                  <td><div class="table-product table-product--editable"><MarketplaceLogo :platform="m.platform" :name="m.name" :short="m.short" :size="28" /><strong>{{m.name}}</strong><button class="row-action row-action--edit" title="Editar marketplace" @click.stop="editMarketplace(m)"><UiIcon name="edit" :size="15" /></button></div></td>
                   <td><span class="badge" :class="m.connectionStatus==='connected'?'badge--green':'badge--gray'">{{m.connectionStatus==='connected'?'Conectado':'Manual'}}</span></td>
                   <td>{{m.commission}}%</td>
                   <td>{{formatCurrency(m.fixed)}}</td>
@@ -57,9 +88,35 @@ const removeMarketplace = async (marketplace: any) => {
         <PanelCard title="Faturamento por marketplace" style="margin-top:12px"><div class="bar-list"><div v-for="m in marketplaces" :key="m.name" class="bar-row" style="grid-template-columns:75px 1fr auto"><span>{{m.name}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${m.gross/(metrics.revenue.value || 1)*100}%`,background:m.color}" /></div><strong>{{formatCurrency(m.gross)}}</strong></div></div></PanelCard>
       </aside>
     </div>
+    <PanelCard title="Pedidos recebidos dos marketplaces" subtitle="Revise o pedido, confira o SKU e vincule ao produto antes de liberar para impressão." style="margin-top:12px">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto PrintFlow</th><th>Qtd.</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="order in pendingMarketplaceOrders" :key="order.id">
+              <td><strong>{{ order.externalOrderId || order.id }}</strong></td>
+              <td><div class="market-cell"><MarketplaceLogo :platform="order.platform" :name="order.platform" :size="24" /><span>{{ order.platform }}</span></div></td>
+              <td>{{ order.externalSku || '-' }}</td>
+              <td>{{ order.productName || '-' }}</td>
+              <td>
+                <select v-model="selectedProductByOrder[order.id]" :disabled="Boolean(order.printJobId)" style="min-width:190px">
+                  <option :value="order.mappedProductId || order.suggestedProductId || ''">{{ order.mappedProductName || order.suggestedProductName || 'Selecionar produto' }}</option>
+                  <option v-for="product in products" :key="product.id || product.sku" :value="product.id">{{ product.name }} - {{ product.sku }}</option>
+                </select>
+              </td>
+              <td>{{ order.quantity }}</td>
+              <td>{{ formatCurrency(order.gross) }}</td>
+              <td><span class="badge" :class="marketplaceOrderBadgeClass(order)">{{ marketplaceOrderLabel(order) }}</span></td>
+              <td><button v-if="!order.printJobId" type="button" class="btn btn--primary" :disabled="linkingOrderId !== '' || !(selectedProductByOrder[order.id] || order.suggestedProductId || order.mappedProductId)" @click="linkOrderProduct(order)">Vincular</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-if="!pendingMarketplaceOrders.length" style="margin-top:10px;color:var(--muted);font-size:10px">Nenhum pedido de marketplace aguardando revisão.</div>
+    </PanelCard>
   </div>
 </template>
 
 <style scoped>
-.market-logo{display:grid;width:28px;height:28px;place-items:center;border-radius:7px;color:#fff;font-weight:800;font-size:13px}.market-logo[style*="249, 214"]{color:#17233c}
+.market-cell{display:flex;align-items:center;gap:8px;white-space:nowrap}
 </style>

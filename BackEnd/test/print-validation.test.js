@@ -217,3 +217,117 @@ test('receita invalida bloqueia extensao divergente e quantidade invalida', () =
     result.errors.some((error) => error.includes('Quantidade'))
   )
 })
+
+test('receita invalida bloqueia bico incompativel com impressora', () => {
+  const result =
+    validatePrintCompatibility({
+      product: {
+        dimensions:
+          '120 x 80 x 45',
+        print_file_name:
+          'suporte.gcode',
+        print_file_format:
+          'gcode',
+        print_file_hash:
+          'sha256-mock',
+        print_file_storage_key:
+          'tenant/product/sha256-mock.gcode',
+        validation_status:
+          'validated',
+        compatibility: {
+          materials:
+            ['PLA'],
+          nozzleMm:
+            0.6
+        },
+        print_profile: {
+          layerHeightMm:
+            0.2,
+          infillPercent:
+            15
+        }
+      },
+      printer: {
+        volume:
+          '220 x 220 x 250',
+        agent_protocol:
+          'marlin',
+        nozzle_mm:
+          0.4
+      },
+      filament: {
+        material:
+          'PLA'
+      }
+    })
+
+  assert.equal(
+    result.valid,
+    false
+  )
+
+  assert.ok(
+    result.errors.some((error) => error.includes('bico'))
+  )
+})
+
+test('receita invalida bloqueia camada e preenchimento fora do perfil', () => {
+  const result =
+    validatePrintCompatibility({
+      product: {
+        dimensions:
+          '120 x 80 x 45',
+        print_file_name:
+          'suporte.gcode',
+        print_file_format:
+          'gcode',
+        print_file_hash:
+          'sha256-mock',
+        print_file_storage_key:
+          'tenant/product/sha256-mock.gcode',
+        validation_status:
+          'validated',
+        compatibility: {
+          materials:
+            ['PLA'],
+          nozzleMm:
+            0.4
+        },
+        print_profile: {
+          layerHeightMm:
+            0.35,
+          infillPercent:
+            125
+        }
+      },
+      printer: {
+        volume:
+          '220 x 220 x 250',
+        agent_protocol:
+          'marlin',
+        nozzle_mm:
+          0.4,
+        min_layer_height:
+          0.08,
+        max_layer_height:
+          0.28
+      },
+      filament: {
+        material:
+          'PLA'
+      }
+    })
+
+  assert.equal(
+    result.valid,
+    false
+  )
+
+  assert.ok(
+    result.errors.some((error) => error.includes('camada'))
+  )
+
+  assert.ok(
+    result.errors.some((error) => error.includes('Preenchimento'))
+  )
+})

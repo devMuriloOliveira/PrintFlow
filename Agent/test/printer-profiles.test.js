@@ -53,6 +53,11 @@ test('normaliza Marlin USB com baud rate padrao', () => {
     result.printer.baudRate,
     115200
   )
+
+  assert.equal(
+    result.profile.capabilities.startPrint,
+    true
+  )
 })
 
 test('exige API Key para OctoPrint', () => {

@@ -1,3 +1,6 @@
+import { createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
+
 import { SerialPort } from 'serialport'
 
 const DEFAULT_BAUD_RATE =
@@ -11,6 +14,12 @@ const COMMAND_TIMEOUT =
 
 const STARTUP_DELAY =
   2_000
+
+const PRINT_LINE_TIMEOUT =
+  20_000
+
+const PRINT_PAUSE_POLL =
+  250
 
 const normalizePort = (
   value
@@ -62,6 +71,139 @@ const wait = (
         ms
       )
   )
+
+const normalizePrintFile = (
+  job
+) => {
+  const printFile =
+    job?.printFile ||
+    {}
+
+  const localPath =
+    String(
+      printFile.localPath ||
+        job?.localPath ||
+        ''
+    ).trim()
+
+  if (!localPath) {
+    throw new Error(
+      'Arquivo G-code local obrigatorio para impressao Marlin USB.'
+    )
+  }
+
+  const name =
+    String(
+      printFile.name ||
+        job?.title ||
+        localPath
+    )
+
+  const format =
+    String(
+      printFile.format ||
+        name.split('.').pop() ||
+        ''
+    )
+      .trim()
+      .toLowerCase()
+
+  if (
+    format !==
+    'gcode'
+  ) {
+    throw new Error(
+      'Marlin USB aceita apenas arquivo .gcode.'
+    )
+  }
+
+  return {
+    localPath,
+    name
+  }
+}
+
+const cleanGcodeLine = (
+  line
+) => {
+  const withoutComment =
+    String(
+      line ||
+        ''
+    )
+      .replace(
+        /;.*$/,
+        ''
+      )
+      .trim()
+
+  return withoutComment
+}
+
+async function * readGcodeCommands(
+  filePath
+) {
+  const reader =
+    createInterface({
+      input:
+        createReadStream(
+          filePath,
+          {
+            encoding:
+              'utf8'
+          }
+        ),
+
+      crlfDelay:
+        Infinity
+    })
+
+  for await (
+    const line
+    of reader
+  ) {
+    const command =
+      cleanGcodeLine(
+        line
+      )
+
+    if (command) {
+      yield command
+    }
+  }
+}
+
+const countGcodeCommands = async (
+  filePath
+) => {
+  let count =
+    0
+
+  for await (
+    const _command
+    of readGcodeCommands(
+      filePath
+    )
+  ) {
+    count +=
+      1
+  }
+
+  return count
+}
+
+const waitWhilePaused = async (
+  printState
+) => {
+  while (
+    printState?.paused &&
+    !printState.cancelled
+  ) {
+    await wait(
+      PRINT_PAUSE_POLL
+    )
+  }
+}
 
 const openSerial = (
   path,
@@ -195,7 +337,8 @@ const parsePositionValue = (
 
 const parseStatus = (
   lines,
-  printer
+  printer,
+  connection = null
 ) => {
   const text =
     lines.join(
@@ -232,6 +375,10 @@ const parseStatus = (
       'B'
     )
 
+  const activePrint =
+    connection?.activePrint ||
+    null
+
   return {
     connected:
       true,
@@ -256,13 +403,20 @@ const parseStatus = (
       null,
 
     state:
-      text.toLowerCase().includes(
+      activePrint?.status ===
         'paused'
-      )
         ? 'PAUSE'
-        : 'CONNECTED',
+        : activePrint?.status ===
+            'printing'
+          ? 'PRINTING'
+          : text.toLowerCase().includes(
+              'paused'
+            )
+            ? 'PAUSE'
+            : 'CONNECTED',
 
     progress:
+      activePrint?.progress ??
       null,
 
     remainingMinutes:
@@ -301,7 +455,28 @@ const parseStatus = (
     },
 
     raw: {
-      lines
+      lines,
+
+      activePrint:
+        activePrint
+          ? {
+              status:
+                activePrint.status,
+
+              file:
+                activePrint.file,
+
+              sentCommands:
+                activePrint.sentCommands,
+
+              totalCommands:
+                activePrint.totalCommands,
+
+              error:
+                activePrint.error ||
+                null
+            }
+          : null
     }
   }
 }
@@ -326,6 +501,45 @@ const enqueueCommand = (
 
   return connection.queue
 }
+
+const writeRawCommand = (
+  connection,
+  command
+) =>
+  new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+      if (
+        !connection?.serial ||
+        !connection.serial.isOpen
+      ) {
+        reject(
+          new Error(
+            'Impressora Marlin nao esta conectada.'
+          )
+        )
+
+        return
+      }
+
+      connection.serial.write(
+        `${command}\n`,
+        error => {
+          if (error) {
+            reject(
+              error
+            )
+
+            return
+          }
+
+          resolve()
+        }
+      )
+    }
+  )
 
 const sendCommandNow = (
   connection,
@@ -548,7 +762,7 @@ export const marlinSerialAdapter = {
       false,
 
     startPrint:
-      false
+      true
   },
 
   async connect(
@@ -707,6 +921,24 @@ export const marlinSerialAdapter = {
       connection
     )
 
+    if (
+      connection.activePrint &&
+      ![
+        'completed',
+        'cancelled',
+        'failed'
+      ].includes(
+        connection.activePrint.status
+      )
+    ) {
+      return parseStatus(
+        connection.lastLines ||
+        [],
+        connection.printer,
+        connection
+      )
+    }
+
     const temperatureLines =
       await enqueueCommand(
         connection,
@@ -732,14 +964,189 @@ export const marlinSerialAdapter = {
         ...temperatureLines,
         ...positionLines
       ],
-      connection.printer
+      connection.printer,
+      connection
     )
   },
 
-  async startPrint() {
-    throw new Error(
-      'Envio/inicio de arquivo por Marlin USB sera implementado na etapa de arquivos G-code.'
+  async startPrint(
+    connection,
+    job
+  ) {
+    requireConnection(
+      connection
     )
+
+    if (
+      connection.activePrint &&
+      ![
+        'completed',
+        'cancelled',
+        'failed'
+      ].includes(
+        connection.activePrint.status
+      )
+    ) {
+      throw new Error(
+        'Ja existe uma impressao Marlin em andamento nesta conexao.'
+      )
+    }
+
+    const printFile =
+      normalizePrintFile(
+        job
+      )
+
+    const totalCommands =
+      await countGcodeCommands(
+        printFile.localPath
+      )
+
+    if (
+      totalCommands <=
+      0
+    ) {
+      throw new Error(
+        'Arquivo G-code nao possui comandos validos para imprimir.'
+      )
+    }
+
+    const printState = {
+      status:
+        'printing',
+
+      file:
+        printFile.name,
+
+      totalCommands,
+
+      sentCommands:
+        0,
+
+      progress:
+        0,
+
+      paused:
+        false,
+
+      cancelled:
+        false,
+
+      startedAt:
+        new Date()
+    }
+
+    connection.activePrint =
+      printState
+
+    const run = async () => {
+      try {
+        for await (
+          const command
+          of readGcodeCommands(
+            printFile.localPath
+          )
+        ) {
+          await waitWhilePaused(
+            printState
+          )
+
+          if (
+            printState.cancelled
+          ) {
+            throw new Error(
+              'Impressao Marlin cancelada pelo usuario.'
+            )
+          }
+
+          await sendCommandNow(
+            connection,
+            command,
+            {
+              timeout:
+                PRINT_LINE_TIMEOUT
+            }
+          )
+
+          printState.sentCommands +=
+            1
+
+          printState.progress =
+            Math.min(
+              100,
+              Math.round(
+                (
+                  printState.sentCommands /
+                  totalCommands
+                ) *
+                100
+              )
+            )
+        }
+
+        printState.status =
+          'completed'
+
+        printState.completedAt =
+          new Date()
+
+        return {
+          started:
+            true,
+
+          completed:
+            true,
+
+          file:
+            printFile.name,
+
+          sentCommands:
+            printState.sentCommands
+        }
+      } catch (
+        error
+      ) {
+        printState.status =
+          printState.cancelled
+            ? 'cancelled'
+            : 'failed'
+
+        printState.error =
+          error.message
+
+        throw error
+      } finally {
+        printState.finishedAt =
+          new Date()
+      }
+    }
+
+    connection.queue =
+      connection.queue.then(
+        run,
+        run
+      )
+
+    connection.queue.catch(
+      error => {
+        console.log(
+          `[Marlin] Impressao G-code finalizada com erro: ${error.message}`
+        )
+      }
+    )
+
+    return {
+      started:
+        true,
+
+      background:
+        true,
+
+      file:
+        printFile.name,
+
+      totalCommands
+    }
   },
 
   async pause(
@@ -748,6 +1155,25 @@ export const marlinSerialAdapter = {
     requireConnection(
       connection
     )
+
+    if (
+      connection.activePrint?.status ===
+      'printing'
+    ) {
+      connection.activePrint.paused =
+        true
+
+      connection.activePrint.status =
+        'paused'
+
+      return {
+        success:
+          true,
+
+        paused:
+          true
+      }
+    }
 
     await enqueueCommand(
       connection,
@@ -767,6 +1193,25 @@ export const marlinSerialAdapter = {
       connection
     )
 
+    if (
+      connection.activePrint?.status ===
+      'paused'
+    ) {
+      connection.activePrint.paused =
+        false
+
+      connection.activePrint.status =
+        'printing'
+
+      return {
+        success:
+          true,
+
+        resumed:
+          true
+      }
+    }
+
     await enqueueCommand(
       connection,
       'M24'
@@ -784,6 +1229,40 @@ export const marlinSerialAdapter = {
     requireConnection(
       connection
     )
+
+    if (
+      connection.activePrint &&
+      ![
+        'completed',
+        'cancelled',
+        'failed'
+      ].includes(
+        connection.activePrint.status
+      )
+    ) {
+      connection.activePrint.cancelled =
+        true
+
+      connection.activePrint.status =
+        'cancelled'
+
+      try {
+        await writeRawCommand(
+          connection,
+          'M410'
+        )
+      } catch {
+        // Nem todo firmware aceita parada rapida; o streaming local ja foi interrompido.
+      }
+
+      return {
+        success:
+          true,
+
+        cancelled:
+          true
+      }
+    }
 
     await enqueueCommand(
       connection,

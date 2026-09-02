@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, printers, printJobs, filaments, createItem, updateItem, deleteItem, refreshAppData } = useAppData()
+const { products, printers, printJobs, filaments, deleteItem, refreshAppData, enqueuePrintJob, reorderPrintJob, movePrintJobPrinter, cancelQueuedPrintJob, approveMarketplacePrintJob, startManualPrintJob, completeQueuedPrintJob } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -26,8 +26,7 @@ const agentIsOnline = (agent: any) => {
 const selectedAgent = computed(() => agents.value.find((agent) => String(agent.id) === String((selected.value as any).agentId)))
 const selectedAgentPrinterId = computed(() => String((selected.value as any).agentPrinterId || ''))
 const selectedLiveStatus = computed(() => {
-  const agentPrinterId = selectedAgentPrinterId.value
-  return agentPrinterId ? printerStatuses[String(agentPrinterId)] : null
+  return liveStatusForPrinter(selected.value)
 })
 const selectedAgentStatus = computed(() => {
   if (!selectedAgentPrinterId.value) return 'Manual'
@@ -37,7 +36,7 @@ const selectedAgentStatus = computed(() => {
 const selectedPrinterJobs = computed(() => printJobs.value
   .filter((job: any) => String(job.printerId || '') === String((selected.value as any).id || '') && !['completed', 'cancelled'].includes(String(job.status || '')))
   .sort((a: any, b: any) => Number(b.priority || 0) - Number(a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
-const activePrintJob = computed(() => selectedPrinterJobs.value.find((job: any) => ['printing', 'paused'].includes(String(job.status || ''))))
+const activePrintJob = computed(() => selectedPrinterJobs.value.find((job: any) => ['starting', 'printing', 'paused'].includes(String(job.status || ''))))
 const queuedPrintJobs = computed(() => selectedPrinterJobs.value.filter((job: any) => String(job.status || '') === 'queued'))
 const selectedQueueProduct = computed(() => products.value.find((product: any) => String(product.id || '') === String(queueProductId.value || '')))
 const productForJob = (job: any) => products.value.find((product: any) => String(product.id || '') === String(job.productId || ''))
@@ -56,19 +55,51 @@ const allowedFormatsByProtocol: Record<string, string[]> = {
 }
 const readyPrintFormats = ['3mf', 'gcode', 'bgcode']
 const normalizeList = (value: any) => Array.isArray(value) ? value.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean) : String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
-const liveStatusForPrinter = (printer: any) => printer?.agentPrinterId ? printerStatuses[String(printer.agentPrinterId)] : null
-const activeJobForPrinter = (printer: any) => printJobs.value.find((job: any) => String(job.printerId || '') === String(printer?.id || '') && ['printing', 'paused'].includes(String(job.status || '')))
+const normalizePrinterStatus = (printer: any, status: any = {}) => ({
+  ...(status && typeof status === 'object' ? status : {}),
+  lastConnectionError: status?.lastConnectionError || printer?.agentLastConnectionError || null,
+  fetchedAt: status?.fetchedAt || printer?.agentLastSeenAt || null
+})
+const liveStatusForPrinter = (printer: any) => {
+  const agentPrinterId = String(printer?.agentPrinterId || '')
+  if (!agentPrinterId) return null
+  return normalizePrinterStatus(printer, printerStatuses[agentPrinterId] || printer?.agentLastStatus || {})
+}
+const activeJobForPrinter = (printer: any) => printJobs.value.find((job: any) => String(job.printerId || '') === String(printer?.id || '') && ['starting', 'printing', 'paused'].includes(String(job.status || '')))
 const queuedJobsForPrinter = (printer: any) => printJobs.value.filter((job: any) => String(job.printerId || '') === String(printer?.id || '') && String(job.status || '') === 'queued')
-const printerBusyLabel = (printer: any) => activeJobForPrinter(printer) ? 'Ocupada' : 'Livre'
+const isStatusFresh = (status: any) => status?.fetchedAt ? Date.now() - new Date(status.fetchedAt).getTime() < 120_000 : false
+const printerBusyLabel = (printer: any) => {
+  const liveStatus = liveStatusForPrinter(printer)
+  const liveState = String(liveStatus?.state || '').toLowerCase()
+  if (activeJobForPrinter(printer) || ['printing', 'busy', 'paused', 'starting'].includes(liveState)) return 'Ocupada'
+  if (printer?.agentPrinterId && !isStatusFresh(liveStatus)) return 'Sem contato'
+  return 'Livre'
+}
 const printerQueueSummary = (printer: any) => {
   const active = activeJobForPrinter(printer)
   const queued = queuedJobsForPrinter(printer).length
   return active ? `${printerBusyLabel(printer)}: ${active.title || active.productName || 'item atual'} | fila ${queued}` : `${printerBusyLabel(printer)} | fila ${queued}`
 }
+const seedPrinterStatusCache = () => {
+  for (const printer of printers.value as any[]) {
+    const agentPrinterId = String(printer?.agentPrinterId || '')
+    if (!agentPrinterId || printerStatuses[agentPrinterId]) continue
+    printerStatuses[agentPrinterId] = normalizePrinterStatus(printer, printer?.agentLastStatus || {})
+  }
+}
+const refreshAllPrinterStatuses = async () => {
+  if (printerStatusLoadingId.value || printerControlLoadingId.value) return
+  const linkedPrinters = (printers.value as any[]).filter((printer) => printer?.agentId && printer?.agentPrinterId)
+  for (const printer of linkedPrinters) {
+    if (printerStatusLoadingId.value || printerControlLoadingId.value) break
+    await loadPrinterStatus(printer, { silent: true }).catch(() => {})
+  }
+}
 const formatDateTime = (value: any) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '-'
 const printReadinessError = (job: any) => {
   const product = productForJob(job) || job
   const printer = printers.value.find((item: any) => String(item.id || '') === String(job.printerId || (selected.value as any).id || '')) as any
+  if (String(job.status || '') !== 'queued') return 'Somente itens pendentes podem ser iniciados.'
   if (!product) return 'Produto da fila não encontrado.'
   const quantity = Number(job.quantity || 0)
   if (!Number.isInteger(quantity) || quantity <= 0) return 'Quantidade da fila precisa ser maior que zero.'
@@ -89,13 +120,17 @@ const printReadinessError = (job: any) => {
   const filament = filaments.value.find((item: any) => String(item.id || '') === String(product.filamentId || '')) as any
   const material = String(filament?.material || product.filament || '').trim().toLowerCase()
   if (materials.length && material && !materials.includes(material)) return `Material ${material.toUpperCase()} não está liberado para este produto.`
-  if (Number(product.compatibility?.nozzleMm || 0) <= 0) return 'Diâmetro do bico não informado no produto.'
+  const productNozzle = Number(product.compatibility?.nozzleMm || 0)
+  const printerNozzle = Number(printer?.nozzleMm || 0)
+  if (productNozzle <= 0) return 'Diâmetro do bico não informado no produto.'
+  if (printerNozzle > 0 && Math.abs(productNozzle - printerNozzle) > 0.01) return `Receita exige bico de ${productNozzle} mm, mas a impressora usa ${printerNozzle} mm.`
   if (Number(product.layer || product.printProfile?.layerHeightMm || 0) <= 0) return 'Altura de camada não informada no produto.'
-  if (Number(product.infill || product.printProfile?.infillPercent || 0) <= 0) return 'Preenchimento não informado no produto.'
+  const infill = Number(product.infill || product.printProfile?.infillPercent || 0)
+  if (infill <= 0 || infill > 100) return 'Preenchimento precisa estar entre 1% e 100%.'
   return ''
 }
-const printJobStatusLabel = (status: string) => ({ queued: 'Na fila', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluído', cancelled: 'Cancelado' }[status] || status || '-')
-const printJobBadgeClass = (status: string) => ({ queued: '', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', cancelled: 'badge--red' }[status] || '')
+const printJobStatusLabel = (status: string) => ({ awaiting_confirmation: 'Aguardando confirmação', queued: 'Na fila', starting: 'Iniciando', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluído', cancelled: 'Cancelado' }[status] || status || '-')
+const printJobBadgeClass = (status: string) => ({ awaiting_confirmation: 'badge--orange', queued: '', starting: 'badge--orange', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', cancelled: 'badge--red' }[status] || '')
 const editPrinter = (printer: any) => {
   if (!printer.id) return
   router.push(`/impressoras/nova?id=${printer.id}`)
@@ -251,7 +286,7 @@ const addProductToQueue = async () => {
   }
   queueLoadingId.value = `add:${printer.id}`
   try {
-    await createItem('printJobs' as any, {
+    await enqueuePrintJob({
       productId: product.id,
       printerId: printer.id,
       agentPrinterId: printer.agentPrinterId || '',
@@ -272,33 +307,19 @@ const addProductToQueue = async () => {
     queueLoadingId.value = ''
   }
 }
-const updatePrintJob = async (job: any, patch: Record<string, any>, message: string) => {
-  if (!job?.id || queueLoadingId.value) return
-  queueLoadingId.value = String(job.id)
-  try {
-    await updateItem('printJobs' as any, {
-      ...job,
-      ...patch
-    })
-    notify(message)
-  } catch (error) {
-    notify(error instanceof Error ? error.message : 'Não foi possível atualizar a fila.', 'info')
-  } finally {
-    queueLoadingId.value = ''
-  }
-}
 const movePrintJob = async (job: any, direction: 'up' | 'down') => {
   if (!job?.id || queueLoadingId.value) return
-  const list = selectedPrinterJobs.value
+  if (String(job.status || '') !== 'queued') {
+    notify('Somente itens pendentes podem ter a ordem alterada.', 'info')
+    return
+  }
+  const list = queuedPrintJobs.value
   const index = list.findIndex((item: any) => String(item.id) === String(job.id))
   const target = direction === 'up' ? list[index - 1] : list[index + 1]
   if (!target) return
   queueLoadingId.value = String(job.id)
   try {
-    const currentPriority = Number(job.priority || 0)
-    const targetPriority = Number(target.priority || 0)
-    await updateItem('printJobs' as any, { ...job, priority: targetPriority })
-    await updateItem('printJobs' as any, { ...target, priority: currentPriority })
+    await reorderPrintJob(String(job.id), direction)
     notify('Ordem da fila atualizada.')
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível atualizar a fila.', 'info')
@@ -309,23 +330,43 @@ const movePrintJob = async (job: any, direction: 'up' | 'down') => {
 const changePrintJobPrinter = async (job: any, printerId: string) => {
   const targetPrinter = printers.value.find((printer: any) => String(printer.id || '') === String(printerId || '')) as any
   if (!job?.id || !targetPrinter?.id || queueLoadingId.value) return
-  await updatePrintJob(job, {
-    printerId: targetPrinter.id,
-    printerName: targetPrinter.name,
-    agentPrinterId: targetPrinter.agentPrinterId || ''
-  }, 'Item movido para outra impressora.')
+  if (!['queued', 'awaiting_confirmation'].includes(String(job.status || ''))) {
+    notify('Somente itens pendentes podem ser movidos para outra impressora.', 'info')
+    return
+  }
+  queueLoadingId.value = String(job.id)
+  try {
+    await movePrintJobPrinter(String(job.id), String(targetPrinter.id), String(targetPrinter.agentPrinterId || ''))
+    notify('Item movido para outra impressora.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'NÃ£o foi possÃ­vel atualizar a fila.', 'info')
+  } finally {
+    queueLoadingId.value = ''
+  }
 }
 const startPrintJob = async (job: any) => {
   const printer = (printers.value.find((item: any) => String(item.id || '') === String(job.printerId || '')) || selected.value) as any
   if (activePrintJob.value && String(activePrintJob.value.id) !== String(job.id) && !window.confirm('Esta impressora já possui uma impressão em andamento. Deseja iniciar outro item mesmo assim?')) return
   if (!job?.id || queueLoadingId.value) return
+  if (String(job.status || '') !== 'queued') {
+    notify('Somente itens na fila podem ser iniciados.', 'info')
+    return
+  }
   const readinessError = printReadinessError(job)
   if (readinessError) {
     notify(readinessError, 'info')
     return
   }
   if (!printer?.agentId || !printer?.agentPrinterId) {
-    await updatePrintJob(job, { status: 'printing', startedAt: new Date().toISOString() }, 'Impressão iniciada na fila.')
+    queueLoadingId.value = String(job.id)
+    try {
+      await startManualPrintJob(String(job.id))
+      notify('Impressão iniciada na fila.')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Não foi possível iniciar a impressão.', 'info')
+    } finally {
+      queueLoadingId.value = ''
+    }
     return
   }
   const agent = assertAgentPrinterReady(printer)
@@ -352,26 +393,63 @@ const startPrintJob = async (job: any) => {
     queueLoadingId.value = ''
   }
 }
-const completePrintJob = (job: any) => {
-  void updatePrintJob(job, { status: 'completed', completedAt: new Date().toISOString() }, 'Impressão concluída.')
+const approvePrintJob = async (job: any) => {
+  if (!job?.id || queueLoadingId.value) return
+  if (String(job.status || '') !== 'awaiting_confirmation') {
+    notify('Este item não está aguardando confirmação.', 'info')
+    return
+  }
+  if (!window.confirm(`Liberar pedido para impressão?\n\n${job.title || job.productName || 'Pedido'}\n\nDepois da confirmação ele entrará na fila desta impressora.`)) return
+  queueLoadingId.value = String(job.id)
+  try {
+    await approveMarketplacePrintJob(String(job.id))
+    notify('Pedido liberado para a fila de impressão.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível liberar o pedido.', 'info')
+  } finally {
+    queueLoadingId.value = ''
+  }
 }
-const cancelPrintJob = (job: any) => {
-  if (!window.confirm(`Cancelar item da fila?\n\n${job.title || job.productName || 'Impressão'}`)) return
-  void updatePrintJob(job, { status: 'cancelled', cancelledAt: new Date().toISOString() }, 'Item cancelado na fila.')
+const completePrintJob = async (job: any) => {
+  if (!job?.id || queueLoadingId.value) return
+  queueLoadingId.value = String(job.id)
+  try {
+    await completeQueuedPrintJob(String(job.id))
+    notify('Impressão concluída.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível concluir o item da fila.', 'info')
+  } finally {
+    queueLoadingId.value = ''
+  }
+}
+const cancelPrintJob = async (job: any) => {
+  const title = job.title || job.productName || 'Impressão'
+  const status = printJobStatusLabel(String(job.status || ''))
+  if (String(job.status || '') === 'starting') {
+    notify('A impressão está iniciando. Aguarde a resposta do Agent ou cancele pela impressora.', 'info')
+    return
+  }
+  if (!window.confirm(`Confirmar cancelamento de impressão?\n\nItem: ${title}\nStatus: ${status}\n\nEsta ação remove o item da fila. Se a impressão já estiver rodando fisicamente, use também o botão Cancelar da impressora.`)) return
+  if (!job?.id || queueLoadingId.value) return
+  queueLoadingId.value = String(job.id)
+  try {
+    await cancelQueuedPrintJob(String(job.id))
+    notify('Item cancelado na fila.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível cancelar o item da fila.', 'info')
+  } finally {
+    queueLoadingId.value = ''
+  }
 }
 onMounted(() => {
-  loadAgents()
+  seedPrinterStatusCache()
+  loadAgents().then(() => refreshAllPrinterStatuses()).catch(() => {})
   statusRefreshTimer.value = setInterval(() => {
-    const printer = selected.value as any
-    if (
-      printer?.agentId &&
-      printer?.agentPrinterId &&
-      !printerStatusLoadingId.value &&
-      !printerControlLoadingId.value
-    ) {
-      loadPrinterStatus(printer, { silent: true }).catch(() => {})
-    }
+    refreshAllPrinterStatuses().catch(() => {})
   }, 30_000)
+})
+watch(printers, () => {
+  seedPrinterStatusCache()
 })
 onBeforeUnmount(() => {
   if (statusRefreshTimer.value) {
@@ -413,7 +491,7 @@ onBeforeUnmount(() => {
       </div>
       <aside class="detail-card">
         <div class="detail-card__head"><span class="product-thumb" style="width:100px;height:100px"><UiIcon name="printer" :size="65" /></span><div><h3>{{selected.name}} <span class="badge badge--green">{{displayStatus(selected.status)}}</span></h3><p>Código: {{selected.code}}</p><p>Fabricante: {{selected.maker}}</p><p>Modelo: {{selected.model}}</p><p>Nº de Série: {{selected.serial}}</p><p>Conexão: {{selectedAgentStatus}}</p></div></div>
-        <div class="detail-card__body"><div v-if="selectedAgentPrinterId" class="form-card" style="margin-bottom:12px"><h3 style="margin:0 0 10px;font-size:12px">PrintFlow Agent</h3><div class="detail-list"><div class="detail-list__row"><span>Status</span><strong>{{selectedAgentStatus}}</strong></div><div class="detail-list__row"><span>Estado</span><strong>{{selectedLiveStatus?.state || '-'}}</strong></div><div class="detail-list__row"><span>Item atual</span><strong>{{activePrintJob?.title || activePrintJob?.productName || selectedLiveStatus?.file || '-'}}</strong></div><div class="detail-list__row"><span>Fila vinculada</span><strong>{{queuedPrintJobs.length}} item(ns)</strong></div><div class="detail-list__row"><span>Progresso</span><strong>{{selectedLiveStatus?.progress ?? '-'}}%</strong></div><div class="detail-list__row"><span>Bico / mesa</span><strong>{{selectedLiveStatus?.nozzleTemperature ?? '-'}} / {{selectedLiveStatus?.bedTemperature ?? '-'}} C</strong></div><div class="detail-list__row"><span>Ultimo contato</span><strong>{{formatDateTime(selectedLiveStatus?.fetchedAt)}}</strong></div></div><div v-if="selectedLiveStatus?.lastConnectionError" class="summary-box" style="margin-top:10px"><div class="detail-list__row"><span>Erro</span><strong>{{selectedLiveStatus.lastConnectionError}}</strong></div></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="btn" :disabled="printerStatusLoadingId === selectedAgentPrinterId" @click="loadPrinterStatus(selected)">Atualizar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'pause')">Pausar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'resume')">Retomar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'cancel')">Cancelar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'disconnect')">Desconectar</button><button type="button" class="btn btn--danger" :disabled="printerControlLoadingId !== ''" @click="revokeSelectedAgent">Revogar Agent</button></div></div><div v-if="selected.id" class="form-card" style="margin-bottom:12px"><h3 style="margin:0 0 10px;font-size:12px">Fila de impressão</h3><div class="form-grid"><div class="field col-7"><label>Produto</label><select v-model="queueProductId"><option value="">Selecionar produto</option><option v-for="product in products" :key="product.id || product.sku" :value="product.id">{{product.name}}</option></select></div><div class="field col-5"><label>Quantidade</label><input v-model.number="queueQuantity" type="number" min="1"></div><div class="col-12"><button type="button" class="btn btn--primary btn--wide" :disabled="!queueProductId || queueLoadingId !== ''" @click="addProductToQueue">Adicionar na fila</button></div></div><div class="summary-box"><div class="detail-list__row"><span>Em andamento</span><strong>{{activePrintJob?.title || activePrintJob?.productName || '-'}}</strong></div><div class="detail-list__row"><span>Fila</span><strong>{{queuedPrintJobs.length}}</strong></div></div><div v-if="!selectedPrinterJobs.length" style="margin-top:10px;color:var(--muted);font-size:10px">Nenhum item na fila desta impressora.</div><div v-for="job in selectedPrinterJobs" :key="job.id" class="summary-box"><div class="detail-list__row"><span>{{job.title || job.productName}}</span><strong><span class="badge" :class="printJobBadgeClass(job.status)">{{printJobStatusLabel(job.status)}}</span></strong></div><div class="detail-list__row"><span>Receita</span><strong><span class="badge" :class="productValidationBadgeClass(productForJob(job))">{{productValidationLabel(productForJob(job))}}</span></strong></div><div class="detail-list__row"><span>Impressora</span><strong><select :value="job.printerId" style="max-width:170px" @change="changePrintJobPrinter(job, ($event.target as HTMLSelectElement).value)"><option v-for="printer in printers" :key="printer.id || printer.code" :value="printer.id">{{printer.name}}</option></select></strong></div><div class="detail-list__row"><span>Quantidade</span><strong>{{job.quantity}}</strong></div><div v-if="printReadinessError(job)" style="margin-top:8px;color:var(--danger);font-size:10px">{{printReadinessError(job)}}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"><button type="button" class="btn" :disabled="queueLoadingId !== ''" @click="movePrintJob(job, 'up')">Subir</button><button type="button" class="btn" :disabled="queueLoadingId !== ''" @click="movePrintJob(job, 'down')">Descer</button><button v-if="job.status !== 'printing'" type="button" class="btn btn--primary" :disabled="queueLoadingId !== '' || Boolean(printReadinessError(job))" @click="startPrintJob(job)">Iniciar</button><button v-if="job.status === 'printing'" type="button" class="btn" :disabled="queueLoadingId !== ''" @click="completePrintJob(job)">Concluir</button><button type="button" class="btn btn--danger" :disabled="queueLoadingId !== ''" @click="cancelPrintJob(job)">Cancelar</button></div></div></div><div class="stat-strip"><div class="stat-box"><small>Potência</small><strong>{{selected.power}} W</strong></div><div class="stat-box"><small>Consumo Médio</small><strong>{{(selected.power/1000).toFixed(2)}} kWh</strong></div><div class="stat-box"><small>Horas (Mês)</small><strong>82 h</strong></div><div class="stat-box"><small>Custo kWh</small><strong>R$ 0,68</strong></div></div><div class="form-card" style="margin-top:12px"><h3 style="margin:0;font-size:12px">Cálculo de Custo de Energia</h3><p style="color:var(--muted);font-size:9px">Potência (kW) x Tempo (h) x Valor do kWh</p><div class="summary-box"><div class="detail-list__row"><span>Custo estimado mensal</span><strong class="money-positive">{{formatCurrency(energyCost)}}</strong></div></div></div><div class="form-card"><h3 style="margin:0 0 10px;font-size:12px">Informações Adicionais</h3><div class="detail-list"><div class="detail-list__row"><span>Localização</span><strong>Lab Principal</strong></div><div class="detail-list__row"><span>Volume de Impressão</span><strong>{{selected.volume || '220 x 220 x 250 mm'}}</strong></div><div class="detail-list__row"><span>Filamento Padrão</span><strong>{{selected.defaultFilament || 'PLA'}}</strong></div></div></div></div>
+        <div class="detail-card__body"><div v-if="selectedAgentPrinterId" class="form-card" style="margin-bottom:12px"><h3 style="margin:0 0 10px;font-size:12px">PrintFlow Agent</h3><div class="detail-list"><div class="detail-list__row"><span>Status</span><strong>{{selectedAgentStatus}}</strong></div><div class="detail-list__row"><span>Estado</span><strong>{{selectedLiveStatus?.state || '-'}}</strong></div><div class="detail-list__row"><span>Item atual</span><strong>{{activePrintJob?.title || activePrintJob?.productName || selectedLiveStatus?.file || '-'}}</strong></div><div class="detail-list__row"><span>Fila vinculada</span><strong>{{queuedPrintJobs.length}} item(ns)</strong></div><div class="detail-list__row"><span>Progresso</span><strong>{{selectedLiveStatus?.progress ?? '-'}}%</strong></div><div class="detail-list__row"><span>Bico / mesa</span><strong>{{selectedLiveStatus?.nozzleTemperature ?? '-'}} / {{selectedLiveStatus?.bedTemperature ?? '-'}} C</strong></div><div class="detail-list__row"><span>Ultimo contato</span><strong>{{formatDateTime(selectedLiveStatus?.fetchedAt)}}</strong></div></div><div v-if="selectedLiveStatus?.lastConnectionError" class="summary-box" style="margin-top:10px"><div class="detail-list__row"><span>Erro</span><strong>{{selectedLiveStatus.lastConnectionError}}</strong></div></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="btn" :disabled="printerStatusLoadingId === selectedAgentPrinterId" @click="loadPrinterStatus(selected)">Atualizar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'pause')">Pausar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'resume')">Retomar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'cancel')">Cancelar</button><button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'disconnect')">Desconectar</button><button type="button" class="btn btn--danger" :disabled="printerControlLoadingId !== ''" @click="revokeSelectedAgent">Revogar Agent</button></div></div><div v-if="selected.id" class="form-card" style="margin-bottom:12px"><h3 style="margin:0 0 10px;font-size:12px">Fila de impressão</h3><div class="form-grid"><div class="field col-7"><label>Produto</label><select v-model="queueProductId"><option value="">Selecionar produto</option><option v-for="product in products" :key="product.id || product.sku" :value="product.id">{{product.name}}</option></select></div><div class="field col-5"><label>Quantidade</label><input v-model.number="queueQuantity" type="number" min="1"></div><div class="col-12"><button type="button" class="btn btn--primary btn--wide" :disabled="!queueProductId || queueLoadingId !== ''" @click="addProductToQueue">Adicionar na fila</button></div></div><div class="summary-box"><div class="detail-list__row"><span>Em andamento</span><strong>{{activePrintJob?.title || activePrintJob?.productName || '-'}}</strong></div><div class="detail-list__row"><span>Fila</span><strong>{{queuedPrintJobs.length}}</strong></div></div><div v-if="!selectedPrinterJobs.length" style="margin-top:10px;color:var(--muted);font-size:10px">Nenhum item na fila desta impressora.</div><div v-for="job in selectedPrinterJobs" :key="job.id" class="summary-box"><div class="detail-list__row"><span>{{job.title || job.productName}}</span><strong><span class="badge" :class="printJobBadgeClass(job.status)">{{printJobStatusLabel(job.status)}}</span></strong></div><div class="detail-list__row"><span>Receita</span><strong><span class="badge" :class="productValidationBadgeClass(productForJob(job))">{{productValidationLabel(productForJob(job))}}</span></strong></div><div class="detail-list__row"><span>Impressora</span><strong><select :value="job.printerId" style="max-width:170px" @change="changePrintJobPrinter(job, ($event.target as HTMLSelectElement).value)"><option v-for="printer in printers" :key="printer.id || printer.code" :value="printer.id">{{printer.name}}</option></select></strong></div><div class="detail-list__row"><span>Quantidade</span><strong>{{job.quantity}}</strong></div><div v-if="printReadinessError(job)" style="margin-top:8px;color:var(--danger);font-size:10px">{{printReadinessError(job)}}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"><button v-if="job.status === 'queued'" type="button" class="btn" :disabled="queueLoadingId !== ''" @click="movePrintJob(job, 'up')">Subir</button><button v-if="job.status === 'queued'" type="button" class="btn" :disabled="queueLoadingId !== ''" @click="movePrintJob(job, 'down')">Descer</button><button v-if="job.status === 'awaiting_confirmation'" type="button" class="btn btn--primary" :disabled="queueLoadingId !== '' || Boolean(printReadinessError(job))" @click="approvePrintJob(job)">Confirmar pedido</button><button v-if="job.status === 'queued'" type="button" class="btn btn--primary" :disabled="queueLoadingId !== '' || Boolean(printReadinessError(job))" @click="startPrintJob(job)">Iniciar</button><button v-if="job.status === 'printing'" type="button" class="btn" :disabled="queueLoadingId !== ''" @click="completePrintJob(job)">Concluir</button><button type="button" class="btn btn--danger" :disabled="queueLoadingId !== ''" @click="cancelPrintJob(job)">Cancelar</button></div></div></div><div class="stat-strip"><div class="stat-box"><small>Potência</small><strong>{{selected.power}} W</strong></div><div class="stat-box"><small>Consumo Médio</small><strong>{{(selected.power/1000).toFixed(2)}} kWh</strong></div><div class="stat-box"><small>Horas (Mês)</small><strong>82 h</strong></div><div class="stat-box"><small>Custo kWh</small><strong>R$ 0,68</strong></div></div><div class="form-card" style="margin-top:12px"><h3 style="margin:0;font-size:12px">Cálculo de Custo de Energia</h3><p style="color:var(--muted);font-size:9px">Potência (kW) x Tempo (h) x Valor do kWh</p><div class="summary-box"><div class="detail-list__row"><span>Custo estimado mensal</span><strong class="money-positive">{{formatCurrency(energyCost)}}</strong></div></div></div><div class="form-card"><h3 style="margin:0 0 10px;font-size:12px">Informações Adicionais</h3><div class="detail-list"><div class="detail-list__row"><span>Localização</span><strong>Lab Principal</strong></div><div class="detail-list__row"><span>Volume de Impressão</span><strong>{{selected.volume || '220 x 220 x 250 mm'}}</strong></div><div class="detail-list__row"><span>Filamento Padrão</span><strong>{{selected.defaultFilament || 'PLA'}}</strong></div></div></div></div>
       </aside>
     </div>
   </div>

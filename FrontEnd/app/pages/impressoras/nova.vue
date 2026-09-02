@@ -2356,6 +2356,12 @@ watchEffect(() => {
       maintenance:
         toDateInputValue(
           item.maintenance
+        ),
+
+      nozzle:
+        Number(
+          item.nozzleMm ||
+          form.nozzle
         )
     }
   )
@@ -2403,6 +2409,26 @@ const validate = () => {
   ) {
     errors.power =
       'Informe a potência média.'
+  }
+
+  if (
+    !form.x ||
+    !form.y ||
+    !form.z ||
+    form.x <= 0 ||
+    form.y <= 0 ||
+    form.z <= 0
+  ) {
+    errors.volume =
+      'Informe o volume util da impressora.'
+  }
+
+  if (
+    !form.nozzle ||
+    form.nozzle <= 0
+  ) {
+    errors.nozzle =
+      'Informe o diametro do bico.'
   }
 
   if (
@@ -2504,7 +2530,10 @@ const save =
           `${form.x} x ${form.y} x ${form.z} mm`,
 
         defaultFilament:
-          form.filament
+          form.filament,
+
+        nozzleMm:
+          form.nozzle
       }
 
       if (
@@ -3993,7 +4022,14 @@ const cancel = () => {
               >
             </div>
 
-            <div class="field col-2">
+            <div
+              class="field col-2"
+              data-field="volume"
+              :class="{
+                'field--error':
+                  errors.volume
+              }"
+            >
               <label>
                 X
               </label>
@@ -4006,7 +4042,13 @@ const cancel = () => {
               >
             </div>
 
-            <div class="field col-2">
+            <div
+              class="field col-2"
+              :class="{
+                'field--error':
+                  errors.volume
+              }"
+            >
               <label>
                 Y
               </label>
@@ -4019,7 +4061,13 @@ const cancel = () => {
               >
             </div>
 
-            <div class="field col-2">
+            <div
+              class="field col-2"
+              :class="{
+                'field--error':
+                  errors.volume
+              }"
+            >
               <label>
                 Z
               </label>
@@ -4030,9 +4078,27 @@ const cancel = () => {
                 "
                 type="number"
               >
+
+              <small
+                v-if="
+                  errors.volume
+                "
+                class="field__error"
+              >
+                {{
+                  errors.volume
+                }}
+              </small>
             </div>
 
-            <div class="field col-3">
+            <div
+              class="field col-3"
+              data-field="nozzle"
+              :class="{
+                'field--error':
+                  errors.nozzle
+              }"
+            >
               <label>
                 Diâmetro do bico
               </label>
@@ -4044,6 +4110,17 @@ const cancel = () => {
                 type="number"
                 step=".1"
               >
+
+              <small
+                v-if="
+                  errors.nozzle
+                "
+                class="field__error"
+              >
+                {{
+                  errors.nozzle
+                }}
+              </small>
             </div>
 
             <div class="field col-4">

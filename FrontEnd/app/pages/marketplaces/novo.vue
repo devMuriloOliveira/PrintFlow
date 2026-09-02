@@ -2,10 +2,11 @@
 import { computed, nextTick, reactive, ref, watch, watchEffect } from 'vue'
 import { navigateTo } from '#app'
 
-const { apiBase, marketplaces, createItem, updateItem, createMarketplaceIntegration } = useAppData()
+const { apiBase, marketplaces, createItem, updateItem, createMarketplaceIntegration, startMarketplaceOAuth } = useAppData()
 const { notify } = useUi()
 const route = useRoute()
 const saving = ref(false)
+const oauthLoading = ref(false)
 const errors = reactive<Record<string, string>>({})
 const saleValue = ref(100)
 const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
@@ -90,6 +91,19 @@ const copyWebhook = () => {
   notify('URL copiada.')
 }
 
+const connectOfficialOAuth = async () => {
+  if (form.platform === 'custom' || oauthLoading.value) return
+  oauthLoading.value = true
+  try {
+    const url = await startMarketplaceOAuth(form.platform)
+    window.location.href = url
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível iniciar a autorização oficial.', 'info')
+  } finally {
+    oauthLoading.value = false
+  }
+}
+
 const save = async () => {
   if (!validate() || saving.value) return
   saving.value = true
@@ -146,7 +160,7 @@ const cancel = () => {
       <form @submit.prevent="save">
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="store" />1. Serviço de venda</h2><div class="integration-grid">
           <button v-for="platform in platforms" :key="platform.id" class="integration-card" :class="{active:form.platform===platform.id}" type="button" @click="form.platform=platform.id">
-            <span class="market-logo" :style="{background:platform.color,color:platform.id==='mercado_livre'?'#17233c':'#fff'}">{{platform.short}}</span>
+            <MarketplaceLogo :platform="platform.id" :name="platform.name" :short="platform.short" :size="30" />
             <strong>{{platform.name}}</strong>
             <small>{{platform.id==='custom' ? 'Controle manual de taxas' : 'Webhook e token obrigatório'}}</small>
           </button>
@@ -157,7 +171,7 @@ const cancel = () => {
           <div class="field col-3"><label>Status</label><select v-model="form.active"><option :value="true">Ativo</option><option :value="false">Inativo</option></select></div>
         </div></div>
 
-        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais e webhook</h2><div class="form-grid">
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais e webhook</h2><div v-if="form.platform !== 'custom'" class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />Use OAuth oficial quando as credenciais do servidor estiverem configuradas. Os campos manuais continuam disponíveis para teste local.</div><button v-if="form.platform !== 'custom'" type="button" class="btn btn--primary" style="margin-bottom:12px" :disabled="oauthLoading" @click="connectOfficialOAuth">{{ oauthLoading ? 'Abrindo...' : 'Conectar com OAuth oficial' }}</button><div class="form-grid">
           <div v-if="requiresToken" class="field col-4" data-field="accountExternalId" :class="{'field--error':errors.accountExternalId}"><label>ID da conta externa *</label><input v-model="form.accountExternalId" :placeholder="form.platform==='shopee'?'Shop ID':'Seller/User ID'"><small v-if="errors.accountExternalId" class="field__error">{{errors.accountExternalId}}</small></div>
           <div class="field col-4"><label>Nome da conexão</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
           <div v-if="requiresToken" class="field col-4"><label>Expira em</label><input v-model="form.tokenExpiresAt" type="datetime-local"></div>
@@ -189,7 +203,6 @@ const cancel = () => {
 .integration-card{display:flex;min-height:92px;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;text-align:left;cursor:pointer}
 .integration-card.active{border-color:var(--blue);box-shadow:0 0 0 2px #e4f0ff;background:#fbfdff}
 .integration-card small{color:var(--muted);font-size:8px}
-.market-logo{display:grid;width:30px;height:30px;place-items:center;border-radius:7px;font-weight:800;font-size:12px}
 .copy-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
 @media (max-width:900px){.integration-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>

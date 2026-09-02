@@ -2,7 +2,8 @@ import crypto from 'node:crypto'
 
 import {
   query,
-  tenantQuery
+  tenantQuery,
+  withTenant
 } from '../db/pool.js'
 
 import {
@@ -2396,9 +2397,23 @@ const updatePrintJobFromCommand =
   ) => {
     if (
       !agent ||
-      !command ||
-      command.command !==
-        'start_print'
+      !command
+    ) {
+      return
+    }
+
+    const supportedCommands =
+      new Set([
+        'start_print',
+        'printer_pause',
+        'printer_resume',
+        'printer_cancel'
+      ])
+
+    if (
+      !supportedCommands.has(
+        command.command
+      )
     ) {
       return
     }
@@ -2413,7 +2428,18 @@ const updatePrintJobFromCommand =
         ''
       ).trim()
 
-    if (!printJobId) {
+    const agentPrinterId =
+      String(
+        command.payload
+          ?.agentPrinterId ||
+        ''
+      ).trim()
+
+    if (
+      command.command ===
+        'start_print' &&
+      !printJobId
+    ) {
       return
     }
 
@@ -2424,7 +2450,56 @@ const updatePrintJobFromCommand =
         ?.success !==
         false
 
-    if (!commandSucceeded) {
+    if (
+      command.command !==
+      'start_print'
+    ) {
+      if (
+        !agentPrinterId ||
+        !commandSucceeded
+      ) {
+        return
+      }
+
+      const nextStatus =
+        command.command ===
+          'printer_pause'
+          ? 'paused'
+          : command.command ===
+              'printer_resume'
+            ? 'printing'
+            : 'cancelled'
+
+      await tenantQuery(
+        agent.tenant_id,
+        `
+          update print_jobs
+          set
+            status = $3,
+            completed_at =
+              case
+                when $3 = 'cancelled'
+                  then completed_at
+                else completed_at
+              end,
+            cancelled_at =
+              case
+                when $3 = 'cancelled'
+                  then now()
+                else cancelled_at
+              end,
+            updated_at = now()
+          where tenant_id = $1
+            and agent_printer_id = $2
+            and status in ('starting', 'printing', 'paused')
+        `,
+        [
+          agent.tenant_id,
+          agentPrinterId,
+          nextStatus
+        ]
+      )
+
       return
     }
 
@@ -2433,15 +2508,50 @@ const updatePrintJobFromCommand =
       `
         update print_jobs
         set
-          status = 'printing',
-          started_at = coalesce(started_at, now()),
+          status =
+            case
+              when $3::boolean = true
+                then 'printing'
+              when status = 'starting'
+                then 'queued'
+              else status
+            end,
+
+          started_at =
+            case
+              when $3::boolean = true
+                then coalesce(started_at, now())
+              else started_at
+            end,
+
+          notes =
+            case
+              when $3::boolean = false
+                then concat_ws(
+                  E'\\n',
+                  nullif(notes, ''),
+                  concat(
+                    'Falha ao iniciar impressao: ',
+                    left(
+                      coalesce($4::text, 'Erro nao informado pelo Agent.'),
+                      500
+                    )
+                  )
+                )
+              else notes
+            end,
+
           updated_at = now()
         where tenant_id = $1
           and id = $2
       `,
       [
         agent.tenant_id,
-        printJobId
+        printJobId,
+        commandSucceeded,
+        command.result
+          ?.error ||
+          ''
       ]
     )
   }
@@ -3923,6 +4033,9 @@ export const handleAgentPrinterControlCreate =
               p.validation_message,
               pr.volume as printer_volume,
               pr.agent_protocol as printer_protocol,
+              pr.nozzle_mm as printer_nozzle_mm,
+              pr.min_layer_height as printer_min_layer_height,
+              pr.max_layer_height as printer_max_layer_height,
               f.material as filament_material
 
             from print_jobs j
@@ -3994,6 +4107,12 @@ export const handleAgentPrinterControlCreate =
               ...storedPrinter,
               volume:
                 storedJob.printer_volume,
+              nozzle_mm:
+                storedJob.printer_nozzle_mm,
+              min_layer_height:
+                storedJob.printer_min_layer_height,
+              max_layer_height:
+                storedJob.printer_max_layer_height,
               agent_protocol:
                 storedJob.printer_protocol ||
                 storedPrinter.protocol
@@ -4008,7 +4127,7 @@ export const handleAgentPrinterControlCreate =
             job: {
               quantity:
                 Number(
-                  storedJob.quantity ||
+                  storedJob.quantity ??
                   0
                 )
             }
@@ -4084,7 +4203,7 @@ export const handleAgentPrinterControlCreate =
 
         quantity:
           Number(
-            storedJob.quantity ||
+            storedJob.quantity ??
             1
           ),
 
@@ -4262,42 +4381,117 @@ export const handleAgentPrinterControlCreate =
     // CRIAR COMANDO
     // ==================================================
 
-    const commandResult =
-      await tenantQuery(
-        user.tenantId,
-        `
-          insert into agent_commands (
-            tenant_id,
-            agent_id,
-            command,
-            payload,
-            status
-          )
+    let commandResult
 
-          values (
-            $1,
-            $2,
-            $3,
-            $4::jsonb,
-            'pending'
-          )
-
-          returning
-            id,
-            command,
-            status,
-            created_at
-        `,
-        [
+    try {
+      commandResult =
+        await withTenant(
           user.tenantId,
-          agent.id,
-          commandType,
+          async (client) => {
+            if (
+              action ===
+              'start'
+            ) {
+              const reserveResult =
+                await client.query(
+                  `
+                    update print_jobs
+                    set
+                      status = 'starting',
+                      started_at = coalesce(started_at, now()),
+                      updated_at = now()
+                    where tenant_id = $1
+                      and id = $2
+                      and printer_id is not distinct from $3::bigint
+                      and agent_printer_id is not distinct from $4::bigint
+                      and status = 'queued'
+                      and not exists (
+                        select 1
+                        from print_jobs active
+                        where active.tenant_id = print_jobs.tenant_id
+                          and active.id <> print_jobs.id
+                          and active.printer_id is not distinct from print_jobs.printer_id
+                          and active.agent_printer_id is not distinct from print_jobs.agent_printer_id
+                          and active.status in ('starting', 'printing', 'paused')
+                      )
+                    returning id
+                  `,
+                  [
+                    user.tenantId,
+                    printJobId,
+                    storedPrinter.printer_id,
+                    storedPrinter.id
+                  ]
+                )
 
-          JSON.stringify(
-            payload
-          )
-        ]
-      )
+              if (
+                !reserveResult.rowCount
+              ) {
+                const error =
+                  new Error(
+                    'Esta impressora ja possui uma impressao em andamento ou este item nao esta mais na fila.'
+                  )
+
+                error.statusCode =
+                  409
+
+                throw error
+              }
+            }
+
+            return client.query(
+              `
+                insert into agent_commands (
+                  tenant_id,
+                  agent_id,
+                  command,
+                  payload,
+                  status
+                )
+
+                values (
+                  $1,
+                  $2,
+                  $3,
+                  $4::jsonb,
+                  'pending'
+                )
+
+                returning
+                  id,
+                  command,
+                  status,
+                  created_at
+              `,
+              [
+                user.tenantId,
+                agent.id,
+                commandType,
+
+                JSON.stringify(
+                  payload
+                )
+              ]
+            )
+          }
+        )
+    } catch (error) {
+      if (
+        error.statusCode ===
+        409
+      ) {
+        return sendJson(
+          res,
+          409,
+          {
+            error:
+              error.message
+          }
+        )
+      }
+
+      throw error
+    }
 
     const command =
       commandResult
