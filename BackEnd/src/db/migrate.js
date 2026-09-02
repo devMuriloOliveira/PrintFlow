@@ -29,7 +29,9 @@ const tenantTables = [
   'marketplace_integrations',
   'marketplace_product_links',
   'tracked_sales',
-  'marketplace_webhook_events'
+  'marketplace_webhook_events',
+  'operational_notifications',
+  'operational_audit_events'
 ]
 
 // ======================================================
@@ -2345,6 +2347,45 @@ export const migrate =
             timestamptz
             not null
             default now()
+        )
+      `
+    )
+
+    // ==================================================
+    // EVENTOS OPERACIONAIS
+    // ==================================================
+
+    await query(
+      `
+        create table if not exists operational_notifications (
+          id bigserial primary key,
+          tenant_id text not null references tenants(id) on delete cascade,
+          type text not null default 'system',
+          severity text not null default 'info',
+          title text not null,
+          message text not null default '',
+          entity_type text not null default '',
+          entity_id text not null default '',
+          dedupe_key text,
+          read_at timestamptz,
+          created_at timestamptz not null default now(),
+          unique (tenant_id, dedupe_key)
+        )
+      `
+    )
+
+    await query(
+      `
+        create table if not exists operational_audit_events (
+          id bigserial primary key,
+          tenant_id text not null references tenants(id) on delete cascade,
+          action text not null,
+          actor_type text not null default 'system',
+          actor_id text not null default '',
+          entity_type text not null default '',
+          entity_id text not null default '',
+          details jsonb not null default '{}'::jsonb,
+          created_at timestamptz not null default now()
         )
       `
     )

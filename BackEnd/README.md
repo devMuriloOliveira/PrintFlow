@@ -80,6 +80,22 @@ npm.cmd run clean:demo
 npm.cmd test
 ```
 
+## Backup e Restauracao
+
+O backup usa `pg_dump` instalado no computador ou no ambiente de deploy. Ele gera um arquivo no formato PostgreSQL customizado e remove os mais antigos conforme `BACKUP_RETENTION_COUNT`.
+
+```powershell
+npm.cmd run backup
+```
+
+A restauracao e propositalmente manual e exige confirmacao explicita, pois substitui dados no banco informado por `DATABASE_URL`.
+
+```powershell
+npm.cmd run restore -- caminho\\para\\printflow_arquivo.dump --confirm
+```
+
+Defina `BACKUP_DIR` em um diretorio privado e, em producao, envie os arquivos gerados para um storage externo com controle de acesso. O banco continua guardando apenas metadados dos arquivos de impressao; o driver local atual ja permite limpeza por tamanho e retencao.
+
 ## Rotas Principais
 
 Autenticacao:

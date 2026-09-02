@@ -3,6 +3,7 @@ import { env } from './config/env.js'
 import { migrate } from './db/migrate.js'
 import { startPrintFileStorageCleanup } from './jobs/printFileStorageCleanup.js'
 import { startPrintQueueWatchdog } from './jobs/printQueueWatchdog.js'
+import { startAgentHealthWatchdog } from './jobs/agentHealthWatchdog.js'
 import { handleRequest } from './routes/index.js'
 
 process.on('uncaughtException', (error) => {
@@ -21,6 +22,7 @@ try {
   await migrate()
   startPrintFileStorageCleanup()
   startPrintQueueWatchdog()
+  startAgentHealthWatchdog()
 
   server.listen(env.port, '0.0.0.0', () => {
     console.log(`PrintFlow API running at http://localhost:${env.port}`)

@@ -46,6 +46,12 @@ import {
 } from './marketplaceOrders.js'
 
 import {
+  handleOperationalAuditList,
+  handleOperationalNotificationRead,
+  handleOperationalNotificationsList
+} from './operations.js'
+
+import {
   handlePrintJobApprove,
   handlePrintJobCancel,
   handlePrintJobComplete,
@@ -753,6 +759,29 @@ export const handleRequest =
             req
           )
         )
+      }
+
+      // ==================================================
+      // OPERACAO / NOTIFICACOES
+      // ==================================================
+
+      if (
+        req.method === 'GET' &&
+        url.pathname === '/api/operational-notifications'
+      ) {
+        return await handleOperationalNotificationsList(req, res, url)
+      }
+
+      const notificationReadMatch = url.pathname.match(/^\/api\/operational-notifications\/([^/]+)\/read$/)
+      if (req.method === 'POST' && notificationReadMatch) {
+        return await handleOperationalNotificationRead(req, res, notificationReadMatch[1])
+      }
+
+      if (
+        req.method === 'GET' &&
+        url.pathname === '/api/operational-audit-events'
+      ) {
+        return await handleOperationalAuditList(req, res, url)
       }
 
       // ==================================================

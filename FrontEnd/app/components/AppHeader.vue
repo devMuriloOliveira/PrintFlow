@@ -4,6 +4,29 @@ defineEmits<{ menu: [] }>()
 const searchOpen = ref(false)
 const notificationsOpen = ref(false)
 const auth = useAuth()
+const { notifications, unreadCount, refreshNotifications, markNotificationRead } = useOperationalNotifications()
+let notificationTimer: ReturnType<typeof setInterval> | undefined
+
+const notificationDotClass = (severity: string) => ({
+  success: 'dot--green', warning: 'dot--orange', error: 'dot--red', info: 'dot--blue'
+}[severity] || 'dot--blue')
+
+const notificationTime = (value: string) => {
+  const date = new Date(value)
+  const minutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60_000))
+  if (minutes < 1) return 'Agora'
+  if (minutes < 60) return `Ha ${minutes} min`
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+}
+
+onMounted(() => {
+  void refreshNotifications().catch(() => {})
+  notificationTimer = setInterval(() => void refreshNotifications().catch(() => {}), 30_000)
+})
+
+onBeforeUnmount(() => {
+  if (notificationTimer) clearInterval(notificationTimer)
+})
 
 const initials = computed(() =>
   auth.user.value?.name
@@ -53,17 +76,26 @@ const initials = computed(() =>
           @click="notificationsOpen = !notificationsOpen"
         >
           <UiIcon name="bell" :size="21" />
-          <b>3</b>
+          <b v-if="unreadCount">{{ unreadCount > 9 ? '9+' : unreadCount }}</b>
         </button>
 
         <Transition name="drop">
           <div v-if="notificationsOpen" class="dropdown-card notifications">
             <div class="dropdown-card__head">
               <strong>Notificações</strong>
-              <span>3 novas</span>
+              <span>{{ unreadCount ? `${unreadCount} nova${unreadCount === 1 ? '' : 's'}` : 'Em dia' }}</span>
             </div>
 
-            <div class="notification-item">
+            <button v-for="notification in notifications" :key="notification.id" class="notification-item" type="button" @click="markNotificationRead(notification.id)">
+              <i class="dot" :class="notificationDotClass(notification.severity)" />
+              <div>
+                <strong>{{ notification.title }}</strong>
+                <small>{{ notification.message || notificationTime(notification.createdAt) }}</small>
+              </div>
+            </button>
+            <div v-if="!notifications.length" class="notification-item notification-item--empty">Nenhuma notificacao operacional.</div>
+
+            <div v-if="false" class="notification-item">
               <i class="dot dot--orange" />
               <div>
                 <strong>PLA Preto com estoque baixo</strong>
@@ -71,7 +103,7 @@ const initials = computed(() =>
               </div>
             </div>
 
-            <div class="notification-item">
+            <div v-if="false" class="notification-item">
               <i class="dot dot--blue" />
               <div>
                 <strong>Nova meta atingida</strong>
@@ -79,7 +111,7 @@ const initials = computed(() =>
               </div>
             </div>
 
-            <div class="notification-item">
+            <div v-if="false" class="notification-item">
               <i class="dot dot--green" />
               <div>
                 <strong>Pedido #10845 entregue</strong>

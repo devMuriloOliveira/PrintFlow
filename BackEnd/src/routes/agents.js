@@ -26,6 +26,11 @@ import {
   openPrintFileReadStream
 } from '../services/printFileStorage.js'
 
+import {
+  writeAuditEvent,
+  writeOperationalNotification
+} from '../services/operationalEvents.js'
+
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
 // ======================================================
@@ -2935,6 +2940,38 @@ try {
     '[PrintJobs] Falha ao atualizar fila de impressao:',
     error
   )
+}
+
+try {
+  const printJobId = String(command.payload?.printJobId || '')
+  const commandLabel = String(command.command || 'comando').replace(/_/g, ' ')
+  await writeAuditEvent(agent.tenant_id, {
+    action: `agent.command.${command.status}`,
+    actorType: 'agent',
+    actorId: String(agent.id),
+    entityType: printJobId ? 'print_job' : 'agent_command',
+    entityId: printJobId || String(command.id),
+    details: { command: command.command, success: command.status === 'completed' }
+  })
+
+  if (command.status === 'failed') {
+    await writeOperationalNotification(agent.tenant_id, {
+      type: 'agent.command_failed', severity: 'error',
+      title: 'Comando da impressora falhou',
+      message: `${commandLabel} falhou no Agent. ${String(command.result?.error || '').slice(0, 300)}`.trim(),
+      entityType: printJobId ? 'print_job' : 'agent_command', entityId: printJobId || String(command.id),
+      dedupeKey: `command-failed:${command.id}`
+    })
+  } else if (command.command === 'start_print') {
+    await writeOperationalNotification(agent.tenant_id, {
+      type: 'print.started', severity: 'success', title: 'Impressao iniciada',
+      message: 'O Agent confirmou o inicio da impressao.',
+      entityType: 'print_job', entityId: printJobId || String(command.id),
+      dedupeKey: `print-started:${command.id}`
+    })
+  }
+} catch (error) {
+  console.error('[Operations] Falha ao registrar evento operacional:', error)
 }
 
     // ==================================================
