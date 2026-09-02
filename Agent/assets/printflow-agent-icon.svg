@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" role="img" aria-labelledby="title desc">
+  <title id="title">PrintFlow Agent</title>
+  <desc id="desc">Icone oficial do PrintFlow 3D para o Agent local.</desc>
+  <path d="m22 2 13 7.5v15L22 32 9 24.5v-15L22 2Z" fill="#6f4df6" />
+  <path d="m22 17 13-7.5v15L22 32V17Z" fill="#2348d8" />
+  <path d="M22 17 9 9.5v15L22 32V17Z" fill="#42c1f2" />
+  <path d="m22 17 13 7.5L22 42 9 34.5l13-7.5V17Z" fill="#1768f2" opacity=".9" />
+  <path d="m9 24.5 13 7.5v10L9 34.5v-10Z" fill="#62d2ef" />
+</svg>

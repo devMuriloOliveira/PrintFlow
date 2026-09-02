@@ -1,0 +1,33 @@
+{
+  "name": "printflow-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:tray": "powershell -STA -ExecutionPolicy Bypass -File scripts/start-windows-agent-tray.ps1",
+    "dev": "nodemon src/index.js",
+    "test": "node --test",
+    "generate:icon": "node scripts/generate-windows-icon.js",
+    "build:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1",
+    "build:windows:dev-signed": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1 -SignDev",
+    "sign:windows:dev": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows-agent-dev.ps1",
+    "trust:windows:dev-cert": "powershell -ExecutionPolicy Bypass -File scripts/trust-windows-agent-dev-certificate.ps1",
+    "install:agent": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-agent.ps1",
+    "uninstall:agent": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-agent.ps1",
+    "install:startup": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-startup.ps1",
+    "uninstall:startup": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-startup.ps1"
+  },
+  "dependencies": {
+    "axios": "^1.0.0",
+    "dotenv": "^17.0.0",
+    "form-data": "^4.0.6",
+    "mqtt": "^5.15.2",
+    "serialport": "^13.0.0",
+    "uuid": "^11.0.0",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
