@@ -2,11 +2,14 @@
 type Overview = { tenants:number; activeTenants:number; suspendedTenants:number; paymentAttention:number; agents:number; onlineAgents:number; printers:number; connectedPrinters:number }
 type Tenant = { id:string; name:string; email:string; accountStatus:string; billingStatus:string; billingDueAt?:string; users:number; activeUsers:number; agents:number; onlineAgents:number; printers:number }
 type Audit = { id:string; action:string; actorType:string; entityType:string; entityId:string; createdAt:string }
+type PlatformAudit = { id:string; action:string; targetTenantId?:string; targetResource:string; targetResourceId:string; reason:string; createdAt:string }
 const session = useAdminSession()
 const overview = ref<Overview | null>(null)
 const tenants = ref<Tenant[]>([])
 const selected = ref<Tenant | null>(null)
 const audit = ref<Audit[]>([])
+const platformAudit = ref<PlatformAudit[]>([])
+const showingPlatformAudit = ref(false)
 const search = ref('')
 const loading = ref(false)
 
@@ -21,6 +24,11 @@ const load = async () => {
   finally { loading.value = false }
 }
 const openAudit = async (tenant: Tenant) => { selected.value = tenant; audit.value = await session.request<Audit[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenant.id)}/audit?limit=100`) }
+const openPlatformAudit = async () => {
+  selected.value = null
+  platformAudit.value = await session.request<PlatformAudit[]>('/api/platform-admin/audit?limit=100')
+  showingPlatformAudit.value = true
+}
 const updateStatus = async (tenant: Tenant) => {
   const reason = window.prompt('Motivo da alteracao (sera registrado na auditoria):') || ''
   if (reason.trim().length < 8) return
@@ -38,11 +46,12 @@ onMounted(() => void load())
       <article><small>Agents</small><strong>{{ overview.onlineAgents }}/{{ overview.agents }}</strong><span>online agora</span></article>
       <article><small>Impressoras</small><strong>{{ overview.connectedPrinters }}/{{ overview.printers }}</strong><span>conectadas</span></article>
     </section>
-    <section class="surface"><div class="section-head"><div><h2>Empresas clientes</h2><p>Dados de plataforma. Cada acesso e alteracao e auditado.</p></div><input v-model="search" placeholder="Buscar empresa, e-mail ou ID"></div>
+    <section class="surface"><div class="section-head"><div><h2>Empresas clientes</h2><p>Dados de plataforma. Cada acesso e alteracao e auditado.</p></div><div class="section-actions"><button @click="openPlatformAudit">Auditoria administrativa</button><input v-model="search" placeholder="Buscar empresa, e-mail ou ID"></div></div>
       <div class="table-wrap"><table><thead><tr><th>Empresa</th><th>Usuarios</th><th>Agents</th><th>Impressoras</th><th>Conta</th><th>Cobranca</th><th></th></tr></thead><tbody>
         <tr v-for="tenant in filtered" :key="tenant.id"><td><strong>{{ tenant.name || 'Empresa sem nome' }}</strong><small>{{ tenant.email }}</small></td><td>{{ tenant.activeUsers }}/{{ tenant.users }}</td><td>{{ tenant.onlineAgents }}/{{ tenant.agents }}</td><td>{{ tenant.printers }}</td><td><select v-model="tenant.accountStatus" @change="updateStatus(tenant)"><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></td><td><select v-model="tenant.billingStatus" @change="updateStatus(tenant)"><option value="not_configured">Nao configurada</option><option value="active">Em dia</option><option value="pending">Pendente</option><option value="overdue">Atrasada</option><option value="cancelled">Cancelada</option></select></td><td><button @click="openAudit(tenant)">Auditoria</button></td></tr>
       </tbody></table></div>
     </section>
     <section v-if="selected" class="surface audit"><div class="section-head"><div><h2>Auditoria: {{ selected.name }}</h2><p>{{ selected.id }}</p></div><button @click="selected = null">Fechar</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Acao</th><th>Origem</th><th>Recurso</th></tr></thead><tbody><tr v-for="event in audit" :key="event.id"><td>{{ new Date(event.createdAt).toLocaleString('pt-BR') }}</td><td>{{ event.action }}</td><td>{{ event.actorType }}</td><td>{{ event.entityType }} {{ event.entityId }}</td></tr><tr v-if="!audit.length"><td colspan="4">Nenhum evento operacional encontrado.</td></tr></tbody></table></div></section>
+    <section v-if="showingPlatformAudit" class="surface audit"><div class="section-head"><div><h2>Auditoria administrativa</h2><p>Acoes executadas no portal interno.</p></div><button @click="showingPlatformAudit = false">Fechar</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Acao</th><th>Empresa</th><th>Recurso</th><th>Motivo</th></tr></thead><tbody><tr v-for="event in platformAudit" :key="event.id"><td>{{ new Date(event.createdAt).toLocaleString('pt-BR') }}</td><td>{{ event.action }}</td><td>{{ event.targetTenantId || '-' }}</td><td>{{ event.targetResource }} {{ event.targetResourceId }}</td><td>{{ event.reason || '-' }}</td></tr><tr v-if="!platformAudit.length"><td colspan="5">Nenhuma acao administrativa encontrada.</td></tr></tbody></table></div></section>
   </main>
 </template>

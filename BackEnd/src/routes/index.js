@@ -52,6 +52,7 @@ import {
 } from './operations.js'
 
 import {
+  handlePlatformAdminAudit,
   handlePlatformOverview,
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
@@ -778,6 +779,10 @@ export const handleRequest =
 
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenants') {
         return await handlePlatformTenantsList(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit') {
+        return await handlePlatformAdminAudit(req, res, url)
       }
 
       const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)

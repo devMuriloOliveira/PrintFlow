@@ -317,9 +317,24 @@ export const migrate =
     // ADMINISTRACAO DA PLATAFORMA
     // ==================================================
 
+    // Instancias antigas usam UUID para users.id, enquanto instalacoes novas
+    // desta base ainda criam bigint. A FK deve acompanhar o banco existente.
+    const userIdTypeResult = await query(`
+      select format_type(a.atttypid, a.atttypmod) as type
+        from pg_attribute a
+        join pg_class c on c.oid = a.attrelid
+        join pg_namespace n on n.oid = c.relnamespace
+       where c.relname = 'users'
+         and a.attname = 'id'
+         and a.attnum > 0
+         and not a.attisdropped
+       limit 1
+    `)
+    const platformAdminUserIdType = userIdTypeResult.rows[0]?.type === 'uuid' ? 'uuid' : 'bigint'
+
     await query(`
       create table if not exists platform_super_admins (
-        user_id bigint primary key references users(id) on delete cascade,
+        user_id ${platformAdminUserIdType} primary key references users(id) on delete cascade,
         email_hash text not null unique,
         status text not null default 'active',
         granted_at timestamptz not null default now(),
@@ -330,7 +345,7 @@ export const migrate =
     await query(`
       create table if not exists platform_admin_audit_events (
         id bigserial primary key,
-        actor_user_id bigint references users(id) on delete set null,
+        actor_user_id ${platformAdminUserIdType} references users(id) on delete set null,
         action text not null,
         target_tenant_id text references tenants(id) on delete set null,
         target_resource text not null default '',

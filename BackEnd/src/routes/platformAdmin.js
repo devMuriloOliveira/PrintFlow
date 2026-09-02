@@ -4,6 +4,7 @@ import { sendJson } from '../http/response.js'
 import {
   getPlatformOverview,
   isPlatformSuperAdmin,
+  listPlatformAdminAudit,
   listPlatformTenants,
   listTenantOperationalAudit,
   updatePlatformTenantStatus,
@@ -33,6 +34,14 @@ export const handlePlatformTenantsList = async (req, res) => {
   const tenants = await listPlatformTenants()
   await writePlatformAudit(req, user, { action: 'platform.tenants.list' })
   return sendJson(res, 200, tenants)
+}
+
+export const handlePlatformAdminAudit = async (req, res, url) => {
+  const user = await requirePlatformAdmin(req, res)
+  if (!user) return
+  const events = await listPlatformAdminAudit(url.searchParams.get('limit'))
+  await writePlatformAudit(req, user, { action: 'platform.admin_audit.read', targetResource: 'platform_admin_audit' })
+  return sendJson(res, 200, events)
 }
 
 export const handlePlatformTenantAudit = async (req, res, tenantId, url) => {
