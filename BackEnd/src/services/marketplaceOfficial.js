@@ -1,7 +1,11 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { env } from '../config/env.js'
 import { decryptField } from '../security/crypto.js'
 import { normalizeMarketplaceOrder } from './marketplaceQueue.js'
+import {
+  createMarketplaceOAuthAttempt,
+  updateMarketplaceIntegrationTokens
+} from '../repositories/integrationsRepository.js'
 
 const text = (value) => String(value || '').trim()
 const jsonFetch = async (url, options = {}) => {
@@ -14,11 +18,12 @@ const jsonFetch = async (url, options = {}) => {
   return data
 }
 
-export const createMarketplaceOAuthState = (tenantId, platform) =>
+export const createMarketplaceOAuthState = (tenantId, platform, attemptId = '') =>
   {
     const payload = Buffer.from(JSON.stringify({
     tenantId,
     platform,
+    attemptId,
     nonce: randomBytes(16).toString('base64url'),
     createdAt: Date.now()
     })).toString('base64url')
@@ -53,19 +58,27 @@ const redirectUriFor = (platform) => {
   return ''
 }
 
-export const marketplaceAuthorizationUrl = ({ tenantId, platform }) => {
-  const state = createMarketplaceOAuthState(tenantId, platform)
+const pkceChallenge = (verifier) =>
+  createHash('sha256').update(verifier).digest('base64url')
+
+export const marketplaceAuthorizationUrl = async ({ tenantId, platform }) => {
 
   if (platform === 'mercado_livre') {
     if (!env.mercadoLivreClientId || !redirectUriFor(platform)) {
       throw new Error('OAuth Mercado Livre nao configurado no servidor.')
     }
 
+    const codeVerifier = randomBytes(48).toString('base64url')
+    const attempt = await createMarketplaceOAuthAttempt(tenantId, platform, codeVerifier)
+    const state = createMarketplaceOAuthState(tenantId, platform, attempt.id)
+
     const url = new URL('https://auth.mercadolivre.com.br/authorization')
     url.searchParams.set('response_type', 'code')
     url.searchParams.set('client_id', env.mercadoLivreClientId)
     url.searchParams.set('redirect_uri', redirectUriFor(platform))
     url.searchParams.set('state', state)
+    url.searchParams.set('code_challenge', pkceChallenge(codeVerifier))
+    url.searchParams.set('code_challenge_method', 'S256')
     return url.toString()
   }
 
@@ -73,6 +86,9 @@ export const marketplaceAuthorizationUrl = ({ tenantId, platform }) => {
     if (!env.shopeePartnerId || !env.shopeePartnerKey || !redirectUriFor(platform)) {
       throw new Error('OAuth Shopee nao configurado no servidor.')
     }
+
+    const attempt = await createMarketplaceOAuthAttempt(tenantId, platform)
+    const state = createMarketplaceOAuthState(tenantId, platform, attempt.id)
 
     const timestamp = Math.floor(Date.now() / 1000)
     const path = '/api/v2/shop/auth_partner'
@@ -92,6 +108,9 @@ export const marketplaceAuthorizationUrl = ({ tenantId, platform }) => {
       throw new Error('OAuth Amazon nao configurado no servidor.')
     }
 
+    const attempt = await createMarketplaceOAuthAttempt(tenantId, platform)
+    const state = createMarketplaceOAuthState(tenantId, platform, attempt.id)
+
     const url = new URL('https://sellercentral.amazon.com/apps/authorize/consent')
     url.searchParams.set('application_id', env.amazonLwaClientId)
     url.searchParams.set('redirect_uri', redirectUriFor(platform))
@@ -102,7 +121,7 @@ export const marketplaceAuthorizationUrl = ({ tenantId, platform }) => {
   throw new Error('Marketplace nao suportado para OAuth.')
 }
 
-export const exchangeMarketplaceOAuthCode = async ({ platform, code }) => {
+export const exchangeMarketplaceOAuthCode = async ({ platform, code, codeVerifier = '' }) => {
   if (platform === 'mercado_livre') {
     if (!env.mercadoLivreClientId || !env.mercadoLivreClientSecret || !redirectUriFor(platform)) {
       throw new Error('OAuth Mercado Livre nao configurado no servidor.')
@@ -115,6 +134,7 @@ export const exchangeMarketplaceOAuthCode = async ({ platform, code }) => {
       code,
       redirect_uri: redirectUriFor(platform)
     })
+    if (codeVerifier) body.set('code_verifier', codeVerifier)
 
     const token = await jsonFetch('https://api.mercadolibre.com/oauth/token', {
       method: 'POST',
@@ -192,10 +212,49 @@ export const exchangeMarketplaceOAuthCode = async ({ platform, code }) => {
   throw new Error('Marketplace nao suportado para OAuth.')
 }
 
+const tokenExpiresSoon = (value) => {
+  const expiresAt = new Date(value || '').getTime()
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 60_000
+}
+
+const refreshMercadoLivreToken = async (integration) => {
+  const refreshToken = decryptField(integration?.refresh_token)
+  if (!refreshToken) throw new Error('Integracao Mercado Livre sem refresh token. Conecte a conta novamente.')
+  if (!env.mercadoLivreClientId || !env.mercadoLivreClientSecret) {
+    throw new Error('OAuth Mercado Livre nao configurado no servidor.')
+  }
+  const token = await jsonFetch('https://api.mercadolibre.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: env.mercadoLivreClientId,
+      client_secret: env.mercadoLivreClientSecret,
+      refresh_token: refreshToken
+    })
+  })
+  const refreshed = {
+    accessToken: token.access_token || '',
+    refreshToken: token.refresh_token || refreshToken,
+    tokenExpiresAt: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000).toISOString() : ''
+  }
+  if (!refreshed.accessToken) throw new Error('Mercado Livre nao retornou um access token renovado.')
+  await updateMarketplaceIntegrationTokens(integration.tenant_id, integration.id, refreshed)
+  return refreshed.accessToken
+}
+
+const marketplaceAccessToken = async (integration) => {
+  const accessToken = decryptField(integration?.access_token)
+  if (integration?.platform === 'mercado_livre' && tokenExpiresSoon(integration?.token_expires_at)) {
+    return refreshMercadoLivreToken(integration)
+  }
+  if (!accessToken) throw new Error('Integracao sem access token valido.')
+  return accessToken
+}
+
 export const fetchMarketplaceOrderDetails = async (integration, externalOrderId) => {
   const platform = text(integration?.platform)
-  const accessToken = decryptField(integration?.access_token)
-  if (!accessToken) throw new Error('Integracao sem access token valido.')
+  const accessToken = await marketplaceAccessToken(integration)
 
   if (platform === 'mercado_livre') {
     const order = await jsonFetch(`https://api.mercadolibre.com/orders/${encodeURIComponent(externalOrderId)}`, {

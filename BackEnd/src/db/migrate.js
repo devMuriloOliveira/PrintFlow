@@ -27,6 +27,7 @@ const tenantTables = [
   'calculator_simulations',
   'export_history',
   'marketplace_integrations',
+  'marketplace_oauth_attempts',
   'marketplace_product_links',
   'tracked_sales',
   'marketplace_webhook_events',
@@ -299,6 +300,28 @@ export const migrate =
         on users (
           tenant_id
         )
+      `
+    )
+
+    await query(
+      `
+        create table if not exists marketplace_oauth_attempts (
+          id text primary key,
+          tenant_id text not null references tenants(id) on delete cascade,
+          platform text not null,
+          code_verifier text not null default '',
+          expires_at timestamptz not null,
+          consumed_at timestamptz,
+          created_at timestamptz not null default now()
+        )
+      `
+    )
+
+    await query(
+      `
+        create index if not exists marketplace_oauth_attempts_active_idx
+        on marketplace_oauth_attempts (tenant_id, platform, expires_at)
+        where consumed_at is null
       `
     )
 

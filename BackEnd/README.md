@@ -50,6 +50,16 @@ Variaveis principais:
 - `MAX_CONCURRENT_REQUESTS_PER_IP`: limite de concorrencia por IP.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
+- `MERCADO_LIVRE_CLIENT_ID`: App ID privado da aplicacao Mercado Livre.
+- `MERCADO_LIVRE_CLIENT_SECRET`: Secret Key privada da aplicacao Mercado Livre.
+- `MERCADO_LIVRE_REDIRECT_URI`: callback fixa registrada no Mercado Livre.
+- `APP_PUBLIC_URL`: URL publica do FrontEnd usada ao finalizar OAuth.
+
+Para Mercado Livre, cadastre a mesma callback informada em
+`MERCADO_LIVRE_REDIRECT_URI` no painel de desenvolvedores. Em producao ela deve
+apontar para `/api/marketplace-integrations/oauth-callback` da API. O fluxo usa
+PKCE e tentativas OAuth de uso unico; nunca copie tokens, authorization codes ou
+secrets para o repositorio, logs ou canais de conversa.
 
 Nao publique valores reais dessas variaveis.
 

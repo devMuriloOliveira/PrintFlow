@@ -1,9 +1,15 @@
 import { hasDatabase, query, withTenant } from '../db/pool.js'
+import { randomUUID } from 'node:crypto'
 import { blindIndex, decryptField, encryptField } from '../security/crypto.js'
 
 const number = (value) => Number(value || 0)
 const text = (value) => String(value || '').trim()
 const platformName = (platform) => text(platform).toLowerCase().replace(/[^a-z0-9_]/g, '_') || 'custom'
+const marketplaceDefaults = {
+  mercado_livre: { name: 'Mercado Livre', short: 'ML', color: '#ffe600' },
+  shopee: { name: 'Shopee', short: 'SP', color: '#ee4d2d' },
+  amazon: { name: 'Amazon', short: 'AM', color: '#232f3e' }
+}
 const maskSensitiveIdentifier = (value) => {
   const decrypted = decryptField(value)
   if (!decrypted) return ''
@@ -49,10 +55,16 @@ export const createMarketplaceIntegration = async (tenantId, payload) => {
   const result = await withTenant(tenantId, async (client) => {
     let marketplaceId = payload.marketplaceId ? Number(payload.marketplaceId) : null
     if (!marketplaceId && payload.marketplaceName) {
-      const marketplace = await client.query(
-        'select id from marketplaces where tenant_id = $1 and lower(name) = lower($2) order by created_at desc limit 1',
-        [tenantId, text(payload.marketplaceName)]
-      )
+      const defaults = marketplaceDefaults[platform] || { name: text(payload.marketplaceName), short: text(payload.marketplaceName).slice(0, 2).toUpperCase(), color: '#1768f2' }
+      const marketplace = await client.query(`
+        insert into marketplaces (tenant_id, name, short, color, platform, connection_status, active)
+        values ($1, $2, $3, $4, $5, 'connected', true)
+        on conflict (tenant_id, name) do update set
+          platform = excluded.platform,
+          connection_status = 'connected',
+          active = true
+        returning id
+      `, [tenantId, text(payload.marketplaceName || defaults.name), defaults.short, defaults.color, platform])
       marketplaceId = marketplace.rows[0]?.id || null
     }
     const status = payload.accessToken || payload.refreshToken ? 'connected' : 'pending'
@@ -91,6 +103,65 @@ export const createMarketplaceIntegration = async (tenantId, payload) => {
   })
 
   return publicIntegration(result.rows[0])
+}
+
+const oauthAttempts = new Map()
+
+export const createMarketplaceOAuthAttempt = async (tenantId, platform, codeVerifier = '') => {
+  const id = `mko_${randomUUID()}`
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+  if (!hasDatabase) {
+    oauthAttempts.set(id, { tenantId, platform: platformName(platform), codeVerifier, expiresAt })
+    return { id, expiresAt }
+  }
+  await withTenant(tenantId, (client) => client.query(`
+    insert into marketplace_oauth_attempts (id, tenant_id, platform, code_verifier, expires_at)
+    values ($1, $2, $3, $4, $5)
+  `, [id, tenantId, platformName(platform), encryptField(codeVerifier), expiresAt]))
+  return { id, expiresAt }
+}
+
+export const consumeMarketplaceOAuthAttempt = async (tenantId, platform, attemptId) => {
+  if (!attemptId) throw new Error('Tentativa OAuth nao informada.')
+  if (!hasDatabase) {
+    const attempt = oauthAttempts.get(attemptId)
+    oauthAttempts.delete(attemptId)
+    if (!attempt || attempt.tenantId !== tenantId || attempt.platform !== platformName(platform) || attempt.expiresAt <= new Date()) {
+      throw new Error('Tentativa OAuth invalida ou expirada.')
+    }
+    return { codeVerifier: attempt.codeVerifier }
+  }
+  const result = await withTenant(tenantId, (client) => client.query(`
+    update marketplace_oauth_attempts
+    set consumed_at = now()
+    where id = $1
+      and tenant_id = $2
+      and platform = $3
+      and consumed_at is null
+      and expires_at > now()
+    returning code_verifier
+  `, [attemptId, tenantId, platformName(platform)]))
+  if (!result.rows[0]) throw new Error('Tentativa OAuth invalida ou expirada.')
+  return { codeVerifier: decryptField(result.rows[0].code_verifier) }
+}
+
+export const updateMarketplaceIntegrationTokens = async (tenantId, integrationId, token) => {
+  if (!hasDatabase) return
+  await withTenant(tenantId, (client) => client.query(`
+    update marketplace_integrations
+    set access_token = $3,
+        refresh_token = $4,
+        token_expires_at = nullif($5, '')::timestamptz,
+        status = 'connected',
+        updated_at = now()
+    where tenant_id = $1 and id = $2
+  `, [
+    tenantId,
+    integrationId,
+    encryptField(token.accessToken || ''),
+    encryptField(token.refreshToken || ''),
+    text(token.tokenExpiresAt)
+  ]))
 }
 
 export const findIntegrationByExternalAccount = async (platform, accountExternalId) => {
