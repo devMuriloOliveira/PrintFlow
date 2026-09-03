@@ -62,6 +62,7 @@ export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname === '/api/app-data') return 'app_data.read'
   if (pathname === '/api/settings') return 'settings.manage'
   if (pathname === '/api/members') return accessForMethod(method, 'members')
+  if (pathname === '/api/members/invitations') return 'members.manage'
   if (pathname.startsWith('/api/members/')) return 'members.manage'
   if (pathname === '/api/operational-audit-events') return 'audit.read'
   if (pathname.startsWith('/api/operational-notifications')) return 'notifications.read'

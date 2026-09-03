@@ -1,11 +1,15 @@
 <script setup lang="ts">
 const { notify } = useUi()
 const auth = useAuth()
-const { members, loading: membersLoading, refreshMembers, updateMember } = useTenantMembers()
+const { members, loading: membersLoading, refreshMembers, updateMember, createInvitation } = useTenantMembers()
 
 const active = ref('Empresa')
 const savingMemberId = ref('')
+const inviting = ref(false)
+const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string }[]>([])
+const sessionsLoading = ref(false)
 const memberDrafts = reactive<Record<string, { role: string; status: string }>>({})
+const invite = reactive({ email: '', role: 'usuario' as 'admin' | 'financeiro' | 'producao' | 'usuario' })
 const tabs = [
   ['Empresa', 'building', 'Informacoes da empresa'],
   ['Financeiro', 'money', 'Impostos, moedas e contas'],
@@ -66,8 +70,34 @@ const saveMember = async (userId: string) => {
   }
 }
 
+const sendInvitation = async () => {
+  inviting.value = true
+  try {
+    await createInvitation(invite)
+    invite.email = ''
+    invite.role = 'usuario'
+    notify('Convite enviado por e-mail.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel enviar o convite.')
+  } finally {
+    inviting.value = false
+  }
+}
+
+const loadSessions = async () => {
+  sessionsLoading.value = true
+  try { sessions.value = await auth.listSessions() } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel carregar as sessoes.') } finally { sessionsLoading.value = false }
+}
+const endSession = async (sessionId: string) => {
+  try { await auth.revokeSession(sessionId); sessions.value = sessions.value.filter((session) => session.sessionId !== sessionId); notify('Sessao encerrada.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel encerrar a sessao.') }
+}
+const endAllSessions = async () => {
+  try { await auth.revokeAllSessions(); auth.clearSession(); await navigateTo('/login') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel encerrar as sessoes.') }
+}
+
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes') void loadMembers()
+  if (tab === 'Seguranca') void loadSessions()
 })
 
 watch(members, syncMemberDrafts, { immediate: true })
@@ -103,9 +133,10 @@ watch(members, syncMemberDrafts, { immediate: true })
           </div>
 
           <div v-if="!canManageMembers" class="info-note"><UiIcon name="shield" />Somente Owner e Administrador podem gerenciar acessos.</div>
-          <div v-else-if="membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Carregando usuarios</h3><p>Consultando os membros autorizados deste tenant.</p></div></div>
-          <div v-else-if="!members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Nenhum usuario encontrado</h3><p>Convites de novos usuarios serao adicionados em uma proxima etapa segura.</p></div></div>
-          <div v-else class="table-scroll" style="margin-top:16px">
+          <form v-if="canManageMembers" class="filters" style="margin-top:16px" @submit.prevent="sendInvitation"><label class="field field--search"><span>E-mail do novo usuario</span><input v-model="invite.email" type="email" required placeholder="usuario@empresa.com"></label><label class="field"><span>Perfil inicial</span><select v-model="invite.role"><option value="admin">Administrador</option><option value="financeiro">Financeiro</option><option value="producao">Producao</option><option value="usuario">Usuario</option></select></label><button class="btn btn--primary" type="submit" :disabled="inviting">{{ inviting ? 'Enviando...' : 'Convidar usuario' }}</button></form>
+          <div v-if="canManageMembers && membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Carregando usuarios</h3><p>Consultando os membros autorizados deste tenant.</p></div></div>
+          <div v-if="canManageMembers && !membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Nenhum usuario encontrado</h3><p>Use o formulario acima para convidar o primeiro usuario.</p></div></div>
+          <div v-if="canManageMembers && members.length" class="table-scroll" style="margin-top:16px">
             <table class="data-table">
               <thead><tr><th>Usuario</th><th>Perfil</th><th>Status</th><th>Acao</th></tr></thead>
               <tbody>
@@ -118,6 +149,13 @@ watch(members, syncMemberDrafts, { immediate: true })
               </tbody>
             </table>
           </div>
+        </div>
+
+        <div v-else-if="active === 'Seguranca'">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Sessoes ativas</h2><p>Encerre acessos que voce nao reconhece.</p></div><button class="btn" :disabled="sessionsLoading" @click="loadSessions">Atualizar</button></div>
+          <div v-if="sessionsLoading" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Carregando sessoes</h3></div></div>
+          <div v-else-if="!sessions.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Nenhuma sessao ativa</h3><p>Entre novamente para continuar usando o PrintFlow.</p></div></div>
+          <div v-else><div class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Inicio</th><th>Expira em</th><th>Acao</th></tr></thead><tbody><tr v-for="session in sessions" :key="session.sessionId"><td>{{ new Date(session.createdAt).toLocaleString('pt-BR') }}</td><td>{{ new Date(session.expiresAt).toLocaleString('pt-BR') }}</td><td><button class="btn btn--danger" @click="endSession(session.sessionId)">Encerrar</button></td></tr></tbody></table></div><button class="btn btn--danger" style="margin-top:16px" @click="endAllSessions">Encerrar todas as sessoes</button></div>
         </div>
 
         <div v-else class="empty-state"><div><div class="empty-state__icon"><UiIcon :name="tabs.find((item) => item[0] === active)?.[1] || 'settings'" :size="29" /></div><h3>{{ active }}</h3><p>Este modulo visual esta preparado para receber as configuracoes correspondentes quando conectado a API.</p><button class="btn btn--primary" @click="notify('Preferencias atualizadas')">Salvar preferencias</button></div></div>

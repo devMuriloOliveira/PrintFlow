@@ -41,5 +41,8 @@ export const useTenantMembers = () => {
     return member
   }
 
-  return { members, loading, refreshMembers, updateMember }
+  const createInvitation = async (payload: { email: string; role: TenantMember['role'] }) =>
+    $fetch(`${apiBase}/api/members/invitations`, { method: 'POST', headers: auth.authHeaders.value, body: payload })
+
+  return { members, loading, refreshMembers, updateMember, createInvitation }
 }

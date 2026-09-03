@@ -14,6 +14,8 @@ type AuthResponse = {
   token?: string
 }
 
+export type AuthSession = { sessionId: string; createdAt: string; expiresAt: string }
+
 const AUTH_TOKEN_KEY = 'printflow-auth-token'
 const AUTH_REFRESH_TOKEN_KEY = 'printflow-refresh-token'
 const AUTH_USER_KEY = 'printflow-auth-user'
@@ -167,6 +169,16 @@ export const useAuth = () => {
     return session.user
   }
 
+  const acceptInvitation = async (payload: { token: string; name: string; password: string }) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/invitations/accept'), { method: 'POST', body: payload })
+    setSession(session)
+    return session.user
+  }
+
+  const listSessions = () => $fetch<AuthSession[]>(apiUrl('/api/auth/sessions'), { headers: authHeaders.value })
+  const revokeSession = (sessionId: string) => $fetch(apiUrl(`/api/auth/sessions/${encodeURIComponent(sessionId)}`), { method: 'DELETE', headers: authHeaders.value })
+  const revokeAllSessions = () => $fetch(apiUrl('/api/auth/sessions/revoke-all'), { method: 'POST', headers: authHeaders.value })
+
   const logout = async () => {
     const currentRefreshToken = refreshToken.value
     if (currentRefreshToken) {
@@ -193,10 +205,15 @@ export const useAuth = () => {
     ready,
     isAuthenticated: computed(() => Boolean(token.value && user.value && !sessionIsExpired())),
     authHeaders,
+    clearSession,
     restore,
     refreshSession,
     login,
     register,
+    acceptInvitation,
+    listSessions,
+    revokeSession,
+    revokeAllSessions,
     logout
   }
 }

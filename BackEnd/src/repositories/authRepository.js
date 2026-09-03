@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
 import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, validatePasswordPolicy, verifyPassword } from '../auth/password.js'
-import { hasDatabase, query, tenantQuery } from '../db/pool.js'
+import { hasDatabase, query, tenantQuery, withTenant } from '../db/pool.js'
 import { blindIndex, blindIndexesForLookup, decryptField, encryptField } from '../security/crypto.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 
@@ -308,4 +308,36 @@ export const loginUser = async ({ email, password }) => {
   }
 
   return publicUser({ ...user, role: membership.role })
+}
+
+export const listUserSessions = async (user) => {
+  if (!hasDatabase) return []
+  const result = await tenantQuery(user.tenantId, `
+    select session_id, min(created_at) as created_at, max(expires_at) as expires_at
+      from refresh_tokens
+     where tenant_id = $1 and user_id = $2 and revoked_at is null and expires_at > now()
+     group by session_id
+     order by max(created_at) desc
+  `, [user.tenantId, String(user.id)])
+  return result.rows.map((row) => ({ sessionId: row.session_id, createdAt: row.created_at, expiresAt: row.expires_at }))
+}
+
+export const revokeUserSession = async (user, sessionId) => {
+  if (!hasDatabase) throw new Error('Sessoes requerem DATABASE_URL.')
+  const result = await tenantQuery(user.tenantId, `
+    update refresh_tokens set revoked_at = coalesce(revoked_at, now())
+     where tenant_id = $1 and user_id = $2 and session_id = $3 and revoked_at is null
+     returning session_id
+  `, [user.tenantId, String(user.id), String(sessionId || '')])
+  if (!result.rowCount) throw new Error('Sessao nao encontrada')
+  await writeAuditEvent(user.tenantId, { action: 'session.revoked', actorType: 'user', actorId: user.id, entityType: 'session', entityId: sessionId })
+}
+
+export const revokeAllUserSessions = async (user) => {
+  if (!hasDatabase) throw new Error('Sessoes requerem DATABASE_URL.')
+  await withTenant(user.tenantId, async (client) => {
+    await client.query(`update refresh_tokens set revoked_at = coalesce(revoked_at, now()) where tenant_id = $1 and user_id = $2 and revoked_at is null`, [user.tenantId, String(user.id)])
+    await client.query(`update users set token_version = token_version + 1, updated_at = now() where id::text = $1`, [String(user.id)])
+    await writeAuditEvent(user.tenantId, { action: 'sessions.revoked_all', actorType: 'user', actorId: user.id, entityType: 'session', entityId: String(user.id) }, client)
+  })
 }

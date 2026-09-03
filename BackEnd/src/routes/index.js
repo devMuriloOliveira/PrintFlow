@@ -8,6 +8,10 @@ import {
 
 import {
   handleLogin,
+  handleInvitationAccept,
+  handleSessionRevoke,
+  handleSessionsList,
+  handleSessionsRevokeAll,
   handleLogout,
   handleMe,
   handleRefresh,
@@ -57,11 +61,15 @@ import {
 
 import {
   handleMemberUpdate,
-  handleMembersList
+  handleMembersList,
+  handleInvitationCreate
 } from './members.js'
 
 import {
   handlePlatformAdminAudit,
+  handleDataAccessRequest,
+  handleDataAccessVerify,
+  handlePlatformUserAudit,
   handlePlatformOverview,
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
@@ -246,7 +254,7 @@ export const handleRequest =
 
       if (
         req.method ===
-          'POST' &&
+        'POST' &&
         url.pathname ===
           '/api/auth/logout'
       ) {
@@ -466,6 +474,15 @@ export const handleRequest =
         )
       }
 
+      if (req.method === 'POST' && url.pathname === '/api/auth/invitations/accept') {
+        return await handleInvitationAccept(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/auth/sessions') return await handleSessionsList(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/sessions/revoke-all') return await handleSessionsRevokeAll(req, res)
+      const authSessionMatch = url.pathname.match(/^\/api\/auth\/sessions\/([^/]+)$/)
+      if (req.method === 'DELETE' && authSessionMatch) return await handleSessionRevoke(req, res, authSessionMatch[1])
+
       if (isProtectedApi && !env.allowDemoTenant) {
         const user = await getAuthUser(req)
         if (!canAccessRequest(user, req.method, url.pathname)) {
@@ -479,6 +496,10 @@ export const handleRequest =
 
       if (req.method === 'GET' && url.pathname === '/api/members') {
         return await handleMembersList(req, res)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
+        return await handleInvitationCreate(req, res)
       }
 
       const memberUpdateMatch = url.pathname.match(/^\/api\/members\/([^/]+)$/)
@@ -810,10 +831,19 @@ export const handleRequest =
         return await handlePlatformAdminAudit(req, res, url)
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/user-audit') {
+        return await handlePlatformUserAudit(req, res, url)
+      }
+
       const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)
       if (req.method === 'GET' && platformTenantAuditMatch) {
         return await handlePlatformTenantAudit(req, res, platformTenantAuditMatch[1], url)
       }
+
+      const platformDataAccessMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/data-access-requests$/)
+      if (req.method === 'POST' && platformDataAccessMatch) return await handleDataAccessRequest(req, res, platformDataAccessMatch[1])
+      const platformDataAccessVerifyMatch = url.pathname.match(/^\/api\/platform-admin\/data-access-requests\/([^/]+)\/verify$/)
+      if (req.method === 'POST' && platformDataAccessVerifyMatch) return await handleDataAccessVerify(req, res, platformDataAccessVerifyMatch[1])
 
       const platformTenantStatusMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/status$/)
       if (req.method === 'POST' && platformTenantStatusMatch) {

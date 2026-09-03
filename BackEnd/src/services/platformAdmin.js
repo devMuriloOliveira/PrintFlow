@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
 import { query, withTenant } from '../db/pool.js'
 import { blindIndexesForLookup, decryptField } from '../security/crypto.js'
@@ -48,6 +48,7 @@ const tenantRow = (row) => ({
   id: row.id,
   name: decryptField(row.name),
   email: decryptField(row.email),
+  cnpj: maskedDocument(decryptField(row.document)),
   accountStatus: row.account_status,
   billingStatus: row.billing_status,
   billingDueAt: row.billing_due_at,
@@ -80,7 +81,7 @@ export const getPlatformOverview = async () => {
 
 export const listPlatformTenants = async () => {
   const result = await query(`
-    select t.id, t.name, t.email, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
+    select t.id, t.name, t.email, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
       count(distinct u.id) as users,
       count(distinct u.id) filter (where u.status = 'active') as active_users,
       count(distinct a.id) as agents,
@@ -90,7 +91,7 @@ export const listPlatformTenants = async () => {
     left join users u on u.tenant_id = t.id
     left join agents a on a.tenant_id = t.id
     left join agent_printers p on p.tenant_id = t.id
-    group by t.id, t.name, t.email, t.account_status, t.billing_status, t.billing_due_at, t.created_at
+    group by t.id, t.name, t.email, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at
     order by t.created_at desc
   `)
   return result.rows.map(tenantRow)
@@ -110,6 +111,38 @@ export const listTenantOperationalAudit = async (tenantId, limit = 100) => withT
   }))
 })
 
+const normalizedDocument = (value) => String(value || '').replace(/\D/g, '')
+const maskedDocument = (value) => {
+  const digits = normalizedDocument(value)
+  return digits.length === 14 ? `${digits.slice(0, 2)}.***.***/${digits.slice(8, 12)}-${digits.slice(12)}` : 'CNPJ nao informado'
+}
+
+export const createDataAccessRequest = async (user, tenantId, reason, scope = 'user_audit') => {
+  const cleanReason = text(reason, 500)
+  if (cleanReason.length < 12) throw new Error('Informe um motivo detalhado para a solicitacao.')
+  const tenant = await query('select id, name, document from tenants where id = $1 limit 1', [tenantId])
+  if (!tenant.rowCount) throw new Error('Empresa nao encontrada.')
+  const row = tenant.rows[0]
+  const id = `access_${randomBytes(16).toString('hex')}`
+  await query(`insert into platform_data_access_requests (id, tenant_id, requested_by, reason, scope) values ($1, $2, $3, $4, $5)`, [id, tenantId, user.id, cleanReason, scope])
+  return { id, tenantId, companyName: decryptField(row.name), cnpj: maskedDocument(decryptField(row.document)), status: 'pending' }
+}
+
+export const verifyDataAccessRequest = async (user, requestId, document) => {
+  const result = await query(`select r.id, r.tenant_id, r.status, t.document from platform_data_access_requests r join tenants t on t.id = r.tenant_id where r.id = $1 and r.requested_by = $2 limit 1`, [requestId, user.id])
+  const request = result.rows[0]
+  if (!request || request.status !== 'pending') throw new Error('Solicitacao nao encontrada ou indisponivel.')
+  const matches = normalizedDocument(document) && normalizedDocument(document) === normalizedDocument(decryptField(request.document))
+  if (!matches) { await query(`update platform_data_access_requests set status = 'rejected', updated_at = now() where id = $1`, [requestId]); throw new Error('CNPJ nao confere com o cadastro da empresa.') }
+  await query(`update platform_data_access_requests set status = 'approved', verified_at = now(), expires_at = now() + interval '30 minutes', updated_at = now() where id = $1`, [requestId])
+  return { id: requestId, tenantId: request.tenant_id, status: 'approved', expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString() }
+}
+
+export const requireApprovedDataAccess = async (user, requestId, tenantId) => {
+  const result = await query(`select id from platform_data_access_requests where id = $1 and tenant_id = $2 and requested_by = $3 and status = 'approved' and expires_at > now() limit 1`, [requestId, tenantId, user.id])
+  if (!result.rowCount) throw new Error('Solicitacao de acesso nao aprovada ou expirada.')
+}
+
 export const listPlatformAdminAudit = async (limit = 100) => {
   const result = await query(`
     select id, action, target_tenant_id, target_resource, target_resource_id, reason, details, created_at
@@ -121,6 +154,28 @@ export const listPlatformAdminAudit = async (limit = 100) => {
     id: String(row.id), action: row.action, targetTenantId: row.target_tenant_id,
     targetResource: row.target_resource, targetResourceId: row.target_resource_id,
     reason: row.reason, details: row.details || {}, createdAt: row.created_at
+  }))
+}
+
+export const listPlatformUserAudit = async ({ tenantId = '', action = '', from = '', to = '', limit = 100 } = {}) => {
+  const clauses = []
+  const params = []
+  if (tenantId) { params.push(String(tenantId)); clauses.push(`e.tenant_id = $${params.length}`) }
+  if (action) { params.push(`${String(action).slice(0, 120)}%`); clauses.push(`e.action like $${params.length}`) }
+  if (from) { params.push(String(from)); clauses.push(`e.created_at >= $${params.length}::timestamptz`) }
+  if (to) { params.push(String(to)); clauses.push(`e.created_at < ($${params.length}::date + interval '1 day')`) }
+  params.push(Math.min(500, Math.max(1, Number(limit) || 100)))
+  const result = await query(`
+    select e.id, e.tenant_id, e.action, e.actor_type, e.actor_id, e.entity_type, e.entity_id, e.details, e.created_at, u.name as actor_name
+      from operational_audit_events e
+      left join users u on u.id::text = e.actor_id and u.tenant_id = e.tenant_id
+     ${clauses.length ? `where ${clauses.join(' and ')}` : ''}
+     order by e.created_at desc limit $${params.length}
+  `, params)
+  return result.rows.map((row) => ({
+    id: String(row.id), tenantId: row.tenant_id, action: row.action, actorType: row.actor_type,
+    actorId: row.actor_id, actorName: decryptField(row.actor_name), entityType: row.entity_type,
+    entityId: row.entity_id, details: row.details || {}, createdAt: row.created_at
   }))
 }
 

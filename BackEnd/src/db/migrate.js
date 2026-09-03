@@ -33,7 +33,8 @@ const tenantTables = [
   'marketplace_webhook_events',
   'operational_notifications',
   'operational_audit_events',
-  'tenant_memberships'
+  'tenant_memberships',
+  'tenant_invitations'
 ]
 
 // ======================================================
@@ -382,6 +383,25 @@ export const migrate =
     await query(`create index if not exists tenant_memberships_user_id_idx on tenant_memberships (user_id)`)
 
     await query(`
+      create table if not exists tenant_invitations (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        email text not null,
+        email_hash text not null,
+        role text not null check (role in ('admin', 'financeiro', 'producao', 'usuario')),
+        token_hash text not null unique,
+        invited_by ${platformAdminUserIdType} not null references users(id) on delete restrict,
+        expires_at timestamptz not null,
+        accepted_at timestamptz,
+        revoked_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists tenant_invitations_tenant_id_idx on tenant_invitations (tenant_id)`)
+    await query(`create index if not exists tenant_invitations_email_hash_idx on tenant_invitations (email_hash)`)
+
+    await query(`
       create table if not exists platform_super_admins (
         user_id ${platformAdminUserIdType} primary key references users(id) on delete cascade,
         email_hash text not null unique,
@@ -409,6 +429,22 @@ export const migrate =
 
     await query(`create index if not exists platform_admin_audit_events_created_at_idx on platform_admin_audit_events (created_at desc)`)
     await query(`create index if not exists platform_admin_audit_events_target_tenant_idx on platform_admin_audit_events (target_tenant_id, created_at desc)`)
+
+    await query(`
+      create table if not exists platform_data_access_requests (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        requested_by ${platformAdminUserIdType} not null references users(id) on delete restrict,
+        reason text not null,
+        scope text not null default 'user_audit',
+        status text not null default 'pending' check (status in ('pending', 'approved', 'expired', 'rejected')),
+        verified_at timestamptz,
+        expires_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists platform_data_access_requests_tenant_idx on platform_data_access_requests (tenant_id, created_at desc)`)
 
     // ==================================================
     // REFRESH TOKENS
