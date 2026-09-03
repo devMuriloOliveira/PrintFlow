@@ -141,8 +141,13 @@ const validate = () => {
   if (!form.sku.trim()) errors.sku = 'Informe o SKU.'
   if (!form.price || form.price <= 0) errors.price = 'Informe o preco de venda.'
   if (form.weight < 0) errors.weight = 'Informe um peso valido.'
-  if (!form.dimensions.trim()) errors.dimensions = 'Informe as dimensoes reais em mm.'
-  else if (!parseDimensions(form.dimensions)) errors.dimensions = 'Use dimensoes no formato 120 x 80 x 45 mm.'
+  // Um arquivo novo e analisado pelo servidor logo apos o primeiro salvamento.
+  // Nao bloquear esse fluxo antes que a extracao possa preencher as dimensoes.
+  if (!form.dimensions.trim()) {
+    if (!selectedPrintFile.value) errors.dimensions = 'Informe as dimensoes reais em mm.'
+  } else if (!parseDimensions(form.dimensions)) {
+    errors.dimensions = 'Use dimensoes no formato 120 x 80 x 45 mm.'
+  }
   if (!form.printFileName.trim()) errors.printFileName = 'Informe o arquivo de impressão.'
   if (!form.printFileFormat.trim()) errors.printFileFormat = 'Informe o formato do arquivo.'
   if (form.printFileFormat && !allowedPrintFileFormats.has(form.printFileFormat.toLowerCase())) errors.printFileFormat = 'Use 3MF, G-code ou BGCODE.'
@@ -174,6 +179,15 @@ const save = async () => {
       const upload = await uploadProductPrintFile(productId, selectedPrintFile.value)
       if (upload.product) hydrateForm(upload.product)
       selectedPrintFile.value = null
+    }
+    if (selectedPrintFile.value) {
+      // O upload nao foi concluido; mantenha o arquivo selecionado para nova tentativa.
+      return
+    }
+    if (!form.dimensions.trim()) {
+      notify('Arquivo enviado, mas nao foi possivel obter as dimensoes automaticamente. Informe-as para revisar a receita.', 'info')
+      if (!isEditing.value && productId) await router.replace(`/produtos/novo?id=${productId}`)
+      return
     }
     notify(isEditing.value ? 'Produto atualizado com sucesso' : 'Produto salvo com sucesso')
     router.push('/produtos')
