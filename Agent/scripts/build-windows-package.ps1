@@ -2,7 +2,7 @@ param(
   [string]$OutputDir = "dist",
   [string]$PackageName = "PrintFlow-Agent-Windows",
   [string]$InstallerName = "PrintFlow-Agent-Setup",
-  [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
+  [string]$ApiUrl = "http://localhost:3333",
   [switch]$SignDev,
   [switch]$SkipInstall
 )

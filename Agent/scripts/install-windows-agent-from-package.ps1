@@ -1,5 +1,5 @@
 param(
-  [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com"
+  [string]$ApiUrl = "http://localhost:3333"
 )
 
 $ErrorActionPreference = "Stop"
