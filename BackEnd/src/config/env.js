@@ -77,6 +77,8 @@ export const env = {
   agentOfflineAfterMs: Number(process.env.AGENT_OFFLINE_AFTER_MS || 90 * 1000),
   agentHealthWatchdogIntervalMs: Number(process.env.AGENT_HEALTH_WATCHDOG_INTERVAL_MS || 30 * 1000),
   appPublicUrl: process.env.APP_PUBLIC_URL || '',
+  corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',').map((value) => value.trim().replace(/\/$/, '')).filter(Boolean),
   resendApiKey: process.env.RESEND_API_KEY || '',
   emailFrom: process.env.EMAIL_FROM || '',
   apiPublicUrl: process.env.API_PUBLIC_URL || '',

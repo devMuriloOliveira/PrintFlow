@@ -1,6 +1,4 @@
-import {
-  sendJson
-} from '../http/response.js'
+import { configureCors, sendJson } from '../http/response.js'
 
 import {
   enterRequest
@@ -121,6 +119,10 @@ export const handleRequest =
 
           `http://${req.headers.host}`
         )
+
+      if (!configureCors(req, res)) {
+        return sendJson(res, 403, { error: 'Origem nao autorizada' })
+      }
 
       // ==================================================
       // CORS / OPTIONS
@@ -472,6 +474,7 @@ export const handleRequest =
               'Login necessario'
           }
         )
+
       }
 
       if (req.method === 'POST' && url.pathname === '/api/auth/invitations/accept') {

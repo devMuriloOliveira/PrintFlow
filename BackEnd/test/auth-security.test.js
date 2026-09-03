@@ -10,6 +10,7 @@ process.env.WEBHOOK_SHARED_SECRET = 'auth-security-webhook-secret-32-characters'
 process.env.PLATFORM_SUPER_ADMIN_EMAILS = 'platform-admin@example.com'
 process.env.RATE_LIMIT_AUTH_MAX_REQUESTS = '2'
 process.env.RATE_LIMIT_WINDOW_MS = '60000'
+process.env.CORS_ALLOWED_ORIGINS = 'https://app.example.com,https://admin.example.com'
 process.env.DATABASE_URL = ''
 
 const { hashPassword, validatePasswordPolicy, verifyPassword } = await import('../src/auth/password.js')
@@ -47,13 +48,16 @@ class MockResponse extends EventEmitter {
   }
 }
 
-const request = ({ method = 'GET', path, body, ip, token }) => new Promise((resolve) => {
+const request = ({ method = 'GET', path, body, ip, token, origin }) => new Promise((resolve) => {
   const req = new MockRequest({
     method,
     path,
     body,
     ip,
-    headers: token ? { authorization: `Bearer ${token}` } : {}
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(origin ? { origin } : {})
+    }
   })
   const res = new MockResponse()
   res.once('finish', () => resolve({ status: res.statusCode, body: res.body, headers: res.headers }))
@@ -181,6 +185,25 @@ test('logout revoga refresh token e invalida access token da sessao', async () =
     ip: '127.0.2.14'
   })
   assert.equal(refreshAfterLogout.status, 400)
+})
+
+test('CORS permite somente as origens configuradas', async () => {
+  const allowed = await request({
+    method: 'OPTIONS',
+    path: '/api/auth/login',
+    origin: 'https://app.example.com'
+  })
+  assert.equal(allowed.status, 204)
+  assert.equal(allowed.headers['Access-Control-Allow-Origin'], 'https://app.example.com')
+  assert.match(allowed.headers['Access-Control-Allow-Methods'], /PATCH/)
+
+  const blocked = await request({
+    method: 'OPTIONS',
+    path: '/api/auth/login',
+    origin: 'https://untrusted.example.com'
+  })
+  assert.equal(blocked.status, 403)
+  assert.equal(blocked.headers['Access-Control-Allow-Origin'], undefined)
 })
 
 test('rota de producao rejeita sessao de financeiro no backend', async () => {
