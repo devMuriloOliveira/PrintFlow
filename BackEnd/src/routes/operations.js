@@ -2,7 +2,7 @@ import { getAuthUser } from './auth.js'
 import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { tenantQuery } from '../db/pool.js'
-import { writeAuditEvent } from '../services/operationalEvents.js'
+import { describeAuditEvent, writeAuditEvent } from '../services/operationalEvents.js'
 
 const limitFromUrl = (url) => Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 25)))
 
@@ -59,8 +59,12 @@ export const handleOperationalAuditList = async (req, res, url) => {
      limit $2
   `, [user.tenantId, limitFromUrl(url)])
 
-  return sendJson(res, 200, result.rows.map((row) => ({
-    id: String(row.id), action: row.action, actorType: row.actor_type, actorId: row.actor_id,
-    entityType: row.entity_type, entityId: row.entity_id, details: row.details || {}, createdAt: row.created_at
-  })))
+  return sendJson(res, 200, result.rows.map((row) => {
+    const description = describeAuditEvent(row)
+    return {
+      id: String(row.id), action: row.action, actorType: row.actor_type, actorId: row.actor_id,
+      entityType: row.entity_type, entityId: row.entity_id, details: row.details || {},
+      summary: description.summary, context: description.context, createdAt: row.created_at
+    }
+  }))
 }

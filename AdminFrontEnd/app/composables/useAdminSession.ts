@@ -27,5 +27,20 @@ export const useAdminSession = () => {
     await $fetch(`${apiBase}/api/platform-admin/overview`, { headers: headers.value }).catch((error) => { clear(); throw error })
   }
   const request = <T>(path: string, options: Record<string, unknown> = {}) => $fetch<T>(`${apiBase}${path}`, { ...options, headers: { ...headers.value, ...(options.headers as Record<string, string> || {}) } })
-  return { token, user, headers, restore, login, clear, request }
+  const download = async (path: string, fallbackFilename: string) => {
+    const response = await fetch(`${apiBase}${path}`, { headers: headers.value })
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.error || 'Nao foi possivel gerar o relatorio.')
+    }
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    const disposition = response.headers.get('content-disposition') || ''
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || fallbackFilename
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+  return { token, user, headers, restore, login, clear, request, download }
 }

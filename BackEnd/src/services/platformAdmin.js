@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
 import { query, withTenant } from '../db/pool.js'
 import { blindIndexesForLookup, decryptField } from '../security/crypto.js'
+import { describeAuditEvent } from './operationalEvents.js'
 
 const text = (value, max = 500) => String(value || '').trim().slice(0, max)
 const configuredEmails = () => env.platformSuperAdminEmails
@@ -47,7 +48,6 @@ export const writePlatformAudit = async (req, user, event = {}) => {
 const tenantRow = (row) => ({
   id: row.id,
   name: decryptField(row.name),
-  email: decryptField(row.email),
   cnpj: maskedDocument(decryptField(row.document)),
   accountStatus: row.account_status,
   billingStatus: row.billing_status,
@@ -81,7 +81,7 @@ export const getPlatformOverview = async () => {
 
 export const listPlatformTenants = async () => {
   const result = await query(`
-    select t.id, t.name, t.email, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
+    select t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
       count(distinct u.id) as users,
       count(distinct u.id) filter (where u.status = 'active') as active_users,
       count(distinct a.id) as agents,
@@ -91,7 +91,7 @@ export const listPlatformTenants = async () => {
     left join users u on u.tenant_id = t.id
     left join agents a on a.tenant_id = t.id
     left join agent_printers p on p.tenant_id = t.id
-    group by t.id, t.name, t.email, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at
+    group by t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at
     order by t.created_at desc
   `)
   return result.rows.map(tenantRow)
@@ -105,10 +105,14 @@ export const listTenantOperationalAudit = async (tenantId, limit = 100) => withT
      order by created_at desc
      limit $2
   `, [tenantId, Math.min(200, Math.max(1, Number(limit) || 100))])
-  return result.rows.map((row) => ({
-    id: String(row.id), action: row.action, actorType: row.actor_type, actorId: row.actor_id,
-    entityType: row.entity_type, entityId: row.entity_id, details: row.details || {}, createdAt: row.created_at
-  }))
+  return result.rows.map((row) => {
+    const description = describeAuditEvent(row)
+    return {
+      id: String(row.id), action: row.action, actorType: row.actor_type, actorId: row.actor_id,
+      entityType: row.entity_type, entityId: row.entity_id, details: row.details || {},
+      summary: description.summary, context: description.context, createdAt: row.created_at
+    }
+  })
 })
 
 const normalizedDocument = (value) => String(value || '').replace(/\D/g, '')
@@ -143,6 +147,28 @@ export const requireApprovedDataAccess = async (user, requestId, tenantId) => {
   if (!result.rowCount) throw new Error('Solicitacao de acesso nao aprovada ou expirada.')
 }
 
+export const getTenantAuditReport = async (user, requestId, tenantId, limit = 500) => {
+  await requireApprovedDataAccess(user, requestId, tenantId)
+  const result = await query(`
+    select t.name, t.document, r.reason, r.verified_at, r.expires_at
+      from platform_data_access_requests r
+      join tenants t on t.id = r.tenant_id
+     where r.id = $1 and r.tenant_id = $2 and r.requested_by = $3 and r.status = 'approved' and r.expires_at > now()
+     limit 1
+  `, [requestId, tenantId, user.id])
+  if (!result.rowCount) throw new Error('Solicitacao de acesso nao aprovada ou expirada.')
+
+  const row = result.rows[0]
+  return {
+    companyName: decryptField(row.name),
+    cnpj: maskedDocument(decryptField(row.document)),
+    reason: row.reason,
+    verifiedAt: row.verified_at,
+    expiresAt: row.expires_at,
+    events: await listTenantOperationalAudit(tenantId, limit)
+  }
+}
+
 export const listPlatformAdminAudit = async (limit = 100) => {
   const result = await query(`
     select id, action, target_tenant_id, target_resource, target_resource_id, reason, details, created_at
@@ -150,33 +176,15 @@ export const listPlatformAdminAudit = async (limit = 100) => {
      order by created_at desc
      limit $1
   `, [Math.min(200, Math.max(1, Number(limit) || 100))])
-  return result.rows.map((row) => ({
-    id: String(row.id), action: row.action, targetTenantId: row.target_tenant_id,
-    targetResource: row.target_resource, targetResourceId: row.target_resource_id,
-    reason: row.reason, details: row.details || {}, createdAt: row.created_at
-  }))
-}
-
-export const listPlatformUserAudit = async ({ tenantId = '', action = '', from = '', to = '', limit = 100 } = {}) => {
-  const clauses = []
-  const params = []
-  if (tenantId) { params.push(String(tenantId)); clauses.push(`e.tenant_id = $${params.length}`) }
-  if (action) { params.push(`${String(action).slice(0, 120)}%`); clauses.push(`e.action like $${params.length}`) }
-  if (from) { params.push(String(from)); clauses.push(`e.created_at >= $${params.length}::timestamptz`) }
-  if (to) { params.push(String(to)); clauses.push(`e.created_at < ($${params.length}::date + interval '1 day')`) }
-  params.push(Math.min(500, Math.max(1, Number(limit) || 100)))
-  const result = await query(`
-    select e.id, e.tenant_id, e.action, e.actor_type, e.actor_id, e.entity_type, e.entity_id, e.details, e.created_at, u.name as actor_name
-      from operational_audit_events e
-      left join users u on u.id::text = e.actor_id and u.tenant_id = e.tenant_id
-     ${clauses.length ? `where ${clauses.join(' and ')}` : ''}
-     order by e.created_at desc limit $${params.length}
-  `, params)
-  return result.rows.map((row) => ({
-    id: String(row.id), tenantId: row.tenant_id, action: row.action, actorType: row.actor_type,
-    actorId: row.actor_id, actorName: decryptField(row.actor_name), entityType: row.entity_type,
-    entityId: row.entity_id, details: row.details || {}, createdAt: row.created_at
-  }))
+  return result.rows.map((row) => {
+    const description = describeAuditEvent(row)
+    return {
+      id: String(row.id), action: row.action, targetTenantId: row.target_tenant_id,
+      targetResource: row.target_resource, targetResourceId: row.target_resource_id,
+      reason: row.reason, details: row.details || {}, summary: description.summary,
+      context: description.context, createdAt: row.created_at
+    }
+  })
 }
 
 export const updatePlatformTenantStatus = async (tenantId, payload = {}) => {

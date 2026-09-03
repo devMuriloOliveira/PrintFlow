@@ -12,6 +12,7 @@ type AuthResponse = {
   accessToken?: string
   refreshToken: string
   token?: string
+  deletionCancelled?: boolean
 }
 
 export type AuthSession = { sessionId: string; createdAt: string; expiresAt: string }
@@ -44,6 +45,7 @@ export const useAuth = () => {
   const user = useState<AuthUser | null>('auth-user', () => null)
   const expiresAt = useState<number>('auth-expires-at', () => 0)
   const ready = useState('auth-ready', () => false)
+  const tenantDeletionCancelled = useState('tenant-deletion-cancelled', () => false)
 
   const apiUrl = (path: string) => `${apiBase}${path}`
 
@@ -157,6 +159,7 @@ export const useAuth = () => {
       body: { email, password }
     })
     setSession(session)
+    tenantDeletionCancelled.value = Boolean(session.deletionCancelled)
     return session.user
   }
 
@@ -172,12 +175,27 @@ export const useAuth = () => {
   const acceptInvitation = async (payload: { token: string; name: string; password: string }) => {
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/invitations/accept'), { method: 'POST', body: payload })
     setSession(session)
+    tenantDeletionCancelled.value = Boolean(session.deletionCancelled)
     return session.user
   }
 
   const listSessions = () => $fetch<AuthSession[]>(apiUrl('/api/auth/sessions'), { headers: authHeaders.value })
   const revokeSession = (sessionId: string) => $fetch(apiUrl(`/api/auth/sessions/${encodeURIComponent(sessionId)}`), { method: 'DELETE', headers: authHeaders.value })
   const revokeAllSessions = () => $fetch(apiUrl('/api/auth/sessions/revoke-all'), { method: 'POST', headers: authHeaders.value })
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/change-password'), {
+      method: 'POST',
+      headers: authHeaders.value,
+      body: { currentPassword, newPassword }
+    })
+    setSession(session)
+    return session.user
+  }
+
+  const requestTenantDeletion = (currentPassword: string) => $fetch<{ scheduledFor: string }>(apiUrl('/api/auth/tenant-deletion-request'), {
+    method: 'POST', headers: authHeaders.value,
+    body: { currentPassword, confirmation: 'EXCLUIR', acknowledgedCancellation: true }
+  })
 
   const logout = async () => {
     const currentRefreshToken = refreshToken.value
@@ -203,6 +221,7 @@ export const useAuth = () => {
     user,
     expiresAt,
     ready,
+    tenantDeletionCancelled,
     isAuthenticated: computed(() => Boolean(token.value && user.value && !sessionIsExpired())),
     authHeaders,
     clearSession,
@@ -214,6 +233,8 @@ export const useAuth = () => {
     listSessions,
     revokeSession,
     revokeAllSessions,
+    changePassword,
+    requestTenantDeletion,
     logout
   }
 }

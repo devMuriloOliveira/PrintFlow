@@ -6,6 +6,8 @@ import {
 
 import {
   handleLogin,
+  handlePasswordChange,
+  handleTenantDeletionRequest,
   handleInvitationAccept,
   handleSessionRevoke,
   handleSessionsList,
@@ -65,9 +67,10 @@ import {
 
 import {
   handlePlatformAdminAudit,
+  handlePlatformTenantDeletionAudit,
+  handlePlatformTenantAuditExport,
   handleDataAccessRequest,
   handleDataAccessVerify,
-  handlePlatformUserAudit,
   handlePlatformOverview,
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
@@ -240,6 +243,22 @@ export const handleRequest =
           req,
           res
         )
+      }
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/auth/change-password'
+      ) {
+        return await handlePasswordChange(
+          req,
+          res
+        )
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/auth/tenant-deletion-request') {
+        return await handleTenantDeletionRequest(req, res)
       }
 
       if (
@@ -834,13 +853,18 @@ export const handleRequest =
         return await handlePlatformAdminAudit(req, res, url)
       }
 
-      if (req.method === 'GET' && url.pathname === '/api/platform-admin/user-audit') {
-        return await handlePlatformUserAudit(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenant-deletions') {
+        return await handlePlatformTenantDeletionAudit(req, res, url)
       }
 
       const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)
       if (req.method === 'GET' && platformTenantAuditMatch) {
         return await handlePlatformTenantAudit(req, res, platformTenantAuditMatch[1], url)
+      }
+
+      const platformTenantAuditExportMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit-export$/)
+      if (req.method === 'GET' && platformTenantAuditExportMatch) {
+        return await handlePlatformTenantAuditExport(req, res, platformTenantAuditExportMatch[1], url)
       }
 
       const platformDataAccessMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/data-access-requests$/)
@@ -1205,6 +1229,14 @@ export const handleRequest =
           'Registro nao encontrado',
           'Membro nao encontrado',
           'E-mail ou senha invalidos.',
+          'Informe a senha atual.',
+          'Senha atual invalida.',
+          'A nova senha deve ser diferente da senha atual.',
+          'A senha precisa ter pelo menos 10 caracteres.',
+          'A senha precisa conter letra minuscula.',
+          'A senha precisa conter letra maiuscula.',
+          'A senha precisa conter numero.',
+          'A senha precisa conter caractere especial.',
           'Refresh token invalido.',
           'Refresh token reutilizado.'
         ])

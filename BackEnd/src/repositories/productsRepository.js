@@ -1,4 +1,5 @@
 import { tenantQuery, withTenant } from '../db/pool.js'
+import { writeAuditEvent } from '../services/operationalEvents.js'
 
 const mapProduct = (row) => ({
   id: String(row.id),
@@ -68,7 +69,7 @@ export const listProducts = async (tenantId) => {
   return result.rows.map(mapProduct)
 }
 
-export const createProduct = async (tenantId, product) => {
+export const createProduct = async (tenantId, product, audit = null) => {
   const result = await withTenant(tenantId, async (client) => {
     await client.query(
       `insert into tenants (id, name)
@@ -77,7 +78,8 @@ export const createProduct = async (tenantId, product) => {
       [tenantId]
     )
 
-    return client.query(
+    const existing = await client.query('select id from products where tenant_id = $1 and sku = $2 limit 1', [tenantId, product.sku])
+    const created = await client.query(
     `insert into products (
       tenant_id, name, subtitle, sku, category, description, printer_id, printer, price, weight, print_time,
       layer_height, infill, dimensions, print_file_name, print_file_format, print_file_hash, print_file_size_bytes,
@@ -170,6 +172,22 @@ export const createProduct = async (tenantId, product) => {
       product.thumb || 'vase'
       ]
     )
+
+    if (audit?.actorId) {
+      const changedFields = Object.keys(product)
+        .filter((field) => !/email|phone|token|secret|hash|storage|key|fileName|document|cnpj/i.test(field))
+        .slice(0, 40)
+      await writeAuditEvent(tenantId, {
+        action: existing.rowCount ? 'products.updated' : 'products.created',
+        actorType: audit.actorType || 'user',
+        actorId: audit.actorId,
+        entityType: 'products',
+        entityId: String(created.rows[0].id),
+        details: { changedFields }
+      }, client)
+    }
+
+    return created
   })
 
   return mapProduct(result.rows[0])

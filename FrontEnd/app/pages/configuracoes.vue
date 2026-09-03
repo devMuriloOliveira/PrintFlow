@@ -8,6 +8,10 @@ const savingMemberId = ref('')
 const inviting = ref(false)
 const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string }[]>([])
 const sessionsLoading = ref(false)
+const changingPassword = ref(false)
+const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '' })
+const deletingTenant = ref(false)
+const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
 const memberDrafts = reactive<Record<string, { role: string; status: string }>>({})
 const invite = reactive({ email: '', role: 'usuario' as 'admin' | 'financeiro' | 'producao' | 'usuario' })
 const tabs = [
@@ -95,6 +99,43 @@ const endAllSessions = async () => {
   try { await auth.revokeAllSessions(); auth.clearSession(); await navigateTo('/login') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel encerrar as sessoes.') }
 }
 
+const submitPasswordChange = async () => {
+  if (passwordForm.newPassword !== passwordForm.confirmation) {
+    notify('A confirmacao da nova senha nao confere.')
+    return
+  }
+
+  changingPassword.value = true
+  try {
+    await auth.changePassword(passwordForm.currentPassword, passwordForm.newPassword)
+    passwordForm.currentPassword = ''
+    passwordForm.newPassword = ''
+    passwordForm.confirmation = ''
+    await loadSessions()
+    notify('Senha alterada. As sessoes anteriores foram encerradas por seguranca.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel alterar a senha.')
+  } finally {
+    changingPassword.value = false
+  }
+}
+
+const requestTenantDeletion = async () => {
+  if (auth.user.value?.role !== 'owner') return notify('Somente o Owner pode solicitar a exclusao da empresa.')
+  if (!deletionForm.acknowledged || deletionForm.confirmation !== 'EXCLUIR') return notify('Leia o aviso, marque a confirmacao e digite EXCLUIR.')
+  deletingTenant.value = true
+  try {
+    const result = await auth.requestTenantDeletion(deletionForm.currentPassword)
+    auth.clearSession()
+    notify(`Exclusao programada para ${new Date(result.scheduledFor).toLocaleString('pt-BR')}. Entre novamente para cancelar.`)
+    await navigateTo('/login')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel solicitar a exclusao.')
+  } finally {
+    deletingTenant.value = false
+  }
+}
+
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes') void loadMembers()
   if (tab === 'Seguranca') void loadSessions()
@@ -152,10 +193,32 @@ watch(members, syncMemberDrafts, { immediate: true })
         </div>
 
         <div v-else-if="active === 'Seguranca'">
+          <form class="settings-security-card" @submit.prevent="submitPasswordChange">
+            <div><h2>Alterar senha</h2><p>Confirme sua senha atual. Os outros acessos serao encerrados automaticamente.</p></div>
+            <div class="form-grid" style="margin-top:16px">
+              <label class="field col-4"><span>Senha atual</span><input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" required></label>
+              <label class="field col-4"><span>Nova senha</span><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="10" required placeholder="Minimo 10 caracteres"></label>
+              <label class="field col-4"><span>Confirmar nova senha</span><input v-model="passwordForm.confirmation" type="password" autocomplete="new-password" minlength="10" required></label>
+            </div>
+            <button class="btn btn--primary" type="submit" :disabled="changingPassword">{{ changingPassword ? 'Alterando...' : 'Alterar senha' }}</button>
+          </form>
+          <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Sessoes ativas</h2><p>Encerre acessos que voce nao reconhece.</p></div><button class="btn" :disabled="sessionsLoading" @click="loadSessions">Atualizar</button></div>
           <div v-if="sessionsLoading" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Carregando sessoes</h3></div></div>
           <div v-else-if="!sessions.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Nenhuma sessao ativa</h3><p>Entre novamente para continuar usando o PrintFlow.</p></div></div>
           <div v-else><div class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Inicio</th><th>Expira em</th><th>Acao</th></tr></thead><tbody><tr v-for="session in sessions" :key="session.sessionId"><td>{{ new Date(session.createdAt).toLocaleString('pt-BR') }}</td><td>{{ new Date(session.expiresAt).toLocaleString('pt-BR') }}</td><td><button class="btn btn--danger" @click="endSession(session.sessionId)">Encerrar</button></td></tr></tbody></table></div><button class="btn btn--danger" style="margin-top:16px" @click="endAllSessions">Encerrar todas as sessoes</button></div>
+        </div>
+
+        <div v-else-if="active === 'Backup e Dados'" class="settings-security-card">
+          <div><h2>Excluir empresa e dados</h2><p>Esta acao agenda a exclusao completa da empresa, usuarios, dados operacionais, arquivos e informacoes no banco em sete dias.</p></div>
+          <form v-if="auth.user?.role === 'owner'" style="margin-top:16px" @submit.prevent="requestTenantDeletion">
+            <div class="info-note" style="margin-bottom:16px"><UiIcon name="shield" />Ao entrar novamente no PrintFlow durante os 7 dias, a exclusao sera cancelada automaticamente. Esta confirmacao sera registrada em auditoria.</div>
+            <label class="field"><span>Senha atual</span><input v-model="deletionForm.currentPassword" type="password" autocomplete="current-password" required></label>
+            <label class="field" style="margin-top:12px"><span>Para confirmar, digite EXCLUIR</span><input v-model="deletionForm.confirmation" required autocomplete="off"></label>
+            <label style="display:flex;gap:8px;align-items:flex-start;margin:16px 0"><input v-model="deletionForm.acknowledged" type="checkbox" required><span>Li e estou ciente de que um novo login cancelara esta solicitacao de exclusao.</span></label>
+            <button class="btn btn--danger" type="submit" :disabled="deletingTenant">{{ deletingTenant ? 'Programando...' : 'Programar exclusao da empresa' }}</button>
+          </form>
+          <div v-else class="info-note"><UiIcon name="shield" />Somente o Owner pode solicitar a exclusao da empresa.</div>
         </div>
 
         <div v-else class="empty-state"><div><div class="empty-state__icon"><UiIcon :name="tabs.find((item) => item[0] === active)?.[1] || 'settings'" :size="29" /></div><h3>{{ active }}</h3><p>Este modulo visual esta preparado para receber as configuracoes correspondentes quando conectado a API.</p><button class="btn btn--primary" @click="notify('Preferencias atualizadas')">Salvar preferencias</button></div></div>

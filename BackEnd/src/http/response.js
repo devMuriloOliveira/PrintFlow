@@ -4,7 +4,7 @@ export const configureCors = (req, res) => {
   const origin = String(req.headers.origin || '').replace(/\/$/, '')
   if (!origin) return true
   if (!env.corsAllowedOrigins.includes(origin)) return false
-  res.corsHeaders = { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' }
+  res.corsHeaders = { 'Access-Control-Allow-Origin': origin, 'Access-Control-Expose-Headers': 'Content-Disposition', Vary: 'Origin' }
   return true
 }
 
@@ -18,4 +18,22 @@ export const sendJson = (res, status, body, extraHeaders = {}) => {
   })
 
   res.end(status === 204 ? null : JSON.stringify(body))
+}
+
+export const sendText = (res, status, body, extraHeaders = {}) => {
+  res.writeHead(status, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    ...res.corsHeaders,
+    ...extraHeaders
+  })
+  res.end(body)
+}
+
+export const sendBuffer = (res, status, body, extraHeaders = {}) => {
+  res.writeHead(status, {
+    'Content-Type': 'application/octet-stream',
+    ...res.corsHeaders,
+    ...extraHeaders
+  })
+  res.end(body)
 }

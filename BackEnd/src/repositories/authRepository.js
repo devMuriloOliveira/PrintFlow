@@ -310,6 +310,57 @@ export const loginUser = async ({ email, password }) => {
   return publicUser({ ...user, role: membership.role })
 }
 
+export const changeUserPassword = async (user, { currentPassword, newPassword }) => {
+  const current = String(currentPassword || '')
+  const passwordError = validatePasswordPolicy(newPassword)
+
+  if (!current) throw new Error('Informe a senha atual.')
+  if (passwordError) throw new Error(passwordError)
+  if (current === String(newPassword || '')) throw new Error('A nova senha deve ser diferente da senha atual.')
+
+  if (!hasDatabase) {
+    const stored = memoryUsersById.get(String(user.id))
+    if (!stored || !verifyPassword(current, stored.password_hash)) throw new Error('Senha atual invalida.')
+
+    stored.password_hash = hashPassword(newPassword)
+    revokeAllMemoryUserSessions(stored.id)
+    incrementMemoryTokenVersion(stored.id)
+    return { ...publicUser(stored), tokenVersion: stored.token_version }
+  }
+
+  return withTenant(user.tenantId, async (client) => {
+    const result = await client.query(
+      `select password_hash, token_version
+         from users
+        where id::text = $1 and tenant_id = $2 and status = 'active'
+        limit 1`,
+      [String(user.id), String(user.tenantId)]
+    )
+    const stored = result.rows[0]
+    if (!stored || !verifyPassword(current, stored.password_hash)) throw new Error('Senha atual invalida.')
+
+    const tokenVersion = Number(stored.token_version || 0) + 1
+    await client.query(
+      `update users
+          set password_hash = $1, token_version = $2, updated_at = now()
+        where id::text = $3 and tenant_id = $4`,
+      [hashPassword(newPassword), tokenVersion, String(user.id), String(user.tenantId)]
+    )
+    await client.query(
+      `update refresh_tokens
+          set revoked_at = coalesce(revoked_at, now())
+        where tenant_id = $1 and user_id = $2 and revoked_at is null`,
+      [String(user.tenantId), String(user.id)]
+    )
+    await writeAuditEvent(user.tenantId, {
+      action: 'password.changed', actorType: 'user', actorId: user.id,
+      entityType: 'user', entityId: String(user.id), details: { sessionsRevoked: true }
+    }, client)
+
+    return { ...user, tokenVersion }
+  })
+}
+
 export const listUserSessions = async (user) => {
   if (!hasDatabase) return []
   const result = await tenantQuery(user.tenantId, `

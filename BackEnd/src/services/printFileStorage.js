@@ -272,6 +272,15 @@ export const resolvePrintFilePath =
     return resolved
   }
 
+export const removeTenantPrintFiles = async (tenantId) => {
+  const root = path.resolve(env.printFileStorageDir)
+  const directory = path.resolve(root, cleanSegment(tenantId))
+  if (directory === root || !directory.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Diretorio de arquivos invalido.')
+  }
+  await rm(directory, { recursive: true, force: true })
+}
+
 export const openPrintFileReadStream =
   async (
     storageKey

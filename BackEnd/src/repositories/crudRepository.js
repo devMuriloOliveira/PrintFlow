@@ -2,6 +2,7 @@ import { withTenant } from '../db/pool.js'
 import { listProducts, createProduct } from './productsRepository.js'
 import { listResource } from './appDataRepository.js'
 import { blindIndex, encryptField } from '../security/crypto.js'
+import { writeAuditEvent } from '../services/operationalEvents.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
@@ -12,6 +13,25 @@ const textOrNull = (value) => {
 const idOrNull = (value) => {
   const id = Number(value || 0)
   return Number.isFinite(id) && id > 0 ? id : null
+}
+
+const isSensitiveAuditField = (field) => /password|token|secret|email|phone|hash|document|cnpj|storage|connection.*key|file_name/i.test(field)
+const comparableValue = (value) => JSON.stringify(value ?? null)
+export const safeChangedFields = (before, values) => Object.keys(values)
+  .filter((field) => !isSensitiveAuditField(field))
+  .filter((field) => comparableValue(before?.[field]) !== comparableValue(values[field]))
+  .slice(0, 40)
+
+const writeResourceAudit = async (client, tenantId, audit, resource, entityId, changedFields = []) => {
+  if (!audit?.actorId) return
+  await writeAuditEvent(tenantId, {
+    action: audit.action || `${resource}.${audit.operation || 'updated'}`,
+    actorType: audit.actorType || 'user',
+    actorId: audit.actorId,
+    entityType: resource,
+    entityId: String(entityId),
+    details: { changedFields, ...(audit.details || {}) }
+  }, client)
 }
 
 const syncPrinterAgentLink = async (
@@ -54,7 +74,7 @@ const findOrCreateClientId = async (client, tenantId, name) => {
     'select id from clients where tenant_id = $1 and (name_hash = $2 or lower(name) = lower($3)) order by created_at asc limit 1',
     [tenantId, blindIndex(cleanName), cleanName]
   )
-  if (existing.rows[0]) return existing.rows[0].id
+  if (existing.rows[0]) return { id: existing.rows[0].id, created: false }
 
   const created = await client.query(
     `insert into clients (tenant_id, name, name_hash, email, phone)
@@ -62,7 +82,7 @@ const findOrCreateClientId = async (client, tenantId, name) => {
      returning id`,
     [tenantId, encryptField(cleanName), blindIndex(cleanName), encryptField('nao-informado'), encryptField('nao-informado')]
   )
-  return created.rows[0].id
+  return { id: created.rows[0].id, created: true }
 }
 
 const findOrCreateMarketplaceId = async (client, tenantId, name) => {
@@ -73,7 +93,7 @@ const findOrCreateMarketplaceId = async (client, tenantId, name) => {
     'select id from marketplaces where tenant_id = $1 and lower(name) = lower($2) order by created_at asc limit 1',
     [tenantId, cleanName]
   )
-  if (existing.rows[0]) return existing.rows[0].id
+  if (existing.rows[0]) return { id: existing.rows[0].id, created: false }
 
   const created = await client.query(
     `insert into marketplaces (tenant_id, name, short, color, active)
@@ -82,7 +102,7 @@ const findOrCreateMarketplaceId = async (client, tenantId, name) => {
      returning id`,
     [tenantId, cleanName, cleanName.slice(0, 2).toUpperCase()]
   )
-  return created.rows[0].id
+  return { id: created.rows[0].id, created: true }
 }
 
 const resourceConfig = {
@@ -271,17 +291,27 @@ const configFor = (resource) => {
 
 const writePatch = async (client, tenantId, resource, item, id = null) => {
   const config = configFor(resource)
-  if (config.create && !id) return config.create(tenantId, item)
+  if (config.create && !id) {
+    const created = await config.create(tenantId, item)
+    return { id: created.id, changedFields: safeChangedFields({}, item) }
+  }
 
   const values = config.patch(item)
+  const relatedCreated = []
   if (resource === 'orders') {
-    values.client_id = await findOrCreateClientId(client, tenantId, item.client)
-    values.marketplace_id = await findOrCreateMarketplaceId(client, tenantId, item.marketplace)
+    const clientReference = await findOrCreateClientId(client, tenantId, item.client)
+    const marketplaceReference = await findOrCreateMarketplaceId(client, tenantId, item.marketplace)
+    values.client_id = clientReference?.id || null
+    values.marketplace_id = marketplaceReference?.id || null
+    if (clientReference?.created) relatedCreated.push({ resource: 'clients', id: clientReference.id })
+    if (marketplaceReference?.created) relatedCreated.push({ resource: 'marketplaces', id: marketplaceReference.id })
   }
   const keys = Object.keys(values).filter((key) => values[key] !== undefined)
   if (!keys.length) throw new Error('Nenhum dado para salvar')
 
   if (id) {
+    const current = await client.query(`select * from ${config.table} where tenant_id = $1 and id = $2 limit 1`, [tenantId, id])
+    if (!current.rowCount) throw new Error('Registro nao encontrado')
     const assignments = keys.map((key, index) => `${key} = $${index + 3}`).join(', ')
     const params = [tenantId, id, ...keys.map((key) => values[key])]
     const result = await client.query(
@@ -293,7 +323,7 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
     if (resource === 'printers') {
       await syncPrinterAgentLink(client, tenantId, result.rows[0].id, item)
     }
-    return null
+    return { id: result.rows[0].id, changedFields: safeChangedFields(current.rows[0], values), relatedCreated }
   }
 
   const columns = ['tenant_id', ...keys]
@@ -308,19 +338,31 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
   if (resource === 'printers') {
     await syncPrinterAgentLink(client, tenantId, result.rows[0].id, item)
   }
-  return null
+  return { id: result.rows[0].id, changedFields: safeChangedFields({}, values), relatedCreated }
 }
 
-export const createResource = async (tenantId, resource, item) => {
+const writeRelatedAudits = async (client, tenantId, audit, relatedCreated) => {
+  for (const related of relatedCreated || []) {
+    await writeResourceAudit(client, tenantId, { ...audit, operation: 'created', details: { source: 'orders' } }, related.resource, related.id)
+  }
+}
+
+export const createResource = async (tenantId, resource, item, audit = null) => {
   await withTenant(tenantId, async (client) => {
     await client.query('insert into tenants (id, name) values ($1, $1) on conflict (id) do nothing', [tenantId])
-    await writePatch(client, tenantId, resource, item)
+    const result = await writePatch(client, tenantId, resource, item)
+    await writeResourceAudit(client, tenantId, { ...audit, operation: 'created' }, resource, result.id, result.changedFields)
+    await writeRelatedAudits(client, tenantId, audit, result.relatedCreated)
   })
   return listResource(tenantId, resource)
 }
 
-export const updateResource = async (tenantId, resource, id, item) => {
-  await withTenant(tenantId, async (client) => writePatch(client, tenantId, resource, item, id))
+export const updateResource = async (tenantId, resource, id, item, audit = null) => {
+  await withTenant(tenantId, async (client) => {
+    const result = await writePatch(client, tenantId, resource, item, id)
+    await writeResourceAudit(client, tenantId, { ...audit, operation: 'updated' }, resource, result.id, result.changedFields)
+    await writeRelatedAudits(client, tenantId, audit, result.relatedCreated)
+  })
   return listResource(tenantId, resource)
 }
 
@@ -332,11 +374,12 @@ export const assertResourceBelongsToTenant = async (tenantId, resource, id) => {
   })
 }
 
-export const deleteResource = async (tenantId, resource, id) => {
+export const deleteResource = async (tenantId, resource, id, audit = null) => {
   const config = configFor(resource)
   await withTenant(tenantId, async (client) => {
     const result = await client.query(`delete from ${config.table} where tenant_id = $1 and id = $2`, [tenantId, id])
     if (!result.rowCount) throw new Error('Registro nao encontrado')
+    await writeResourceAudit(client, tenantId, { ...audit, operation: 'deleted' }, resource, id)
   })
   return listResource(tenantId, resource)
 }

@@ -1,6 +1,7 @@
 import { getTenantData } from '../data.js'
 import { hasDatabase } from '../db/pool.js'
 import { getTenantId } from '../config/tenant.js'
+import { getAuthUser } from './auth.js'
 import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
@@ -49,7 +50,7 @@ export const handleProductCreate = async (req, res) => {
     }
 
     if (hasDatabase) {
-      const created = await createProduct(await getTenantId(req), product)
+      const created = await createProduct(await getTenantId(req), product, await auditActor(req))
       return sendJson(res, 201, created)
     }
 
@@ -64,6 +65,10 @@ export const handleProductCreate = async (req, res) => {
 const validResources = new Set(['products', 'orders', 'printJobs', 'expenses', 'filaments', 'printers', 'marketplaces', 'clients', 'goals'])
 const localId = () => String(Date.now() + Math.floor(Math.random() * 1000))
 const itemMatchesId = (item, id) => String(item.dbId || item.id) === String(id)
+const auditActor = async (req) => {
+  const user = await getAuthUser(req)
+  return user ? { actorId: user.id, actorType: 'user' } : null
+}
 
 const createLocalResource = (tenantId, resource, payload) => {
   const tenantData = getTenantData(tenantId)
@@ -147,7 +152,11 @@ export const handleProductPrintFileUpload = async (req, res, productId, url) => 
         validationMessage: metadata.message || 'Arquivo enviado. Confira dimensoes, material e perfil antes de validar.'
       }
 
-      const updated = await updateResource(tenantId, 'products', productId, applyPrintFileMetadataToProduct(productWithFile, metadata))
+      const updated = await updateResource(tenantId, 'products', productId, applyPrintFileMetadataToProduct(productWithFile, metadata), {
+        ...(await auditActor(req)),
+        action: 'products.print_file_uploaded',
+        details: { format: stored.format, sizeBytes: stored.size }
+      })
 
       const savedProduct = Array.isArray(updated)
         ? updated.find((item) => String(item.id) === String(productId))
@@ -221,7 +230,7 @@ export const handleResourceCreate = async (req, res, resource) => {
   if (!validResources.has(resource)) return sendJson(res, 404, { error: 'Recurso nao encontrado' })
   const payload = await readJsonBody(req)
   const tenantId = await getTenantId(req)
-  const list = hasDatabase ? await createResource(tenantId, resource, payload) : createLocalResource(tenantId, resource, payload)
+  const list = hasDatabase ? await createResource(tenantId, resource, payload, await auditActor(req)) : createLocalResource(tenantId, resource, payload)
   return sendJson(res, 201, list)
 }
 
@@ -229,13 +238,13 @@ export const handleResourceUpdate = async (req, res, resource, id) => {
   if (!validResources.has(resource)) return sendJson(res, 404, { error: 'Recurso nao encontrado' })
   const payload = await readJsonBody(req)
   const tenantId = await getTenantId(req)
-  const list = hasDatabase ? await updateResource(tenantId, resource, id, payload) : updateLocalResource(tenantId, resource, id, payload)
+  const list = hasDatabase ? await updateResource(tenantId, resource, id, payload, await auditActor(req)) : updateLocalResource(tenantId, resource, id, payload)
   return sendJson(res, 200, list)
 }
 
 export const handleResourceDelete = async (req, res, resource, id) => {
   if (!validResources.has(resource)) return sendJson(res, 404, { error: 'Recurso nao encontrado' })
   const tenantId = await getTenantId(req)
-  const list = hasDatabase ? await deleteResource(tenantId, resource, id) : deleteLocalResource(tenantId, resource, id)
+  const list = hasDatabase ? await deleteResource(tenantId, resource, id, await auditActor(req)) : deleteLocalResource(tenantId, resource, id)
   return sendJson(res, 200, list)
 }

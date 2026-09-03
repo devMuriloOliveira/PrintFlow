@@ -446,6 +446,35 @@ export const migrate =
     `)
     await query(`create index if not exists platform_data_access_requests_tenant_idx on platform_data_access_requests (tenant_id, created_at desc)`)
 
+    // Exclusoes aguardam o prazo de arrependimento. A trilha separada nao tem
+    // chaves para o tenant, para sobreviver ao descarte sem reter dados pessoais.
+    await query(`
+      create table if not exists tenant_deletion_requests (
+        id text primary key,
+        tenant_id text not null unique references tenants(id) on delete cascade,
+        requested_by text not null,
+        status text not null default 'pending' check (status in ('pending', 'cancelled')),
+        requested_at timestamptz not null default now(),
+        scheduled_for timestamptz not null,
+        cancelled_at timestamptz,
+        cancellation_reason text not null default '',
+        evidence jsonb not null default '{}'::jsonb
+      )
+    `)
+    await query(`create index if not exists tenant_deletion_requests_due_idx on tenant_deletion_requests (scheduled_for) where status = 'pending'`)
+    await query(`
+      create table if not exists platform_tenant_deletion_audit (
+        id bigserial primary key,
+        deletion_request_id text not null,
+        event_type text not null,
+        evidence jsonb not null default '{}'::jsonb,
+        ip_hash text not null default '',
+        user_agent text not null default '',
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists platform_tenant_deletion_audit_request_idx on platform_tenant_deletion_audit (deletion_request_id, created_at desc)`)
+
     // ==================================================
     // REFRESH TOKENS
     // ==================================================

@@ -15,6 +15,9 @@ process.env.DATABASE_URL = ''
 
 const { hashPassword, validatePasswordPolicy, verifyPassword } = await import('../src/auth/password.js')
 const { createToken } = await import('../src/auth/token.js')
+const { safeChangedFields } = await import('../src/repositories/crudRepository.js')
+const { describeAuditEvent } = await import('../src/services/operationalEvents.js')
+const { auditReportFilename, formatTenantAuditCsv, formatTenantAuditWorkbook } = await import('../src/routes/platformAdmin.js')
 const { handleRequest } = await import('../src/routes/index.js')
 
 class MockRequest extends Readable {
@@ -187,6 +190,93 @@ test('logout revoga refresh token e invalida access token da sessao', async () =
   assert.equal(refreshAfterLogout.status, 400)
 })
 
+test('alteracao de senha exige a senha atual e invalida as sessoes anteriores', async () => {
+  const session = await registerSession('troca-senha', '127.0.0.211')
+
+  const rejected = await request({
+    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.0.0.212',
+    body: { currentPassword: 'SenhaIncorreta1!', newPassword: 'NovaSenhaForte1!' }
+  })
+  assert.equal(rejected.status, 400)
+  assert.equal(rejected.body.error, 'Senha atual invalida.')
+
+  const changed = await request({
+    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.0.0.213',
+    body: { currentPassword: 'SenhaForte1!', newPassword: 'NovaSenhaForte1!' }
+  })
+  assert.equal(changed.status, 200)
+  assert.ok(changed.body.accessToken)
+  assert.notEqual(changed.body.accessToken, session.accessToken)
+
+  const oldSession = await request({ method: 'GET', path: '/api/auth/me', token: session.accessToken, ip: '127.0.0.214' })
+  assert.equal(oldSession.status, 401)
+  const currentSession = await request({ method: 'GET', path: '/api/auth/me', token: changed.body.accessToken, ip: '127.0.0.215' })
+  assert.equal(currentSession.status, 200)
+
+  const oldPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.0.0.216', body: { email: session.user.email, password: 'SenhaForte1!' } })
+  assert.equal(oldPassword.status, 400)
+  const newPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.0.0.217', body: { email: session.user.email, password: 'NovaSenhaForte1!' } })
+  assert.equal(newPassword.status, 200)
+})
+
+test('auditoria de recursos registra somente campos seguros alterados', () => {
+  const changedFields = safeChangedFields({ description: 'anterior', email: 'anterior@example.com' }, {
+    description: 'atualizado',
+    cost: 10,
+    email: 'novo@example.com',
+    phone: '11999999999',
+    refreshToken: 'nao-deve-ser-registrado',
+    printFileHash: 'nao-deve-ser-registrado'
+  })
+
+  assert.deepEqual(changedFields, ['description', 'cost'])
+})
+
+test('auditoria apresenta resumo compreensivel sem expor valores', () => {
+  const event = describeAuditEvent({
+    action: 'products.updated',
+    details: { changedFields: ['price', 'status', 'email'] }
+  })
+
+  assert.equal(event.summary, 'Produto atualizado')
+  assert.equal(event.context, 'Campos alterados: preco, status.')
+
+  const passwordChange = describeAuditEvent({ action: 'password.changed', details: { sessionsRevoked: true } })
+  assert.equal(passwordChange.summary, 'Senha alterada')
+  assert.match(passwordChange.context, /Sessoes anteriores foram encerradas por seguranca/)
+})
+
+test('relatorio CSV de auditoria preserva o contexto seguro e escapa celulas', () => {
+  const csv = formatTenantAuditCsv({
+    companyName: 'Empresa "Teste"',
+    cnpj: '12.***.***/0001-90',
+    reason: 'Solicitacao de suporte',
+    verifiedAt: '2026-09-03T12:00:00.000Z',
+    expiresAt: '2026-09-03T12:30:00.000Z',
+    events: [{
+      createdAt: '2026-09-03T12:01:00.000Z', summary: 'Produto atualizado', action: 'products.updated',
+      context: 'Campos alterados: preco.', actorType: 'user', entityType: 'products', entityId: '42'
+    }]
+  })
+
+  assert.match(csv, /^\ufeff"Relatorio de auditoria PrintFlow"/)
+  assert.match(csv, /"Empresa ""Teste"""/)
+  assert.match(csv, /"Produto atualizado"/)
+  assert.match(csv, /"products.updated"/)
+})
+
+test('relatorio usa nome padronizado e gera planilha Excel real', async () => {
+  const date = new Date('2026-09-03T15:04:05.000Z')
+  assert.equal(auditReportFilename('xlsx', date), 'Relatorio_Auditoria_de_Empresa_2026-09-03_12-04-05.xlsx')
+
+  const workbook = await formatTenantAuditWorkbook({
+    companyName: 'Empresa teste', cnpj: '12.***.***/0001-90', reason: 'Suporte solicitado',
+    verifiedAt: date.toISOString(), expiresAt: new Date(date.getTime() + 30 * 60 * 1000).toISOString(),
+    events: []
+  })
+  assert.equal(workbook.subarray(0, 2).toString(), 'PK')
+})
+
 test('CORS permite somente as origens configuradas', async () => {
   const allowed = await request({
     method: 'OPTIONS',
@@ -249,4 +339,12 @@ test('papel global da plataforma permanece separado do papel owner do tenant', a
   const payload = JSON.parse(Buffer.from(response.body.accessToken.split('.')[1], 'base64url').toString('utf8'))
   assert.equal(payload.role, 'owner')
   assert.equal(payload.platformRole, 'platform_super_admin')
+
+  const removedGlobalReport = await request({
+    method: 'GET',
+    path: '/api/platform-admin/user-audit',
+    token: response.body.accessToken,
+    ip: '127.0.4.11'
+  })
+  assert.equal(removedGlobalReport.status, 404)
 })

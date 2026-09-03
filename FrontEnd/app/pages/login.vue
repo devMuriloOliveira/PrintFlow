@@ -25,7 +25,7 @@ const submit = async () => {
   try {
     if (mode.value === 'login') {
       await auth.login(form.email, form.password)
-      notify('Login realizado com sucesso.')
+      notify(auth.tenantDeletionCancelled.value ? 'A exclusao da empresa foi cancelada pelo seu login.' : 'Login realizado com sucesso.')
     } else {
       await auth.register({
         name: form.name,
