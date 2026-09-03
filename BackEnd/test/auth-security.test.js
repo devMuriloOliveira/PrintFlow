@@ -7,11 +7,13 @@ process.env.ALLOW_DEMO_TENANT = 'false'
 process.env.AUTH_SECRET = 'auth-security-test-secret-32-characters'
 process.env.DATA_ENCRYPTION_KEY = 'auth-security-data-key-32-characters'
 process.env.WEBHOOK_SHARED_SECRET = 'auth-security-webhook-secret-32-characters'
+process.env.PLATFORM_SUPER_ADMIN_EMAILS = 'platform-admin@example.com'
 process.env.RATE_LIMIT_AUTH_MAX_REQUESTS = '2'
 process.env.RATE_LIMIT_WINDOW_MS = '60000'
 process.env.DATABASE_URL = ''
 
 const { hashPassword, validatePasswordPolicy, verifyPassword } = await import('../src/auth/password.js')
+const { createToken } = await import('../src/auth/token.js')
 const { handleRequest } = await import('../src/routes/index.js')
 
 class MockRequest extends Readable {
@@ -179,4 +181,49 @@ test('logout revoga refresh token e invalida access token da sessao', async () =
     ip: '127.0.2.14'
   })
   assert.equal(refreshAfterLogout.status, 400)
+})
+
+test('rota de producao rejeita sessao de financeiro no backend', async () => {
+  const session = await registerSession('autorizacao', '127.0.3.10')
+  const payload = JSON.parse(Buffer.from(session.accessToken.split('.')[1], 'base64url').toString('utf8'))
+  const financeiroToken = createToken({
+    id: session.user.id,
+    tenantId: session.user.tenantId,
+    name: session.user.name,
+    email: session.user.email,
+    role: 'financeiro',
+    tokenVersion: payload.tokenVersion
+  }, { sessionId: payload.sid })
+
+  const response = await request({
+    method: 'POST',
+    path: '/api/print-jobs/enqueue',
+    token: financeiroToken,
+    ip: '127.0.3.11',
+    body: { productId: 1, printerId: 1 }
+  })
+
+  assert.equal(response.status, 403)
+})
+
+test('papel global da plataforma permanece separado do papel owner do tenant', async () => {
+  const response = await request({
+    method: 'POST',
+    path: '/api/auth/register',
+    ip: '127.0.4.10',
+    body: {
+      name: 'Administrador da Plataforma',
+      email: 'platform-admin@example.com',
+      password: 'SenhaForte1!',
+      company: 'Tenant da Plataforma'
+    }
+  })
+
+  assert.equal(response.status, 201)
+  assert.equal(response.body.user.role, 'owner')
+  assert.equal(response.body.user.platformRole, 'platform_super_admin')
+
+  const payload = JSON.parse(Buffer.from(response.body.accessToken.split('.')[1], 'base64url').toString('utf8'))
+  assert.equal(payload.role, 'owner')
+  assert.equal(payload.platformRole, 'platform_super_admin')
 })

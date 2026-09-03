@@ -2,8 +2,9 @@ import { createHash, randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
 import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, validatePasswordPolicy, verifyPassword } from '../auth/password.js'
-import { hasDatabase, query } from '../db/pool.js'
+import { hasDatabase, query, tenantQuery } from '../db/pool.js'
 import { blindIndex, blindIndexesForLookup, decryptField, encryptField } from '../security/crypto.js'
+import { writeAuditEvent } from '../services/operationalEvents.js'
 
 const memoryUsers = new Map()
 const memoryUsersById = new Map()
@@ -21,6 +22,7 @@ const publicUser = (row) => ({
   name: decryptField(row.name),
   email: decryptField(row.email),
   role: row.role,
+  platformRole: row.platform_role || '',
   status: row.status,
   tokenVersion: Number(row.token_version || 0)
 })
@@ -31,6 +33,7 @@ const publicUserFromPayload = (payload) => ({
   name: payload.name,
   email: payload.email,
   role: payload.role,
+  platformRole: payload.platformRole || '',
   status: 'active',
   tokenVersion: Number(payload.tokenVersion || 0)
 })
@@ -99,10 +102,15 @@ export const validateAccessPayload = async (payload) => {
     return activeSession ? publicUserFromPayload(payload) : null
   }
 
-  const result = await query(
-    `select u.id, u.tenant_id, u.name, u.email, u.role, u.status, u.token_version
+  const result = await tenantQuery(
+    payload.tenantId,
+    `select u.id, u.tenant_id, u.name, u.email, tm.role,
+      case when u.role = 'platform_super_admin' then u.role else '' end as platform_role,
+      u.status, u.token_version
      from users u
+     join tenant_memberships tm on tm.tenant_id = u.tenant_id and tm.user_id = u.id
      where u.id = $1 and u.tenant_id = $2 and u.status = 'active'
+       and tm.status = 'active'
        and u.token_version = $3
        and exists (
          select 1 from refresh_tokens rt
@@ -139,7 +147,7 @@ export const rotateRefreshToken = async (refreshToken) => {
 
   const result = await query(
     `select rt.id, rt.tenant_id, rt.user_id, rt.session_id, rt.expires_at, rt.revoked_at,
-      u.name, u.email, u.role, u.status, u.token_version
+      u.name, u.email, case when u.role = 'platform_super_admin' then u.role else '' end as platform_role, u.status, u.token_version
      from refresh_tokens rt
      join users u on u.id::text = rt.user_id and u.tenant_id = rt.tenant_id
      where rt.token_hash = $1
@@ -155,12 +163,21 @@ export const rotateRefreshToken = async (refreshToken) => {
     throw new Error('Refresh token reutilizado.')
   }
 
+  const membershipResult = await tenantQuery(
+    current.tenant_id,
+    `select role, status from tenant_memberships where tenant_id = $1 and user_id::text = $2 limit 1`,
+    [current.tenant_id, current.user_id]
+  )
+  const membership = membershipResult.rows[0]
+  if (!membership || membership.status !== 'active') throw new Error('Refresh token invalido.')
+
   const user = publicUser({
     id: current.user_id,
     tenant_id: current.tenant_id,
     name: current.name,
     email: current.email,
-    role: current.role,
+    role: membership.role,
+    platform_role: current.platform_role,
     status: current.status,
     token_version: current.token_version
   })
@@ -206,7 +223,7 @@ export const registerUser = async ({ name, email, password, company }) => {
 
   if (!hasDatabase) {
     if (memoryUsers.has(normalizedEmail)) throw new Error('Este e-mail ja esta cadastrado.')
-    const user = { id: createOpaqueId('user'), tenant_id: tenantId, name: cleanName, email: normalizedEmail, password_hash: passwordHash, role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin', status: 'active', token_version: 0 }
+    const user = { id: createOpaqueId('user'), tenant_id: tenantId, name: cleanName, email: normalizedEmail, password_hash: passwordHash, role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '', status: 'active', token_version: 0 }
     memoryUsers.set(normalizedEmail, user)
     memoryUsersById.set(String(user.id), user)
     return publicUser(user)
@@ -229,11 +246,28 @@ export const registerUser = async ({ name, email, password, company }) => {
     [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, passwordHash, isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin']
   )
 
+  await tenantQuery(
+    tenantId,
+    `insert into tenant_memberships (tenant_id, user_id, role, status)
+     values ($1, $2, 'owner', 'active')
+     on conflict (tenant_id, user_id) do nothing`,
+    [tenantId, result.rows[0].id]
+  )
+
   if (isConfiguredPlatformSuperAdmin(normalizedEmail)) {
     await query(`insert into platform_super_admins (user_id, email_hash) values ($1, $2) on conflict (user_id) do update set email_hash = excluded.email_hash, status = 'active', updated_at = now()`, [result.rows[0].id, emailHash])
   }
 
-  return publicUser(result.rows[0])
+  await writeAuditEvent(tenantId, {
+    action: 'membership.owner.granted', actorType: 'user', actorId: result.rows[0].id,
+    entityType: 'membership', entityId: result.rows[0].id, details: { role: 'owner' }
+  })
+
+  return publicUser({
+    ...result.rows[0],
+    role: 'owner',
+    platform_role: result.rows[0].role === 'platform_super_admin' ? 'platform_super_admin' : ''
+  })
 }
 
 export const loginUser = async ({ email, password }) => {
@@ -248,12 +282,22 @@ export const loginUser = async ({ email, password }) => {
   }
 
   const result = await query(
-    `select id, tenant_id, name, email, email_hash, password_hash, role, status, token_version
+    `select id, tenant_id, name, email, email_hash, password_hash,
+      case when role = 'platform_super_admin' then role else '' end as platform_role,
+      status, token_version
      from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`,
     [blindIndexesForLookup(normalizedEmail), normalizedEmail]
   )
   const user = result.rows[0]
   if (!user || !verifyPassword(password, user.password_hash)) throw new Error('E-mail ou senha invalidos.')
+
+  const membershipResult = await tenantQuery(
+    user.tenant_id,
+    `select role, status from tenant_memberships where tenant_id = $1 and user_id = $2 limit 1`,
+    [user.tenant_id, user.id]
+  )
+  const membership = membershipResult.rows[0]
+  if (!membership || membership.status !== 'active') throw new Error('E-mail ou senha invalidos.')
 
   if (!user.email_hash || user.email_hash !== emailHash || user.email === normalizedEmail) {
     await query(
@@ -263,5 +307,5 @@ export const loginUser = async ({ email, password }) => {
     )
   }
 
-  return publicUser(user)
+  return publicUser({ ...user, role: membership.role })
 }

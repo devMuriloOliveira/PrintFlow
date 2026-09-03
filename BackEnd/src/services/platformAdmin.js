@@ -22,7 +22,7 @@ export const syncConfiguredPlatformSuperAdmins = async () => {
 }
 
 export const isPlatformSuperAdmin = async (user) => {
-  if (!user || user.role !== 'platform_super_admin') return false
+  if (!user || user.platformRole !== 'platform_super_admin') return false
   if (!configuredEmails().includes(String(user.email || '').toLowerCase())) return false
   const result = await query(`select 1 from platform_super_admins where user_id = $1 and status = 'active' limit 1`, [user.id])
   return Boolean(result.rowCount)

@@ -15,6 +15,7 @@ export const createToken = (user, session = {}) => {
     name: user.name,
     email: user.email,
     role: user.role,
+    platformRole: user.platformRole || '',
     tokenVersion: Number(user.tokenVersion || 0),
     sid: session.sessionId || '',
     exp: expiresAt

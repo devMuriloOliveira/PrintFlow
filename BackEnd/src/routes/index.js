@@ -20,6 +20,10 @@ import {
 } from '../config/env.js'
 
 import {
+  canAccessRequest
+} from '../auth/authorization.js'
+
+import {
   handleProductCreate,
   handleProductPrintFileUpload,
   handleResourceCreate,
@@ -50,6 +54,11 @@ import {
   handleOperationalNotificationRead,
   handleOperationalNotificationsList
 } from './operations.js'
+
+import {
+  handleMemberUpdate,
+  handleMembersList
+} from './members.js'
 
 import {
   handlePlatformAdminAudit,
@@ -457,9 +466,25 @@ export const handleRequest =
         )
       }
 
+      if (isProtectedApi && !env.allowDemoTenant) {
+        const user = await getAuthUser(req)
+        if (!canAccessRequest(user, req.method, url.pathname)) {
+          return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
+        }
+      }
+
       // ==================================================
       // CONSULTAR RESULTADO DE COMANDO
       // ==================================================
+
+      if (req.method === 'GET' && url.pathname === '/api/members') {
+        return await handleMembersList(req, res)
+      }
+
+      const memberUpdateMatch = url.pathname.match(/^\/api\/members\/([^/]+)$/)
+      if (req.method === 'PATCH' && memberUpdateMatch) {
+        return await handleMemberUpdate(req, res, memberUpdateMatch[1])
+      }
 
       const agentCommandGetMatch =
         url.pathname.match(
@@ -1145,14 +1170,15 @@ export const handleRequest =
       const expectedClientErrors =
         new Set([
           'Registro nao encontrado',
+          'Membro nao encontrado',
           'E-mail ou senha invalidos.',
           'Refresh token invalido.',
           'Refresh token reutilizado.'
         ])
 
       const status =
-        error.message ===
-        'Registro nao encontrado'
+        error.message === 'Registro nao encontrado' ||
+        error.message === 'Membro nao encontrado'
           ? 404
           : 400
 

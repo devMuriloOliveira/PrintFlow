@@ -32,7 +32,8 @@ const tenantTables = [
   'tracked_sales',
   'marketplace_webhook_events',
   'operational_notifications',
-  'operational_audit_events'
+  'operational_audit_events',
+  'tenant_memberships'
 ]
 
 // ======================================================
@@ -354,6 +355,31 @@ export const migrate =
        limit 1
     `)
     const platformAdminUserIdType = userIdTypeResult.rows[0]?.type === 'uuid' ? 'uuid' : 'bigint'
+
+    await query(`
+      create table if not exists tenant_memberships (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        user_id ${platformAdminUserIdType} not null references users(id) on delete cascade,
+        role text not null check (role in ('owner', 'admin', 'financeiro', 'producao', 'usuario')),
+        status text not null default 'active' check (status in ('active', 'suspended')),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, user_id)
+      )
+    `)
+
+    await query(`
+      insert into tenant_memberships (tenant_id, user_id, role, status)
+      select tenant_id,
+             id,
+             case when role in ('admin', 'platform_super_admin') then 'owner' else 'usuario' end,
+             case when status = 'active' then 'active' else 'suspended' end
+        from users
+      on conflict (tenant_id, user_id) do nothing
+    `)
+
+    await query(`create index if not exists tenant_memberships_user_id_idx on tenant_memberships (user_id)`)
 
     await query(`
       create table if not exists platform_super_admins (
