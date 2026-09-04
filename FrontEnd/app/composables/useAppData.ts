@@ -143,8 +143,8 @@ export type BackupStatus = {
   export: { enabled: boolean; format: 'json'; excludes: string[] }
   restore: { enabled: false; reason: string }
 }
-export type AuditRequest = { id: string; status: string; reason: string; scope: { entityType?: string; entityId?: string }; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string }
-export type AuditMessage = { id: string; senderType: 'owner' | 'superadmin'; body: string; createdAt: string }
+export type SupportRequest = { id: string; status: string; subject: string; category: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string }
+export type SupportMessage = { id: string; senderType: 'owner' | 'requester' | 'superadmin'; body: string; createdAt: string }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
@@ -355,10 +355,11 @@ export const useAppData = () => {
   const loadBackupStatus = () => $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
     headers: resourceHeaders()
   })
-  const listAuditRequests = () => $fetch<AuditRequest[]>(apiUrl('/api/settings/audit-requests'), { headers: resourceHeaders() })
-  const createAuditRequest = (body: Record<string, unknown>) => $fetch<AuditRequest>(apiUrl('/api/settings/audit-requests'), { method: 'POST', body, headers: resourceHeaders() })
-  const listAuditMessages = (id: string) => $fetch<AuditMessage[]>(apiUrl(`/api/settings/audit-requests/${id}/messages`), { headers: resourceHeaders() })
-  const sendAuditMessage = (id: string, body: string) => $fetch(apiUrl(`/api/settings/audit-requests/${id}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
+  const listSupportRequests = () => $fetch<SupportRequest[]>(apiUrl('/api/support/requests'), { headers: resourceHeaders() })
+  const createSupportRequest = (body: Record<string, unknown>) => $fetch<SupportRequest>(apiUrl('/api/support/requests'), { method: 'POST', body, headers: resourceHeaders() })
+  const cancelSupportRequest = (id: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}`), { method: 'DELETE', headers: resourceHeaders() })
+  const listSupportMessages = (id: string) => $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { headers: resourceHeaders() })
+  const sendSupportMessage = (id: string, body: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
 
   const loadIntegrationsOverview = () => $fetch<IntegrationsOverview>(apiUrl('/api/integrations/overview'), {
     headers: resourceHeaders()
@@ -393,10 +394,11 @@ export const useAppData = () => {
     , exportTenantData
     , listSettingsExports
     , loadBackupStatus
-    , listAuditRequests
-    , createAuditRequest
-    , listAuditMessages
-    , sendAuditMessage
+    , listSupportRequests
+    , createSupportRequest
+    , cancelSupportRequest
+    , listSupportMessages
+    , sendSupportMessage
     , loadIntegrationsOverview
     , enqueuePrintJob
     , reorderPrintJob

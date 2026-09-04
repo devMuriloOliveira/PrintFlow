@@ -20,7 +20,8 @@ const rolePermissions = {
     'orders.read',
     'orders.manage',
     'production.read',
-    'production.manage'
+    'production.manage',
+    'support.use'
   ]),
   financeiro: new Set([
     'catalog.read',
@@ -30,7 +31,8 @@ const rolePermissions = {
     'financial.manage',
     'marketplaces.read',
     'orders.read',
-    'orders.manage'
+    'orders.manage',
+    'support.use'
   ]),
   producao: new Set([
     'catalog.read',
@@ -39,12 +41,14 @@ const rolePermissions = {
     'orders.read',
     'orders.manage',
     'production.read',
-    'production.manage'
+    'production.manage',
+    'support.use'
   ]),
   usuario: new Set([
     'catalog.read',
     'orders.read',
-    'production.read'
+    'production.read',
+    'support.use'
   ])
 }
 
@@ -60,6 +64,7 @@ const accessForMethod = (method, area) =>
 
 export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname === '/api/app-data') return 'app_data.read'
+  if (pathname === '/api/support/requests' || pathname.startsWith('/api/support/requests/')) return 'support.use'
   if (pathname === '/api/settings' || pathname.startsWith('/api/settings/')) return 'settings.manage'
   if (pathname === '/api/members') return accessForMethod(method, 'members')
   if (pathname === '/api/members/invitations') return 'members.manage'

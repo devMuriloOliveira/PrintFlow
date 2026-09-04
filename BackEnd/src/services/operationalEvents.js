@@ -58,6 +58,9 @@ const actionLabels = {
   'notification.read': 'Notificacao marcada como lida',
   'settings.updated': 'Configuracoes da empresa atualizadas',
   'settings.data_exported': 'Dados da empresa exportados',
+  'support.request.created': 'Solicitacao de suporte criada',
+  'support.request.message_sent': 'Mensagem de suporte enviada',
+  'support.request.cancelled': 'Solicitacao de suporte cancelada',
   'agent.offline': 'Agent ficou offline',
   'print_job.start_timeout': 'Inicio da impressao excedeu o prazo'
 }

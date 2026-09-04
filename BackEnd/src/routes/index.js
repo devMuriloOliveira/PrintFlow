@@ -862,6 +862,14 @@ export const handleRequest =
       if (req.method === 'GET' && tenantAuditMessagesMatch) return await handleTenantAuditMessagesList(req, res, tenantAuditMessagesMatch[1])
       if (req.method === 'POST' && tenantAuditMessagesMatch) return await handleTenantAuditMessageCreate(req, res, tenantAuditMessagesMatch[1])
 
+      if (req.method === 'GET' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestsList(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestCreate(req, res)
+      const supportRequestMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)$/)
+      if (req.method === 'DELETE' && supportRequestMatch) return await handleTenantAuditRequestCancel(req, res, supportRequestMatch[1])
+      const supportMessagesMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/messages$/)
+      if (req.method === 'GET' && supportMessagesMatch) return await handleTenantAuditMessagesList(req, res, supportMessagesMatch[1])
+      if (req.method === 'POST' && supportMessagesMatch) return await handleTenantAuditMessageCreate(req, res, supportMessagesMatch[1])
+
       if (req.method === 'GET' && url.pathname === '/api/settings/export') {
         return await handleSettingsExport(req, res)
       }
@@ -915,6 +923,14 @@ export const handleRequest =
       if (req.method === 'POST' && platformAuditRequestDecisionMatch) return await handlePlatformAuditDecision(req, res, platformAuditRequestDecisionMatch[1])
       const platformAuditRequestCloseMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/close-chat$/)
       if (req.method === 'POST' && platformAuditRequestCloseMatch) return await handlePlatformAuditChatClose(req, res, platformAuditRequestCloseMatch[1])
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests') return await handlePlatformAuditRequestsList(req, res)
+      const platformSupportMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/messages$/)
+      if (req.method === 'GET' && platformSupportMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformSupportMessagesMatch[1])
+      if (req.method === 'POST' && platformSupportMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformSupportMessagesMatch[1])
+      const platformSupportDecisionMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/decision$/)
+      if (req.method === 'POST' && platformSupportDecisionMatch) return await handlePlatformAuditDecision(req, res, platformSupportDecisionMatch[1])
+      const platformSupportCloseMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/close-chat$/)
+      if (req.method === 'POST' && platformSupportCloseMatch) return await handlePlatformAuditChatClose(req, res, platformSupportCloseMatch[1])
 
       const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)
       if (req.method === 'GET' && platformTenantAuditMatch) {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 const { notify } = useUi()
 const auth = useAuth()
-const { settings, marketplaceIntegrations, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, listAuditRequests, createAuditRequest, loadIntegrationsOverview } = useAppData()
+const { settings, marketplaceIntegrations, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
+const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
 const active = ref('Empresa')
 const savingMemberId = ref('')
@@ -18,8 +19,8 @@ const exportingData = ref(false)
 const exportHistory = ref<Array<{ id: string; fileName: string; format: string; recordCount: number; status: string; createdAt: string }>>([])
 const backupLoading = ref(false)
 const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
-const auditRequests = ref<any[]>([])
-const auditDraft = reactive({ reason: '', entityType: '', entityId: '', currentPassword: '' })
+const submittingSupport = ref(false)
+const supportDraft = reactive({ subject: '', category: 'technical', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
@@ -33,7 +34,8 @@ const tabs = [
   ['Seguranca', 'shield', 'Acesso, 2FA e sessoes'],
   ['Personalizacao', 'settings', 'Marca, aparencia e preferencias'],
   ['Integracoes', 'box', 'Marketplaces e servicos'],
-  ['Backup e Dados', 'download', 'Exportar e restaurar dados']
+  ['Backup e Dados', 'download', 'Exportar e restaurar dados'],
+  ['Ajuda e Suporte', 'info', 'Solicitacoes e atendimentos']
 ]
 const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0 })
 const preferences = reactive({ emailAlerts: true, productionAlerts: true, marketplaceAlerts: true, dailySummary: false, compactLayout: false, logoUrl: '', brandName: '', accentColor: '#1768f2', defaultMargin: 40, monthlyFixedCost: 0, plannedMonthlyUnits: 0 })
@@ -47,6 +49,9 @@ const roles = [
 ]
 
 const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
+const isOwner = computed(() => auth.user.value?.role === 'owner')
+const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', audit: 'Auditoria excepcional' }[category] || category)
+const supportStatusLabel = (status: string) => ({ pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada' }[status] || status)
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
 const memberBadge = (status: string) => status === 'active' ? 'badge badge--green' : 'badge badge--orange'
 const memberStatusLabel = (status: string) => status === 'active' ? 'Ativo' : 'Suspenso'
@@ -209,12 +214,35 @@ const loadBackup = async () => {
   try {
     backupStatus.value = await loadBackupStatus()
     if (backupStatus.value.export.enabled) await loadExportHistory()
-    auditRequests.value = await listAuditRequests()
   } catch (error: any) {
     notify(error?.data?.error || 'Nao foi possivel verificar a disponibilidade do backup.')
   } finally { backupLoading.value = false }
 }
-const submitAuditRequest = async () => { try { await createAuditRequest({ ...auditDraft, scope: { entityType: auditDraft.entityType, entityId: auditDraft.entityId } }); Object.assign(auditDraft, { reason: '', entityType: '', entityId: '', currentPassword: '' }); await loadBackup(); notify('Solicitacao enviada ao superadmin.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel criar a solicitacao.') } }
+const loadSupport = async () => {
+  try {
+    await refreshSupportRequests()
+  } catch (error: any) {
+    notify(error?.data?.error || 'Nao foi possivel carregar suas solicitacoes.')
+  }
+}
+const submitSupportRequest = async () => {
+  submittingSupport.value = true
+  try {
+    const created = await createSupportRequest({
+      subject: supportDraft.subject, category: supportDraft.category, priority: supportDraft.priority, reason: supportDraft.reason,
+      currentPassword: supportDraft.category === 'audit' ? supportDraft.currentPassword : undefined,
+      scope: supportDraft.category === 'audit' ? { entityType: supportDraft.entityType, entityId: supportDraft.entityId } : {}
+    })
+    Object.assign(supportDraft, { subject: '', category: 'technical', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
+    notify(`Solicitacao criada. Protocolo ${created.id}`)
+  } catch (error: any) {
+    notify(error?.data?.error || 'Nao foi possivel criar a solicitacao.')
+  } finally { submittingSupport.value = false }
+}
+const cancelSupport = async (request: any) => {
+  if (!window.confirm(`Cancelar a solicitacao ${request.id}?`)) return
+  try { await cancelSupportRequest(request.id); notify('Solicitacao cancelada.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel cancelar a solicitacao.') }
+}
 
 const loadIntegrations = async () => {
   integrationsLoading.value = true
@@ -229,10 +257,12 @@ watch(active, (tab) => {
   if (tab === 'Seguranca') void loadSessions()
   if (tab === 'Backup e Dados') void loadBackup()
   if (tab === 'Integracoes') void loadIntegrations()
+  if (tab === 'Ajuda e Suporte') void loadSupport()
 })
 
 watch(members, syncMemberDrafts, { immediate: true })
 watch(settings, syncSettings, { immediate: true })
+watch(() => supportDraft.category, (category) => { if (category === 'audit') supportDraft.priority = 'high' })
 </script>
 
 <template>
@@ -317,12 +347,10 @@ watch(settings, syncSettings, { immediate: true })
             <div v-if="exportHistory.length" class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Arquivo</th><th>Formato</th><th>Registros</th><th>Status</th><th>Gerado em</th></tr></thead><tbody><tr v-for="item in exportHistory" :key="item.id"><td>{{ item.fileName }}</td><td>{{ item.format.toUpperCase() }}</td><td>{{ item.recordCount }}</td><td><span class="badge badge--green">{{ item.status }}</span></td><td>{{ new Date(item.createdAt).toLocaleString('pt-BR') }}</td></tr></tbody></table></div>
             <div v-else-if="backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="info" />Nenhuma exportacao registrada para este tenant.</div>
             <div class="info-note" style="margin-top:16px"><UiIcon name="shield" />Restauracao automatica permanece bloqueada. {{ backupStatus.restore.reason }}</div>
-            <form v-if="auth.user?.role === 'owner'" class="integration-section" @submit.prevent="submitAuditRequest"><h2>Solicitar auditoria excepcional</h2><p>O superadmin somente acessa eventos apos esta solicitacao formal.</p><label class="field"><span>Motivo</span><textarea v-model="auditDraft.reason" minlength="12" maxlength="500" required></textarea></label><div class="form-grid"><label class="field col-6"><span>Tipo de item</span><input v-model="auditDraft.entityType" maxlength="80"></label><label class="field col-6"><span>Identificador</span><input v-model="auditDraft.entityId" maxlength="160"></label></div><label class="field"><span>Senha atual</span><input v-model="auditDraft.currentPassword" type="password" required></label><button class="btn btn--primary" type="submit">Enviar solicitacao</button></form>
-            <div v-if="auditRequests.length" class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Status do chat</th><th>Decisao</th><th>Solicitada em</th></tr></thead><tbody><tr v-for="request in auditRequests" :key="request.id"><td>{{ request.id }}</td><td>{{ request.status }}</td><td>{{ request.decision || 'Aguardando' }}</td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td></tr></tbody></table></div>
           </template>
           <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
           <div><h2>Excluir empresa e dados</h2><p>Esta acao agenda a exclusao completa da empresa, usuarios, dados operacionais, arquivos e informacoes no banco em sete dias.</p></div>
-          <form v-if="auth.user?.role === 'owner'" style="margin-top:16px" @submit.prevent="requestTenantDeletion">
+          <form v-if="isOwner" style="margin-top:16px" @submit.prevent="requestTenantDeletion">
             <div class="info-note" style="margin-bottom:16px"><UiIcon name="shield" />Ao entrar novamente no PrintFlow durante os 7 dias, a exclusao sera cancelada automaticamente. Esta confirmacao sera registrada em auditoria.</div>
             <label class="field"><span>Senha atual</span><input v-model="deletionForm.currentPassword" type="password" autocomplete="current-password" required></label>
             <label class="field" style="margin-top:12px"><span>Para confirmar, digite EXCLUIR</span><input v-model="deletionForm.confirmation" required autocomplete="off"></label>
@@ -357,9 +385,30 @@ watch(settings, syncSettings, { immediate: true })
             <div class="integration-section"><div class="integration-section__head"><div><h3>Envio de e-mail</h3><p>Usado para convites e comunicacoes transacionais.</p></div><span :class="integrationBadge(integrationsOverview.email.status)">{{ integrationStatus(integrationsOverview.email.status) }}</span></div><div class="info-note"><UiIcon name="shield" />Provedor: {{ integrationsOverview.email.provider }}. Credenciais nunca sao exibidas nesta tela.</div></div>
           </template>
         </div>
-      </section>
 
-      <AuditRequestChat v-if="auth.user?.role === 'owner' && auditRequests[0]" :request-id="auditRequests[0].id" :status="auditRequests[0].status" />
+        <div v-else-if="active === 'Ajuda e Suporte'" class="settings-security-card">
+          <div><h2>Ajuda e Suporte</h2><p>Abra uma solicitacao e converse com o atendimento usando um protocolo auditado.</p></div>
+          <form class="integration-section" @submit.prevent="submitSupportRequest">
+            <div class="form-grid">
+              <label class="field col-8"><span>Assunto</span><input v-model="supportDraft.subject" minlength="4" maxlength="120" required placeholder="Resuma o que voce precisa"></label>
+              <label class="field col-4"><span>Categoria</span><select v-model="supportDraft.category"><option value="technical">Suporte tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracoes</option><option value="account">Conta e permissoes</option><option value="data_backup">Backup e dados</option><option value="audit">Auditoria excepcional</option></select></label>
+              <label class="field col-4"><span>Prioridade</span><select v-model="supportDraft.priority" :disabled="supportDraft.category === 'audit'"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option></select></label>
+              <label class="field col-12"><span>Descricao detalhada</span><textarea v-model="supportDraft.reason" minlength="12" maxlength="1000" required placeholder="Descreva o problema, impacto e resultado esperado"></textarea></label>
+              <template v-if="supportDraft.category === 'audit'">
+                <div class="col-12 info-note"><UiIcon name="shield" />Auditorias podem envolver dados sensiveis e exigem confirmacao de identidade, escopo e aprovacao do superadmin.</div>
+                <label class="field col-6"><span>Tipo de item</span><input v-model="supportDraft.entityType" maxlength="80" required></label>
+                <label class="field col-6"><span>Identificador</span><input v-model="supportDraft.entityId" maxlength="160" required></label>
+                <label class="field col-6"><span>Senha atual</span><input v-model="supportDraft.currentPassword" type="password" autocomplete="current-password" required></label>
+              </template>
+            </div>
+            <button class="btn btn--primary" type="submit" :disabled="submittingSupport">{{ submittingSupport ? 'Criando...' : 'Criar solicitacao' }}</button>
+          </form>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px"><div><h2>Minhas solicitacoes</h2><p>Somente voce e o superadmin acessam estas conversas.</p></div><button class="btn" @click="loadSupport">Atualizar</button></div>
+          <div v-if="!supportRequests.length" class="empty-state"><div><h3>Nenhuma solicitacao encontrada</h3><p>Use o formulario acima para iniciar um atendimento.</p></div></div>
+          <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Categoria</th><th>Prioridade</th><th>Status</th><th>Criada em</th><th>Acao</th></tr></thead><tbody><tr v-for="request in supportRequests" :key="request.id"><td>{{ request.id }}</td><td>{{ request.subject }}</td><td>{{ supportCategoryLabel(request.category) }}</td><td>{{ request.priority }}</td><td><span class="badge">{{ supportStatusLabel(request.status) }}</span></td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
+        </div>
+      </section>
 
       <aside class="settings-panel"><h2>Dados e Seguranca</h2><p>Os dados empresariais sensiveis sao protegidos no BackEnd e isolados por tenant.</p><ul class="check-list"><li><span><UiIcon name="check" :size="15" /></span>Permissoes aplicadas no servidor.</li><li><span><UiIcon name="check" :size="15" /></span>Exportacao registrada em auditoria.</li><li><span><UiIcon name="check" :size="15" /></span>Tokens de integracoes nao sao exibidos.</li></ul><button class="btn btn--wide" :disabled="exportingData" @click="downloadTenantData"><UiIcon name="download" />Exportar dados</button></aside>
     </div>

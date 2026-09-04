@@ -142,18 +142,34 @@ export const verifyDataAccessRequest = async (user, requestId, document) => {
   return { id: requestId, tenantId: request.tenant_id, status: 'approved', expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString() }
 }
 
-export const requireApprovedDataAccess = async (user, requestId, tenantId) => {
-  const result = await query(`select id from platform_data_access_requests where id = $1 and tenant_id = $2 and requested_by = $3 and status = 'approved' and expires_at > now() limit 1`, [requestId, tenantId, user.id])
+export const createApprovedDataAccessChecker = (runQuery = query) => async (user, requestId, tenantId) => {
+  const result = await runQuery(`
+    select id from platform_data_access_requests
+     where id = $1 and tenant_id = $2 and requested_by = $3 and status = 'approved' and expires_at > now()
+    union all
+    select id from tenant_audit_requests
+     where id = $1 and tenant_id = $2 and reviewed_by = $3 and category = 'audit'
+       and status in ('approved', 'closed') and expires_at > now()
+    limit 1
+  `, [requestId, tenantId, user.id])
   if (!result.rowCount) throw new Error('Solicitacao de acesso nao aprovada ou expirada.')
 }
+
+export const requireApprovedDataAccess = createApprovedDataAccessChecker()
 
 export const getTenantAuditReport = async (user, requestId, tenantId, limit = 500) => {
   await requireApprovedDataAccess(user, requestId, tenantId)
   const result = await query(`
-    select t.name, t.document, r.reason, r.verified_at, r.expires_at
-      from platform_data_access_requests r
-      join tenants t on t.id = r.tenant_id
-     where r.id = $1 and r.tenant_id = $2 and r.requested_by = $3 and r.status = 'approved' and r.expires_at > now()
+    select t.name, t.document, access.reason, access.verified_at, access.expires_at
+      from (
+        select tenant_id, reason, verified_at, expires_at from platform_data_access_requests
+         where id = $1 and tenant_id = $2 and requested_by = $3 and status = 'approved' and expires_at > now()
+        union all
+        select tenant_id, reason, updated_at as verified_at, expires_at from tenant_audit_requests
+         where id = $1 and tenant_id = $2 and reviewed_by = $3 and category = 'audit'
+           and status in ('approved', 'closed') and expires_at > now()
+      ) access
+      join tenants t on t.id = access.tenant_id
      limit 1
   `, [requestId, tenantId, user.id])
   if (!result.rowCount) throw new Error('Solicitacao de acesso nao aprovada ou expirada.')

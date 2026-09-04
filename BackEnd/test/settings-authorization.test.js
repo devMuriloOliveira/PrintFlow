@@ -11,6 +11,15 @@ test('exportacao de configuracoes usa a permissao settings.manage', () => {
   assert.equal(canAccessRequest({ role: 'financeiro' }, 'GET', '/api/settings/export'), false)
 })
 
+test('suporte fica disponivel para todos os perfis sem liberar configuracoes', () => {
+  for (const role of ['owner', 'admin', 'financeiro', 'producao', 'usuario']) {
+    assert.equal(requiredPermissionForRequest('POST', '/api/support/requests'), 'support.use')
+    assert.equal(canAccessRequest({ role }, 'POST', '/api/support/requests'), true)
+    assert.equal(canAccessRequest({ role }, 'GET', '/api/support/requests/protocolo/messages'), true)
+  }
+  assert.equal(canAccessRequest({ role: 'usuario' }, 'GET', '/api/settings/backup-status'), false)
+})
+
 test('status de backup nao expoe dados ou credenciais', () => {
   const status = backupStatus()
   assert.equal(status.restore.enabled, false)

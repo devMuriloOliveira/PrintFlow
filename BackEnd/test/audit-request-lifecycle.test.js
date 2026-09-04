@@ -5,14 +5,18 @@ process.env.DATABASE_URL = ''
 
 const {
   AUDIT_CHAT_OPEN_STATUSES,
+  cancelRequesterRequest,
   createPlatformAuditChatActions,
+  findRequesterRequest,
   isAuditChatOpenStatus,
-  mapAuditRequestRow
+  mapAuditRequestRow,
+  normalizeSupportRequest
 } = await import('../src/services/tenantAuditRequests.js')
+const { createApprovedDataAccessChecker } = await import('../src/services/platformAdmin.js')
 
-const createStore = (initialStatus = 'pending') => {
+const createStore = (initialStatus = 'pending', category = 'audit') => {
   const request = {
-    tenantId: 'tenant-test', status: initialStatus, reviewReason: '', expiresAt: null,
+    tenantId: 'tenant-test', status: initialStatus, category, reviewReason: '', expiresAt: null,
     chatOpenedAt: null, chatClosedAt: null
   }
   const messages = []
@@ -33,7 +37,7 @@ const createStore = (initialStatus = 'pending') => {
       return { rowCount: 1, rows: [{ tenant_id: request.tenantId, chat_opened_at: request.chatOpenedAt, chat_closed_at: request.chatClosedAt }] }
     }
     if (sql.includes('review_reason')) {
-      if (!['pending', 'under_review'].includes(request.status)) return { rowCount: 0, rows: [] }
+      if (request.category !== 'audit' || !['pending', 'under_review'].includes(request.status)) return { rowCount: 0, rows: [] }
       request.status = params[1]
       request.reviewReason = params[3]
       request.expiresAt = request.status === 'approved' ? new Date('2026-09-04T12:30:00.000Z') : null
@@ -66,6 +70,35 @@ test('retorno preserva decisao e horarios depois do encerramento', () => {
   assert.equal(row.reviewReason, 'Acesso temporario aprovado.')
   assert.equal(row.chatOpenedAt, '2026-09-04T12:00:00.000Z')
   assert.equal(row.chatClosedAt, '2026-09-04T12:20:00.000Z')
+  assert.equal(row.category, 'audit')
+  assert.equal(row.subject, 'Auditoria solicitada')
+})
+
+test('normaliza suporte comum sem exigir escopo e protege auditoria', () => {
+  const support = normalizeSupportRequest({ category: 'technical', subject: 'Falha na fila', reason: 'A fila nao inicia a impressao.', priority: 'high', scope: { entityId: 'ignorado' } })
+  assert.deepEqual(support, { category: 'technical', subject: 'Falha na fila', reason: 'A fila nao inicia a impressao.', priority: 'high', scope: {} })
+
+  const audit = normalizeSupportRequest({ category: 'audit', subject: 'Auditar pedido', reason: 'Preciso conferir os eventos do pedido.', priority: 'low', scope: { entityType: 'order', entityId: 'order-1' } })
+  assert.equal(audit.priority, 'high')
+  assert.deepEqual(audit.scope, { type: 'operational_audit', entityType: 'order', entityId: 'order-1', periodStart: null, periodEnd: null })
+  assert.throws(() => normalizeSupportRequest({ category: 'unknown', subject: 'Teste', reason: 'Descricao suficientemente longa.' }), /Categoria/)
+})
+
+test('consulta de conversa exige tenant e solicitante exatos', async () => {
+  const calls = []
+  const client = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] } } }
+  await findRequesterRequest(client, { id: 'user-a', tenantId: 'tenant-a' }, 'support-1')
+  assert.deepEqual(calls[0].params, ['support-1', 'tenant-a', 'user-a'])
+  assert.match(calls[0].sql, /tenant_id = \$2 and requested_by::text = \$3/)
+})
+
+test('solicitante somente cancela o proprio protocolo antes do atendimento', async () => {
+  const calls = []
+  const client = { query: async (sql, params) => { calls.push({ sql, params }); return { rowCount: 1, rows: [{ id: params[0] }] } } }
+  await cancelRequesterRequest(client, { id: 'user-a', tenantId: 'tenant-a' }, 'support-1')
+  assert.deepEqual(calls[0].params, ['support-1', 'tenant-a', 'user-a'])
+  assert.match(calls[0].sql, /status = 'pending'/)
+  assert.doesNotMatch(calls[0].sql, /under_review/)
 })
 
 test('mensagem inicial abre atendimento e gravacao e atomica', async () => {
@@ -124,4 +157,24 @@ test('decisao exige justificativa detalhada', async () => {
   const store = createStore('under_review')
   await assert.rejects(store.actions.decide(admin, 'auditreq-reason', true, 'muito curta'), /justificativa/)
   assert.equal(store.request.status, 'under_review')
+})
+
+test('suporte comum aceita conversa mas nunca decisao de acesso', async () => {
+  const store = createStore('pending', 'technical')
+  await store.actions.addMessage(admin, 'support-common', 'Vamos analisar o problema informado.')
+  assert.equal(store.request.status, 'under_review')
+  await assert.rejects(store.actions.decide(admin, 'support-common', true, 'Tentativa indevida de liberar acesso.'), /indisponivel/)
+})
+
+test('protocolo somente autoriza relatorio para auditoria aprovada pelo mesmo superadmin', async () => {
+  const calls = []
+  const allow = createApprovedDataAccessChecker(async (sql, params) => { calls.push({ sql, params }); return { rowCount: 1, rows: [{ id: params[0] }] } })
+  await allow({ id: 'superadmin-test' }, 'support-audit', 'tenant-test')
+  assert.deepEqual(calls[0].params, ['support-audit', 'tenant-test', 'superadmin-test'])
+  assert.match(calls[0].sql, /category = 'audit'/)
+  assert.match(calls[0].sql, /reviewed_by = \$3/)
+  assert.match(calls[0].sql, /expires_at > now\(\)/)
+
+  const deny = createApprovedDataAccessChecker(async () => ({ rowCount: 0, rows: [] }))
+  await assert.rejects(deny({ id: 'outro-admin' }, 'support-audit', 'tenant-test'), /nao aprovada ou expirada/)
 })

@@ -27,6 +27,10 @@ export type AuditRequest = {
   tenantId: string
   requestedBy: string
   status: string
+  subject: string
+  category: 'technical' | 'financial' | 'integration' | 'account' | 'data_backup' | 'audit'
+  priority: 'low' | 'normal' | 'high'
+  requesterRole: string
   reason: string
   scope: { entityType?: string; entityId?: string; periodStart?: string; periodEnd?: string }
   reviewerId?: string | null
@@ -41,7 +45,7 @@ export type AuditRequest = {
 
 export type Message = {
   id: string
-  sender_type: 'owner' | 'superadmin'
+  sender_type: 'owner' | 'requester' | 'superadmin'
   sender_id: string
   body: string
   created_at: string

@@ -48,7 +48,7 @@ export const usePlatformAdminWorkspace = () => {
       const jobs: Promise<void>[] = []
       if (options.overview) jobs.push(session.request<Overview>('/api/platform-admin/overview').then(value => { overview.value = value }))
       if (options.tenants) jobs.push(session.request<Tenant[]>('/api/platform-admin/tenants').then(value => { tenants.value = value }))
-      if (options.requests) jobs.push(session.request<AuditRequest[]>('/api/platform-admin/audit-requests').then(value => { requests.value = value }))
+      if (options.requests) jobs.push(session.request<AuditRequest[]>('/api/platform-admin/support-requests').then(value => { requests.value = value }))
       await Promise.all(jobs)
       return true
     } catch (cause) {
@@ -60,7 +60,7 @@ export const usePlatformAdminWorkspace = () => {
   }
 
   const refreshRequests = async () => {
-    requests.value = await session.request<AuditRequest[]>('/api/platform-admin/audit-requests')
+    requests.value = await session.request<AuditRequest[]>('/api/platform-admin/support-requests')
   }
 
   const activeRequests = computed(() => requests.value.filter(request => isChatOpen(request.status)))

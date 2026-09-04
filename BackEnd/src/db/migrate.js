@@ -2420,6 +2420,28 @@ export const migrate =
     await query(`create index if not exists tenant_audit_request_messages_request_idx on tenant_audit_request_messages (request_id, created_at)`)
     await query(`alter table tenant_audit_requests add column if not exists chat_opened_at timestamptz`)
     await query(`alter table tenant_audit_requests add column if not exists chat_closed_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists subject text not null default ''`)
+    await query(`alter table tenant_audit_requests add column if not exists category text not null default 'audit'`)
+    await query(`alter table tenant_audit_requests add column if not exists priority text not null default 'normal'`)
+    await query(`alter table tenant_audit_requests add column if not exists requester_role text not null default ''`)
+    await query(`do $$
+      begin
+        if exists (
+          select 1 from pg_constraint
+          where conname = 'tenant_audit_request_messages_sender_type_check'
+            and conrelid = 'tenant_audit_request_messages'::regclass
+            and pg_get_constraintdef(oid) not like '%requester%'
+        ) then
+          alter table tenant_audit_request_messages drop constraint tenant_audit_request_messages_sender_type_check;
+        end if;
+        if not exists (
+          select 1 from pg_constraint
+          where conname = 'tenant_audit_request_messages_sender_type_check'
+            and conrelid = 'tenant_audit_request_messages'::regclass
+        ) then
+          alter table tenant_audit_request_messages add constraint tenant_audit_request_messages_sender_type_check check (sender_type in ('owner','requester','superadmin'));
+        end if;
+      end $$`)
 
     // ==================================================
     // CALCULATOR SIMULATIONS

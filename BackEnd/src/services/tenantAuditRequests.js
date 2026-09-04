@@ -3,8 +3,10 @@ import { hasDatabase, query, withTenant } from '../db/pool.js'
 import { verifyPassword } from '../auth/password.js'
 import { writeAuditEvent } from './operationalEvents.js'
 
-const id = () => `auditreq_${randomBytes(16).toString('hex')}`
+const id = () => `support_${randomBytes(16).toString('hex')}`
 const clean = (value, max = 1000) => String(value || '').trim().slice(0, max)
+const categories = new Set(['technical', 'financial', 'integration', 'account', 'data_backup', 'audit'])
+const priorities = new Set(['low', 'normal', 'high'])
 export const AUDIT_CHAT_OPEN_STATUSES = Object.freeze(['pending', 'under_review', 'approved', 'rejected'])
 export const isAuditChatOpenStatus = (status) => AUDIT_CHAT_OPEN_STATUSES.includes(status)
 const writable = new Set(AUDIT_CHAT_OPEN_STATUSES)
@@ -16,24 +18,39 @@ const scopeFor = (value = {}) => ({
 })
 export const mapAuditRequestRow = (row) => ({
   id: row.id, tenantId: row.tenant_id, requestedBy: String(row.requested_by), status: row.status,
+  subject: row.subject || row.reason, category: row.category || 'audit', priority: row.priority || 'normal',
+  requesterRole: row.requester_role || '',
   reason: row.reason, scope: row.scope || {}, reviewerId: row.reviewed_by ? String(row.reviewed_by) : null,
   reviewReason: row.review_reason || '', decision: row.review_reason ? (row.expires_at ? 'approved' : 'rejected') : null,
   expiresAt: row.expires_at, chatOpenedAt: row.chat_opened_at, chatClosedAt: row.chat_closed_at,
   createdAt: row.created_at, updatedAt: row.updated_at
 })
 
+export const normalizeSupportRequest = (payload = {}) => {
+  const category = String(payload.category || 'audit')
+  if (!categories.has(category)) throw new Error('Categoria de suporte invalida.')
+  const requestedPriority = String(payload.priority || 'normal')
+  if (!priorities.has(requestedPriority)) throw new Error('Prioridade de suporte invalida.')
+  const priority = category === 'audit' ? 'high' : requestedPriority
+  const subject = clean(payload.subject || (category === 'audit' ? 'Solicitacao de auditoria' : ''), 120)
+  const reason = clean(payload.reason, 1000)
+  if (subject.length < 4) throw new Error('Informe um assunto para a solicitacao.')
+  if (reason.length < 12) throw new Error('Descreva a solicitacao com pelo menos 12 caracteres.')
+  return { subject, category, priority, reason, scope: category === 'audit' ? scopeFor(payload.scope) : {} }
+}
+
 export const createTenantAuditRequest = async (user, payload) => {
-  if (!hasDatabase) throw new Error('Solicitacoes de auditoria exigem DATABASE_URL.')
-  if (user.role !== 'owner') throw new Error('Somente o Owner pode solicitar auditoria excepcional.')
-  const reason = clean(payload.reason, 500)
-  if (reason.length < 12) throw new Error('Informe um motivo detalhado para a solicitacao.')
+  if (!hasDatabase) throw new Error('Solicitacoes de suporte exigem DATABASE_URL.')
+  const request = normalizeSupportRequest(payload)
   return withTenant(user.tenantId, async (client) => {
-    const account = await client.query('select password_hash from users where id::text = $1 and tenant_id = $2 and status = $3 limit 1', [String(user.id), user.tenantId, 'active'])
-    if (!account.rowCount || !verifyPassword(clean(payload.currentPassword, 500), account.rows[0].password_hash)) throw new Error('Senha atual invalida.')
-    const requestId = id(); const scope = scopeFor(payload.scope)
-    await client.query('insert into tenant_audit_requests (id, tenant_id, requested_by, reason, scope, chat_opened_at) values ($1, $2, $3, $4, $5::jsonb, now())', [requestId, user.tenantId, String(user.id), reason, JSON.stringify(scope)])
-    await writeAuditEvent(user.tenantId, { action: 'tenant.audit_request.created', actorType: 'user', actorId: user.id, entityType: 'audit_request', entityId: requestId, details: { scope } }, client)
-    return { id: requestId, status: 'pending', scope }
+    if (request.category === 'audit') {
+      const account = await client.query('select password_hash from users where id::text = $1 and tenant_id = $2 and status = $3 limit 1', [String(user.id), user.tenantId, 'active'])
+      if (!account.rowCount || !verifyPassword(clean(payload.currentPassword, 500), account.rows[0].password_hash)) throw new Error('Senha atual invalida.')
+    }
+    const requestId = id()
+    await client.query('insert into tenant_audit_requests (id, tenant_id, requested_by, requester_role, subject, category, priority, reason, scope, chat_opened_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now())', [requestId, user.tenantId, String(user.id), clean(user.role, 40), request.subject, request.category, request.priority, request.reason, JSON.stringify(request.scope)])
+    await writeAuditEvent(user.tenantId, { action: 'support.request.created', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: requestId, details: { category: request.category, priority: request.priority, requesterRole: clean(user.role, 40), scope: request.scope } }, client)
+    return { id: requestId, status: 'pending', ...request, requesterRole: clean(user.role, 40) }
   })
 }
 
@@ -42,18 +59,20 @@ export const listTenantAuditRequests = async (user) => withTenant(user.tenantId,
   return result.rows.map(mapAuditRequestRow)
 })
 
-const ownerRequest = async (user, requestId) => withTenant(user.tenantId, async (client) => (await client.query('select * from tenant_audit_requests where id = $1 and tenant_id = $2 and requested_by::text = $3 limit 1', [requestId, user.tenantId, String(user.id)])).rows[0])
+export const findRequesterRequest = async (client, user, requestId) => (await client.query('select * from tenant_audit_requests where id = $1 and tenant_id = $2 and requested_by::text = $3 limit 1', [requestId, user.tenantId, String(user.id)])).rows[0]
+const requesterRequest = async (user, requestId) => withTenant(user.tenantId, (client) => findRequesterRequest(client, user, requestId))
 export const listTenantAuditMessages = async (user, requestId) => {
-  const request = await ownerRequest(user, requestId); if (!request) throw new Error('Solicitacao nao encontrada.')
+  const request = await requesterRequest(user, requestId); if (!request) throw new Error('Solicitacao nao encontrada.')
   const result = await withTenant(user.tenantId, (client) => client.query('select id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 and tenant_id = $2 order by created_at asc limit 200', [requestId, user.tenantId]))
   return result.rows.map((row) => ({ id: String(row.id), senderType: row.sender_type, senderId: String(row.sender_id), body: row.body, createdAt: row.created_at }))
 }
 export const addTenantAuditMessage = async (user, requestId, body) => {
-  const request = await ownerRequest(user, requestId); if (!request || !writable.has(request.status)) throw new Error('Conversa indisponivel para esta solicitacao.')
+  const request = await requesterRequest(user, requestId); if (!request || !writable.has(request.status)) throw new Error('Conversa indisponivel para esta solicitacao.')
   const message = clean(body); if (!message) throw new Error('Mensagem obrigatoria.')
-  await withTenant(user.tenantId, async (client) => { await client.query('insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body) values ($1, $2, $3, $4, $5)', [user.tenantId, requestId, 'owner', String(user.id), message]); await writeAuditEvent(user.tenantId, { action: 'tenant.audit_request.message_sent', actorType: 'user', actorId: user.id, entityType: 'audit_request', entityId: requestId }, client) })
+  await withTenant(user.tenantId, async (client) => { await client.query('insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body) values ($1, $2, $3, $4, $5)', [user.tenantId, requestId, 'requester', String(user.id), message]); await writeAuditEvent(user.tenantId, { action: 'support.request.message_sent', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: requestId }, client) })
 }
-export const cancelTenantAuditRequest = async (user, requestId) => withTenant(user.tenantId, async (client) => { const result = await client.query("update tenant_audit_requests set status = 'cancelled', updated_at = now() where id = $1 and tenant_id = $2 and requested_by::text = $3 and status in ('pending', 'under_review') returning id", [requestId, user.tenantId, String(user.id)]); if (!result.rowCount) throw new Error('Solicitacao nao encontrada ou indisponivel.'); await writeAuditEvent(user.tenantId, { action: 'tenant.audit_request.cancelled', actorType: 'user', actorId: user.id, entityType: 'audit_request', entityId: requestId }, client) })
+export const cancelRequesterRequest = (client, user, requestId) => client.query("update tenant_audit_requests set status = 'cancelled', updated_at = now() where id = $1 and tenant_id = $2 and requested_by::text = $3 and status = 'pending' returning id", [requestId, user.tenantId, String(user.id)])
+export const cancelTenantAuditRequest = async (user, requestId) => withTenant(user.tenantId, async (client) => { const result = await cancelRequesterRequest(client, user, requestId); if (!result.rowCount) throw new Error('Solicitacao nao encontrada ou indisponivel.'); await writeAuditEvent(user.tenantId, { action: 'support.request.cancelled', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: requestId }, client) })
 
 export const listPlatformAuditRequests = async () => (await query('select * from tenant_audit_requests order by created_at desc limit 200')).rows.map(mapAuditRequestRow)
 export const platformAuditMessages = async (requestId) => (await query('select id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 order by created_at asc limit 200', [requestId])).rows
@@ -96,7 +115,7 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
          set status = $2, reviewed_by = $3, review_reason = $4,
              expires_at = case when $2 = 'approved' then now() + interval '30 minutes' else null end,
              updated_at = now()
-       where id = $1 and status in ('pending', 'under_review')
+       where id = $1 and category = 'audit' and status in ('pending', 'under_review')
        returning tenant_id, expires_at
     `, [requestId, status, String(user.id), reviewReason])
     if (!result.rowCount) throw new Error('Solicitacao indisponivel.')
