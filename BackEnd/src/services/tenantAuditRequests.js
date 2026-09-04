@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { hasDatabase, query, withTenant } from '../db/pool.js'
 import { verifyPassword } from '../auth/password.js'
+import { decryptField } from '../security/crypto.js'
 import { writeAuditEvent } from './operationalEvents.js'
 
 const id = () => `support_${randomBytes(16).toString('hex')}`
@@ -18,7 +19,7 @@ const scopeFor = (value = {}) => ({
 })
 export const mapAuditRequestRow = (row) => ({
   id: row.id, tenantId: row.tenant_id, requestedBy: String(row.requested_by), status: row.status,
-  requesterName: clean(row.requester_name, 160),
+  requesterName: clean(decryptField(row.requester_name), 160),
   subject: row.subject || row.reason, category: row.category || 'audit', priority: row.priority || 'normal',
   requesterRole: row.requester_role || '',
   reason: row.reason, scope: row.scope || {}, reviewerId: row.reviewed_by ? String(row.reviewed_by) : null,
@@ -65,7 +66,7 @@ const requesterRequest = async (user, requestId) => withTenant(user.tenantId, (c
 export const mapTenantSupportMessage = (row) => ({
   id: String(row.id),
   senderType: row.sender_type === 'superadmin' ? 'support' : 'requester',
-  body: row.body,
+  body: decryptField(row.body),
   createdAt: row.created_at
 })
 export const listTenantAuditMessages = async (user, requestId) => {
@@ -90,7 +91,14 @@ export const listPlatformAuditRequests = async () => (await query(`
    order by request.created_at desc
    limit 200
 `)).rows.map(mapAuditRequestRow)
-export const platformAuditMessages = async (requestId) => (await query('select id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 order by created_at asc limit 200', [requestId])).rows
+export const mapPlatformAuditMessage = (row) => ({ ...row, body: decryptField(row.body) })
+export const platformAuditMessages = async (requestId) => {
+  const result = await query('select id, tenant_id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 order by created_at asc limit 200', [requestId])
+  return {
+    tenantId: result.rows[0]?.tenant_id || null,
+    messages: result.rows.map(({ tenant_id, ...row }) => mapPlatformAuditMessage(row))
+  }
+}
 
 export const createPlatformAuditChatActions = (runQuery = query) => ({
   addMessage: async (user, requestId, body) => {

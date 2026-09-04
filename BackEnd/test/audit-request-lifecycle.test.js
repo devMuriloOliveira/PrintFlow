@@ -10,9 +10,11 @@ const {
   findRequesterRequest,
   isAuditChatOpenStatus,
   mapAuditRequestRow,
+  mapPlatformAuditMessage,
   mapTenantSupportMessage,
   normalizeSupportRequest
 } = await import('../src/services/tenantAuditRequests.js')
+const { encryptField } = await import('../src/security/crypto.js')
 const { createApprovedDataAccessChecker } = await import('../src/services/platformAdmin.js')
 
 const createStore = (initialStatus = 'pending', category = 'audit') => {
@@ -98,6 +100,11 @@ test('consulta de conversa exige tenant e solicitante exatos', async () => {
 test('resposta do suporte para tenant usa alias e nao expoe o identificador interno', () => {
   const message = mapTenantSupportMessage({ id: 7, sender_type: 'superadmin', sender_id: 'admin-interno', body: 'Atendimento iniciado.', created_at: '2026-09-04T12:00:00.000Z' })
   assert.deepEqual(message, { id: '7', senderType: 'support', body: 'Atendimento iniciado.', createdAt: '2026-09-04T12:00:00.000Z' })
+})
+
+test('retorno administrativo descriptografa a mensagem sem expor a cifra', () => {
+  const message = mapPlatformAuditMessage({ id: 8, sender_type: 'requester', sender_id: 'user-a', body: encryptField('Preciso de ajuda com a fila.'), created_at: '2026-09-04T12:00:00.000Z' })
+  assert.equal(message.body, 'Preciso de ajuda com a fila.')
 })
 
 test('solicitante somente cancela o proprio protocolo antes do atendimento', async () => {
