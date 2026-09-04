@@ -6,7 +6,11 @@ export const useSupportRequests = () => {
   const requests = useState<SupportRequest[]>('support-requests', () => [])
   const activeRequestId = useState('support-active-request-id', () => '')
   const loadedTenantId = useState('support-loaded-tenant-id', () => '')
-  const activeRequest = computed(() => requests.value.find(request => request.id === activeRequestId.value) || requests.value[0] || null)
+  const openChatStatuses = ['pending', 'under_review', 'approved', 'rejected']
+  const activeRequest = computed(() => {
+    const openRequests = requests.value.filter(request => openChatStatuses.includes(request.status))
+    return openRequests.find(request => request.id === activeRequestId.value) || openRequests[0] || null
+  })
 
   const refresh = async () => {
     const tenantId = auth.user.value?.tenantId || ''
@@ -16,7 +20,8 @@ export const useSupportRequests = () => {
     }
     requests.value = await api.listSupportRequests()
     loadedTenantId.value = tenantId
-    if (!activeRequestId.value && requests.value[0]) activeRequestId.value = requests.value[0].id
+    const selectedRequest = requests.value.find(request => request.id === activeRequestId.value)
+    if (!selectedRequest || !openChatStatuses.includes(selectedRequest.status)) activeRequestId.value = activeRequest.value?.id || ''
     return requests.value
   }
 
