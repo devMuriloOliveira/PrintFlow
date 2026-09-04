@@ -16,14 +16,25 @@ export const useOperationalNotifications = () => {
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
   const notifications = useState<OperationalNotification[]>('operational-notifications', () => [])
   const loading = useState('operational-notifications-loading', () => false)
+  const { settings } = useAppData()
+  const visibleNotifications = computed(() => {
+    const preferences = (settings.value?.preferences || {}) as Record<string, unknown>
+    return notifications.value.filter((notification) => {
+      if (notification.type.startsWith('print.') || notification.type.startsWith('agent.')) return preferences.productionAlerts !== false
+      if (notification.type.startsWith('marketplace.')) return preferences.marketplaceAlerts !== false
+      return true
+    })
+  })
 
   const refreshNotifications = async () => {
-    if (!process.client || loading.value || !auth.authHeaders.value.Authorization) return notifications.value
+    if (!process.client || !auth.ready.value || loading.value || !auth.authHeaders.value.Authorization) return notifications.value
     loading.value = true
     try {
       notifications.value = await $fetch<OperationalNotification[]>(`${apiBase}/api/operational-notifications?limit=25`, {
         headers: auth.authHeaders.value
       })
+    } catch (error: any) {
+      if (error?.status === 401 || error?.status === 403) notifications.value = []
     } finally {
       loading.value = false
     }
@@ -52,12 +63,3 @@ export const useOperationalNotifications = () => {
     markNotificationRead
   }
 }
-  const { settings } = useAppData()
-  const visibleNotifications = computed(() => {
-    const preferences = (settings.value?.preferences || {}) as Record<string, unknown>
-    return notifications.value.filter((notification) => {
-      if (notification.type.startsWith('print.') || notification.type.startsWith('agent.')) return preferences.productionAlerts !== false
-      if (notification.type.startsWith('marketplace.')) return preferences.marketplaceAlerts !== false
-      return true
-    })
-  })
