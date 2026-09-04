@@ -346,6 +346,22 @@ test('rota de producao rejeita sessao de financeiro no backend', async () => {
 })
 
 test('papel global da plataforma permanece separado do papel owner do tenant', async () => {
+  const anonymous = await request({
+    method: 'GET',
+    path: '/api/platform-admin/audit-requests',
+    ip: '127.0.4.9'
+  })
+  assert.equal(anonymous.status, 401)
+
+  const tenantOwner = await registerSession('owner-sem-acesso-global', '127.0.4.8')
+  const hiddenFromTenantOwner = await request({
+    method: 'GET',
+    path: '/api/platform-admin/audit-requests',
+    token: tenantOwner.accessToken,
+    ip: '127.0.4.7'
+  })
+  assert.equal(hiddenFromTenantOwner.status, 404)
+
   const response = await request({
     method: 'POST',
     path: '/api/auth/register',

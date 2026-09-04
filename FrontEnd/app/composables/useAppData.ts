@@ -143,7 +143,7 @@ export type BackupStatus = {
   export: { enabled: boolean; format: 'json'; excludes: string[] }
   restore: { enabled: false; reason: string }
 }
-export type AuditRequest = { id: string; status: string; reason: string; scope: { entityType?: string; entityId?: string }; createdAt: string }
+export type AuditRequest = { id: string; status: string; reason: string; scope: { entityType?: string; entityId?: string }; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string }
 export type AuditMessage = { id: string; senderType: 'owner' | 'superadmin'; body: string; createdAt: string }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
