@@ -78,12 +78,14 @@ import {
 
 import {
   handlePlatformAdminAudit,
+  handlePlatformAdminAuditExport,
   handlePlatformTenantDeletionAudit,
   handlePlatformTenantAuditExport,
   handleDataAccessRequest,
   handleDataAccessVerify,
   handlePlatformAuditDecision,
   handlePlatformAuditChatClose,
+  handlePlatformAuditChatReport,
   handlePlatformAuditMessageCreate,
   handlePlatformAuditMessagesList,
   handlePlatformAuditRequestsList,
@@ -911,6 +913,9 @@ export const handleRequest =
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit') {
         return await handlePlatformAdminAudit(req, res, url)
       }
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit-export') {
+        return await handlePlatformAdminAuditExport(req, res, url)
+      }
 
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenant-deletions') {
         return await handlePlatformTenantDeletionAudit(req, res, url)
@@ -927,6 +932,8 @@ export const handleRequest =
       const platformSupportMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/messages$/)
       if (req.method === 'GET' && platformSupportMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformSupportMessagesMatch[1])
       if (req.method === 'POST' && platformSupportMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformSupportMessagesMatch[1])
+      const platformSupportChatReportMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/report$/)
+      if (req.method === 'GET' && platformSupportChatReportMatch) return await handlePlatformAuditChatReport(req, res, platformSupportChatReportMatch[1], url)
       const platformSupportDecisionMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/decision$/)
       if (req.method === 'POST' && platformSupportDecisionMatch) return await handlePlatformAuditDecision(req, res, platformSupportDecisionMatch[1])
       const platformSupportCloseMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/close-chat$/)

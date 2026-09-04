@@ -92,11 +92,34 @@ export const listPlatformAuditRequests = async () => (await query(`
    limit 200
 `)).rows.map(mapAuditRequestRow)
 export const mapPlatformAuditMessage = (row) => ({ ...row, body: decryptField(row.body) })
-export const platformAuditMessages = async (requestId) => {
-  const result = await query('select id, tenant_id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 order by created_at asc limit 200', [requestId])
+export const platformAuditMessages = async (requestId, range = {}) => {
+  const result = await query(`select id, tenant_id, sender_type, sender_id, body, created_at
+    from tenant_audit_request_messages where request_id = $1
+      and ($2::date is null or created_at >= $2::date)
+      and ($3::date is null or created_at < $3::date + interval '1 day')
+    order by created_at asc limit 200`, [requestId, range.from || null, range.to || null])
   return {
     tenantId: result.rows[0]?.tenant_id || null,
     messages: result.rows.map(({ tenant_id, ...row }) => mapPlatformAuditMessage(row))
+  }
+}
+
+export const getPlatformAuditChatReport = async (requestId, range = {}) => {
+  const request = await query(`
+    select request.id, request.tenant_id, request.subject, request.created_at,
+           tenant.name as company_name, account.name as requester_name
+      from tenant_audit_requests request
+      join tenants tenant on tenant.id = request.tenant_id
+      left join users account on account.id::text = request.requested_by and account.tenant_id = request.tenant_id
+     where request.id = $1
+     limit 1
+  `, [requestId])
+  if (!request.rowCount) throw new Error('Solicitacao nao encontrada.')
+  const conversation = await platformAuditMessages(requestId, range)
+  return {
+    id: request.rows[0].id, tenantId: request.rows[0].tenant_id, subject: request.rows[0].subject,
+    createdAt: request.rows[0].created_at, companyName: decryptField(request.rows[0].company_name),
+    requesterName: decryptField(request.rows[0].requester_name), messages: conversation.messages
   }
 }
 

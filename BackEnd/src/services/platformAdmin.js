@@ -97,14 +97,16 @@ export const listPlatformTenants = async () => {
   return result.rows.map(tenantRow)
 }
 
-export const listTenantOperationalAudit = async (tenantId, limit = 100) => withTenant(tenantId, async (client) => {
+export const listTenantOperationalAudit = async (tenantId, limit = 100, range = {}) => withTenant(tenantId, async (client) => {
   const result = await client.query(`
     select id, action, actor_type, actor_id, entity_type, entity_id, details, created_at
-      from operational_audit_events
+     from operational_audit_events
      where tenant_id = $1
+       and ($3::date is null or created_at >= $3::date)
+       and ($4::date is null or created_at < $4::date + interval '1 day')
      order by created_at desc
      limit $2
-  `, [tenantId, Math.min(200, Math.max(1, Number(limit) || 100))])
+  `, [tenantId, Math.min(200, Math.max(1, Number(limit) || 100)), range.from || null, range.to || null])
   return result.rows.map((row) => {
     const description = describeAuditEvent(row)
     return {
@@ -157,7 +159,7 @@ export const createApprovedDataAccessChecker = (runQuery = query) => async (user
 
 export const requireApprovedDataAccess = createApprovedDataAccessChecker()
 
-export const getTenantAuditReport = async (user, requestId, tenantId, limit = 500) => {
+export const getTenantAuditReport = async (user, requestId, tenantId, limit = 500, range = {}) => {
   await requireApprovedDataAccess(user, requestId, tenantId)
   const result = await query(`
     select t.name, t.document, access.reason, access.verified_at, access.expires_at
@@ -181,17 +183,19 @@ export const getTenantAuditReport = async (user, requestId, tenantId, limit = 50
     reason: row.reason,
     verifiedAt: row.verified_at,
     expiresAt: row.expires_at,
-    events: await listTenantOperationalAudit(tenantId, limit)
+    events: await listTenantOperationalAudit(tenantId, limit, range)
   }
 }
 
-export const listPlatformAdminAudit = async (limit = 100) => {
+export const listPlatformAdminAudit = async (limit = 100, range = {}) => {
   const result = await query(`
     select id, action, target_tenant_id, target_resource, target_resource_id, reason, details, created_at
       from platform_admin_audit_events
+     where ($2::date is null or created_at >= $2::date)
+       and ($3::date is null or created_at < $3::date + interval '1 day')
      order by created_at desc
      limit $1
-  `, [Math.min(200, Math.max(1, Number(limit) || 100))])
+  `, [Math.min(200, Math.max(1, Number(limit) || 100)), range.from || null, range.to || null])
   return result.rows.map((row) => {
     const description = describeAuditEvent(row)
     return {
