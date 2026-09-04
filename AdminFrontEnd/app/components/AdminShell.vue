@@ -2,8 +2,8 @@
 defineProps<{ title: string; subtitle: string; requestCount?: number }>()
 const search = defineModel<string>('search', { default: '' })
 const session = useAdminSession()
+const { clearWorkspace } = usePlatformAdminWorkspace()
 const route = useRoute()
-const authorizedTenantAudit = useState('platform-admin-authorized-tenant-audit', () => null)
 
 const nav = [
   { to: '/', label: 'Central', mark: 'C' },
@@ -16,7 +16,7 @@ const nav = [
 
 const isActive = (path: string) => route.path === path
 const logout = async () => {
-  authorizedTenantAudit.value = null
+  clearWorkspace()
   session.clear()
   await navigateTo('/login')
 }

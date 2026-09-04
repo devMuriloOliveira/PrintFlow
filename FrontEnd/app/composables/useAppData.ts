@@ -144,7 +144,7 @@ export type BackupStatus = {
   restore: { enabled: false; reason: string }
 }
 export type SupportRequest = { id: string; status: string; subject: string; category: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string }
-export type SupportMessage = { id: string; senderType: 'owner' | 'requester' | 'superadmin'; body: string; createdAt: string }
+export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
@@ -176,7 +176,7 @@ export const useAppData = () => {
       loaded.value = true
       loadedTenant.value = tenantId.value
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados da API'
+      error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
     } finally {
       pending.value = false
     }

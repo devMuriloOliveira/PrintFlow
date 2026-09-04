@@ -18,6 +18,7 @@ const scopeFor = (value = {}) => ({
 })
 export const mapAuditRequestRow = (row) => ({
   id: row.id, tenantId: row.tenant_id, requestedBy: String(row.requested_by), status: row.status,
+  requesterName: clean(row.requester_name, 160),
   subject: row.subject || row.reason, category: row.category || 'audit', priority: row.priority || 'normal',
   requesterRole: row.requester_role || '',
   reason: row.reason, scope: row.scope || {}, reviewerId: row.reviewed_by ? String(row.reviewed_by) : null,
@@ -61,10 +62,16 @@ export const listTenantAuditRequests = async (user) => withTenant(user.tenantId,
 
 export const findRequesterRequest = async (client, user, requestId) => (await client.query('select * from tenant_audit_requests where id = $1 and tenant_id = $2 and requested_by::text = $3 limit 1', [requestId, user.tenantId, String(user.id)])).rows[0]
 const requesterRequest = async (user, requestId) => withTenant(user.tenantId, (client) => findRequesterRequest(client, user, requestId))
+export const mapTenantSupportMessage = (row) => ({
+  id: String(row.id),
+  senderType: row.sender_type === 'superadmin' ? 'support' : 'requester',
+  body: row.body,
+  createdAt: row.created_at
+})
 export const listTenantAuditMessages = async (user, requestId) => {
   const request = await requesterRequest(user, requestId); if (!request) throw new Error('Solicitacao nao encontrada.')
   const result = await withTenant(user.tenantId, (client) => client.query('select id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 and tenant_id = $2 order by created_at asc limit 200', [requestId, user.tenantId]))
-  return result.rows.map((row) => ({ id: String(row.id), senderType: row.sender_type, senderId: String(row.sender_id), body: row.body, createdAt: row.created_at }))
+  return result.rows.map(mapTenantSupportMessage)
 }
 export const addTenantAuditMessage = async (user, requestId, body) => {
   const request = await requesterRequest(user, requestId); if (!request || !writable.has(request.status)) throw new Error('Conversa indisponivel para esta solicitacao.')
@@ -74,7 +81,15 @@ export const addTenantAuditMessage = async (user, requestId, body) => {
 export const cancelRequesterRequest = (client, user, requestId) => client.query("update tenant_audit_requests set status = 'cancelled', updated_at = now() where id = $1 and tenant_id = $2 and requested_by::text = $3 and status = 'pending' returning id", [requestId, user.tenantId, String(user.id)])
 export const cancelTenantAuditRequest = async (user, requestId) => withTenant(user.tenantId, async (client) => { const result = await cancelRequesterRequest(client, user, requestId); if (!result.rowCount) throw new Error('Solicitacao nao encontrada ou indisponivel.'); await writeAuditEvent(user.tenantId, { action: 'support.request.cancelled', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: requestId }, client) })
 
-export const listPlatformAuditRequests = async () => (await query('select * from tenant_audit_requests order by created_at desc limit 200')).rows.map(mapAuditRequestRow)
+export const listPlatformAuditRequests = async () => (await query(`
+  select request.*, coalesce(nullif(trim(account.name), ''), '') as requester_name
+    from tenant_audit_requests request
+    left join users account
+      on account.id::text = request.requested_by
+     and account.tenant_id = request.tenant_id
+   order by request.created_at desc
+   limit 200
+`)).rows.map(mapAuditRequestRow)
 export const platformAuditMessages = async (requestId) => (await query('select id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 order by created_at asc limit 200', [requestId])).rows
 
 export const createPlatformAuditChatActions = (runQuery = query) => ({

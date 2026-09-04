@@ -10,6 +10,7 @@ const {
   findRequesterRequest,
   isAuditChatOpenStatus,
   mapAuditRequestRow,
+  mapTenantSupportMessage,
   normalizeSupportRequest
 } = await import('../src/services/tenantAuditRequests.js')
 const { createApprovedDataAccessChecker } = await import('../src/services/platformAdmin.js')
@@ -60,6 +61,7 @@ test('chat permanece aberto durante analise, aprovacao e rejeicao', () => {
 test('retorno preserva decisao e horarios depois do encerramento', () => {
   const row = mapAuditRequestRow({
     id: 'auditreq-mapped', tenant_id: 'tenant-test', requested_by: 'owner-test', reviewed_by: 'admin-test',
+    requester_name: 'Alex Solicitante',
     status: 'closed', reason: 'Auditoria solicitada', scope: {}, review_reason: 'Acesso temporario aprovado.',
     expires_at: '2026-09-04T12:30:00.000Z', chat_opened_at: '2026-09-04T12:00:00.000Z',
     chat_closed_at: '2026-09-04T12:20:00.000Z', created_at: '2026-09-04T12:00:00.000Z', updated_at: '2026-09-04T12:20:00.000Z'
@@ -72,6 +74,7 @@ test('retorno preserva decisao e horarios depois do encerramento', () => {
   assert.equal(row.chatClosedAt, '2026-09-04T12:20:00.000Z')
   assert.equal(row.category, 'audit')
   assert.equal(row.subject, 'Auditoria solicitada')
+  assert.equal(row.requesterName, 'Alex Solicitante')
 })
 
 test('normaliza suporte comum sem exigir escopo e protege auditoria', () => {
@@ -90,6 +93,11 @@ test('consulta de conversa exige tenant e solicitante exatos', async () => {
   await findRequesterRequest(client, { id: 'user-a', tenantId: 'tenant-a' }, 'support-1')
   assert.deepEqual(calls[0].params, ['support-1', 'tenant-a', 'user-a'])
   assert.match(calls[0].sql, /tenant_id = \$2 and requested_by::text = \$3/)
+})
+
+test('resposta do suporte para tenant usa alias e nao expoe o identificador interno', () => {
+  const message = mapTenantSupportMessage({ id: 7, sender_type: 'superadmin', sender_id: 'admin-interno', body: 'Atendimento iniciado.', created_at: '2026-09-04T12:00:00.000Z' })
+  assert.deepEqual(message, { id: '7', senderType: 'support', body: 'Atendimento iniciado.', createdAt: '2026-09-04T12:00:00.000Z' })
 })
 
 test('solicitante somente cancela o proprio protocolo antes do atendimento', async () => {

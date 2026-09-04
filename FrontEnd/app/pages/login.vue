@@ -39,7 +39,7 @@ const submit = async () => {
   } catch (err: any) {
     const isNetworkError = err?.message === 'Failed to fetch' || err?.cause?.message === 'Failed to fetch'
     error.value = isNetworkError
-      ? `Não foi possível conectar na API (${apiBase.value}). Verifique se o backend está rodando.`
+      ? 'Nao foi possivel conectar ao servico. Verifique sua internet e tente novamente.'
       : err?.data?.error || err?.message || 'Não foi possível autenticar.'
   } finally {
     loading.value = false

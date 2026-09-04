@@ -26,6 +26,7 @@ export type AuditRequest = {
   id: string
   tenantId: string
   requestedBy: string
+  requesterName: string
   status: string
   subject: string
   category: 'technical' | 'financial' | 'integration' | 'account' | 'data_backup' | 'audit'

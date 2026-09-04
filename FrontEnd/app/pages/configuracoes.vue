@@ -41,7 +41,7 @@ const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: ''
 const preferences = reactive({ emailAlerts: true, productionAlerts: true, marketplaceAlerts: true, dailySummary: false, compactLayout: false, logoUrl: '', brandName: '', accentColor: '#1768f2', defaultMargin: 40, monthlyFixedCost: 0, plannedMonthlyUnits: 0 })
 const previewBrandName = computed(() => preferences.brandName.trim() || company.name.trim() || 'PrintFlow 3D')
 const roles = [
-  { value: 'owner', label: 'Owner', description: 'Controle total do tenant, inclusive outros Owners.', access: ['Todas as configuracoes', 'Membros e Owners', 'Auditoria e dados'] },
+  { value: 'owner', label: 'Owner', description: 'Controle total da empresa, inclusive outros Owners.', access: ['Todas as configuracoes', 'Membros e Owners', 'Auditoria e dados'] },
   { value: 'admin', label: 'Administrador', description: 'Gerencia membros e a operacao, sem poderes reservados de Owner.', access: ['Catalogo e producao', 'Financeiro e marketplaces', 'Membros, sem Owners'] },
   { value: 'financeiro', label: 'Financeiro', description: 'Acessa vendas, despesas e informacoes financeiras.', access: ['Vendas e despesas', 'Clientes', 'Consulta de catalogo'] },
   { value: 'producao', label: 'Producao', description: 'Gerencia producao, impressoras e catalogo.', access: ['Produtos e filamentos', 'Impressoras e fila', 'Pedidos e clientes'] },
@@ -297,13 +297,13 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
 
         <div v-else-if="active === 'Usuarios e Permissoes'">
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-            <div><h2>Usuarios e Permissoes</h2><p>Altere o acesso de membros ja cadastrados neste tenant.</p></div>
+            <div><h2>Usuarios e Permissoes</h2><p>Altere o acesso de membros ja cadastrados nesta empresa.</p></div>
             <button class="btn" :disabled="membersLoading" @click="loadMembers">Atualizar</button>
           </div>
 
           <div v-if="!canManageMembers" class="info-note"><UiIcon name="shield" />Somente Owner e Administrador podem gerenciar acessos.</div>
           <form v-if="canManageMembers" class="filters" style="margin-top:16px" @submit.prevent="sendInvitation"><label class="field field--search"><span>E-mail do novo usuario</span><input v-model="invite.email" type="email" required placeholder="usuario@empresa.com"></label><label class="field"><span>Perfil inicial</span><select v-model="invite.role"><option value="admin">Administrador</option><option value="financeiro">Financeiro</option><option value="producao">Producao</option><option value="usuario">Usuario</option></select></label><button class="btn btn--primary" type="submit" :disabled="inviting">{{ inviting ? 'Enviando...' : 'Convidar usuario' }}</button></form>
-          <div v-if="canManageMembers && membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Carregando usuarios</h3><p>Consultando os membros autorizados deste tenant.</p></div></div>
+          <div v-if="canManageMembers && membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Carregando usuarios</h3><p>Consultando os membros autorizados desta empresa.</p></div></div>
           <div v-if="canManageMembers && !membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Nenhum usuario encontrado</h3><p>Use o formulario acima para convidar o primeiro usuario.</p></div></div>
           <div v-if="canManageMembers && members.length" class="table-scroll" style="margin-top:16px">
             <table class="data-table">
@@ -339,13 +339,13 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
         </div>
 
         <div v-else-if="active === 'Backup e Dados'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Backup e dados</h2><p>Exporte uma copia dos dados deste tenant. Credenciais, tokens e sessoes nao entram no arquivo.</p></div><button class="btn" :disabled="backupLoading" @click="loadBackup">Atualizar</button></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Backup e dados</h2><p>Exporte uma copia dos dados da sua empresa. Credenciais, integracoes e sessoes nao entram no arquivo.</p></div><button class="btn" :disabled="backupLoading" @click="loadBackup">Atualizar</button></div>
           <div v-if="backupLoading" class="empty-state"><div><h3>Verificando disponibilidade</h3></div></div>
           <template v-else>
-            <div v-if="!backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Exportacao indisponivel: o ambiente nao possui banco de dados configurado. Configure `DATABASE_URL` no backend para habilitar backup e historico.</div>
-            <div v-else style="margin-top:16px"><div class="info-note"><UiIcon name="check" />Exportacao habilitada em {{ backupStatus.export.format.toUpperCase() }}. Cada arquivo fica registrado na auditoria do tenant.</div><button class="btn btn--primary" style="margin-top:12px" :disabled="exportingData" @click="downloadTenantData">{{ exportingData ? 'Gerando...' : 'Exportar dados deste tenant' }}</button></div>
+            <div v-if="!backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Exportacao indisponivel no momento. Tente novamente mais tarde ou entre em contato com a equipe de suporte.</div>
+            <div v-else style="margin-top:16px"><div class="info-note"><UiIcon name="check" />Exportacao habilitada em {{ backupStatus.export.format.toUpperCase() }}. Cada arquivo fica registrado no historico de seguranca da empresa.</div><button class="btn btn--primary" style="margin-top:12px" :disabled="exportingData" @click="downloadTenantData">{{ exportingData ? 'Gerando...' : 'Exportar dados da empresa' }}</button></div>
             <div v-if="exportHistory.length" class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Arquivo</th><th>Formato</th><th>Registros</th><th>Status</th><th>Gerado em</th></tr></thead><tbody><tr v-for="item in exportHistory" :key="item.id"><td>{{ item.fileName }}</td><td>{{ item.format.toUpperCase() }}</td><td>{{ item.recordCount }}</td><td><span class="badge badge--green">{{ item.status }}</span></td><td>{{ new Date(item.createdAt).toLocaleString('pt-BR') }}</td></tr></tbody></table></div>
-            <div v-else-if="backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="info" />Nenhuma exportacao registrada para este tenant.</div>
+            <div v-else-if="backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="info" />Nenhuma exportacao registrada para esta empresa.</div>
             <div class="info-note" style="margin-top:16px"><UiIcon name="shield" />Restauracao automatica permanece bloqueada. {{ backupStatus.restore.reason }}</div>
           </template>
           <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
@@ -360,9 +360,9 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
           <div v-else class="info-note"><UiIcon name="shield" />Somente o Owner pode solicitar a exclusao da empresa.</div>
         </div>
 
-        <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Suas preferencias sao salvas para este tenant.</p></div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas por e-mail</span><input v-model="preferences.emailAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label><label class="field col-6"><span>Resumo diario</span><input v-model="preferences.dailySummary" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
+        <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Suas preferencias sao salvas para esta empresa.</p></div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas por e-mail</span><input v-model="preferences.emailAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label><label class="field col-6"><span>Resumo diario</span><input v-model="preferences.dailySummary" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
         <div v-else-if="active === 'Personalizacao'" class="settings-security-card">
-          <div><h2>Identidade visual</h2><p>Personalize a marca exibida para todos os membros deste tenant.</p></div>
+          <div><h2>Identidade visual</h2><p>Personalize a marca exibida para todos os membros desta empresa.</p></div>
           <div class="branding-preview" :style="{ '--brand-preview': preferences.accentColor }">
             <AppLogo :logo-url="preferences.logoUrl" :brand-name="previewBrandName" />
             <span>Pre-visualizacao da barra lateral</span>
@@ -395,7 +395,7 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
               <label class="field col-4"><span>Prioridade</span><select v-model="supportDraft.priority" :disabled="supportDraft.category === 'audit'"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option></select></label>
               <label class="field col-12"><span>Descricao detalhada</span><textarea v-model="supportDraft.reason" minlength="12" maxlength="1000" required placeholder="Descreva o problema, impacto e resultado esperado"></textarea></label>
               <template v-if="supportDraft.category === 'audit'">
-                <div class="col-12 info-note"><UiIcon name="shield" />Auditorias podem envolver dados sensiveis e exigem confirmacao de identidade, escopo e aprovacao do superadmin.</div>
+                <div class="col-12 info-note"><UiIcon name="shield" />Auditorias podem envolver dados sensiveis e exigem confirmacao de identidade, escopo e aprovacao da equipe responsavel.</div>
                 <label class="field col-6"><span>Tipo de item</span><input v-model="supportDraft.entityType" maxlength="80" required></label>
                 <label class="field col-6"><span>Identificador</span><input v-model="supportDraft.entityId" maxlength="160" required></label>
                 <label class="field col-6"><span>Senha atual</span><input v-model="supportDraft.currentPassword" type="password" autocomplete="current-password" required></label>
@@ -404,16 +404,16 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
             <button class="btn btn--primary" type="submit" :disabled="submittingSupport">{{ submittingSupport ? 'Criando...' : 'Criar solicitacao' }}</button>
           </form>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px"><div><h2>Minhas solicitacoes</h2><p>Somente voce e o superadmin acessam estas conversas.</p></div><button class="btn" @click="loadSupport">Atualizar</button></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px"><div><h2>Minhas solicitacoes</h2><p>Somente voce e a equipe de suporte acessam estas conversas.</p></div><button class="btn" @click="loadSupport">Atualizar</button></div>
           <div v-if="!supportRequests.length" class="empty-state"><div><h3>Nenhuma solicitacao encontrada</h3><p>Use o formulario acima para iniciar um atendimento.</p></div></div>
           <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Categoria</th><th>Prioridade</th><th>Status</th><th>Criada em</th><th>Acao</th></tr></thead><tbody><tr v-for="request in supportRequests" :key="request.id"><td>{{ request.id }}</td><td>{{ request.subject }}</td><td>{{ supportCategoryLabel(request.category) }}</td><td>{{ request.priority }}</td><td><span class="badge">{{ supportStatusLabel(request.status) }}</span></td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
         </div>
       </section>
 
-      <aside class="settings-panel"><h2>Dados e Seguranca</h2><p>Os dados empresariais sensiveis sao protegidos no BackEnd e isolados por tenant.</p><ul class="check-list"><li><span><UiIcon name="check" :size="15" /></span>Permissoes aplicadas no servidor.</li><li><span><UiIcon name="check" :size="15" /></span>Exportacao registrada em auditoria.</li><li><span><UiIcon name="check" :size="15" /></span>Tokens de integracoes nao sao exibidos.</li></ul><button class="btn btn--wide" :disabled="exportingData" @click="downloadTenantData"><UiIcon name="download" />Exportar dados</button></aside>
+      <aside class="settings-panel"><h2>Dados e Seguranca</h2><p>Os dados da sua empresa sao protegidos e mantidos separados de outras empresas.</p><ul class="check-list"><li><span><UiIcon name="check" :size="15" /></span>Permissoes aplicadas com seguranca.</li><li><span><UiIcon name="check" :size="15" /></span>Exportacao registrada no historico de seguranca.</li><li><span><UiIcon name="check" :size="15" /></span>Credenciais de integracoes nao sao exibidas.</li></ul><button class="btn btn--wide" :disabled="exportingData" @click="downloadTenantData"><UiIcon name="download" />Exportar dados</button></aside>
     </div>
 
-    <PanelCard v-if="active === 'Usuarios e Permissoes'" title="Funcoes de Usuario" subtitle="Os acessos sao aplicados pelo backend e registrados em auditoria." style="margin-top:12px">
+    <PanelCard v-if="active === 'Usuarios e Permissoes'" title="Funcoes de Usuario" subtitle="Os acessos sao protegidos e registrados no historico de seguranca." style="margin-top:12px">
       <div class="role-grid"><div v-for="(role, index) in roles" :key="role.value" class="role-card"><div class="role-card__icon" :style="index === 1 ? { color: '#1768f2', background: '#eef5ff' } : index === 2 ? { color: '#0da566', background: '#eaf9f1' } : index === 3 ? { color: '#f57c1f', background: '#fff3e9' } : {}"><UiIcon :name="index === 0 ? 'shield' : index === 2 ? 'money' : index === 3 ? 'box' : 'users'" /></div><h3>{{ role.label }}</h3><p>{{ role.description }}</p><ul style="margin:10px 0;padding-left:16px;color:var(--muted);font-size:10px"><li v-for="access in role.access" :key="access">{{ access }}</li></ul><span class="badge">{{ roleCount(role.value) }} usuarios</span></div></div>
     </PanelCard>
   </div>
