@@ -7,6 +7,7 @@ export type TenantMember = {
   createdAt?: string
   updatedAt?: string
 }
+export type PendingInvitation = { id: string; email: string; role: TenantMember['role']; expiresAt: string; createdAt: string }
 
 export const useTenantMembers = () => {
   const config = useRuntimeConfig()
@@ -14,6 +15,7 @@ export const useTenantMembers = () => {
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
   const members = useState<TenantMember[]>('tenant-members', () => [])
   const loading = useState('tenant-members-loading', () => false)
+  const invitations = useState<PendingInvitation[]>('tenant-invitations', () => [])
 
   const refreshMembers = async () => {
     if (!process.client || loading.value || !auth.authHeaders.value.Authorization) return members.value
@@ -44,5 +46,18 @@ export const useTenantMembers = () => {
   const createInvitation = async (payload: { email: string; role: TenantMember['role'] }) =>
     $fetch(`${apiBase}/api/members/invitations`, { method: 'POST', headers: auth.authHeaders.value, body: payload })
 
-  return { members, loading, refreshMembers, updateMember, createInvitation }
+  const refreshInvitations = async () => {
+    invitations.value = await $fetch<PendingInvitation[]>(`${apiBase}/api/members/invitations`, { headers: auth.authHeaders.value })
+    return invitations.value
+  }
+  const revokeInvitation = async (id: string) => {
+    await $fetch(`${apiBase}/api/members/invitations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: auth.authHeaders.value })
+    invitations.value = invitations.value.filter((item) => item.id !== id)
+  }
+  const resendInvitation = async (id: string) => {
+    await $fetch(`${apiBase}/api/members/invitations/${encodeURIComponent(id)}/resend`, { method: 'POST', headers: auth.authHeaders.value, body: {} })
+    return refreshInvitations()
+  }
+
+  return { members, loading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation }
 }

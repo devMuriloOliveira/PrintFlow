@@ -18,6 +18,7 @@ const {
 } = useAppData()
 
 const { notify } = useUi()
+const auth = useAuth()
 
 const route = useRoute()
 const config = useRuntimeConfig()
@@ -300,10 +301,7 @@ const loadAgents = async () => {
     true
 
   try {
-    const token =
-      localStorage.getItem(
-        'printflow-auth-token'
-      )
+    const token = auth.token.value
 
     if (!token) {
       throw new Error(
@@ -357,10 +355,7 @@ const generatePairingCode =
       true
 
     try {
-      const token =
-        localStorage.getItem(
-          'printflow-auth-token'
-        )
+      const token = auth.token.value
 
       if (!token) {
         throw new Error(
@@ -759,10 +754,7 @@ const waitForCommandResult =
   async (
     commandId: string
   ) => {
-    const token =
-      localStorage.getItem(
-        'printflow-auth-token'
-      )
+      const token = auth.token.value
 
     if (!token) {
       throw new Error(
@@ -853,10 +845,7 @@ const findRegisteredAgentPrinter =
     // TOKEN
     // ==================================================
 
-    const token =
-      localStorage.getItem(
-        'printflow-auth-token'
-      )
+      const token = auth.token.value
 
     if (!token) {
       throw new Error(
@@ -1239,10 +1228,7 @@ const discoverPrinters =
       'Enviando comando para o PrintFlow Agent...'
 
     try {
-      const token =
-        localStorage.getItem(
-          'printflow-auth-token'
-        )
+      const token = auth.token.value
 
       if (!token) {
         throw new Error(
@@ -1363,10 +1349,7 @@ const connectDiscoveredPrinter =
       key
 
     try {
-      const token =
-        localStorage.getItem(
-          'printflow-auth-token'
-        )
+      const token = auth.token.value
 
       if (!token) {
         throw new Error(
@@ -1748,10 +1731,7 @@ const loadPrinterStatus =
       // TOKEN
       // ==================================================
 
-      const token =
-        localStorage.getItem(
-          'printflow-auth-token'
-        )
+      const token = auth.token.value
 
       if (
         !token
@@ -2004,10 +1984,7 @@ const controlPrinter =
       // TOKEN
       // ==================================================
 
-      const token =
-        localStorage.getItem(
-          'printflow-auth-token'
-        )
+      const token = auth.token.value
 
       if (
         !token

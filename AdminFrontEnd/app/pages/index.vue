@@ -18,11 +18,16 @@ const showingPlatformAudit = ref(false)
 const deletionAudit = ref<DeletionAudit[]>([])
 const showingDeletionAudit = ref(false)
 const accessRequest = ref<AccessRequest | null>(null)
+const ownerAuditRequests = ref<Array<{ id: string; tenantId: string; status: string; reason: string; scope: { entityType?: string; entityId?: string }; createdAt: string }>>([])
+const activeOwnerAuditRequest = ref<any>(null)
+const ownerAuditMessages = ref<any[]>([])
+const ownerAuditDraft = ref('')
 const search = ref('')
 const loading = ref(false)
 const error = ref('')
 
 const filtered = computed(() => tenants.value.filter((tenant) => `${tenant.name} ${tenant.cnpj}`.toLowerCase().includes(search.value.toLowerCase())))
+const filteredAuditRequests = computed(() => ownerAuditRequests.value.filter((request) => `${request.id} ${request.tenantId} ${request.status}`.toLowerCase().includes(search.value.toLowerCase())))
 const formatDate = (value: string) => new Date(value).toLocaleString('pt-BR')
 
 const load = async () => {
@@ -31,9 +36,10 @@ const load = async () => {
   loading.value = true
   error.value = ''
   try {
-    ;[overview.value, tenants.value] = await Promise.all([
+    ;[overview.value, tenants.value, ownerAuditRequests.value] = await Promise.all([
       session.request<Overview>('/api/platform-admin/overview'),
-      session.request<Tenant[]>('/api/platform-admin/tenants')
+      session.request<Tenant[]>('/api/platform-admin/tenants'),
+      session.request('/api/platform-admin/audit-requests')
     ])
   } catch {
     session.clear()
@@ -47,6 +53,22 @@ const openAudit = (tenant: Tenant) => {
   selected.value = null
   audit.value = []
   accessRequest.value = { tenant, id: '', reason: '', cnpj: '', status: 'reason' }
+}
+const openOwnerAuditRequest = async (request: any) => {
+  activeOwnerAuditRequest.value = request
+  ownerAuditMessages.value = await session.request(`/api/platform-admin/audit-requests/${encodeURIComponent(request.id)}/messages`)
+}
+const sendOwnerAuditMessage = async () => {
+  if (!activeOwnerAuditRequest.value || !ownerAuditDraft.value.trim()) return
+  await session.request(`/api/platform-admin/audit-requests/${encodeURIComponent(activeOwnerAuditRequest.value.id)}/messages`, { method: 'POST', body: { body: ownerAuditDraft.value } })
+  ownerAuditDraft.value = ''
+  await openOwnerAuditRequest(activeOwnerAuditRequest.value)
+}
+const closeOwnerAuditChat = async () => {
+  if (!activeOwnerAuditRequest.value) return
+  await session.request(`/api/platform-admin/audit-requests/${encodeURIComponent(activeOwnerAuditRequest.value.id)}/close-chat`, { method: 'POST' })
+  activeOwnerAuditRequest.value = null
+  ownerAuditRequests.value = await session.request('/api/platform-admin/audit-requests')
 }
 
 const requestAuditAccess = async () => {
@@ -134,6 +156,9 @@ onMounted(() => void load())
     </section>
 
     <p v-if="error" class="feedback feedback--error">{{ error }}</p>
+
+    <section class="surface company-panel"><div class="section-head"><div><span class="section-kicker">Consentimento do owner</span><h2>Solicitacoes de auditoria</h2><p>Busque pelo protocolo para localizar conversas abertas ou encerradas.</p></div></div><div class="table-wrap"><table><thead><tr><th>Protocolo</th><th>Empresa</th><th>Escopo</th><th>Motivo</th><th>Status</th><th>Solicitada em</th><th></th></tr></thead><tbody><tr v-for="request in filteredAuditRequests" :key="request.id"><td><code>{{ request.id }}</code></td><td><code>{{ request.tenantId }}</code></td><td>{{ request.scope.entityType || 'Eventos operacionais' }} {{ request.scope.entityId || '' }}</td><td>{{ request.reason }}</td><td><span class="status status--pending">{{ request.status }}</span></td><td>{{ formatDate(request.createdAt) }}</td><td><button v-if="['pending','under_review'].includes(request.status)" class="button button--primary" @click="openOwnerAuditRequest(request)">Iniciar atendimento</button></td></tr><tr v-if="!filteredAuditRequests.length"><td colspan="7" class="empty-state">Nenhuma solicitacao encontrada.</td></tr></tbody></table></div></section>
+    <section v-if="activeOwnerAuditRequest" class="surface secure-panel"><div class="section-head"><div><span class="section-kicker">Atendimento seguro</span><h2>Conversa do protocolo {{ activeOwnerAuditRequest.id }}</h2><p>Somente owner e superadmin podem acessar estas mensagens.</p></div><button class="button button--quiet" @click="closeOwnerAuditChat">Encerrar conversa</button></div><div class="table-wrap"><p v-for="message in ownerAuditMessages" :key="message.id"><strong>{{ message.sender_type === 'owner' ? 'Owner' : 'Superadmin' }}:</strong> {{ message.body }} <small>{{ formatDate(message.created_at) }}</small></p></div><form class="secure-form" @submit.prevent="sendOwnerAuditMessage"><label>Mensagem<textarea v-model="ownerAuditDraft" maxlength="1000" required></textarea></label><button class="button button--primary">Enviar</button></form></section>
 
     <section class="surface company-panel">
       <div class="section-head"><div><span class="section-kicker">Base de clientes</span><h2>Empresas</h2><p>Localize pelo nome da empresa ou CNPJ mascarado.</p></div><div class="section-actions"><input v-model="search" aria-label="Buscar empresa ou CNPJ" placeholder="Buscar empresa ou CNPJ"><button class="button button--quiet" @click="openDeletionAudit">Exclusoes</button><button class="button button--quiet" @click="openPlatformAudit">Auditoria interna</button></div></div>

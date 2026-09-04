@@ -9,11 +9,22 @@ const getClientIp = (req) => {
   return String(firstForwarded || req.socket.remoteAddress || 'unknown').split(',')[0].trim()
 }
 
-const isAuthPath = (path) => path === '/api/auth/login' || path === '/api/auth/register'
+const isAuthPath = (path) => [
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/change-password',
+  '/api/auth/invitations/accept'
+].includes(path)
+
+const isRefreshPath = (path) => path === '/api/auth/refresh'
 
 const rateConfigFor = (path) => ({
   windowMs: env.rateLimitWindowMs,
-  maxRequests: isAuthPath(path) ? env.rateLimitAuthMaxRequests : env.rateLimitMaxRequests
+  maxRequests: isAuthPath(path)
+    ? env.rateLimitAuthMaxRequests
+    : isRefreshPath(path)
+      ? env.rateLimitRefreshMaxRequests
+      : env.rateLimitMaxRequests
 })
 
 const pruneExpiredWindows = (now) => {
@@ -39,7 +50,7 @@ export const enterRequest = (req, path) => {
   pruneExpiredWindows(now)
 
   const config = rateConfigFor(path)
-  const key = `${ip}:${isAuthPath(path) ? 'auth' : 'api'}`
+  const key = `${ip}:${isAuthPath(path) ? 'auth' : isRefreshPath(path) ? 'refresh' : 'api'}`
   const entry = windows.get(key) || { count: 0, resetAt: now + config.windowMs }
 
   if (entry.resetAt <= now) {

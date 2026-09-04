@@ -3,6 +3,8 @@ import { sendJson } from '../http/response.js'
 import { verifyWebhookSecret } from '../security/webhook.js'
 import { getTenantId } from '../config/tenant.js'
 import { env } from '../config/env.js'
+import { getAuthUser } from './auth.js'
+import { tenantQuery } from '../db/pool.js'
 import {
   createMarketplaceIntegration,
   consumeMarketplaceOAuthAttempt,
@@ -37,6 +39,34 @@ const ignored = (res) => sendJson(res, 200, { message: 'Conta ignorada ou nao in
 
 export const handleIntegrationsList = async (req, res) =>
   sendJson(res, 200, await listMarketplaceIntegrations(await getTenantId(req)))
+
+export const handleIntegrationsOverview = async (req, res) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Login necessario' })
+
+  const [marketplaces, agents] = await Promise.all([
+    listMarketplaceIntegrations(user.tenantId),
+    tenantQuery(user.tenantId, `
+      select id, name, machine_name, platform, status, last_seen_at
+        from agents
+       where tenant_id = $1
+       order by created_at desc
+    `, [user.tenantId])
+  ])
+
+  return sendJson(res, 200, {
+    marketplaces,
+    agents: agents.rows.map((agent) => ({
+      id: String(agent.id), name: agent.name || agent.machine_name,
+      machineName: agent.machine_name, platform: agent.platform,
+      status: agent.status, lastSeenAt: agent.last_seen_at
+    })),
+    email: {
+      provider: 'Resend',
+      status: env.resendApiKey && env.emailFrom && env.appPublicUrl ? 'connected' : 'not_configured'
+    }
+  })
+}
 
 export const handleIntegrationCreate = async (req, res) => {
   const payload = await readJsonBody(req)

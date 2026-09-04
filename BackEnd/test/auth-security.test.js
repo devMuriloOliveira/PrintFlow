@@ -51,7 +51,7 @@ class MockResponse extends EventEmitter {
   }
 }
 
-const request = ({ method = 'GET', path, body, ip, token, origin }) => new Promise((resolve) => {
+const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAgent }) => new Promise((resolve) => {
   const req = new MockRequest({
     method,
     path,
@@ -59,7 +59,9 @@ const request = ({ method = 'GET', path, body, ip, token, origin }) => new Promi
     ip,
     headers: {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(origin ? { origin } : {})
+      ...(origin ? { origin } : {}),
+      ...(cookie ? { cookie } : {}),
+      ...(userAgent ? { 'user-agent': userAgent } : {})
     }
   })
   const res = new MockResponse()
@@ -82,9 +84,12 @@ const registerSession = async (label, ip) => {
 
   assert.equal(response.status, 201)
   assert.ok(response.body.accessToken)
-  assert.ok(response.body.refreshToken)
+  assert.equal(response.body.refreshToken, undefined)
+  assert.match(response.headers['Set-Cookie'], /HttpOnly/)
+  assert.match(response.headers['Set-Cookie'], /SameSite=Lax/)
+  assert.equal(response.headers['Cache-Control'], 'no-store')
   assert.equal(response.body.token, response.body.accessToken)
-  return response.body
+  return { ...response.body, refreshCookie: response.headers['Set-Cookie'] }
 }
 
 test('senha e armazenada como hash scrypt, nunca em texto puro', () => {
@@ -131,17 +136,18 @@ test('refresh token possui rotacao e rejeita reutilizacao', async () => {
   const refreshed = await request({
     method: 'POST',
     path: '/api/auth/refresh',
-    body: { refreshToken: session.refreshToken },
+    cookie: session.refreshCookie,
     ip: '127.0.1.12'
   })
   assert.equal(refreshed.status, 200)
   assert.ok(refreshed.body.accessToken)
-  assert.notEqual(refreshed.body.refreshToken, session.refreshToken)
+  assert.equal(refreshed.body.refreshToken, undefined)
+  assert.match(refreshed.headers['Set-Cookie'], /HttpOnly/)
 
   const reused = await request({
     method: 'POST',
     path: '/api/auth/refresh',
-    body: { refreshToken: session.refreshToken },
+    cookie: session.refreshCookie,
     ip: '127.0.1.13'
   })
   assert.equal(reused.status, 400)
@@ -168,10 +174,11 @@ test('logout revoga refresh token e invalida access token da sessao', async () =
   const logout = await request({
     method: 'POST',
     path: '/api/auth/logout',
-    body: { refreshToken: session.refreshToken },
+    cookie: session.refreshCookie,
     ip: '127.0.2.12'
   })
   assert.equal(logout.status, 200)
+  assert.match(logout.headers['Set-Cookie'], /Max-Age=0/)
 
   const afterLogout = await request({
     method: 'GET',
@@ -184,7 +191,7 @@ test('logout revoga refresh token e invalida access token da sessao', async () =
   const refreshAfterLogout = await request({
     method: 'POST',
     path: '/api/auth/refresh',
-    body: { refreshToken: session.refreshToken },
+    cookie: session.refreshCookie,
     ip: '127.0.2.14'
   })
   assert.equal(refreshAfterLogout.status, 400)
@@ -285,6 +292,8 @@ test('CORS permite somente as origens configuradas', async () => {
   })
   assert.equal(allowed.status, 204)
   assert.equal(allowed.headers['Access-Control-Allow-Origin'], 'https://app.example.com')
+  assert.equal(allowed.headers['Access-Control-Allow-Credentials'], 'true')
+  assert.equal(allowed.headers['X-Content-Type-Options'], 'nosniff')
   assert.match(allowed.headers['Access-Control-Allow-Methods'], /PATCH/)
 
   const blocked = await request({
@@ -294,6 +303,23 @@ test('CORS permite somente as origens configuradas', async () => {
   })
   assert.equal(blocked.status, 403)
   assert.equal(blocked.headers['Access-Control-Allow-Origin'], undefined)
+})
+
+test('sessoes mostram metadados minimos sem expor o IP completo', async () => {
+  const session = await registerSession('metadados', '10.20.30.40')
+  const response = await request({
+    method: 'GET',
+    path: '/api/auth/sessions',
+    token: session.accessToken,
+    ip: '10.20.30.40',
+    userAgent: 'PrintFlow Test Browser/1.0'
+  })
+
+  assert.equal(response.status, 200)
+  const current = response.body.find((item) => item.sessionId)
+  assert.equal(current.ipMasked, '10.20.30.0')
+  assert.equal(current.deviceLabel, 'PrintFlow Test Browser/1.0')
+  assert.ok(current.lastSeenAt)
 })
 
 test('rota de producao rejeita sessao de financeiro no backend', async () => {

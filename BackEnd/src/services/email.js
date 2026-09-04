@@ -12,7 +12,7 @@ export const sendInvitationEmail = async ({ email, invitationUrl, role }) => {
       from: env.emailFrom,
       to: [email],
       subject: 'Convite para acessar o PrintFlow',
-      text: `Voce foi convidado como ${role}. Defina sua senha em ate 7 dias: ${invitationUrl}`
+      text: `Voce foi convidado como ${role}. Defina sua senha em ate 48 horas: ${invitationUrl}`
     })
   })
 

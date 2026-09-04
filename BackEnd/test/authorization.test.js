@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { canAccessRequest, requiredPermissionForRequest } from '../src/auth/authorization.js'
+import { INVITATION_TTL_HOURS } from '../src/repositories/invitationsRepository.js'
 
 test('a politica exige permissao explicita para novas rotas protegidas', () => {
   assert.equal(requiredPermissionForRequest('POST', '/api/nova-rota'), 'tenant.manage')
@@ -28,4 +29,19 @@ test('admin administra membros sem receber poderes reservados ao owner', () => {
   assert.equal(canAccessRequest({ role: 'financeiro' }, 'GET', '/api/members'), false)
   assert.equal(canAccessRequest({ role: 'admin' }, 'POST', '/api/nova-rota'), false)
   assert.equal(canAccessRequest({ role: 'owner' }, 'POST', '/api/nova-rota'), true)
+})
+
+test('convites pendentes exigem permissao de gestao de membros', () => {
+  assert.equal(canAccessRequest({ role: 'admin' }, 'GET', '/api/members/invitations'), true)
+  assert.equal(canAccessRequest({ role: 'admin' }, 'DELETE', '/api/members/invitations/convite-1'), true)
+  assert.equal(canAccessRequest({ role: 'financeiro' }, 'GET', '/api/members/invitations'), false)
+})
+
+test('convites expiram em no maximo 48 horas', () => {
+  assert.equal(INVITATION_TTL_HOURS, 48)
+})
+
+test('resumo de integracoes respeita a permissao de leitura', () => {
+  assert.equal(canAccessRequest({ role: 'admin' }, 'GET', '/api/integrations/overview'), true)
+  assert.equal(canAccessRequest({ role: 'financeiro' }, 'GET', '/api/integrations/overview'), false)
 })

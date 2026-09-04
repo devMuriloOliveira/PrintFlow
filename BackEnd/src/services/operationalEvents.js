@@ -47,6 +47,7 @@ const actionLabels = {
   'membership.owner.granted': 'Proprietario inicial definido',
   'membership.updated': 'Permissao de usuario atualizada',
   'invitation.created': 'Convite de usuario criado',
+  'invitation.revoked': 'Convite de usuario cancelado',
   'invitation.accepted': 'Convite de usuario aceito',
   'password.changed': 'Senha alterada',
   'tenant.deletion.requested': 'Exclusao da empresa solicitada',
@@ -55,6 +56,8 @@ const actionLabels = {
   'session.revoked': 'Sessao encerrada',
   'sessions.revoked_all': 'Todas as sessoes foram encerradas',
   'notification.read': 'Notificacao marcada como lida',
+  'settings.updated': 'Configuracoes da empresa atualizadas',
+  'settings.data_exported': 'Dados da empresa exportados',
   'agent.offline': 'Agent ficou offline',
   'print_job.start_timeout': 'Inicio da impressao excedeu o prazo'
 }

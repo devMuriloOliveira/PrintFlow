@@ -7,6 +7,7 @@ import { writeAuditEvent } from '../services/operationalEvents.js'
 import { sendInvitationEmail } from '../services/email.js'
 
 const inviteRoles = new Set(['admin', 'financeiro', 'producao', 'usuario'])
+export const INVITATION_TTL_HOURS = 48
 const tokenHash = (token) => createHash('sha256').update(String(token)).digest('hex')
 const emailValue = (value) => String(value || '').trim().toLowerCase()
 const publicInvite = (row) => ({ id: row.id, email: decryptField(row.email), role: row.role, expiresAt: row.expires_at })
@@ -25,9 +26,9 @@ export const createInvitation = async ({ actor, email, role }) => {
   const invitation = await withTenant(actor.tenantId, async (client) => {
     const result = await client.query(`
       insert into tenant_invitations (id, tenant_id, email, email_hash, role, token_hash, invited_by, expires_at)
-      values ($1, $2, $3, $4, $5, $6, $7, now() + interval '7 days')
+      values ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(hours => $8::int))
       returning id, email, role, expires_at
-    `, [createOpaqueId('invite'), actor.tenantId, encryptField(normalizedEmail), blindIndex(normalizedEmail), memberRole, tokenHash(token), actor.id])
+    `, [createOpaqueId('invite'), actor.tenantId, encryptField(normalizedEmail), blindIndex(normalizedEmail), memberRole, tokenHash(token), actor.id, INVITATION_TTL_HOURS])
     await writeAuditEvent(actor.tenantId, { action: 'invitation.created', actorType: 'user', actorId: actor.id, entityType: 'invitation', entityId: result.rows[0].id, details: { role: memberRole } }, client)
     return publicInvite(result.rows[0])
   })
@@ -40,6 +41,49 @@ export const createInvitation = async ({ actor, email, role }) => {
     throw error
   }
   return invitation
+}
+
+export const listPendingInvitations = async (tenantId) => {
+  if (!hasDatabase) return []
+  const result = await tenantQuery(tenantId, `
+    select id, email, role, expires_at, created_at
+      from tenant_invitations
+     where tenant_id = $1 and accepted_at is null and revoked_at is null and expires_at > now()
+     order by created_at desc
+  `, [tenantId])
+  return result.rows.map((row) => ({ ...publicInvite(row), createdAt: row.created_at }))
+}
+
+export const revokeInvitation = async ({ actor, invitationId }) => {
+  if (!hasDatabase) throw new Error('Convites requerem DATABASE_URL.')
+  const result = await withTenant(actor.tenantId, async (client) => {
+    const updated = await client.query(`
+      update tenant_invitations
+         set revoked_at = now(), updated_at = now()
+       where tenant_id = $1 and id = $2 and accepted_at is null and revoked_at is null and expires_at > now()
+       returning id
+    `, [actor.tenantId, String(invitationId || '')])
+    if (!updated.rowCount) throw new Error('Convite nao encontrado')
+    await writeAuditEvent(actor.tenantId, { action: 'invitation.revoked', actorType: 'user', actorId: actor.id, entityType: 'invitation', entityId: String(invitationId) }, client)
+    return updated.rows[0]
+  })
+  return { id: String(result.id), revoked: true }
+}
+
+export const resendInvitation = async ({ actor, invitationId }) => {
+  if (!hasDatabase) throw new Error('Convites requerem DATABASE_URL.')
+  const invitation = await withTenant(actor.tenantId, async (client) => {
+    const current = await client.query(`
+      select id, email, role from tenant_invitations
+       where tenant_id = $1 and id = $2 and accepted_at is null and revoked_at is null and expires_at > now()
+       for update
+    `, [actor.tenantId, String(invitationId || '')])
+    const row = current.rows[0]
+    if (!row) throw new Error('Convite nao encontrado')
+    await client.query('update tenant_invitations set revoked_at = now(), updated_at = now() where id = $1', [row.id])
+    return { email: decryptField(row.email), role: row.role }
+  })
+  return createInvitation({ actor, email: invitation.email, role: invitation.role })
 }
 
 export const acceptInvitation = async ({ token, name, password }) => {

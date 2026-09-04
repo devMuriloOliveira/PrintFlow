@@ -45,10 +45,19 @@ export const useOperationalNotifications = () => {
   }
 
   return {
-    notifications,
+    notifications: visibleNotifications,
     loading,
-    unreadCount: computed(() => notifications.value.filter((item) => !item.readAt).length),
+    unreadCount: computed(() => visibleNotifications.value.filter((item) => !item.readAt).length),
     refreshNotifications,
     markNotificationRead
   }
 }
+  const { settings } = useAppData()
+  const visibleNotifications = computed(() => {
+    const preferences = (settings.value?.preferences || {}) as Record<string, unknown>
+    return notifications.value.filter((notification) => {
+      if (notification.type.startsWith('print.') || notification.type.startsWith('agent.')) return preferences.productionAlerts !== false
+      if (notification.type.startsWith('marketplace.')) return preferences.marketplaceAlerts !== false
+      return true
+    })
+  })

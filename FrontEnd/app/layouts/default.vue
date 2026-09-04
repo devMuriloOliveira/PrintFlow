@@ -1,10 +1,17 @@
 <script setup lang="ts">
 const sidebarOpen = useState('sidebar-open', () => false)
 const { toast } = useUi()
+const { settings } = useAppData()
+const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
+const compactLayout = computed(() => Boolean(preferences.value.compactLayout))
+const brandStyle = computed(() => ({
+  '--blue': String(preferences.value.accentColor || '#1768f2'),
+  '--blue-dark': String(preferences.value.accentColor || '#1768f2')
+}))
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'app-shell--compact': compactLayout }" :style="brandStyle">
     <AppSidebar :open="sidebarOpen" @close="sidebarOpen = false" />
     <div class="app-body">
       <AppHeader @menu="sidebarOpen = true" />

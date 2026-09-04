@@ -16,6 +16,7 @@ import {
   writePlatformAudit
 } from '../services/platformAdmin.js'
 import { listTenantDeletionAudit } from '../services/tenantDeletion.js'
+import { addPlatformAuditMessage, closePlatformAuditChat, decidePlatformAuditRequest, listPlatformAuditRequests, platformAuditMessages } from '../services/tenantAuditRequests.js'
 
 const requirePlatformAdmin = async (req, res) => {
   const user = await getAuthUser(req)
@@ -169,6 +170,12 @@ export const handleDataAccessVerify = async (req, res, requestId) => {
   try { const access = await verifyDataAccessRequest(user, requestId, payload.cnpj); await writePlatformAudit(req, user, { action: 'platform.data_access.verified', targetTenantId: access.tenantId, targetResource: 'data_access', targetResourceId: requestId }); return sendJson(res, 200, access) }
   catch (error) { await writePlatformAudit(req, user, { action: 'platform.data_access.rejected', targetResource: 'data_access', targetResourceId: requestId }); throw error }
 }
+
+export const handlePlatformAuditRequestsList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests()) }
+export const handlePlatformAuditMessagesList = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await platformAuditMessages(requestId)) }
+export const handlePlatformAuditMessageCreate = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { await addPlatformAuditMessage(user, requestId, (await readJsonBody(req)).body); await writePlatformAudit(req, user, { action: 'platform.data_access.message_sent', targetResource: 'audit_request', targetResourceId: requestId }); return sendJson(res, 201, {}) } }
+export const handlePlatformAuditDecision = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const payload = await readJsonBody(req); const decision = await decidePlatformAuditRequest(user, requestId, payload.approved === true, payload.reason); await writePlatformAudit(req, user, { action: payload.approved === true ? 'platform.data_access.approved' : 'platform.data_access.rejected', targetTenantId: decision.tenantId, targetResource: 'audit_request', targetResourceId: requestId, reason: payload.reason }); return sendJson(res, 200, decision) } }
+export const handlePlatformAuditChatClose = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const result = await closePlatformAuditChat(user, requestId); await writePlatformAudit(req, user, { action: 'platform.data_access.chat_closed', targetTenantId: result.tenant_id, targetResource: 'audit_request_chat', targetResourceId: requestId, details: { openedAt: result.chat_opened_at, closedAt: result.chat_closed_at } }); return sendJson(res, 200, result) } }
 
 export const handlePlatformTenantStatusUpdate = async (req, res, tenantId) => {
   const user = await requirePlatformAdmin(req, res)

@@ -141,7 +141,7 @@ const removePrinter = async (printer: any) => {
   notify('Impressora excluída com sucesso.')
 }
 const tokenHeaders = () => {
-  const token = localStorage.getItem('printflow-auth-token')
+  const token = useAuth().token.value
   if (!token) throw new Error('Sessão não encontrada.')
   return {
     Authorization: `Bearer ${token}`,

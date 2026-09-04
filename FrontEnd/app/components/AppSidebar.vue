@@ -1,6 +1,9 @@
 <script setup lang="ts">
 defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
+const { settings } = useAppData()
+const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
+const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
 
 const items = [
   { label: 'Dashboard', to: '/', icon: 'home' },
@@ -24,7 +27,7 @@ const items = [
 
   <aside class="sidebar" :class="{ 'sidebar--open': open }">
     <div class="sidebar__top">
-      <AppLogo />
+      <AppLogo :logo-url="String(preferences.logoUrl || '')" :brand-name="brandName" />
 
       <button class="icon-btn sidebar__close" aria-label="Fechar menu" @click="emit('close')">
         <UiIcon name="close" />

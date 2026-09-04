@@ -125,7 +125,30 @@ const emptyData = (): AppData => ({
   settings: null
 })
 
-export const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+const currencyCode = (value: unknown) => {
+  const setting = String(value || '').toLowerCase()
+  if (setting.includes('dolar') || setting.includes('usd')) return 'USD'
+  if (setting.includes('euro') || setting.includes('eur')) return 'EUR'
+  return 'BRL'
+}
+
+export type IntegrationsOverview = {
+  marketplaces: MarketplaceIntegration[]
+  agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>
+  email: { provider: string; status: 'connected' | 'not_configured' }
+}
+
+export type BackupStatus = {
+  databaseAvailable: boolean
+  export: { enabled: boolean; format: 'json'; excludes: string[] }
+  restore: { enabled: false; reason: string }
+}
+export type AuditRequest = { id: string; status: string; reason: string; scope: { entityType?: string; entityId?: string }; createdAt: string }
+export type AuditMessage = { id: string; senderType: 'owner' | 'superadmin'; body: string; createdAt: string }
+export const formatCurrency = (value: number) => {
+  const settings = useState<AppData>('app-data', emptyData).value.settings
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
+}
 export const formatNumber = (value: number) => new Intl.NumberFormat('pt-BR').format(value)
 
 export const useAppData = () => {
@@ -313,6 +336,34 @@ export const useAppData = () => {
     return list
   }
 
+  const updateSettings = async (settings: Record<string, unknown>) => {
+    const saved = await $fetch<Record<string, unknown>>(apiUrl('/api/settings'), {
+      method: 'PUT', body: settings, headers: resourceHeaders()
+    })
+    data.value.settings = saved
+    return saved
+  }
+
+  const exportTenantData = () => $fetch<{ fileName: string; exportedAt: string; data: AppData }>(apiUrl('/api/settings/export'), {
+    headers: resourceHeaders()
+  })
+
+  const listSettingsExports = () => $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
+    headers: resourceHeaders()
+  })
+
+  const loadBackupStatus = () => $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
+    headers: resourceHeaders()
+  })
+  const listAuditRequests = () => $fetch<AuditRequest[]>(apiUrl('/api/settings/audit-requests'), { headers: resourceHeaders() })
+  const createAuditRequest = (body: Record<string, unknown>) => $fetch<AuditRequest>(apiUrl('/api/settings/audit-requests'), { method: 'POST', body, headers: resourceHeaders() })
+  const listAuditMessages = (id: string) => $fetch<AuditMessage[]>(apiUrl(`/api/settings/audit-requests/${id}/messages`), { headers: resourceHeaders() })
+  const sendAuditMessage = (id: string, body: string) => $fetch(apiUrl(`/api/settings/audit-requests/${id}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
+
+  const loadIntegrationsOverview = () => $fetch<IntegrationsOverview>(apiUrl('/api/integrations/overview'), {
+    headers: resourceHeaders()
+  })
+
   return {
     products: computed(() => data.value.products),
     orders: computed(() => data.value.orders),
@@ -338,6 +389,15 @@ export const useAppData = () => {
     , startMarketplaceOAuth
     , refreshMarketplaceOrders
     , linkMarketplaceOrderProduct
+    , updateSettings
+    , exportTenantData
+    , listSettingsExports
+    , loadBackupStatus
+    , listAuditRequests
+    , createAuditRequest
+    , listAuditMessages
+    , sendAuditMessage
+    , loadIntegrationsOverview
     , enqueuePrintJob
     , reorderPrintJob
     , movePrintJobPrinter

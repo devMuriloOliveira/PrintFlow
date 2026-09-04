@@ -16,6 +16,12 @@ const refreshTokenHash = (token) => createHash('sha256').update(String(token || 
 const createRefreshTokenValue = () => `refresh_${randomBytes(32).toString('base64url')}`
 const refreshExpiresAt = () => new Date(Date.now() + env.refreshTokenTtlSeconds * 1000)
 
+const sessionMetadata = (metadata = {}) => ({
+  ipMasked: String(metadata.ipMasked || '').slice(0, 80),
+  deviceLabel: String(metadata.deviceLabel || '').slice(0, 120),
+  userAgent: String(metadata.userAgent || '').slice(0, 300)
+})
+
 const publicUser = (row) => ({
   id: String(row.id),
   tenantId: row.tenant_id,
@@ -38,7 +44,7 @@ const publicUserFromPayload = (payload) => ({
   tokenVersion: Number(payload.tokenVersion || 0)
 })
 
-const createMemorySession = (user, sessionId = createOpaqueId('session')) => {
+const createMemorySession = (user, sessionId = createOpaqueId('session'), metadata) => {
   const refreshToken = createRefreshTokenValue()
   const tokenHash = refreshTokenHash(refreshToken)
   memoryRefreshTokens.set(tokenHash, {
@@ -48,7 +54,10 @@ const createMemorySession = (user, sessionId = createOpaqueId('session')) => {
     tenantId: user.tenantId,
     expiresAt: refreshExpiresAt(),
     revokedAt: null,
-    replacedByHash: null
+    replacedByHash: null,
+    ...sessionMetadata(metadata),
+    createdAt: new Date(),
+    lastSeenAt: new Date()
   })
   return { refreshToken, sessionId }
 }
@@ -71,19 +80,20 @@ const incrementMemoryTokenVersion = (userId) => {
   user.token_version = Number(user.token_version || 0) + 1
 }
 
-const createDatabaseSession = async (user, sessionId = createOpaqueId('session')) => {
+const createDatabaseSession = async (user, sessionId = createOpaqueId('session'), metadata) => {
   const refreshToken = createRefreshTokenValue()
   const tokenHash = refreshTokenHash(refreshToken)
+  const context = sessionMetadata(metadata)
   await query(
-    `insert into refresh_tokens (tenant_id, user_id, session_id, token_hash, expires_at)
-     values ($1, $2, $3, $4, $5)`,
-    [user.tenantId, String(user.id), sessionId, tokenHash, refreshExpiresAt()]
+    `insert into refresh_tokens (tenant_id, user_id, session_id, token_hash, expires_at, ip_masked, device_label, user_agent, last_seen_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, now())`,
+    [user.tenantId, String(user.id), sessionId, tokenHash, refreshExpiresAt(), context.ipMasked, context.deviceLabel, context.userAgent]
   )
   return { refreshToken, sessionId }
 }
 
-export const createSession = async (user, sessionId) =>
-  hasDatabase ? createDatabaseSession(user, sessionId) : createMemorySession(user, sessionId)
+export const createSession = async (user, sessionId, metadata) =>
+  hasDatabase ? createDatabaseSession(user, sessionId, metadata) : createMemorySession(user, sessionId, metadata)
 
 export const validateAccessPayload = async (payload) => {
   if (!payload?.sub || !payload?.tenantId || !payload?.sid) return null
@@ -124,7 +134,7 @@ export const validateAccessPayload = async (payload) => {
   return result.rows[0] ? publicUser(result.rows[0]) : null
 }
 
-export const rotateRefreshToken = async (refreshToken) => {
+export const rotateRefreshToken = async (refreshToken, metadata) => {
   const tokenHash = refreshTokenHash(refreshToken)
 
   if (!hasDatabase) {
@@ -139,7 +149,7 @@ export const rotateRefreshToken = async (refreshToken) => {
 
     const user = memoryUsersById.get(String(current.userId))
     if (!user || user.status !== 'active') throw new Error('Refresh token invalido.')
-    const session = createMemorySession(publicUser(user), current.sessionId)
+    const session = createMemorySession(publicUser(user), current.sessionId, metadata)
     current.revokedAt = new Date()
     current.replacedByHash = refreshTokenHash(session.refreshToken)
     return { user: publicUser(user), ...session }
@@ -181,7 +191,7 @@ export const rotateRefreshToken = async (refreshToken) => {
     status: current.status,
     token_version: current.token_version
   })
-  const session = await createDatabaseSession(user, current.session_id)
+  const session = await createDatabaseSession(user, current.session_id, metadata)
   await query(
     `update refresh_tokens set revoked_at = now(), replaced_by_hash = $1 where id = $2`,
     [refreshTokenHash(session.refreshToken), current.id]
@@ -362,15 +372,45 @@ export const changeUserPassword = async (user, { currentPassword, newPassword })
 }
 
 export const listUserSessions = async (user) => {
-  if (!hasDatabase) return []
+  if (!hasDatabase) {
+    return [...memoryRefreshTokens.values()]
+      .filter((entry) => entry.userId === String(user.id) && !entry.revokedAt && entry.expiresAt > new Date())
+      .map((entry) => ({ sessionId: entry.sessionId, createdAt: entry.createdAt, expiresAt: entry.expiresAt, lastSeenAt: entry.lastSeenAt, deviceLabel: entry.deviceLabel, ipMasked: entry.ipMasked }))
+  }
   const result = await tenantQuery(user.tenantId, `
-    select session_id, min(created_at) as created_at, max(expires_at) as expires_at
+    select distinct on (session_id) session_id, created_at, expires_at, last_seen_at, device_label, ip_masked
       from refresh_tokens
      where tenant_id = $1 and user_id = $2 and revoked_at is null and expires_at > now()
-     group by session_id
-     order by max(created_at) desc
+     order by session_id, created_at desc
   `, [user.tenantId, String(user.id)])
-  return result.rows.map((row) => ({ sessionId: row.session_id, createdAt: row.created_at, expiresAt: row.expires_at }))
+  return result.rows
+    .sort((left, right) => new Date(right.last_seen_at) - new Date(left.last_seen_at))
+    .map((row) => ({ sessionId: row.session_id, createdAt: row.created_at, expiresAt: row.expires_at, lastSeenAt: row.last_seen_at, deviceLabel: row.device_label, ipMasked: row.ip_masked }))
+}
+
+export const touchUserSession = async (user, sessionId, metadata) => {
+  if (!sessionId) return
+  const context = sessionMetadata(metadata)
+
+  if (!hasDatabase) {
+    for (const entry of memoryRefreshTokens.values()) {
+      if (entry.sessionId === sessionId && entry.userId === String(user.id) && !entry.revokedAt) {
+        entry.lastSeenAt = new Date()
+        if (context.ipMasked) entry.ipMasked = context.ipMasked
+        if (context.deviceLabel) entry.deviceLabel = context.deviceLabel
+      }
+    }
+    return
+  }
+
+  await tenantQuery(user.tenantId, `
+    update refresh_tokens
+       set last_seen_at = now(),
+           ip_masked = case when $4 <> '' then $4 else ip_masked end,
+           device_label = case when $5 <> '' then $5 else device_label end,
+           user_agent = case when $6 <> '' then $6 else user_agent end
+     where tenant_id = $1 and user_id = $2 and session_id = $3 and revoked_at is null
+  `, [user.tenantId, String(user.id), sessionId, context.ipMasked, context.deviceLabel, context.userAgent])
 }
 
 export const revokeUserSession = async (user, sessionId) => {

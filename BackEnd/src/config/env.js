@@ -44,12 +44,16 @@ const requireProductionSecret = (name, value, minLength = 32) => {
 requireProductionSecret('AUTH_SECRET', authSecret)
 requireProductionSecret('DATA_ENCRYPTION_KEY', dataEncryptionKey)
 requireProductionSecret('WEBHOOK_SHARED_SECRET', webhookSharedSecret)
+if (productionLike && !String(process.env.CORS_ALLOWED_ORIGINS || '').trim()) {
+  throw new Error('CORS_ALLOWED_ORIGINS obrigatorio quando o backend usa banco real.')
+}
 const developmentAuthSecret = authSecret || randomBytes(32).toString('base64url')
 
 export const env = {
   port: Number(process.env.PORT || 3333),
   databaseUrl,
   isProduction,
+  isProductionLike: productionLike,
   allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true' && !productionLike,
   authSecret: developmentAuthSecret,
   dataEncryptionKey,
@@ -61,9 +65,11 @@ export const env = {
     .filter(Boolean),
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || defaultAuthTokenTtlSeconds),
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS || defaultRefreshTokenTtlSeconds),
+  authCookieSameSite: String(process.env.AUTH_COOKIE_SAME_SITE || (productionLike ? 'none' : 'lax')).toLowerCase(),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),
   rateLimitAuthMaxRequests: Number(process.env.RATE_LIMIT_AUTH_MAX_REQUESTS || 12),
+  rateLimitRefreshMaxRequests: Number(process.env.RATE_LIMIT_REFRESH_MAX_REQUESTS || 30),
   maxConcurrentRequestsPerIp: Number(process.env.MAX_CONCURRENT_REQUESTS_PER_IP || 25),
   tenantDeletionGraceDays: Number(process.env.TENANT_DELETION_GRACE_DAYS || 7),
   tenantDeletionPurgeIntervalMs: Number(process.env.TENANT_DELETION_PURGE_INTERVAL_MS || 60 * 60 * 1000),

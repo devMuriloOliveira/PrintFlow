@@ -60,7 +60,7 @@ const accessForMethod = (method, area) =>
 
 export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname === '/api/app-data') return 'app_data.read'
-  if (pathname === '/api/settings') return 'settings.manage'
+  if (pathname === '/api/settings' || pathname.startsWith('/api/settings/')) return 'settings.manage'
   if (pathname === '/api/members') return accessForMethod(method, 'members')
   if (pathname === '/api/members/invitations') return 'members.manage'
   if (pathname.startsWith('/api/members/')) return 'members.manage'
@@ -74,6 +74,7 @@ export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname.startsWith('/api/marketplace-integrations')) {
     return accessForMethod(method, 'integrations')
   }
+  if (pathname.startsWith('/api/integrations/')) return 'integrations.read'
 
   if (pathname.startsWith('/api/marketplaces')) return accessForMethod(method, 'marketplaces')
   if (pathname.startsWith('/api/orders')) return accessForMethod(method, 'orders')

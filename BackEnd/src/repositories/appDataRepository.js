@@ -258,7 +258,7 @@ const readGoals = async (client, tenantId) => {
 
 const readSettings = async (client, tenantId) => {
   const result = await client.query(`select name, document, phone, email, address, district, city, state, zip, country,
-    currency, timezone, kwh from company_settings where tenant_id = $1`, [tenantId])
+    currency, timezone, kwh, preferences from company_settings where tenant_id = $1`, [tenantId])
   const row = result.rows[0]
   if (!row) return null
   return {
@@ -271,7 +271,8 @@ const readSettings = async (client, tenantId) => {
     district: decryptField(row.district),
     city: decryptField(row.city),
     state: decryptField(row.state),
-    zip: decryptField(row.zip)
+    zip: decryptField(row.zip),
+    preferences: row.preferences || {}
   }
 }
 

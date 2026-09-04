@@ -14,6 +14,12 @@ const form = reactive({ name: '', sku: '', category: 'Decoração', description:
 const selectedPrinter = computed(() => printers.value.find((printer) => printer.id === form.printerId))
 const selectedFilament = computed(() => filaments.value.find((filament) => filament.id === form.filamentId))
 const kwhCost = computed(() => Number(settings.value?.kwh || 0.68))
+const financialDefaults = computed(() => (settings.value?.preferences || {}) as Record<string, unknown>)
+const fixedCostPerUnit = computed(() => {
+  const fixed = Number(financialDefaults.value.monthlyFixedCost || 0)
+  const planned = Number(financialDefaults.value.plannedMonthlyUnits || 0)
+  return planned > 0 ? fixed / planned : 0
+})
 const filamentCost = computed(() => {
   const filament = selectedFilament.value
   const gramCost = filament?.initial ? Number(filament.cost || 0) / Number(filament.initial || 1) : 0
@@ -27,7 +33,7 @@ const energyCost = computed(() => {
 const shopeeCost = computed(() => form.price * form.shopeeFee / 100)
 const otherMarketplaceCost = computed(() => form.price * form.otherMarketplaceFee / 100)
 const marketplaceCost = computed(() => form.price * form.marketplaceFee / 100)
-const totalCost = computed(() => filamentCost.value + energyCost.value + form.packaging + form.materials + form.labor + form.otherCosts + shopeeCost.value + otherMarketplaceCost.value + marketplaceCost.value)
+const totalCost = computed(() => filamentCost.value + energyCost.value + fixedCostPerUnit.value + form.packaging + form.materials + form.labor + form.otherCosts + shopeeCost.value + otherMarketplaceCost.value + marketplaceCost.value)
 const profit = computed(() => form.price - totalCost.value)
 const margin = computed(() => form.price ? profit.value / form.price * 100 : 0)
 const productionMinutes = computed(() => Number(form.hours || 0) * 60 + Number(form.minutes || 0))
@@ -39,6 +45,9 @@ const costBreakdown = computed(() => ({
   productionTimeMinutes: productionMinutes.value,
   energyEnabled: form.energy,
   energyCost: energyCost.value,
+  fixedCostPerUnit: fixedCostPerUnit.value,
+  monthlyFixedCost: Number(financialDefaults.value.monthlyFixedCost || 0),
+  plannedMonthlyUnits: Number(financialDefaults.value.plannedMonthlyUnits || 0),
   additionalMaterialsCost: Number(form.materials || 0),
   laborCost: Number(form.labor || 0),
   otherCosts: Number(form.otherCosts || 0),
@@ -134,6 +143,11 @@ watch([products, editingId], ([list, id]) => {
     hydrateForm(product)
     hydratedFor.value = id
   }
+}, { immediate: true })
+watch(settings, (value) => {
+  if (isEditing.value || hydratedFor.value) return
+  const defaultMargin = Number((value?.preferences as Record<string, unknown> | undefined)?.defaultMargin)
+  if (Number.isFinite(defaultMargin) && defaultMargin >= 0) form.desiredMargin = defaultMargin
 }, { immediate: true })
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])

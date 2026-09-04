@@ -11,6 +11,56 @@ O sistema e dividido em tres partes:
 - `Agent`: programa local para Windows que conecta o computador do usuario as impressoras 3D por rede ou USB.
 - `AdminFrontEnd`: portal interno separado para administracao da plataforma. Nao deve ser publicado junto ao painel de clientes.
 
+## Pilares Consolidados
+
+O PrintFlow 3D se apoia nos pilares abaixo. Esta secao define o que cada um
+garante hoje e onde ainda existe dependencia externa para validacao final.
+
+### 1. Isolamento por Tenant
+
+O BackEnd resolve a identidade do tenant a partir do token autenticado e aplica
+o contexto de tenant no acesso ao PostgreSQL. Recursos de outro tenant devem
+ser tratados como inexistentes, sem revelar sua existencia. Esse limite vale
+para dados operacionais, financeiros, arquivos, filas, impressoras e
+integracoes.
+
+### 2. Fonte Financeira do Produto
+
+Cada produto preserva o detalhamento de custos e taxas em `costBreakdown`, alem
+dos valores consolidados de custo, lucro e margem. O detalhamento e parte da
+fonte de verdade do produto: interfaces e integracoes devem enviar e manter os
+campos existentes, sem reduzi-los apenas a um total calculado.
+
+### 3. Operacao de Impressao pelo Painel Principal
+
+A tela principal de impressoras concentra a operacao cotidiana de equipamentos
+conectados: disponibilidade do Agent, status, temperaturas, progresso, fila e
+comandos de pausar, retomar, cancelar e desconectar. O fluxo deve continuar
+funcionando tambem para impressoras cadastradas manualmente, sem exigir o
+Agent quando nao houver automacao local.
+
+### 4. Integracoes de Marketplace
+
+O BackEnd centraliza as integracoes e trata o Mercado Livre com OAuth PKCE e
+tentativas temporarias de uso unico. Tokens, codigos de autorizacao e secrets
+ficam fora do FrontEnd, dos logs e do repositorio. A validacao real do provedor
+continua dependendo das variaveis protegidas e da callback registrada.
+
+### 5. Confiabilidade Operacional
+
+Heartbeats do Agent, comandos assincronos, status de impressora e o watchdog da
+fila formam a base de acompanhamento operacional. Os testes automatizados
+cobrem contratos locais; impressao real e adapters HTTP devem ser confirmados
+com o hardware e as APIs reais antes de serem considerados suporte final.
+
+## Limites Atuais
+
+- A simulacao Bambu permite testar descoberta, conexao e comandos sem hardware.
+- Bambu e Marlin/mock possuem maior cobertura local; OctoPrint, Moonraker e
+  PrusaLink ainda requerem validacao com dispositivos e versoes reais das APIs.
+- OAuth de marketplace exige credenciais protegidas e callback configurada no
+  ambiente de destino.
+
 ## Como Funciona
 
 O usuario acessa o FrontEnd para cadastrar produtos, impressoras, pedidos e arquivos de impressao. O BackEnd valida e persiste esses dados de forma isolada por conta/tenant.

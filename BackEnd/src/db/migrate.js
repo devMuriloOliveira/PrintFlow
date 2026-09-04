@@ -541,6 +541,15 @@ export const migrate =
       `
     )
 
+    for (const columnDefinition of [
+      "ip_masked text not null default ''",
+      "device_label text not null default ''",
+      "user_agent text not null default ''",
+      'last_seen_at timestamptz not null default now()'
+    ]) {
+      await query(`alter table refresh_tokens add column if not exists ${columnDefinition}`)
+    }
+
     // ==================================================
     // PRODUCTS
     // ==================================================
@@ -2392,6 +2401,25 @@ export const migrate =
         )
       `
     )
+
+    await query(`alter table company_settings add column if not exists preferences jsonb not null default '{}'::jsonb`)
+
+    await query(`create table if not exists tenant_audit_requests (
+      id text primary key, tenant_id text not null references tenants(id) on delete cascade,
+      requested_by text not null, reviewed_by text, reason text not null, scope jsonb not null default '{}'::jsonb,
+      status text not null default 'pending' check (status in ('pending','under_review','approved','rejected','cancelled','closed','expired')),
+      review_reason text not null default '', expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+    )`)
+    await query(`create index if not exists tenant_audit_requests_tenant_idx on tenant_audit_requests (tenant_id, created_at desc)`)
+    await query(`create table if not exists tenant_audit_request_messages (
+      id bigserial primary key, tenant_id text not null references tenants(id) on delete cascade,
+      request_id text not null references tenant_audit_requests(id) on delete cascade,
+      sender_type text not null check (sender_type in ('owner','superadmin')), sender_id text not null,
+      body text not null check (char_length(body) between 1 and 1000), created_at timestamptz not null default now()
+    )`)
+    await query(`create index if not exists tenant_audit_request_messages_request_idx on tenant_audit_request_messages (request_id, created_at)`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_opened_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_closed_at timestamptz`)
 
     // ==================================================
     // CALCULATOR SIMULATIONS
