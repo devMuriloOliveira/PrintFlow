@@ -13,7 +13,10 @@ const jsonFetch = async (url, options = {}) => {
   const body = await response.text()
   const data = body ? JSON.parse(body) : {}
   if (!response.ok) {
-    throw new Error(data.message || data.error_description || data.error || `Marketplace retornou HTTP ${response.status}`)
+    const error = new Error(data.message || data.error_description || data.error || `Marketplace retornou HTTP ${response.status}`)
+    error.status = response.status
+    error.code = data.error || ''
+    throw error
   }
   return data
 }
@@ -242,16 +245,21 @@ const refreshMercadoLivreToken = async (integration) => {
   if (!env.mercadoLivreClientId || !env.mercadoLivreClientSecret) {
     throw new Error('OAuth Mercado Livre nao configurado no servidor.')
   }
-  const token = await jsonFetch('https://api.mercadolibre.com/oauth/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: env.mercadoLivreClientId,
-      client_secret: env.mercadoLivreClientSecret,
-      refresh_token: refreshToken
+  let token
+  try {
+    token = await jsonFetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: env.mercadoLivreClientId,
+        client_secret: env.mercadoLivreClientSecret,
+        refresh_token: refreshToken
+      })
     })
-  })
+  } catch (error) {
+    throw new Error('Token do Mercado Livre expirado ou revogado. Reconecte esta conta.')
+  }
   const refreshed = {
     accessToken: token.access_token || '',
     refreshToken: token.refresh_token || refreshToken,
@@ -276,9 +284,17 @@ export const fetchMarketplaceOrderDetails = async (integration, externalOrderId)
   const accessToken = await marketplaceAccessToken(integration)
 
   if (platform === 'mercado_livre') {
-    const order = await jsonFetch(`https://api.mercadolibre.com/orders/${encodeURIComponent(externalOrderId)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    })
+    let order
+    try {
+      order = await jsonFetch(`https://api.mercadolibre.com/orders/${encodeURIComponent(externalOrderId)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+    } catch (error) {
+      if (error?.status === 401) {
+        throw new Error('Token do Mercado Livre expirado ou revogado. Reconecte esta conta.')
+      }
+      throw error
+    }
     const sale = normalizeMarketplaceOrder('mercado_livre', order)
     const shippingId = sale.feeBreakdown?.shippingId
     const [shipment, shipmentCosts, discounts] = await Promise.all([

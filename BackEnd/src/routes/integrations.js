@@ -38,6 +38,9 @@ const safeNormalizeOrFetch = async (integration, platform, externalOrderId, payl
 }
 
 const ignored = (res) => sendJson(res, 200, { message: 'Conta ignorada ou nao integrada.' })
+const syncErrorMessage = (error) => String(error?.message || '').includes('Token do Mercado Livre')
+  ? error.message
+  : 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.'
 
 export const handleIntegrationsList = async (req, res) =>
   sendJson(res, 200, await listMarketplaceIntegrations(await getTenantId(req)))
@@ -141,8 +144,8 @@ export const handleMarketplaceOrderSync = async (req, res, integrationId) => {
   let sale
   try {
     sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
-  } catch {
-    await markMarketplaceIntegrationSync(tenantId, integration.id, { status: 'error', lastError: 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.' })
+  } catch (error) {
+    await markMarketplaceIntegrationSync(tenantId, integration.id, { status: 'error', lastError: syncErrorMessage(error) })
     return sendJson(res, 502, { error: 'Nao foi possivel consultar o pedido no marketplace. Verifique a conexao da conta.' })
   }
   const trackedSale = await recordTrackedSale(integration, {
@@ -183,8 +186,8 @@ export const handleMercadoLivreWebhook = async (req, res) => {
     try {
       // A notificacao e apenas um gatilho. Dados de pedido sempre vem da API oficial.
       sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
-    } catch {
-      await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, { status: 'error', lastError: 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.' })
+    } catch (error) {
+      await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, { status: 'error', lastError: syncErrorMessage(error) })
       return sendJson(res, 200, { status: 'received', sync: 'pending' })
     }
     const trackedSale = await recordTrackedSale(integration, {
