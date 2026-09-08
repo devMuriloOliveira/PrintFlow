@@ -337,6 +337,16 @@ export const useAppData = () => {
     return list
   }
 
+  const syncMarketplaceOrder = async (integrationId: string, externalOrderId: string) => {
+    await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(integrationId)}/sync-order`), {
+      method: 'POST', body: { externalOrderId }, headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || 'Nao foi possivel sincronizar o pedido.')
+    })
+    await loadAppData()
+    await refreshMarketplaceOrders()
+  }
+
   const linkMarketplaceOrderProduct = async (id: string, productId: string) => {
     const list = await $fetch<MarketplaceOrder[]>(apiUrl(`/api/marketplace-orders/${id}/link-product`), {
       method: 'POST',
@@ -418,6 +428,7 @@ export const useAppData = () => {
     , startMarketplaceOAuth
     , disconnectMarketplaceIntegration
     , refreshMarketplaceOrders
+    , syncMarketplaceOrder
     , linkMarketplaceOrderProduct
     , updateSettings
     , exportTenantData

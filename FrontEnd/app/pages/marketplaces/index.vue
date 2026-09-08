@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { marketplaces, marketplaceIntegrations, products, marketplaceOrders, deleteItem, updateItem, refreshMarketplaceOrders, linkMarketplaceOrderProduct, startMarketplaceOAuth, disconnectMarketplaceIntegration } = useAppData()
+const { marketplaces, marketplaceIntegrations, products, marketplaceOrders, deleteItem, updateItem, refreshMarketplaceOrders, syncMarketplaceOrder, linkMarketplaceOrderProduct, startMarketplaceOAuth, disconnectMarketplaceIntegration } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -71,6 +71,20 @@ const disconnectConnection = async (integration: any) => {
     notify('Conta do Mercado Livre desconectada. O histórico foi preservado.')
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível desconectar a conta.', 'info')
+  } finally {
+    connectionActionId.value = ''
+  }
+}
+const syncConnectionOrder = async (integration: any) => {
+  if (!integration?.id || connectionActionId.value) return
+  const externalOrderId = window.prompt('Informe o ID do pedido no Mercado Livre:')?.trim()
+  if (!externalOrderId) return
+  connectionActionId.value = integration.id
+  try {
+    await syncMarketplaceOrder(integration.id, externalOrderId)
+    notify('Pedido sincronizado com sucesso.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível sincronizar o pedido.', 'info')
   } finally {
     connectionActionId.value = ''
   }
@@ -150,7 +164,7 @@ onMounted(() => {
           <div class="table-footer"><span>Exibindo {{ filteredMarketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
         </PanelCard>
         <PanelCard title="Contas conectadas do Mercado Livre" subtitle="Cada conta OAuth recebe pedidos separadamente; as taxas permanecem configuradas no canal Mercado Livre." style="margin-top:12px">
-          <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row"><div><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small><small v-if="integration.lastError" style="display:block;color:var(--danger,#c0392b)">{{ integration.lastError }}</small></div><div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar conta" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div></div>
+          <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row"><div><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small><small v-if="integration.lastError" style="display:block;color:var(--danger,#c0392b)">{{ integration.lastError }}</small></div><div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" @click="syncConnectionOrder(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar conta" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div></div>
           <div v-if="!marketplaceConnections.length" style="color:var(--muted);font-size:11px">Nenhuma conta OAuth conectada ainda.</div>
         </PanelCard>
       </div>
