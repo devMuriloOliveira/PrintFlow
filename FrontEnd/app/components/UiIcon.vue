@@ -22,6 +22,7 @@ const icons: Record<string, string> = {
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0 1 4"/><path d="M20 4v7h-7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   trend: '<path d="m3 17 6-6 4 4 8-9"/><path d="M15 6h6v6"/>',
   wallet: '<path d="M4 7h14a2 2 0 0 1 2 2v10H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13"/><path d="M16 12h6v4h-6a2 2 0 0 1 0-4Z"/>',

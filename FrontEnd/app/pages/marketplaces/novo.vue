@@ -158,8 +158,8 @@ const cancel = () => {
 
 <template>
   <div>
-    <div class="breadcrumb"><span>Marketplaces</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar Marketplace' : 'Novo Marketplace' }}</strong></div>
-    <PageHeader :title="isEditing ? 'Editar Marketplace' : 'Novo Marketplace'" :subtitle="isEditing ? 'Atualize taxas, status e identificação do canal.' : 'Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente.'" />
+    <div class="breadcrumb"><span>Marketplaces</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar canal' : 'Adicionar canal' }}</strong></div>
+    <PageHeader :title="isEditing ? 'Editar canal' : 'Adicionar canal'" :subtitle="isEditing ? 'Atualize taxas, status e identificação do canal.' : 'Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente.'" />
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <form @submit.prevent="save">
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="store" />1. Serviço de venda</h2><div class="integration-grid">
@@ -195,7 +195,7 @@ const cancel = () => {
           <div class="col-5 info-note"><UiIcon name="info" :size="18" />Essas regras entram quando a plataforma não enviar o detalhamento completo das taxas.</div>
         </div></div>
 
-        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alterações' : 'Salvar e conectar' }}</button></div>
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar alterações' : 'Salvar canal' }}</button></div>
       </form>
       <aside><PanelCard title="Prévia de resultado"><div class="field"><label>Valor da venda</label><input v-model.number="saleValue" type="number"></div><div class="detail-list" style="margin-top:10px"><div class="detail-list__row"><span>Venda bruta</span><strong>{{formatCurrency(saleValue)}}</strong></div><div class="detail-list__row"><span>Total de taxas</span><strong>- {{formatCurrency(totalFees)}}</strong></div><div class="detail-list__row"><span>Receita líquida</span><strong class="money-positive">{{formatCurrency(netPreview)}}</strong></div></div><div class="summary-box"><small>Status da conexão</small><strong style="display:block;font-size:18px;margin-top:6px">{{connectionStatus === 'connected' ? 'Conectado' : 'Manual'}}</strong><span class="badge badge--green" style="margin-top:7px">{{netPreview && saleValue ? (netPreview/saleValue*100).toFixed(1) : '0.0'}}% do bruto</span></div></PanelCard></aside>
     </div>

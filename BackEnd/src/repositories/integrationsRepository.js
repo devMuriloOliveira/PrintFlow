@@ -28,14 +28,15 @@ const publicIntegration = (row) => ({
   hasAccessToken: Boolean(row.access_token),
   hasRefreshToken: Boolean(row.refresh_token),
   tokenExpiresAt: row.token_expires_at || null,
-  lastSyncAt: row.last_sync_at || null
+  lastSyncAt: row.last_sync_at || null,
+  lastError: row.last_error || ''
 })
 
 export const listMarketplaceIntegrations = async (tenantId) => {
   if (!hasDatabase) return []
   const result = await withTenant(tenantId, (client) => client.query(`
     select id, marketplace_id, platform, connection_name, account_external_id, status, scopes,
-      access_token, refresh_token, token_expires_at, last_sync_at
+      access_token, refresh_token, token_expires_at, last_sync_at, last_error
     from marketplace_integrations
     where tenant_id = $1
     order by created_at desc
@@ -84,9 +85,10 @@ export const createMarketplaceIntegration = async (tenantId, payload) => {
         token_expires_at = excluded.token_expires_at,
         status = excluded.status,
         scopes = excluded.scopes,
+        last_error = '',
         updated_at = now()
       returning id, marketplace_id, platform, connection_name, account_external_id, status, scopes,
-        access_token, refresh_token, token_expires_at, last_sync_at
+        access_token, refresh_token, token_expires_at, last_sync_at, last_error
     `, [
       tenantId,
       marketplaceId,
@@ -153,6 +155,7 @@ export const updateMarketplaceIntegrationTokens = async (tenantId, integrationId
         refresh_token = $4,
         token_expires_at = nullif($5, '')::timestamptz,
         status = 'connected',
+        last_error = '',
         updated_at = now()
     where tenant_id = $1 and id = $2
   `, [
@@ -164,11 +167,72 @@ export const updateMarketplaceIntegrationTokens = async (tenantId, integrationId
   ]))
 }
 
+export const markMarketplaceIntegrationSync = async (tenantId, integrationId, result = {}) => {
+  if (!hasDatabase) return
+  const status = result.status === 'error' ? 'error' : 'connected'
+  const lastError = String(result.lastError || '').trim().slice(0, 500)
+  await withTenant(tenantId, async (client) => {
+    const updated = await client.query(`
+    update marketplace_integrations
+       set status = $3,
+           last_error = $4,
+           last_sync_at = case when $3 = 'connected' then now() else last_sync_at end,
+           updated_at = now()
+     where tenant_id = $1 and id = $2
+     returning marketplace_id
+    `, [tenantId, integrationId, status, lastError])
+    const marketplaceId = updated.rows[0]?.marketplace_id
+    if (marketplaceId) {
+      await client.query(`
+        update marketplaces
+           set connection_status = case
+             when exists (select 1 from marketplace_integrations where tenant_id = $1 and marketplace_id = $2 and status = 'connected') then 'connected'
+             when exists (select 1 from marketplace_integrations where tenant_id = $1 and marketplace_id = $2 and status = 'error') then 'error'
+             else 'disconnected' end,
+               updated_at = now()
+         where tenant_id = $1 and id = $2
+      `, [tenantId, marketplaceId])
+    }
+  })
+}
+
+export const disconnectMarketplaceIntegration = async (tenantId, integrationId) => {
+  if (!hasDatabase) return false
+  return withTenant(tenantId, async (client) => {
+    const result = await client.query(`
+      update marketplace_integrations
+         set access_token = $3,
+             refresh_token = $3,
+             token_expires_at = null,
+             status = 'disconnected',
+             last_error = '',
+             updated_at = now()
+       where tenant_id = $1 and id = $2
+       returning marketplace_id
+    `, [tenantId, integrationId, encryptField('')])
+    if (!result.rows[0]) return false
+
+    const marketplaceId = result.rows[0].marketplace_id
+    if (marketplaceId) {
+      await client.query(`
+        update marketplaces
+           set connection_status = case when exists (
+             select 1 from marketplace_integrations
+              where tenant_id = $1 and marketplace_id = $2 and status = 'connected'
+           ) then 'connected' else 'disconnected' end,
+               updated_at = now()
+         where tenant_id = $1 and id = $2
+      `, [tenantId, marketplaceId])
+    }
+    return true
+  })
+}
+
 export const findIntegrationByExternalAccount = async (platform, accountExternalId) => {
   if (!hasDatabase) return null
   const result = await query(`
     select id, tenant_id, marketplace_id, platform, connection_name, account_external_id,
-      access_token, refresh_token, token_expires_at, status
+      access_token, refresh_token, token_expires_at, status, last_error
     from marketplace_integrations
     where platform = $1 and account_external_id_hash = $2
     limit 1
@@ -180,7 +244,7 @@ export const findIntegrationById = async (tenantId, integrationId) => {
   if (!hasDatabase) return null
   const result = await withTenant(tenantId, (client) => client.query(`
     select id, tenant_id, marketplace_id, platform, connection_name, account_external_id,
-      access_token, refresh_token, token_expires_at, status
+      access_token, refresh_token, token_expires_at, status, last_error
     from marketplace_integrations
     where tenant_id = $1
       and id = $2
@@ -199,13 +263,35 @@ export const recordTrackedSale = async (integration, sale) => {
   const marketplaceFee = number(sale.marketplaceFee)
   const shipping = number(sale.shipping)
   const cost = number(sale.cost)
-  const net = sale.net === undefined ? gross - marketplaceFee - shipping : number(sale.net)
-  const profit = sale.profit === undefined ? net - cost : number(sale.profit)
   const sku = text(sale.sku)
   const productName = text(sale.productName)
   const quantity = Math.max(1, Math.floor(Number(sale.quantity || 1)))
 
-  const result = await withTenant(tenantId, (client) => client.query(`
+  const result = await withTenant(tenantId, async (client) => {
+    let finalMarketplaceFee = marketplaceFee
+    let feeBreakdown = sale.feeBreakdown && typeof sale.feeBreakdown === 'object' ? { ...sale.feeBreakdown } : {}
+    if (finalMarketplaceFee <= 0 && integration.marketplace_id && gross > 0) {
+      const marketplace = await client.query(`
+        select commission, fixed, financial, ads, others
+          from marketplaces
+         where tenant_id = $1 and id = $2
+         limit 1
+      `, [tenantId, integration.marketplace_id])
+      const rates = marketplace.rows[0]
+      if (rates) {
+        const commission = gross * number(rates.commission) / 100
+        const financial = gross * number(rates.financial) / 100
+        const ads = gross * number(rates.ads) / 100
+        const fixed = number(rates.fixed)
+        const others = gross * number(rates.others) / 100
+        finalMarketplaceFee = commission + financial + ads + fixed + others
+        feeBreakdown = { ...feeBreakdown, source: 'printflow.marketplace_fallback', commission, financial, ads, fixed, others, marketplaceFee: finalMarketplaceFee }
+      }
+    }
+    const net = sale.net === undefined ? gross - finalMarketplaceFee - shipping : number(sale.net)
+    const profit = sale.profit === undefined ? net - cost : number(sale.profit)
+
+    return client.query(`
     insert into tracked_sales (
       tenant_id, integration_id, marketplace_id, platform, external_order_id, external_order_hash,
       external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, sold_at
@@ -240,15 +326,16 @@ export const recordTrackedSale = async (integration, sale) => {
     productName,
     quantity,
     gross,
-    marketplaceFee,
+    finalMarketplaceFee,
     shipping,
     net,
     cost,
     profit,
     text(sale.status || 'received'),
     sale.soldAt || null,
-    JSON.stringify(sale.feeBreakdown || {})
-  ]))
+    JSON.stringify(feeBreakdown)
+    ])
+  })
 
   return result.rows[0]
 }

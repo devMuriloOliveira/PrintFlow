@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { marketplaces, marketplaceIntegrations, products, marketplaceOrders, deleteItem, updateItem, refreshMarketplaceOrders, linkMarketplaceOrderProduct } = useAppData()
+const { marketplaces, marketplaceIntegrations, products, marketplaceOrders, deleteItem, updateItem, refreshMarketplaceOrders, linkMarketplaceOrderProduct, startMarketplaceOAuth, disconnectMarketplaceIntegration } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -10,6 +10,7 @@ const marketplaceFilter = ref('Todos os canais')
 const marketplaceSearch = ref('')
 const linkingOrderId = ref('')
 const changingMarketplaceId = ref('')
+const connectionActionId = ref('')
 const selectedProductByOrder = reactive<Record<string, string>>({})
 const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
 const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
@@ -51,6 +52,38 @@ const toggleMarketplace = async (marketplace: any) => {
     changingMarketplaceId.value = ''
   }
 }
+const reconnectConnection = async (integration: any) => {
+  if (!integration?.id || connectionActionId.value) return
+  connectionActionId.value = integration.id
+  try {
+    window.location.href = await startMarketplaceOAuth(integration.platform)
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível iniciar a reconexão.', 'info')
+    connectionActionId.value = ''
+  }
+}
+const disconnectConnection = async (integration: any) => {
+  if (!integration?.id || connectionActionId.value) return
+  if (!window.confirm(`Desconectar esta conta do Mercado Livre?\n\n${integration.connectionName || integration.accountExternalId}\n\nO histórico de pedidos será preservado.`)) return
+  connectionActionId.value = integration.id
+  try {
+    await disconnectMarketplaceIntegration(integration.id)
+    notify('Conta do Mercado Livre desconectada. O histórico foi preservado.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível desconectar a conta.', 'info')
+  } finally {
+    connectionActionId.value = ''
+  }
+}
+const tokenStatusLabel = (integration: any) => {
+  if (integration.status === 'error') return 'Erro de conexão'
+  if (integration.status === 'disconnected') return 'Desconectada'
+  if (integration.tokenExpiresAt && new Date(integration.tokenExpiresAt).getTime() <= Date.now()) return 'Token expirado'
+  return 'Conectada'
+}
+const tokenStatusClass = (integration: any) => ['connected'].includes(integration.status) && tokenStatusLabel(integration) === 'Conectada' ? 'badge--green' : integration.status === 'error' ? 'badge--red' : 'badge--orange'
+const formatSyncDate = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : 'Ainda não sincronizada'
+const formatTokenExpiry = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : 'não informado'
 const marketplaceOrderLabel = (order: any) => {
   if (order.printJobStatus === 'awaiting_confirmation') return 'Aguardando confirmação'
   if (order.printJobStatus === 'queued') return 'Liberado para fila'
@@ -87,7 +120,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Novo Marketplace</a></PageHeader>
+    <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Adicionar canal</a></PageHeader>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <div>
         <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" :points="marketplaces.map(marketplace => marketplace.active ? 1 : 0)" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" :points="marketplaces.map(marketplace => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0))" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" :points="marketplaces.map(marketplace => Number(marketplace.net || 0))" /><MetricCard label="Maior Taxa" :value="metrics.percent((metrics.highestFeeMarketplace.value?.commission || 0) + (metrics.highestFeeMarketplace.value?.financial || 0) + (metrics.highestFeeMarketplace.value?.ads || 0) + (metrics.highestFeeMarketplace.value?.others || 0))" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" :points="marketplaces.map(marketplace => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0))" /></div>
@@ -117,7 +150,7 @@ onMounted(() => {
           <div class="table-footer"><span>Exibindo {{ filteredMarketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
         </PanelCard>
         <PanelCard title="Contas conectadas do Mercado Livre" subtitle="Cada conta OAuth recebe pedidos separadamente; as taxas permanecem configuradas no canal Mercado Livre." style="margin-top:12px">
-          <div v-for="integration in marketplaceConnections" :key="integration.id" class="detail-list__row"><span><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }}</small></span><span class="badge" :class="integration.status === 'connected' ? 'badge--green' : 'badge--gray'">{{ integration.status === 'connected' ? 'Conectada' : integration.status }}</span></div>
+          <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row"><div><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small><small v-if="integration.lastError" style="display:block;color:var(--danger,#c0392b)">{{ integration.lastError }}</small></div><div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar conta" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div></div>
           <div v-if="!marketplaceConnections.length" style="color:var(--muted);font-size:11px">Nenhuma conta OAuth conectada ainda.</div>
         </PanelCard>
       </div>
@@ -159,4 +192,7 @@ onMounted(() => {
 
 <style scoped>
 .market-cell{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.connection-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.connection-row:last-child{border-bottom:0}
+.connection-row__actions{display:flex;align-items:center;gap:6px;white-space:nowrap}
 </style>

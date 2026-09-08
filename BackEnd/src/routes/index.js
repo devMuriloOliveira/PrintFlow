@@ -55,6 +55,7 @@ import {
   handleIntegrationsList,
   handleMarketplaceOAuthCallback,
   handleMarketplaceOAuthStart,
+  handleMarketplaceIntegrationDisconnect,
   handleMarketplaceOrderSync,
   handleMercadoLivreWebhook,
   handleShopeeWebhook
@@ -1022,6 +1023,21 @@ export const handleRequest =
         return await handleIntegrationCreate(
           req,
           res
+        )
+      }
+
+      const marketplaceIntegrationDisconnectMatch =
+        url.pathname.match(/^\/api\/marketplace-integrations\/([^/]+)$/)
+
+      if (
+        req.method ===
+          'DELETE' &&
+        marketplaceIntegrationDisconnectMatch
+      ) {
+        return await handleMarketplaceIntegrationDisconnect(
+          req,
+          res,
+          marketplaceIntegrationDisconnectMatch[1]
         )
       }
 

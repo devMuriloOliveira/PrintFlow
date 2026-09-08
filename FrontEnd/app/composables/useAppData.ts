@@ -68,7 +68,8 @@ export type MarketplaceIntegration = {
   hasAccessToken?: boolean;
   hasRefreshToken?: boolean;
   tokenExpiresAt?: string | null;
-  lastSyncAt?: string | null
+  lastSyncAt?: string | null;
+  lastError?: string
 }
 
 export type MarketplaceOrder = {
@@ -319,6 +320,15 @@ export const useAppData = () => {
     return response.url
   }
 
+  const disconnectMarketplaceIntegration = async (id: string) => {
+    await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(id)}`), {
+      method: 'DELETE', headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || 'Nao foi possivel desconectar a conta do marketplace.')
+    })
+    await loadAppData()
+  }
+
   const refreshMarketplaceOrders = async () => {
     const list = await $fetch<MarketplaceOrder[]>(apiUrl('/api/marketplace-orders'), {
       headers: resourceHeaders()
@@ -406,6 +416,7 @@ export const useAppData = () => {
     , uploadProductPrintFile
     , createMarketplaceIntegration
     , startMarketplaceOAuth
+    , disconnectMarketplaceIntegration
     , refreshMarketplaceOrders
     , linkMarketplaceOrderProduct
     , updateSettings

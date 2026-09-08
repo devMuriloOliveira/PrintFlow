@@ -281,7 +281,7 @@ const readSettings = async (client, tenantId) => {
 const readMarketplaceIntegrations = async (client, tenantId) => {
   const result = await client.query(`
     select id, marketplace_id, platform, connection_name, account_external_id, status, scopes,
-      access_token, refresh_token, token_expires_at, last_sync_at
+      access_token, refresh_token, token_expires_at, last_sync_at, last_error
     from marketplace_integrations
     where tenant_id = $1
     order by created_at desc
@@ -297,7 +297,7 @@ const readMarketplaceIntegrations = async (client, tenantId) => {
     hasAccessToken: Boolean(row.access_token),
     hasRefreshToken: Boolean(row.refresh_token),
     tokenExpiresAt: row.token_expires_at || null,
-    lastSyncAt: row.last_sync_at || null
+    lastSyncAt: row.last_sync_at || null, lastError: row.last_error || ''
   }))
 }
 

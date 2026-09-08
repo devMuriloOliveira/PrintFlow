@@ -8,9 +8,11 @@ import { tenantQuery } from '../db/pool.js'
 import {
   createMarketplaceIntegration,
   consumeMarketplaceOAuthAttempt,
+  disconnectMarketplaceIntegration,
   findIntegrationById,
   findIntegrationByExternalAccount,
   listMarketplaceIntegrations,
+  markMarketplaceIntegrationSync,
   recordTrackedSale,
   recordWebhookEvent
 } from '../repositories/integrationsRepository.js'
@@ -84,6 +86,12 @@ export const handleMarketplaceOAuthStart = async (req, res, platform) => {
   })
 }
 
+export const handleMarketplaceIntegrationDisconnect = async (req, res, integrationId) => {
+  const disconnected = await disconnectMarketplaceIntegration(await getTenantId(req), integrationId)
+  if (!disconnected) return sendJson(res, 404, { error: 'Integracao nao encontrada.' })
+  return sendJson(res, 200, { status: 'disconnected' })
+}
+
 export const handleMarketplaceOAuthCallback = async (req, res, url) => {
   const code = String(url.searchParams.get('code') || '')
   const state = readMarketplaceOAuthState(url.searchParams.get('state') || '')
@@ -130,7 +138,13 @@ export const handleMarketplaceOrderSync = async (req, res, integrationId) => {
   const integration = await findIntegrationById(tenantId, integrationId)
   if (!integration) return sendJson(res, 404, { error: 'Integracao nao encontrada.' })
 
-  const sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
+  let sale
+  try {
+    sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
+  } catch {
+    await markMarketplaceIntegrationSync(tenantId, integration.id, { status: 'error', lastError: 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.' })
+    return sendJson(res, 502, { error: 'Nao foi possivel consultar o pedido no marketplace. Verifique a conexao da conta.' })
+  }
   const trackedSale = await recordTrackedSale(integration, {
     platform: integration.platform,
     externalOrderId,
@@ -142,6 +156,7 @@ export const handleMarketplaceOrderSync = async (req, res, integrationId) => {
     id: trackedSale?.id,
     externalOrderId
   })
+  await markMarketplaceIntegrationSync(tenantId, integration.id)
 
   return sendJson(res, 200, { status: 'synced', trackedSaleId: trackedSale?.id ? String(trackedSale.id) : '' })
 }
@@ -169,6 +184,7 @@ export const handleMercadoLivreWebhook = async (req, res) => {
       // A notificacao e apenas um gatilho. Dados de pedido sempre vem da API oficial.
       sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
     } catch {
+      await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, { status: 'error', lastError: 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.' })
       return sendJson(res, 202, { status: 'received' })
     }
     const trackedSale = await recordTrackedSale(integration, {
@@ -182,6 +198,7 @@ export const handleMercadoLivreWebhook = async (req, res) => {
       id: trackedSale?.id,
       externalOrderId
     })
+    await markMarketplaceIntegrationSync(integration.tenant_id, integration.id)
   }
 
   return sendJson(res, 200, { status: 'success' })

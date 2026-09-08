@@ -1037,6 +1037,11 @@ export const migrate =
       `
     )
 
+    await query(`
+      alter table marketplace_integrations
+      add column if not exists last_error text not null default ''
+    `)
+
     // ==================================================
     // TRACKED SALES
     // ==================================================
@@ -2404,6 +2409,7 @@ export const migrate =
         )
       `
     )
+
 
     for (const column of [
       "delivery_tracking_code text not null default ''",
