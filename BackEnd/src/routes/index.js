@@ -218,10 +218,14 @@ export const handleRequest =
             status:
               'ok',
 
-            endpoints:
-              Object.keys(
-                readRoutes
-              )
+            endpoints: [
+              ...Object.keys(readRoutes),
+              '/api/marketplace-integrations',
+              '/api/marketplace-integrations/:platform/oauth-start',
+              '/api/marketplace-integrations/:id/sync-order',
+              '/api/marketplace-orders',
+              '/webhooks/mercadolivre'
+            ]
           }
         )
       }
