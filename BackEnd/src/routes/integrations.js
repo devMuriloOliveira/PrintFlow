@@ -178,14 +178,14 @@ export const handleMercadoLivreWebhook = async (req, res) => {
     payload
   })
 
-  if (externalOrderId && ['orders', 'merchant_orders'].includes(String(payload.topic))) {
+  if (externalOrderId && ['orders', 'orders_v2', 'merchant_orders'].includes(String(payload.topic))) {
     let sale
     try {
       // A notificacao e apenas um gatilho. Dados de pedido sempre vem da API oficial.
       sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
     } catch {
       await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, { status: 'error', lastError: 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.' })
-      return sendJson(res, 202, { status: 'received' })
+      return sendJson(res, 200, { status: 'received', sync: 'pending' })
     }
     const trackedSale = await recordTrackedSale(integration, {
       platform: 'mercado_livre',
