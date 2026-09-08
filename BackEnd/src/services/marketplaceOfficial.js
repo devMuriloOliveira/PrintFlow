@@ -18,6 +18,24 @@ const jsonFetch = async (url, options = {}) => {
   return data
 }
 
+const optionalJsonFetch = async (url, options = {}) => {
+  try {
+    return await jsonFetch(url, options)
+  } catch {
+    return null
+  }
+}
+
+const shipmentSellerCost = (shipment) => {
+  const candidates = [
+    shipment?.seller?.cost,
+    shipment?.costs?.seller?.cost,
+    shipment?.costs?.senders?.[0]?.cost,
+    shipment?.shipping_option?.cost
+  ]
+  return candidates.find((value) => Number.isFinite(Number(value)))
+}
+
 export const createMarketplaceOAuthState = (tenantId, platform, attemptId = '') =>
   {
     const payload = Buffer.from(JSON.stringify({
@@ -260,7 +278,30 @@ export const fetchMarketplaceOrderDetails = async (integration, externalOrderId)
     const order = await jsonFetch(`https://api.mercadolibre.com/orders/${encodeURIComponent(externalOrderId)}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     })
-    return normalizeMarketplaceOrder('mercado_livre', order)
+    const sale = normalizeMarketplaceOrder('mercado_livre', order)
+    const shippingId = sale.feeBreakdown?.shippingId
+    const [shipment, discounts] = await Promise.all([
+      shippingId
+        ? optionalJsonFetch(`https://api.mercadolibre.com/shipments/${encodeURIComponent(shippingId)}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        })
+        : null,
+      optionalJsonFetch(`https://api.mercadolibre.com/orders/${encodeURIComponent(externalOrderId)}/discounts`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      })
+    ])
+    const sellerShipping = shipmentSellerCost(shipment)
+    const shipping = sellerShipping === undefined ? sale.shipping : Number(sellerShipping)
+    return {
+      ...sale,
+      shipping,
+      feeBreakdown: {
+        ...sale.feeBreakdown,
+        shipping,
+        shippingSource: sellerShipping === undefined ? 'order' : 'mercadolivre.shipments',
+        discounts: discounts || sale.feeBreakdown?.discounts || null
+      }
+    }
   }
 
   if (platform === 'shopee') {

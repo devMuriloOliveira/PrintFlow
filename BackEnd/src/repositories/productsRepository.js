@@ -1,5 +1,6 @@
 import { tenantQuery, withTenant } from '../db/pool.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
+import { recordFinancialSnapshot } from './financialHistoryRepository.js'
 
 const mapProduct = (row) => ({
   id: String(row.id),
@@ -186,6 +187,8 @@ export const createProduct = async (tenantId, product, audit = null) => {
         details: { changedFields }
       }, client)
     }
+
+    await recordFinancialSnapshot(client, tenantId, 'products', created.rows[0].id, created.rows[0], existing.rowCount ? 'resource.update' : 'resource.create')
 
     return created
   })

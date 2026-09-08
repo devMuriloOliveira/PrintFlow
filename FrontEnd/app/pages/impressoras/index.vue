@@ -5,8 +5,28 @@ const { notify } = useUi()
 const router = useRouter()
 const config = useRuntimeConfig()
 const selectedIndex = ref(0)
+const printerStatusFilter = ref('Todos')
+const printerMakerFilter = ref('Todos')
+const printerModelFilter = ref('Todos')
 const emptyPrinter = { name: '', code: '', maker: '', model: '', acquired: '', power: 0, hours: 0, status: '', maintenance: '', serial: '' }
 const selected = computed(() => printers.value[selectedIndex.value] || emptyPrinter)
+const printerStatusOptions = computed(() => ['Todos', ...new Set(printers.value.map((printer: any) => String(printer.status || '').trim()).filter(Boolean))])
+const printerMakerOptions = computed(() => ['Todos', ...new Set(printers.value.map((printer: any) => String(printer.maker || '').trim()).filter(Boolean))])
+const printerModelOptions = computed(() => ['Todos', ...new Set(printers.value.map((printer: any) => String(printer.model || '').trim()).filter(Boolean))])
+const filteredPrinters = computed(() => printers.value.filter((printer: any) =>
+  (printerStatusFilter.value === 'Todos' || String(printer.status || '') === printerStatusFilter.value) &&
+  (printerMakerFilter.value === 'Todos' || String(printer.maker || '') === printerMakerFilter.value) &&
+  (printerModelFilter.value === 'Todos' || String(printer.model || '') === printerModelFilter.value)
+))
+const selectPrinter = (printer: any) => {
+  const index = printers.value.findIndex((item: any) => String(item.id || item.code) === String(printer.id || printer.code))
+  if (index >= 0) selectedIndex.value = index
+}
+const clearPrinterFilters = () => {
+  printerStatusFilter.value = 'Todos'
+  printerMakerFilter.value = 'Todos'
+  printerModelFilter.value = 'Todos'
+}
 const energyCost = computed(() => selected.value ? selected.value.power/1000*82*.68 : 0)
 const agents = ref<any[]>([])
 const agentLoading = ref(false)
@@ -36,6 +56,10 @@ const selectedAgentStatus = computed(() => {
 const selectedPrinterJobs = computed(() => printJobs.value
   .filter((job: any) => String(job.printerId || '') === String((selected.value as any).id || '') && !['completed', 'cancelled'].includes(String(job.status || '')))
   .sort((a: any, b: any) => Number(b.priority || 0) - Number(a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
+const printerCountPoints = computed(() => printers.value.map(printer => Number(/disponivel|impressao|impressão/i.test(String(printer.status || '')))))
+const printingPoints = computed(() => printers.value.map(printer => Number(Boolean(activeJobForPrinter(printer)))))
+const maintenancePoints = computed(() => printers.value.map(printer => Number(/manutenc/i.test(String(printer.status || '')))))
+const printerHoursPoints = computed(() => printers.value.map(printer => Number(printer.hours || 0)))
 const activePrintJob = computed(() => selectedPrinterJobs.value.find((job: any) => ['starting', 'printing', 'paused'].includes(String(job.status || ''))))
 const queuedPrintJobs = computed(() => selectedPrinterJobs.value.filter((job: any) => String(job.status || '') === 'queued'))
 const selectedQueueProduct = computed(() => products.value.find((product: any) => String(product.id || '') === String(queueProductId.value || '')))
@@ -462,17 +486,17 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <PageHeader title="Impressoras" subtitle="Gerencie suas impressoras 3D, acompanhe o status e o desempenho operacional."><NuxtLink class="btn btn--primary" to="/impressoras/nova"><UiIcon name="plus" />Nova Impressora</NuxtLink></PageHeader>
-    <div class="metrics-grid metrics-grid--5"><MetricCard label="Impressoras Ativas" :value="formatNumber(metrics.activePrinters.value)" icon="printer" note="Dados do banco" color="green" /><MetricCard label="Em Impressão" :value="formatNumber(metrics.printingPrinters.value)" icon="play" note="Dados do banco" /><MetricCard label="Em Manutenção" :value="formatNumber(metrics.maintenancePrinters.value)" icon="wrench" note="Dados do banco" color="orange" negative /><MetricCard label="Horas Acumuladas" :value="`${formatNumber(metrics.printerHours.value)} h`" icon="clock" note="Dados do banco" color="purple" /><MetricCard label="Custo Médio de Energia" :value="formatCurrency(0.68)" icon="bolt" note="Config. do sistema" color="cyan" negative /></div>
+    <div class="metrics-grid metrics-grid--5"><MetricCard label="Impressoras Ativas" :value="formatNumber(metrics.activePrinters.value)" icon="printer" note="Dados do banco" color="green" :points="printerCountPoints" /><MetricCard label="Em Impressão" :value="formatNumber(metrics.printingPrinters.value)" icon="play" note="Filas ativas" :points="printingPoints" /><MetricCard label="Em Manutenção" :value="formatNumber(metrics.maintenancePrinters.value)" icon="wrench" note="Dados do banco" color="orange" negative :points="maintenancePoints" /><MetricCard label="Horas Acumuladas" :value="`${formatNumber(metrics.printerHours.value)} h`" icon="clock" note="Horas registradas" color="purple" :points="printerHoursPoints" /><MetricCard label="Custo do kWh" :value="formatCurrency(0.68)" icon="bolt" note="Config. do sistema" color="cyan" negative :points="[0.68]" /></div>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 390px">
       <div>
-        <div class="filters"><div v-for="f in ['Status','Fabricante','Modelo']" :key="f" class="field"><label>{{f}}</label><select><option>Todos</option></select></div><button class="btn"><UiIcon name="close" />Limpar filtros</button></div>
+        <div class="filters"><div class="field"><label>Status</label><select v-model="printerStatusFilter"><option v-for="option in printerStatusOptions" :key="option">{{option}}</option></select></div><div class="field"><label>Fabricante</label><select v-model="printerMakerFilter"><option v-for="option in printerMakerOptions" :key="option">{{option}}</option></select></div><div class="field"><label>Modelo</label><select v-model="printerModelFilter"><option v-for="option in printerModelOptions" :key="option">{{option}}</option></select></div><button class="btn" type="button" @click="clearPrinterFilters"><UiIcon name="close" />Limpar filtros</button></div>
         <PanelCard>
           <div class="table-scroll">
             <table class="data-table">
               <thead><tr><th></th><th>Nome</th><th>Fabricante</th><th>Modelo</th><th>Data de Aquisição</th><th>Potência</th><th>Horas Acumuladas</th><th>Status</th><th>Última Manutenção</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="(p,i) in printers" :key="p.id || p.code" :class="{selected:i===selectedIndex}" @click="selectedIndex=i">
-                  <td><input type="radio" :checked="i===selectedIndex"></td>
+                <tr v-for="p in filteredPrinters" :key="p.id || p.code" :class="{selected:String(p.id || p.code)===String(selected.id || selected.code)}" @click="selectPrinter(p)">
+                  <td><input type="radio" :checked="String(p.id || p.code)===String(selected.id || selected.code)"></td>
                   <td><div class="table-product table-product--editable"><span class="product-thumb"><UiIcon name="printer" :size="30" /></span><div><strong>{{p.name}}</strong><small>{{p.code}}</small><small>{{printerQueueSummary(p)}}</small></div><button class="row-action row-action--edit" title="Editar impressora" @click.stop="editPrinter(p)"><UiIcon name="edit" :size="15" /></button></div></td>
                   <td>{{p.maker}}</td>
                   <td>{{p.model}}</td>
@@ -486,7 +510,7 @@ onBeforeUnmount(() => {
               </tbody>
             </table>
           </div>
-          <div class="table-footer"><span>Mostrando 1 a {{printers.length}} de {{printers.length}} impressoras</span><div class="pagination"><button class="page-btn active">1</button></div></div>
+          <div class="table-footer"><span>Mostrando {{filteredPrinters.length}} de {{printers.length}} impressoras</span><div class="pagination"><button class="page-btn active">1</button></div></div>
         </PanelCard>
       </div>
       <aside class="detail-card">

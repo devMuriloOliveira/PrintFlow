@@ -64,6 +64,9 @@ const accessForMethod = (method, area) =>
 
 export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname === '/api/app-data') return 'app_data.read'
+  if (pathname === '/api/financial-history') return 'financial.read'
+  if (pathname === '/api/reports/financial-export') return 'financial.read'
+  if (pathname === '/api/calculator/simulations') return method === 'GET' ? 'financial.read' : 'financial.manage'
   if (pathname === '/api/support/requests' || pathname.startsWith('/api/support/requests/')) return 'support.use'
   if (pathname === '/api/settings' || pathname.startsWith('/api/settings/')) return 'settings.manage'
   if (pathname === '/api/members') return accessForMethod(method, 'members')
@@ -82,6 +85,7 @@ export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname.startsWith('/api/integrations/')) return 'integrations.read'
 
   if (pathname.startsWith('/api/marketplaces')) return accessForMethod(method, 'marketplaces')
+  if (pathname.startsWith('/api/filaments/') && pathname.endsWith('/movements')) return accessForMethod(method, 'catalog')
   if (pathname.startsWith('/api/orders')) return accessForMethod(method, 'orders')
   if (pathname.startsWith('/api/clients')) return accessForMethod(method, 'clients')
 

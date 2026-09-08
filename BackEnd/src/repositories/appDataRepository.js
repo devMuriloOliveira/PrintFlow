@@ -46,7 +46,8 @@ const readOrders = async (client, tenantId) => {
   const result = await client.query(`
     select o.id, o.external_id, o.product_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
       coalesce(m.name, 'Nao informado') as marketplace, o.product_name as product, o.quantity as qty,
-      o.gross, o.fee, o.shipping, o.net, o.profit, o.status
+      o.gross, o.fee, o.shipping, o.net, o.profit, o.status, o.delivery_tracking_code,
+      o.packed_at, o.shipped_at, o.delivered_at
     from orders o
     left join clients c on c.id = o.client_id and c.tenant_id = o.tenant_id
     left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
@@ -54,7 +55,8 @@ const readOrders = async (client, tenantId) => {
   `, [tenantId])
   return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, productId: row.product_id ? String(row.product_id) : '', date: row.date, client: decryptField(row.client), marketplace: row.marketplace,
     product: row.product, qty: Number(row.qty), gross: number(row.gross), fee: number(row.fee), shipping: number(row.shipping),
-    net: number(row.net), profit: number(row.profit), status: row.status }))
+    net: number(row.net), profit: number(row.profit), status: row.status, trackingCode: row.delivery_tracking_code || '',
+    packedAt: row.packed_at || null, shippedAt: row.shipped_at || null, deliveredAt: row.delivered_at || null }))
 }
 
 const readPrintJobs = async (client, tenantId) => {

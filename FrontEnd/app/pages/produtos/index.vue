@@ -5,6 +5,8 @@ const { notify } = useUi()
 const router = useRouter()
 const search = ref('')
 const category = ref('Todas')
+const printerFilter = ref('Todas')
+const materialFilter = ref('Todos')
 const productStatus = ref('Todos')
 const selectedProductId = ref('')
 const selectedMetric = ref<'active' | 'price' | 'cost' | 'margin'>('active')
@@ -15,9 +17,13 @@ const perPage = ref(5)
 const filtered = computed(() => products.value.filter(p => {
   const matchesCategory = category.value === 'Todas' || p.category === category.value
   const matchesStatus = productStatus.value === 'Todos' || p.status === productStatus.value
+  const matchesPrinter = printerFilter.value === 'Todas' || p.printer === printerFilter.value
+  const matchesMaterial = materialFilter.value === 'Todos' || p.filament === materialFilter.value
   const matchesSearch = `${p.name} ${p.sku} ${p.category}`.toLowerCase().includes(search.value.toLowerCase())
-  return matchesCategory && matchesStatus && matchesSearch
+  return matchesCategory && matchesStatus && matchesPrinter && matchesMaterial && matchesSearch
 }))
+const printerOptions = computed(() => ['Todas', ...new Set(products.value.map(product => product.printer).filter(Boolean))])
+const materialOptions = computed(() => ['Todos', ...new Set(products.value.map(product => product.filament).filter(Boolean))])
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / perPage.value)))
 const paginatedProducts = computed(() => {
   const start = (currentPage.value - 1) * perPage.value
@@ -55,10 +61,10 @@ const visiblePages = computed<(number | string)[]>(() => {
 })
 
 const metricCards = computed(() => [
-  { key: 'active' as const, label: 'Produtos Ativos', value: formatNumber(metrics.activeProducts.value), icon: 'box', note: 'Dados do banco', color: 'blue' },
-  { key: 'price' as const, label: 'Preço Médio', value: formatCurrency(metrics.averagePrice.value), icon: 'tag', note: 'Dados do banco', color: 'green' },
-  { key: 'cost' as const, label: 'Custo Médio', value: formatCurrency(metrics.averageCost.value), icon: 'money', note: 'Dados do banco', color: 'purple' },
-  { key: 'margin' as const, label: 'Margem Media', value: metrics.percent(metrics.averageProductMargin.value), icon: 'percent', note: 'Dados do banco', color: 'orange' }
+  { key: 'active' as const, label: 'Produtos Ativos', value: formatNumber(metrics.activeProducts.value), icon: 'box', note: 'Dados do banco', color: 'blue', points: products.value.map(product => product.status === 'Ativo' ? 1 : 0) },
+  { key: 'price' as const, label: 'Preço Médio', value: formatCurrency(metrics.averagePrice.value), icon: 'tag', note: 'Dados do banco', color: 'green', points: products.value.map(product => Number(product.price || 0)) },
+  { key: 'cost' as const, label: 'Custo Médio', value: formatCurrency(metrics.averageCost.value), icon: 'money', note: 'Dados do banco', color: 'purple', points: products.value.map(product => Number(product.cost || 0)) },
+  { key: 'margin' as const, label: 'Margem Media', value: metrics.percent(metrics.averageProductMargin.value), icon: 'percent', note: 'Dados do banco', color: 'orange', points: products.value.map(product => Number(product.margin || 0)) }
 ])
 const metricDetails = {
   active: { title: 'Evolucao de Produtos Ativos', color: '#1768f2', totalLabel: 'Produtos ativos', formatter: formatNumber },
@@ -115,7 +121,7 @@ const detailedChart = computed(() => {
   return { labels: rows.map(([key]) => formatChartLabel(key)), values: values.length ? values : [0, 0], total }
 })
 
-watch([search, category, productStatus, perPage], () => {
+watch([search, category, printerFilter, materialFilter, productStatus, perPage], () => {
   currentPage.value = 1
 })
 watch([filtered, perPage], () => {
@@ -140,7 +146,7 @@ const removeProduct = async (product: any) => {
       <NuxtLink class="btn btn--primary" to="/produtos/novo"><UiIcon name="plus" :size="17"/><span>Novo Produto</span></NuxtLink>
     </PageHeader>
     <div class="metrics-grid metrics-grid--4">
-      <MetricCard v-for="card in metricCards" :key="card.key" :label="card.label" :value="card.value" :icon="card.icon" :note="card.note" :color="card.color" :selected="selectedMetric === card.key" interactive @click="selectedMetric = card.key" />
+      <MetricCard v-for="card in metricCards" :key="card.key" :label="card.label" :value="card.value" :icon="card.icon" :note="card.note" :color="card.color" :points="card.points" :selected="selectedMetric === card.key" interactive @click="selectedMetric = card.key" />
     </div>
     <PanelCard :title="selectedDetail.title" :subtitle="`${selectedDetail.totalLabel}: ${selectedDetail.formatter(detailedChart.total)}`">
       <template #actions>
@@ -155,10 +161,10 @@ const removeProduct = async (product: any) => {
     <div class="filters">
       <div class="field field--search"><label>Produto</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Buscar produtos..."></div></div>
       <div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option>Decoração</option><option>Acessórios</option><option>Brinquedos</option><option>Organizadores</option></select></div>
-      <div class="field"><label>Impressora</label><select><option>Todas</option></select></div>
-      <div class="field"><label>Material</label><select><option>Todos</option></select></div>
+      <div class="field"><label>Impressora</label><select v-model="printerFilter"><option v-for="item in printerOptions" :key="item">{{item}}</option></select></div>
+      <div class="field"><label>Material</label><select v-model="materialFilter"><option v-for="item in materialOptions" :key="item">{{item}}</option></select></div>
       <div class="field"><label>Status</label><select v-model="productStatus"><option>Todos</option><option>Ativo</option><option>Rascunho</option></select></div>
-      <button class="btn" @click="search='';category='Todas';productStatus='Todos'"><UiIcon name="close" :size="15"/> Limpar</button>
+      <button class="btn" @click="search='';category='Todas';printerFilter='Todas';materialFilter='Todos';productStatus='Todos'"><UiIcon name="close" :size="15"/> Limpar</button>
     </div>
     <div class="split-layout">
       <PanelCard>

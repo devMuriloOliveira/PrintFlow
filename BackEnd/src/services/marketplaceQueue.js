@@ -35,6 +35,18 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
         : data.item || {}
 
   if (platform === 'mercado_livre') {
+    const orderItems = Array.isArray(data.order_items) ? data.order_items : []
+    const itemFeeBreakdown = orderItems.map((orderItem) => ({
+      itemId: firstText(orderItem.item?.id, orderItem.item_id),
+      sku: firstText(orderItem.item?.seller_sku, orderItem.seller_sku, orderItem.item?.id),
+      quantity: quantity(orderItem.quantity),
+      unitPrice: number(orderItem.unit_price),
+      grossPrice: number(orderItem.gross_price),
+      saleFee: number(orderItem.sale_fee)
+    }))
+    const marketplaceFee = number(data.marketplace_fee ?? payload.marketplace_fee)
+    const shippingValue = data.shipping?.cost ?? payload.shipping?.cost ?? data.shipping ?? payload.shipping
+    const shipping = number(shippingValue)
     return {
       externalOrderId:
         firstText(payload.order_id, data.id, payload.resource?.split('/').filter(Boolean).pop()),
@@ -46,10 +58,16 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
         quantity(item.quantity || data.quantity || payload.quantity),
       gross:
         number(data.total_amount ?? payload.total_amount),
-      marketplaceFee:
-        number(data.marketplace_fee ?? payload.marketplace_fee),
-      shipping:
-        number(data.shipping ?? payload.shipping),
+      marketplaceFee,
+      shipping,
+      feeBreakdown: {
+        source: 'mercadolivre.orders',
+        marketplaceFee,
+        itemSaleFees: itemFeeBreakdown,
+        shipping,
+        shippingId: firstText(data.shipping?.id, payload.shipping_id),
+        discounts: data.discounts || payload.discounts || null
+      },
       net:
         data.net_amount === undefined && payload.net_amount === undefined
           ? undefined

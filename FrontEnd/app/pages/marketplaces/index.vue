@@ -5,10 +5,18 @@ const { notify } = useUi()
 const router = useRouter()
 const saleValue = ref(100)
 const selectedName = ref('Shopee')
+const marketplaceFilter = ref('Todos os canais')
+const marketplaceSearch = ref('')
 const linkingOrderId = ref('')
 const selectedProductByOrder = reactive<Record<string, string>>({})
 const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
 const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
+const marketplaceOptions = computed(() => ['Todos os canais', ...new Set(marketplaces.value.map((marketplace: any) => String(marketplace.name || '').trim()).filter(Boolean))])
+const filteredMarketplaces = computed(() => marketplaces.value.filter((marketplace: any) =>
+  (marketplaceFilter.value === 'Todos os canais' || marketplace.name === marketplaceFilter.value) &&
+  Object.values(marketplace).join(' ').toLowerCase().includes(marketplaceSearch.value.toLowerCase())
+))
+const clearMarketplaceFilters = () => { marketplaceFilter.value = 'Todos os canais'; marketplaceSearch.value = '' }
 const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
 const pendingMarketplaceOrders = computed(() => marketplaceOrders.value.filter((order: any) => !['completed', 'cancelled', 'canceled', 'refunded'].includes(String(order.printJobStatus || order.status || '').toLowerCase())))
@@ -56,14 +64,14 @@ onMounted(() => {
     <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Novo Marketplace</a></PageHeader>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <div>
-        <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" /><MetricCard label="Maior Taxa" :value="metrics.percent((metrics.highestFeeMarketplace.value?.commission || 0) + (metrics.highestFeeMarketplace.value?.financial || 0) + (metrics.highestFeeMarketplace.value?.ads || 0) + (metrics.highestFeeMarketplace.value?.others || 0))" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" /></div>
+        <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" :points="marketplaces.map(marketplace => marketplace.active ? 1 : 0)" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" :points="marketplaces.map(marketplace => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0))" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" :points="marketplaces.map(marketplace => Number(marketplace.net || 0))" /><MetricCard label="Maior Taxa" :value="metrics.percent((metrics.highestFeeMarketplace.value?.commission || 0) + (metrics.highestFeeMarketplace.value?.financial || 0) + (metrics.highestFeeMarketplace.value?.ads || 0) + (metrics.highestFeeMarketplace.value?.others || 0))" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" :points="marketplaces.map(marketplace => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0))" /></div>
         <PanelCard>
-          <div class="filters" style="border:0;box-shadow:none;margin:-8px -10px 5px"><div class="field"><label>Canal</label><select><option>Todos os canais</option></select></div><div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16" /><input placeholder="Buscar marketplace..."></div></div></div>
+          <div class="filters" style="border:0;box-shadow:none;margin:-8px -10px 5px"><div class="field"><label>Canal</label><select v-model="marketplaceFilter"><option v-for="option in marketplaceOptions" :key="option">{{option}}</option></select></div><div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16" /><input v-model="marketplaceSearch" placeholder="Buscar marketplace..."></div></div><button class="btn" type="button" @click="clearMarketplaceFilters"><UiIcon name="close" />Limpar</button></div>
           <div class="table-scroll">
             <table class="data-table">
               <thead><tr><th>Marketplace</th><th>Conexão</th><th>Comissão</th><th>Tarifa Fixa</th><th>Taxa Financeira</th><th>Custo Anúncio</th><th>Outras Tarifas</th><th>Receita Bruta</th><th>Receita Líquida</th><th>Pedidos</th><th>Status</th><th></th></tr></thead>
               <tbody>
-                <tr v-for="m in marketplaces" :key="m.id || m.name">
+                <tr v-for="m in filteredMarketplaces" :key="m.id || m.name">
                   <td><div class="table-product table-product--editable"><MarketplaceLogo :platform="m.platform" :name="m.name" :short="m.short" :size="28" /><strong>{{m.name}}</strong><button class="row-action row-action--edit" title="Editar marketplace" @click.stop="editMarketplace(m)"><UiIcon name="edit" :size="15" /></button></div></td>
                   <td><span class="badge" :class="m.connectionStatus==='connected'?'badge--green':'badge--gray'">{{m.connectionStatus==='connected'?'Conectado':'Manual'}}</span></td>
                   <td>{{m.commission}}%</td>
@@ -80,7 +88,7 @@ onMounted(() => {
               </tbody>
             </table>
           </div>
-          <div class="table-footer"><span>Exibindo {{ marketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
+          <div class="table-footer"><span>Exibindo {{ filteredMarketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
         </PanelCard>
       </div>
       <aside>
@@ -91,7 +99,7 @@ onMounted(() => {
     <PanelCard title="Pedidos recebidos dos marketplaces" subtitle="Revise o pedido, confira o SKU e vincule ao produto antes de liberar para impressão." style="margin-top:12px">
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto PrintFlow</th><th>Qtd.</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto PrintFlow</th><th>Qtd.</th><th>Valor</th><th>Taxa ML</th><th>Frete</th><th>Status</th><th></th></tr></thead>
           <tbody>
             <tr v-for="order in pendingMarketplaceOrders" :key="order.id">
               <td><strong>{{ order.externalOrderId || order.id }}</strong></td>
@@ -106,6 +114,8 @@ onMounted(() => {
               </td>
               <td>{{ order.quantity }}</td>
               <td>{{ formatCurrency(order.gross) }}</td>
+              <td>{{ formatCurrency(order.marketplaceFee) }}</td>
+              <td>{{ formatCurrency(order.shipping) }}</td>
               <td><span class="badge" :class="marketplaceOrderBadgeClass(order)">{{ marketplaceOrderLabel(order) }}</span></td>
               <td><button v-if="!order.printJobId" type="button" class="btn btn--primary" :disabled="linkingOrderId !== '' || !(selectedProductByOrder[order.id] || order.suggestedProductId || order.mappedProductId)" @click="linkOrderProduct(order)">Vincular</button></td>
             </tr>

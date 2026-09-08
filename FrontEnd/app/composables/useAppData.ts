@@ -1,7 +1,8 @@
 export type Order = {
   dbId?: string;
   id: string; productId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
-  gross: number; fee: number; shipping: number; net: number; profit: number; status: string
+  gross: number; fee: number; shipping: number; net: number; profit: number; status: string;
+  trackingCode?: string; packedAt?: string | null; shippedAt?: string | null; deliveredAt?: string | null
 }
 
 export type PrintJob = {
@@ -73,7 +74,7 @@ export type MarketplaceIntegration = {
 export type MarketplaceOrder = {
   id: string;
   integrationId?: string; marketplaceId?: string; platform: string; externalOrderId: string; externalSku: string;
-  productName: string; quantity: number; gross: number; marketplaceFee: number; shipping: number; net: number; profit: number;
+  productName: string; quantity: number; gross: number; marketplaceFee: number; shipping: number; net: number; profit: number; feeBreakdown?: Record<string, unknown>;
   status: string; soldAt?: string | null; printJobId?: string; printJobStatus?: string;
   mappedProductId?: string; mappedProductName?: string; suggestedProductId?: string; suggestedProductName?: string
 }
@@ -145,6 +146,9 @@ export type BackupStatus = {
 }
 export type SupportRequest = { id: string; status: string; subject: string; category: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string }
 export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
+export type FinancialHistoryEntry = { id: string; resource: string; resourceId: string; snapshot: Record<string, any>; source: string; createdAt: string }
+export type CalculatorSimulation = { id: string; name: string; pricePerKg: number; weight: number; durationMinutes: number; energyEnabled: boolean; energyRate: number; watts: number; margin: number; directCost: number; suggestedPrice: number; snapshot: Record<string, any>; createdAt: string }
+export type InventoryMovement = { id: string; type: 'in' | 'out' | 'adjustment'; quantity: number; previousQuantity: number; resultingQuantity: number; reason: string; createdAt: string }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
@@ -352,6 +356,20 @@ export const useAppData = () => {
     headers: resourceHeaders()
   })
 
+  const listFinancialHistory = (resource = '', resourceId = '') => $fetch<FinancialHistoryEntry[]>(apiUrl(`/api/financial-history${resource || resourceId ? `?${new URLSearchParams({ ...(resource ? { resource } : {}), ...(resourceId ? { resourceId } : {}) }).toString()}` : ''}`), {
+    headers: resourceHeaders()
+  })
+
+  const exportFinancialReport = (filters: Record<string, string>) => $fetch<Blob>(apiUrl('/api/reports/financial-export'), {
+    query: filters, responseType: 'blob', headers: resourceHeaders()
+  })
+
+  const listCalculatorSimulations = () => $fetch<CalculatorSimulation[]>(apiUrl('/api/calculator/simulations'), { headers: resourceHeaders() })
+  const createCalculatorSimulation = (body: Record<string, unknown>) => $fetch<CalculatorSimulation>(apiUrl('/api/calculator/simulations'), { method: 'POST', body, headers: resourceHeaders() })
+
+  const listFilamentMovements = (filamentId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
+  const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
+
   const loadBackupStatus = () => $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
     headers: resourceHeaders()
   })
@@ -393,6 +411,12 @@ export const useAppData = () => {
     , updateSettings
     , exportTenantData
     , listSettingsExports
+    , listFinancialHistory
+    , exportFinancialReport
+    , listCalculatorSimulations
+    , createCalculatorSimulation
+    , listFilamentMovements
+    , createFilamentMovement
     , loadBackupStatus
     , listSupportRequests
     , createSupportRequest

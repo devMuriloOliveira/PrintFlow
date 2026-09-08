@@ -40,6 +40,12 @@ const sendPrintJobs = async (req, res, status = 200) => {
 const findLocalJob = (list, id) =>
   list.find((item) => itemId(item) === String(id))
 
+const syncLocalOrderStatus = (tenantId, orderId, status) => {
+  if (!orderId) return
+  const order = getTenantData(tenantId).orders.find((item) => itemId(item) === String(orderId))
+  if (order && !['Cancelado', 'Entregue'].includes(String(order.status || ''))) order.status = status
+}
+
 export const handlePrintJobEnqueue = async (req, res) => {
   const body = await readJsonBody(req)
   const tenantId = await getTenantId(req)
@@ -174,7 +180,7 @@ export const handlePrintJobReorder = async (req, res, printJobId) => {
   if (hasDatabase) {
     await withTenant(tenantId, async (client) => {
       const jobResult = await client.query(
-        `select id, printer_id, agent_printer_id, status
+        `select id, order_id, printer_id, agent_printer_id, status
            from print_jobs
           where tenant_id = $1
             and id = $2
@@ -405,6 +411,7 @@ export const handlePrintJobApprove = async (req, res, printJobId) => {
             and id = $2`,
         [tenantId, printJobId, Number(priorityResult.rows[0]?.next_priority || 1)]
       )
+      if (job.order_id) await client.query("update orders set status = 'Producao' where tenant_id = $1 and id = $2 and status not in ('Cancelado', 'Entregue')", [tenantId, job.order_id])
     })
 
     return sendPrintJobs(req, res)
@@ -426,6 +433,7 @@ export const handlePrintJobApprove = async (req, res, printJobId) => {
   job.status = 'queued'
   job.priority = queued.length + 1
   job.updatedAt = new Date().toISOString()
+  syncLocalOrderStatus(tenantId, job.orderId, 'Producao')
   return sendPrintJobs(req, res)
 }
 
@@ -451,13 +459,14 @@ export const handlePrintJobStartManual = async (req, res, printJobId) => {
                  and active.agent_printer_id is not distinct from print_jobs.agent_printer_id
                  and active.status in ('starting', 'printing', 'paused')
             )
-          returning id`,
+          returning id, order_id`,
         [tenantId, printJobId]
       )
 
       if (!result.rowCount) {
         throw new Error('Esta impressora ja possui uma impressao em andamento ou este item nao esta mais na fila.')
       }
+      if (result.rows[0].order_id) await client.query("update orders set status = 'Producao' where tenant_id = $1 and id = $2 and status not in ('Cancelado', 'Entregue')", [tenantId, result.rows[0].order_id])
     })
 
     return sendPrintJobs(req, res)
@@ -482,6 +491,7 @@ export const handlePrintJobStartManual = async (req, res, printJobId) => {
   job.status = 'printing'
   job.startedAt ||= new Date().toISOString()
   job.updatedAt = new Date().toISOString()
+  syncLocalOrderStatus(tenantId, job.orderId, 'Producao')
   return sendPrintJobs(req, res)
 }
 
@@ -498,11 +508,12 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
           where tenant_id = $1
             and id = $2
             and status in ('printing', 'paused')
-          returning id`,
+          returning id, order_id`,
         [tenantId, printJobId]
       )
 
       if (!result.rowCount) throw new Error('Registro nao encontrado')
+      if (result.rows[0].order_id) await client.query("update orders set status = 'Impresso' where tenant_id = $1 and id = $2 and status not in ('Cancelado', 'Entregue')", [tenantId, result.rows[0].order_id])
     })
 
     return sendPrintJobs(req, res)
@@ -517,5 +528,6 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
   job.status = 'completed'
   job.completedAt ||= new Date().toISOString()
   job.updatedAt = new Date().toISOString()
+  syncLocalOrderStatus(tenantId, job.orderId, 'Impresso')
   return sendPrintJobs(req, res)
 }

@@ -3,6 +3,7 @@ import { listProducts, createProduct } from './productsRepository.js'
 import { listResource } from './appDataRepository.js'
 import { blindIndex, encryptField } from '../security/crypto.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
+import { recordFinancialSnapshot } from './financialHistoryRepository.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
@@ -258,6 +259,10 @@ const resourceConfig = {
       shipping: number(item.shipping),
       net: number(item.net),
       profit: number(item.profit),
+      delivery_tracking_code: item.trackingCode || '',
+      packed_at: item.packedAt || null,
+      shipped_at: item.shippedAt || null,
+      delivered_at: item.deliveredAt || null,
       status: item.status || 'Novo'
     })
   },
@@ -323,6 +328,10 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
     if (resource === 'printers') {
       await syncPrinterAgentLink(client, tenantId, result.rows[0].id, item)
     }
+    if (['filaments', 'printers', 'marketplaces'].includes(resource)) {
+      const saved = await client.query(`select * from ${config.table} where tenant_id = $1 and id = $2 limit 1`, [tenantId, result.rows[0].id])
+      await recordFinancialSnapshot(client, tenantId, resource, result.rows[0].id, saved.rows[0])
+    }
     return { id: result.rows[0].id, changedFields: safeChangedFields(current.rows[0], values), relatedCreated }
   }
 
@@ -337,6 +346,10 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
   )
   if (resource === 'printers') {
     await syncPrinterAgentLink(client, tenantId, result.rows[0].id, item)
+  }
+  if (['filaments', 'printers', 'marketplaces'].includes(resource)) {
+    const saved = await client.query(`select * from ${config.table} where tenant_id = $1 and id = $2 limit 1`, [tenantId, result.rows[0].id])
+    await recordFinancialSnapshot(client, tenantId, resource, result.rows[0].id, saved.rows[0])
   }
   return { id: result.rows[0].id, changedFields: safeChangedFields({}, values), relatedCreated }
 }

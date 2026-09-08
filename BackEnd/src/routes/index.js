@@ -34,6 +34,7 @@ import {
   handleResourceDelete,
   handleResourceRead,
   handleResourceUpdate,
+  handleFilamentMovements,
   readRoutes
 } from './resources.js'
 
@@ -43,6 +44,9 @@ import {
   handleSettingsBackupStatus,
   handleSettingsUpdate
 } from './settings.js'
+
+import { handleFinancialReportExport } from './reports.js'
+import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } from './calculator.js'
 
 import {
   handleAmazonWebhook,
@@ -880,6 +884,17 @@ export const handleRequest =
         return await handleSettingsExportHistory(req, res)
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/reports/financial-export') {
+        return await handleFinancialReportExport(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/calculator/simulations') {
+        return await handleCalculatorSimulationsList(req, res)
+      }
+      if (req.method === 'POST' && url.pathname === '/api/calculator/simulations') {
+        return await handleCalculatorSimulationCreate(req, res)
+      }
+
       if (
         req.method ===
           'GET' &&
@@ -1227,6 +1242,11 @@ export const handleRequest =
       // ==================================================
       // RESOURCES GENÉRICOS
       // ==================================================
+
+      const filamentMovementsMatch = url.pathname.match(/^\/api\/filaments\/([^/]+)\/movements$/)
+      if (filamentMovementsMatch && ['GET', 'POST'].includes(req.method)) {
+        return await handleFilamentMovements(req, res, filamentMovementsMatch[1])
+      }
 
       const resourceMatch =
         url.pathname.match(

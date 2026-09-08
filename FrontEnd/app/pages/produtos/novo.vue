@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { calculatePricing } from '../../utils/pricing.js'
 const { products, printers, filaments, settings, createProduct, updateItem, uploadProductPrintFile } = useAppData()
 const { notify } = useUi()
 const router = useRouter()
@@ -10,7 +11,7 @@ const isEditing = computed(() => Boolean(editingId.value))
 const hydratedFor = ref('')
 const selectedPrintFile = ref<File | null>(null)
 const allowedPrintFileFormats = new Set(['3mf', 'gcode', 'bgcode'])
-const form = reactive({ name: '', sku: '', category: 'Decoração', description: '', status: 'Ativo', printerId: '', filamentId: '', weight: 0, hours: 0, minutes: 0, layer: 0.2, infill: 15, dimensions: '', printFileName: '', printFileFormat: '', printFileHash: '', printFileSizeBytes: 0, printFileStorageKey: '', nozzleMm: 0.4, bedTemperature: 60, nozzleTemperature: 205, support: false, scalePercent: 100, allowedMaterials: 'PLA', validationStatus: 'needs_validation', validationMessage: '', packaging: 0, materials: 0, labor: 0, energy: true, shopeeFee: 0, otherMarketplaceFee: 0, marketplaceFee: 0, otherCosts: 0, price: 0, desiredMargin: 40 })
+const form = reactive({ name: '', sku: '', category: 'Decoração', description: '', status: 'Ativo', printerId: '', filamentId: '', weight: 0, wastePercent: 0, hours: 0, minutes: 0, layer: 0.2, infill: 15, dimensions: '', printFileName: '', printFileFormat: '', printFileHash: '', printFileSizeBytes: 0, printFileStorageKey: '', nozzleMm: 0.4, bedTemperature: 60, nozzleTemperature: 205, support: false, scalePercent: 100, allowedMaterials: 'PLA', validationStatus: 'needs_validation', validationMessage: '', packaging: 0, materials: 0, labor: 0, energy: true, shopeeFee: 0, otherMarketplaceFee: 0, marketplaceFee: 0, taxPercent: 0, otherCosts: 0, price: 0, desiredMargin: 40 })
 const selectedPrinter = computed(() => printers.value.find((printer) => printer.id === form.printerId))
 const selectedFilament = computed(() => filaments.value.find((filament) => filament.id === form.filamentId))
 const kwhCost = computed(() => Number(settings.value?.kwh || 0.68))
@@ -20,25 +21,20 @@ const fixedCostPerUnit = computed(() => {
   const planned = Number(financialDefaults.value.plannedMonthlyUnits || 0)
   return planned > 0 ? fixed / planned : 0
 })
-const filamentCost = computed(() => {
-  const filament = selectedFilament.value
-  const gramCost = filament?.initial ? Number(filament.cost || 0) / Number(filament.initial || 1) : 0
-  return Number(form.weight || 0) * gramCost
-})
-const energyCost = computed(() => {
-  const printer = selectedPrinter.value
-  if (!form.energy || !printer) return 0
-  return (Number(form.hours || 0) + Number(form.minutes || 0) / 60) * (Number(printer.power || 0) / 1000) * kwhCost.value
-})
+const pricing = computed(() => calculatePricing({ pricePerKg: selectedFilament.value?.initial ? Number(selectedFilament.value.cost || 0) / Number(selectedFilament.value.initial) * 1000 : 0, weight: form.weight, wastePercent: form.wastePercent, hours: form.hours, minutes: form.minutes, energyEnabled: form.energy && Boolean(selectedPrinter.value), energyRate: kwhCost.value, watts: selectedPrinter.value?.power || 0, fixedCostPerUnit: fixedCostPerUnit.value, packaging: form.packaging, materials: form.materials, labor: form.labor, otherCosts: form.otherCosts, marketplaceFee: Number(form.shopeeFee || 0) + Number(form.otherMarketplaceFee || 0) + Number(form.marketplaceFee || 0), taxPercent: form.taxPercent, desiredMargin: form.desiredMargin, salePrice: form.price }))
+const filamentCost = computed(() => pricing.value.materialCost)
+const energyCost = computed(() => pricing.value.energyCost)
 const shopeeCost = computed(() => form.price * form.shopeeFee / 100)
 const otherMarketplaceCost = computed(() => form.price * form.otherMarketplaceFee / 100)
 const marketplaceCost = computed(() => form.price * form.marketplaceFee / 100)
-const totalCost = computed(() => filamentCost.value + energyCost.value + fixedCostPerUnit.value + form.packaging + form.materials + form.labor + form.otherCosts + shopeeCost.value + otherMarketplaceCost.value + marketplaceCost.value)
-const profit = computed(() => form.price - totalCost.value)
-const margin = computed(() => form.price ? profit.value / form.price * 100 : 0)
+const taxCost = computed(() => form.price * form.taxPercent / 100)
+const totalCost = computed(() => pricing.value.totalCost)
+const profit = computed(() => pricing.value.profit)
+const margin = computed(() => pricing.value.margin)
 const productionMinutes = computed(() => Number(form.hours || 0) * 60 + Number(form.minutes || 0))
 const costBreakdown = computed(() => ({
   materialWeight: Number(form.weight || 0),
+  wastePercent: Number(form.wastePercent || 0),
   materialName: selectedFilament.value?.name || '',
   materialCost: filamentCost.value,
   packagingCost: Number(form.packaging || 0),
@@ -57,6 +53,8 @@ const costBreakdown = computed(() => ({
   otherMarketplaceFeeCost: otherMarketplaceCost.value,
   additionalFeePercent: Number(form.marketplaceFee || 0),
   additionalFeeCost: marketplaceCost.value,
+  taxPercent: Number(form.taxPercent || 0),
+  taxCost: taxCost.value,
   totalCost: totalCost.value,
   salePrice: Number(form.price || 0),
   profit: profit.value,
@@ -102,6 +100,7 @@ const hydrateForm = (product: any) => {
     printerId: product.printerId || printers.value.find((printer) => printer.name === product.printer)?.id || '',
     filamentId: product.filamentId || filaments.value.find((filament) => filament.name === product.filament)?.id || '',
     weight: Number(product.weight || 0),
+    wastePercent: Number(product.costBreakdown?.wastePercent || 0),
     hours: time.hours,
     minutes: time.minutes,
     layer: Number(product.layer || product.printProfile?.layerHeightMm || 0.2),
@@ -127,6 +126,7 @@ const hydrateForm = (product: any) => {
     shopeeFee: Number(product.costBreakdown?.shopeeFeePercent || 0),
     otherMarketplaceFee: Number(product.costBreakdown?.otherMarketplaceFeePercent || 0),
     marketplaceFee: Number(product.marketplaceFee || product.costBreakdown?.additionalFeePercent || 0),
+    taxPercent: Number(product.costBreakdown?.taxPercent || 0),
     otherCosts: Number(product.costBreakdown?.otherCosts || 0),
     price: Number(product.price || 0),
     desiredMargin: Number(product.desiredMargin || 40)
@@ -149,6 +149,25 @@ watch(settings, (value) => {
   const defaultMargin = Number((value?.preferences as Record<string, unknown> | undefined)?.defaultMargin)
   if (Number.isFinite(defaultMargin) && defaultMargin >= 0) form.desiredMargin = defaultMargin
 }, { immediate: true })
+onMounted(() => {
+  if (editingId.value || String(route.query.from || '') !== 'calculator' || !import.meta.client) return
+  const raw = sessionStorage.getItem('printflow-calculator-draft')
+  if (!raw) return
+  try {
+    const draft = JSON.parse(raw)
+    Object.assign(form, {
+      printerId: draft.printerId || '', filamentId: draft.filamentId || '', weight: Number(draft.weight || 0), wastePercent: Number(draft.wastePercent || 0),
+      hours: Number(draft.hours || 0), minutes: Number(draft.minutes || 0), packaging: Number(draft.packaging || 0),
+      materials: Number(draft.materials || 0), labor: Number(draft.labor || 0), otherCosts: Number(draft.otherCosts || 0),
+      energy: draft.energyEnabled !== false, marketplaceFee: Number(draft.marketplaceFee || 0), taxPercent: Number(draft.taxPercent || 0),
+      price: Number(draft.suggestedPrice || 0), desiredMargin: Number(draft.desiredMargin || 40)
+    })
+    sessionStorage.removeItem('printflow-calculator-draft')
+    notify('Simulação carregada. Complete os dados da receita para salvar o produto.')
+  } catch {
+    sessionStorage.removeItem('printflow-calculator-draft')
+  }
+})
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
   if (!form.name.trim()) errors.name = 'Informe o nome do produto.'

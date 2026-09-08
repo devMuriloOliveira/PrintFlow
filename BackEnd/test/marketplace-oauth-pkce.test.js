@@ -62,7 +62,9 @@ test('pedido Mercado Livre renova token expirado antes da consulta', async () =>
     }, 'order-123')
 
     assert.equal(sale.externalOrderId, 'order-123')
-    assert.equal(calls.length, 2)
+    assert.equal(calls.filter((call) => call.url.includes('/oauth/token')).length, 1)
+    assert.equal(calls.filter((call) => call.url.endsWith('/orders/order-123')).length, 1)
+    assert.equal(calls.filter((call) => call.url.includes('/discounts')).length, 1)
     assert.match(calls[1].options.headers.Authorization, /new-access-token/)
   } finally {
     globalThis.fetch = originalFetch

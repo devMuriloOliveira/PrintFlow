@@ -31,6 +31,8 @@ const tenantTables = [
   'marketplace_product_links',
   'tracked_sales',
   'marketplace_webhook_events',
+  'financial_history',
+  'inventory_movements',
   'operational_notifications',
   'operational_audit_events',
   'tenant_memberships',
@@ -1153,7 +1155,8 @@ export const migrate =
         "external_sku text not null default ''",
         "external_sku_hash text not null default ''",
         "product_name text not null default ''",
-        'quantity integer not null default 1'
+        'quantity integer not null default 1',
+        "fee_breakdown jsonb not null default '{}'::jsonb"
       ]
     ) {
       await query(
@@ -2402,6 +2405,15 @@ export const migrate =
       `
     )
 
+    for (const column of [
+      "delivery_tracking_code text not null default ''",
+      'packed_at timestamptz',
+      'shipped_at timestamptz',
+      'delivered_at timestamptz'
+    ]) {
+      await query(`alter table orders add column if not exists ${column}`)
+    }
+
     await query(`alter table company_settings add column if not exists preferences jsonb not null default '{}'::jsonb`)
 
     await query(`create table if not exists tenant_audit_requests (
@@ -2515,6 +2527,9 @@ export const migrate =
         )
       `
     )
+    await query(`alter table calculator_simulations add column if not exists created_by text`)
+    await query(`alter table calculator_simulations add column if not exists snapshot jsonb not null default '{}'::jsonb`)
+    await query(`create index if not exists calculator_simulations_lookup_idx on calculator_simulations (tenant_id, created_at desc)`)
 
     // ==================================================
     // EXPORT HISTORY
@@ -2589,6 +2604,37 @@ export const migrate =
         )
       `
     )
+
+    await query(`
+      create table if not exists financial_history (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        resource text not null check (resource in ('products', 'filaments', 'printers', 'marketplaces')),
+        resource_id text not null,
+        snapshot jsonb not null default '{}'::jsonb,
+        source text not null default 'resource',
+        created_at timestamptz not null default now()
+      )
+    `)
+
+    await query(`create index if not exists financial_history_lookup_idx on financial_history (tenant_id, resource, resource_id, created_at desc)`)
+
+    await query(`
+      create table if not exists inventory_movements (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        resource text not null check (resource in ('filaments')),
+        resource_id bigint not null,
+        movement_type text not null check (movement_type in ('in', 'out', 'adjustment')),
+        quantity numeric(12,2) not null check (quantity > 0),
+        previous_quantity numeric(12,2) not null check (previous_quantity >= 0),
+        resulting_quantity numeric(12,2) not null check (resulting_quantity >= 0),
+        reason text not null default '',
+        created_by text,
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists inventory_movements_lookup_idx on inventory_movements (tenant_id, resource, resource_id, created_at desc)`)
 
     await query(
       `

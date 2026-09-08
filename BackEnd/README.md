@@ -63,6 +63,31 @@ secrets para o repositorio, logs ou canais de conversa.
 
 Nao publique valores reais dessas variaveis.
 
+## Publicacao
+
+O repositorio possui verificacao continua em `.github/workflows/ci.yml`: a cada
+push para `main` ou pull request, executa os testes do BackEnd e Agent e os
+builds dos dois FrontEnds. A publicacao continua separada da verificacao e deve
+ser feita somente depois que esses checks estiverem verdes.
+
+No Render, configure o servico da API com diretorio raiz `BackEnd`, comando de
+build `npm ci` e comando de inicio `npm start`. O inicio da API executa as
+migracoes de forma idempotente antes de abrir a porta; confirme o backup do
+banco e a saude do deploy antes de enviar trafego real.
+
+Checklist de producao:
+
+- Definir `DATABASE_URL`, `AUTH_SECRET`, `DATA_ENCRYPTION_KEY` e
+  `WEBHOOK_SHARED_SECRET` como variaveis privadas no Render.
+- Definir as quatro variaveis Mercado Livre e registrar exatamente a callback
+  HTTPS da API em `MERCADO_LIVRE_REDIRECT_URI`.
+- Publicar o FrontEnd com `NUXT_PUBLIC_API_BASE` apontando para a URL HTTPS da
+  API e informar essa URL em `APP_PUBLIC_URL`.
+- Confirmar que `/healthz`, login, a calculadora e um pedido de teste respondem
+  no ambiente publicado antes de conectar uma impressora real.
+- Manter backup recuperavel antes da primeira migracao e observar os logs do
+  Render durante a inicializacao.
+
 ## Rodar Localmente
 
 ```powershell

@@ -8,6 +8,9 @@ const category = ref('Todas')
 const filtered = computed(() => expenses.value.filter(e => (category.value === 'Todas' || e.category === category.value) && Object.values(e).join(' ').toLowerCase().includes(search.value.toLowerCase())))
 const recurring = computed(() => expenses.value.filter(e => !/nao|não/i.test(e.recurrence)).slice(0, 3))
 const recurringTotal = computed(() => recurring.value.reduce((total, item) => total + item.value, 0))
+const expensePoints = computed(() => expenses.value.map(expense => Number(expense.value || 0)))
+const recurringPoints = computed(() => expenses.value.filter(expense => !/nao|não/i.test(expense.recurrence)).map(expense => Number(expense.value || 0)))
+const averageExpense = computed(() => expenses.value.length ? metrics.expenseTotal.value / expenses.value.length : 0)
 const editExpense = (expense: any) => {
   if (!expense.id) return
   router.push(`/despesas/nova?id=${expense.id}`)
@@ -23,10 +26,10 @@ const removeExpense = async (expense: any) => {
   <div>
     <PageHeader title="Despesas" subtitle="Acompanhe e gerencie todos os gastos do seu negócio de impressão 3D." />
     <div class="metrics-grid metrics-grid--4">
-      <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative />
-      <MetricCard label="Despesas Recorrentes" :value="formatCurrency(metrics.recurringExpenses.value)" icon="calendar" :change="`${metrics.percent(metrics.expenseTotal.value ? metrics.recurringExpenses.value / metrics.expenseTotal.value * 100 : 0)} do total`" color="orange" />
-      <MetricCard label="Maior Categoria" :value="String(metrics.biggestExpenseCategory.value[0])" icon="tag" :change="formatCurrency(Number(metrics.biggestExpenseCategory.value[1]))" note="Dados do banco" color="purple" />
-      <MetricCard label="Média Mensal" :value="formatCurrency(metrics.expenseTotal.value)" icon="chart" note="Período atual" color="cyan" />
+      <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative :points="expensePoints" />
+      <MetricCard label="Despesas Recorrentes" :value="formatCurrency(metrics.recurringExpenses.value)" icon="calendar" :change="`${metrics.percent(metrics.expenseTotal.value ? metrics.recurringExpenses.value / metrics.expenseTotal.value * 100 : 0)} do total`" color="orange" :points="recurringPoints" />
+      <MetricCard label="Maior Categoria" :value="String(metrics.biggestExpenseCategory.value[0])" icon="tag" :change="formatCurrency(Number(metrics.biggestExpenseCategory.value[1]))" note="Categoria com maior valor" color="purple" :points="expensePoints" />
+      <MetricCard label="Média por Lançamento" :value="formatCurrency(averageExpense)" icon="chart" note="Total / lançamentos" color="cyan" :points="expensePoints" />
     </div>
     <div class="filters">
       <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16" /><input v-model="search" placeholder="Descrição ou fornecedor"></div></div>

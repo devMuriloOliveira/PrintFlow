@@ -4,7 +4,16 @@ const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
 const search = ref('')
-const filtered = computed(() => clients.value.filter(c => Object.values(c).join(' ').toLowerCase().includes(search.value.toLowerCase())))
+const clientOrder = ref('name')
+const filtered = computed(() => {
+  const result = clients.value.filter(c => Object.values(c).join(' ').toLowerCase().includes(search.value.toLowerCase()))
+  return [...result].sort((a, b) => clientOrder.value === 'revenue'
+    ? Number(b.revenue || 0) - Number(a.revenue || 0)
+    : clientOrder.value === 'orders'
+      ? Number(b.orders || 0) - Number(a.orders || 0)
+      : String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'))
+})
+const clientOrderPoints = computed(() => clients.value.map(client => Number(client.orders || 0)))
 const goToNewClient = () => navigateTo('/clientes/novo')
 const editClient = (client: any) => {
   if (!client.id) return
@@ -23,17 +32,17 @@ const removeClient = async (client: any) => {
       <button class="btn btn--primary" type="button" @click="goToNewClient"><UiIcon name="plus" />Novo Cliente</button>
     </PageHeader>
     <div class="metrics-grid metrics-grid--4">
-      <MetricCard label="Clientes Ativos" :value="formatNumber(clients.length)" icon="users" note="Dados do banco" />
-      <MetricCard label="Novos no Mês" :value="formatNumber(clients.length)" icon="plus" note="Cadastros carregados" color="green" />
-      <MetricCard label="Cliente mais Rentável" :value="metrics.bestClient.value?.name || '-'" icon="trend" :change="formatCurrency(metrics.bestClient.value?.revenue || 0)" color="purple" />
-      <MetricCard label="Ticket Médio" :value="formatCurrency(metrics.clientTicket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" />
+      <MetricCard label="Clientes Ativos" :value="formatNumber(clients.length)" icon="users" note="Dados do banco" :points="clientOrderPoints" />
+      <MetricCard label="Clientes Cadastrados" :value="formatNumber(clients.length)" icon="users" note="Data de cadastro indisponível" color="green" :points="clientOrderPoints" />
+      <MetricCard label="Cliente mais Rentável" :value="metrics.bestClient.value?.name || '-'" icon="trend" :change="formatCurrency(metrics.bestClient.value?.revenue || 0)" color="purple" :points="clients.map(client => Number(client.revenue || 0))" />
+      <MetricCard label="Ticket Médio" :value="formatCurrency(metrics.clientTicket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="clients.map(client => Number(client.ticket || 0))" />
     </div>
     <div class="filters">
       <div class="field field--search">
         <label>Buscar cliente</label>
         <div class="search-field"><UiIcon name="search" /><input v-model="search" placeholder="Nome, e-mail ou telefone"></div>
       </div>
-      <div class="field"><label>Período da última compra</label><select><option>Todos</option><option>Últimos 30 dias</option></select></div>
+      <div class="field"><label>Ordenar por</label><select v-model="clientOrder"><option value="name">Nome</option><option value="revenue">Maior faturamento</option><option value="orders">Mais pedidos</option></select></div>
     </div>
     <PanelCard title="Lista de Clientes">
       <div class="table-scroll">

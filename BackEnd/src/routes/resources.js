@@ -6,6 +6,8 @@ import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { listResource, loadAppData } from '../repositories/appDataRepository.js'
+import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
+import { createFilamentMovement, listFilamentMovements } from '../repositories/inventoryRepository.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
 import {
   resolvePrintFilePath,
@@ -38,6 +40,12 @@ export const readRoutes = {
   '/api/app-data': async (req) => {
     const tenantId = await getTenantId(req)
     return hasDatabase ? loadAppData(tenantId) : getTenantData(tenantId)
+  },
+  '/api/financial-history': async (req) => {
+    if (!hasDatabase) return []
+    const tenantId = await getTenantId(req)
+    const url = new URL(req.url, 'http://localhost')
+    return listFinancialHistory(tenantId, url.searchParams.get('resource'), url.searchParams.get('resourceId'))
   }
 }
 
@@ -247,4 +255,11 @@ export const handleResourceDelete = async (req, res, resource, id) => {
   const tenantId = await getTenantId(req)
   const list = hasDatabase ? await deleteResource(tenantId, resource, id, await auditActor(req)) : deleteLocalResource(tenantId, resource, id)
   return sendJson(res, 200, list)
+}
+
+export const handleFilamentMovements = async (req, res, filamentId) => {
+  const tenantId = await getTenantId(req)
+  if (req.method === 'GET') return sendJson(res, 200, await listFilamentMovements(tenantId, filamentId))
+  if (req.method === 'POST') return sendJson(res, 201, await createFilamentMovement(tenantId, filamentId, await readJsonBody(req), await auditActor(req)))
+  return sendJson(res, 405, { error: 'Metodo nao permitido' })
 }

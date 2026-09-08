@@ -209,8 +209,9 @@ export const recordTrackedSale = async (integration, sale) => {
     insert into tracked_sales (
       tenant_id, integration_id, marketplace_id, platform, external_order_id, external_order_hash,
       external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, sold_at
+      , fee_breakdown
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, coalesce($18::timestamptz, now()))
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, coalesce($18::timestamptz, now()), $19::jsonb)
     on conflict (tenant_id, platform, external_order_hash) do update set
       external_sku = excluded.external_sku,
       external_sku_hash = excluded.external_sku_hash,
@@ -224,6 +225,7 @@ export const recordTrackedSale = async (integration, sale) => {
       profit = excluded.profit,
       status = excluded.status,
       sold_at = excluded.sold_at,
+      fee_breakdown = excluded.fee_breakdown,
       updated_at = now()
     returning id
   `, [
@@ -244,7 +246,8 @@ export const recordTrackedSale = async (integration, sale) => {
     cost,
     profit,
     text(sale.status || 'received'),
-    sale.soldAt || null
+    sale.soldAt || null,
+    JSON.stringify(sale.feeBreakdown || {})
   ]))
 
   return result.rows[0]
