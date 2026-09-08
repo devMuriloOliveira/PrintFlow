@@ -124,3 +124,22 @@ test('usa a comissao real por item quando o pedido nao traz taxa totalizada', ()
   assert.equal(sale.marketplaceFee, 15)
   assert.equal(sale.feeBreakdown.commission, 15)
 })
+
+test('preserva componentes de tarifa informados pelo Mercado Livre', () => {
+  const sale = normalizeMarketplaceOrder('mercado_livre', {
+    id: 'order-component-fees-1',
+    total_amount: 200,
+    sale_fee_details: [{ fixed_fee: 5, financing_add_on_fee: 3 }],
+    ads_fee: 2,
+    other_fee: 1,
+    order_items: [{ quantity: 1, sale_fee: 20, item: { seller_sku: 'SKU-COMPONENTS' } }]
+  })
+
+  assert.equal(sale.marketplaceFee, 31)
+  assert.equal(sale.feeBreakdown.commission, 20)
+  assert.equal(sale.feeBreakdown.fixed, 5)
+  assert.equal(sale.feeBreakdown.financial, 3)
+  assert.equal(sale.feeBreakdown.ads, 2)
+  assert.equal(sale.feeBreakdown.others, 1)
+  assert.equal(sale.feeBreakdown.detailSource, 'mercadolivre.orders.sale_fee_details')
+})

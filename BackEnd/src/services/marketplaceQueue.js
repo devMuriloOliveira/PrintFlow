@@ -10,6 +10,11 @@ const number = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+const optionalNumber = (...values) => {
+  const value = values.find((item) => item !== undefined && item !== null && item !== '')
+  return value === undefined ? null : number(value)
+}
+
 const quantity = (value) => {
   const parsed = Math.floor(number(value, 1))
   return parsed > 0 ? parsed : 1
@@ -44,9 +49,18 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       grossPrice: number(orderItem.gross_price),
       saleFee: number(orderItem.sale_fee)
     }))
-    const commission = itemFeeBreakdown.reduce((total, item) => total + item.saleFee * item.quantity, 0)
+    const rawFeeDetails = data.sale_fee_details ?? payload.sale_fee_details ?? data.fee_details ?? payload.fee_details
+    const feeDetails = Array.isArray(rawFeeDetails) ? Object.assign({}, ...rawFeeDetails) : (rawFeeDetails || {})
+    const itemCommission = itemFeeBreakdown.reduce((total, item) => total + item.saleFee * item.quantity, 0)
+    const commissionFromDetails = optionalNumber(feeDetails.gross_amount, data.commission, payload.commission)
+    const commission = itemCommission > 0 ? itemCommission : (commissionFromDetails ?? 0)
+    const fixed = optionalNumber(feeDetails.fixed_fee, data.fixed_fee, payload.fixed_fee)
+    const financial = optionalNumber(feeDetails.financing_add_on_fee, feeDetails.payment_fee, data.financial_fee, payload.financial_fee)
+    const ads = optionalNumber(feeDetails.ads_fee, feeDetails.advertising_fee, data.ads_fee, payload.ads_fee)
+    const others = optionalNumber(feeDetails.other_fee, feeDetails.other_fees, data.other_fee, payload.other_fee)
     const rawMarketplaceFee = data.marketplace_fee ?? payload.marketplace_fee
-    const marketplaceFee = rawMarketplaceFee === undefined ? commission : number(rawMarketplaceFee)
+    const actualComponents = [commission, fixed, financial, ads, others].filter((value) => value !== null)
+    const marketplaceFee = rawMarketplaceFee === undefined ? actualComponents.reduce((total, value) => total + value, 0) : number(rawMarketplaceFee)
     const shippingValue = data.shipping?.cost ?? payload.shipping?.cost ?? data.shipping ?? payload.shipping
     const shipping = number(shippingValue)
     return {
@@ -66,7 +80,12 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
         source: 'mercadolivre.orders',
         marketplaceFee,
         commission,
-        commissionSource: itemFeeBreakdown.some((item) => item.saleFee > 0) ? 'mercadolivre.orders.order_items' : 'unavailable',
+        commissionSource: itemCommission > 0 ? 'mercadolivre.orders.order_items' : commissionFromDetails !== null ? 'mercadolivre.orders.sale_fee_details' : 'unavailable',
+        fixed,
+        financial,
+        ads,
+        others,
+        detailSource: [fixed, financial, ads, others].some((value) => value !== null) ? 'mercadolivre.orders.sale_fee_details' : 'unavailable',
         itemSaleFees: itemFeeBreakdown,
         shipping,
         shippingId: firstText(data.shipping?.id, payload.shipping_id),
