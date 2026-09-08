@@ -113,3 +113,14 @@ test('normaliza taxas detalhadas do pedido Mercado Livre', () => {
     saleFee: 11.74
   }])
 })
+
+test('usa a comissao real por item quando o pedido nao traz taxa totalizada', () => {
+  const sale = normalizeMarketplaceOrder('mercado_livre', {
+    id: 'order-item-fee-1',
+    total_amount: 100,
+    order_items: [{ quantity: 2, sale_fee: 7.5, item: { seller_sku: 'SKU-ITEM-FEE' } }]
+  })
+
+  assert.equal(sale.marketplaceFee, 15)
+  assert.equal(sale.feeBreakdown.commission, 15)
+})

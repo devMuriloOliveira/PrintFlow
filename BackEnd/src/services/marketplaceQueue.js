@@ -44,8 +44,9 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       grossPrice: number(orderItem.gross_price),
       saleFee: number(orderItem.sale_fee)
     }))
-    const marketplaceFee = number(data.marketplace_fee ?? payload.marketplace_fee)
     const commission = itemFeeBreakdown.reduce((total, item) => total + item.saleFee * item.quantity, 0)
+    const rawMarketplaceFee = data.marketplace_fee ?? payload.marketplace_fee
+    const marketplaceFee = rawMarketplaceFee === undefined ? commission : number(rawMarketplaceFee)
     const shippingValue = data.shipping?.cost ?? payload.shipping?.cost ?? data.shipping ?? payload.shipping
     const shipping = number(shippingValue)
     return {
