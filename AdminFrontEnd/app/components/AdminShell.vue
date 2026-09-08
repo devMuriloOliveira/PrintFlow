@@ -17,7 +17,7 @@ const nav = [
 const isActive = (path: string) => route.path === path
 const logout = async () => {
   clearWorkspace()
-  session.clear()
+  await session.logout()
   await navigateTo('/login')
 }
 </script>

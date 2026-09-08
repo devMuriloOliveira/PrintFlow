@@ -5,7 +5,7 @@ const password = ref('')
 const loading = ref(false)
 const error = ref('')
 
-onMounted(() => { session.restore(); if (session.token.value) void navigateTo('/') })
+onMounted(async () => { await session.restore(); if (session.token.value) await navigateTo('/') })
 
 const submit = async () => {
   loading.value = true; error.value = ''

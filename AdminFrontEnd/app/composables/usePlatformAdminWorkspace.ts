@@ -54,7 +54,7 @@ export const usePlatformAdminWorkspace = () => {
   }
 
   const ensureSession = async () => {
-    session.restore()
+    await session.restore()
     if (session.token.value) return true
     clearWorkspace()
     await navigateTo('/login')
@@ -126,12 +126,13 @@ export const usePlatformAdminWorkspace = () => {
   }
 
   const refreshRequests = () => loadRequests(true)
+  const refreshTenants = () => loadTenants(true)
 
   const activeRequests = computed(() => requests.value.filter(request => isChatOpen(request.status)))
   const closedRequests = computed(() => requests.value.filter(request => ['closed', 'cancelled', 'expired'].includes(request.status)))
 
   return {
     session, overview, tenants, requests, messagesByRequest, authorizedTenantAudit, loading, error,
-    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, refreshRequests, clearWorkspace, activeRequests, closedRequests
+    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, refreshRequests, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

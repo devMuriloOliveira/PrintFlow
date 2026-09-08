@@ -1,7 +1,6 @@
 <script setup lang="ts">
 const { products, orders, expenses, expenseSegments, filaments, goals, printers, printJobs } = useAppData()
 const metrics = useBusinessMetrics()
-const { notify } = useUi()
 
 const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 const monthlyRevenue = computed(() => {
@@ -148,7 +147,7 @@ const operationalAlerts = computed(() => [
         <div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Vendas</th><th>Lucro</th><th>Margem</th></tr></thead><tbody><tr v-if="!productPerformance.length"><td colspan="4"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado</h3><p>Cadastre produtos e vendas para ver o desempenho.</p></div></div></td></tr><tr v-for="p in productPerformance" :key="p.sku"><td><div class="table-product"><ProductThumb :type="p.thumb" :size="28"/><strong>{{ p.name }}</strong></div></td><td>{{ p.sales }}</td><td class="money-positive">{{ formatCurrency(p.orderProfit) }}</td><td><span class="badge badge--green">{{ metrics.percent(p.margin || 0) }}</span></td></tr></tbody></table></div>
       </PanelCard>
       <PanelCard title="Alertas e Recomendações">
-        <template #actions><button class="btn btn--ghost" @click="notify('Central de alertas aberta', 'info')">Ver todos</button></template>
+        <template #actions><NuxtLink class="btn btn--ghost" to="/notificacoes">Ver todos</NuxtLink></template>
         <div class="alerts-list">
           <div v-if="!alerts.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bell"/></div><h3>Nenhum alerta no momento</h3><p>Os alertas aparecem conforme seus dados forem cadastrados.</p></div></div>
           <div v-for="alert in alerts" :key="alert.title" class="alert-row"><span class="alert-row__icon"><UiIcon :name="alert.icon" :size="17"/></span><div><strong>{{ alert.title }}</strong><small>{{ alert.text }}</small></div><span class="badge" :class="alert.cls">{{ alert.badge }}</span><UiIcon name="chevron" :size="15"/></div>
