@@ -6,7 +6,7 @@ const { filaments, createItem, updateItem } = useAppData()
 const { notify } = useUi()
 const route = useRoute()
 const saving = ref(false)
-const form = reactive({ name: '', maker: '', material: 'PLA', type: '1.75 mm', color: '', colorHex: '#111827', initial: 1000, remaining: 1000, cost: 0, supplier: '', date: '', minStock: 200, status: 'Em estoque' })
+const form = reactive({ name: '', maker: '', material: 'PLA', type: '1.75 mm', color: '', colorHex: '#111827', initial: 1000, remaining: 1000, cost: 0, supplier: '', date: '', minStock: 300, status: 'Em estoque' })
 const errors = reactive<Record<string, string>>({})
 const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const isEditing = computed(() => Boolean(editId.value))
@@ -14,7 +14,8 @@ const hydrated = ref(false)
 const pieceWeight = ref(180)
 const costPerGram = computed(() => form.initial ? form.cost / form.initial : 0)
 const pieceCost = computed(() => costPerGram.value * pieceWeight.value)
-const touched = computed(() => Object.values(form).some(value => value !== '' && value !== 0 && !['PLA', '1.75 mm', '#111827', 'Em estoque', 1000, 200].includes(value as never)))
+const automaticStatus = computed(() => form.remaining <= 0 ? 'Esgotado' : form.remaining <= form.minStock ? 'Baixo estoque' : 'Em estoque')
+const touched = computed(() => Object.values(form).some(value => value !== '' && value !== 0 && !['PLA', '1.75 mm', '#111827', 'Em estoque', 1000, 300].includes(value as never)))
 watchEffect(() => {
   if (!editId.value || hydrated.value) return
   const item = filaments.value.find(filament => filament.id === editId.value)
@@ -30,24 +31,27 @@ const validate = () => {
   if (!form.type) errors.type = 'Selecione o diametro.'
   if (!form.color.trim()) errors.color = 'Informe a cor.'
   if (!form.initial || form.initial <= 0) errors.initial = 'Informe o peso inicial.'
-  if (!form.remaining || form.remaining < 0) errors.remaining = 'Informe o peso restante.'
+  if (form.remaining < 0 || form.remaining > form.initial) errors.remaining = 'O peso restante deve estar entre zero e o peso inicial.'
+  if (form.minStock < 0) errors.minStock = 'O estoque mínimo não pode ser negativo.'
   if (!form.cost || form.cost <= 0) errors.cost = 'Informe o custo do rolo.'
   const first = Object.keys(errors)[0]
   if (first) nextTick(() => document.querySelector(`[data-field="${first}"] input,[data-field="${first}"] select`)?.focus())
   return !first
 }
-const reset = () => { form.name = ''; form.maker = ''; form.color = ''; form.cost = 0; form.supplier = ''; form.date = ''; form.remaining = form.initial }
+const reset = () => { form.name = ''; form.maker = ''; form.color = ''; form.cost = 0; form.supplier = ''; form.date = ''; form.minStock = 300; form.remaining = form.initial }
 const save = async (again = false) => {
   if (!validate()) return
   if (saving.value) return
   saving.value = true
   try {
-    const payload = { id: editId.value, name: form.name, maker: form.maker, material: form.material, type: form.type, color: form.color, colorHex: form.colorHex, initial: form.initial, remaining: form.remaining, cost: form.cost, supplier: form.supplier || 'Não informado', date: form.date || null, status: form.status }
+    const payload = { id: editId.value, name: form.name, maker: form.maker, material: form.material, type: form.type, color: form.color, colorHex: form.colorHex, initial: form.initial, remaining: form.remaining, minStock: form.minStock, cost: form.cost, supplier: form.supplier || 'Não informado', date: form.date || null, status: automaticStatus.value }
     if (isEditing.value) await updateItem('filaments', payload)
     else await createItem('filaments', payload)
     notify(isEditing.value ? 'Filamento atualizado com sucesso.' : 'Filamento cadastrado com sucesso.')
     if (again) return reset()
     navigateTo('/filamentos')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Não foi possível salvar o filamento.')
   } finally {
     saving.value = false
   }
@@ -87,8 +91,8 @@ const cancel = () => {
         <div class="form-card">
           <h2 class="form-card__title"><UiIcon name="alert" />3. Estoque</h2>
           <div class="form-grid">
-            <div class="field col-4"><label>Estoque mínimo para alerta</label><input v-model.number="form.minStock" type="number"><small>O sistema avisará quando o filamento atingir esse peso.</small></div>
-            <div class="field col-4"><label>Status</label><select v-model="form.status"><option>Em estoque</option><option>Atenção</option><option>Baixo estoque</option><option>Esgotado</option></select></div>
+            <div class="field col-4" data-field="minStock" :class="{'field--error':errors.minStock}"><label>Estoque mínimo para alerta</label><input v-model.number="form.minStock" type="number" min="0"><small v-if="errors.minStock" class="field__error">{{errors.minStock}}</small><small v-else>O sistema avisará quando atingir este peso.</small></div>
+            <div class="field col-4"><label>Status automático</label><div class="stat-box"><strong>{{automaticStatus}}</strong></div><small>Calculado pelo saldo e estoque mínimo.</small></div>
           </div>
         </div>
         <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button v-if="!isEditing" class="btn" type="button" :disabled="saving" @click="save(true)">Salvar e adicionar outro</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alterações' : 'Salvar Filamento' }}</button></div>

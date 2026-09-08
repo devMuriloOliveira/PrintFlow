@@ -48,6 +48,7 @@ Variaveis principais:
 - `RATE_LIMIT_MAX_REQUESTS`: limite geral por janela.
 - `RATE_LIMIT_AUTH_MAX_REQUESTS`: limite para rotas de autenticacao.
 - `MAX_CONCURRENT_REQUESTS_PER_IP`: limite de concorrencia por IP.
+- `EXPENSE_RECURRING_INTERVAL_MS`: intervalo da geração automática de despesas recorrentes vencidas.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
 - `MERCADO_LIVRE_CLIENT_ID`: App ID privado da aplicacao Mercado Livre.

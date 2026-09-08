@@ -9,10 +9,12 @@ const grouping = ref<'day' | 'week' | 'month'>('month')
 const marketplaceFilter = ref('Todos')
 const productFilter = ref('Todos')
 const categoryFilter = ref('Todos')
+const channelFilter = ref('Todos')
 const history = ref<any[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
 const exportFormat = ref<'csv' | 'xlsx'>('xlsx')
+const exporting = ref(false)
 
 const parseDate = (value: unknown) => {
   const text = String(value || '')
@@ -32,13 +34,17 @@ const inPeriod = (value: unknown) => {
 }
 const filteredOrders = computed(() => orders.value.filter((order) => inPeriod(order.date)
   && (marketplaceFilter.value === 'Todos' || (order.marketplace || 'Sem marketplace') === marketplaceFilter.value)
-  && (productFilter.value === 'Todos' || order.product === productFilter.value)))
+  && (productFilter.value === 'Todos' || order.product === productFilter.value)
+  && (channelFilter.value === 'Todos' || (channelFilter.value === 'Diretas' ? order.salesChannel === 'direct' : order.salesChannel === 'marketplace'))))
 const filteredExpenses = computed(() => expenses.value.filter((expense) => inPeriod(expense.date)
   && (categoryFilter.value === 'Todos' || expense.category === categoryFilter.value)))
 const revenueTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.gross || 0), 0))
 const feeTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.fee || 0), 0))
 const shippingTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.shipping || 0), 0))
-const costTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.cost || 0), 0))
+const costTotal = computed(() => filteredOrders.value.reduce((sum, item) => {
+  const product = products.value.find(candidate => String(candidate.id || '') === String(item.productId || '') || candidate.name === item.product)
+  return sum + Number(product?.cost || 0) * Number(item.qty || 0)
+}, 0))
 const netTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.net || 0), 0))
 const expenseTotal = computed(() => filteredExpenses.value.reduce((sum, item) => sum + Number(item.value || 0), 0))
 const profitTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.profit || 0), 0) - expenseTotal.value)
@@ -48,9 +54,9 @@ const ticket = computed(() => filteredOrders.value.length ? revenueTotal.value /
 const periodKey = (value: unknown) => {
   const date = parseDate(value)
   if (!date) return ''
-  if (grouping.value === 'day') return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-  if (grouping.value === 'week') return `Sem ${Math.ceil(date.getDate() / 7)}/${date.getMonth() + 1}`
-  return date.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')
+  if (grouping.value === 'day') return date.toISOString().slice(0, 10)
+  if (grouping.value === 'week') return `${date.toISOString().slice(0, 7)}-S${Math.ceil(date.getDate() / 7)}`
+  return date.toISOString().slice(0, 7)
 }
 const chartRows = computed(() => {
   const rows = new Map<string, { revenue: number, net: number, expenses: number, profit: number }>()
@@ -98,22 +104,25 @@ const loadHistory = async () => {
 }
 onMounted(loadHistory)
 const exportReport = async () => {
+  if (periodStart.value > periodEnd.value || exporting.value) return notify('Informe um período válido para exportar.')
+  exporting.value = true
   try {
-    const content = await exportFinancialReport({ from: periodStart.value, to: periodEnd.value, marketplace: marketplaceFilter.value === 'Todos' ? '' : marketplaceFilter.value, product: productFilter.value === 'Todos' ? '' : productFilter.value, category: categoryFilter.value === 'Todos' ? '' : categoryFilter.value, format: exportFormat.value })
+    const content = await exportFinancialReport({ from: periodStart.value, to: periodEnd.value, marketplace: marketplaceFilter.value === 'Todos' ? '' : marketplaceFilter.value, product: productFilter.value === 'Todos' ? '' : productFilter.value, category: categoryFilter.value === 'Todos' ? '' : categoryFilter.value, channel: channelFilter.value === 'Todos' ? '' : channelFilter.value === 'Diretas' ? 'direct' : 'marketplace', format: exportFormat.value })
     const url = URL.createObjectURL(content); const link = document.createElement('a'); link.href = url; link.download = `printflow-relatorio-${periodStart.value}-${periodEnd.value}.${exportFormat.value}`; link.click(); URL.revokeObjectURL(url)
     notify('Relatorio exportado com sucesso.')
-  } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel exportar o relatorio.') }
+  } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel exportar o relatorio.') } finally { exporting.value = false }
 }
 </script>
 
 <template>
   <div>
-    <PageHeader title="Relatórios financeiros" subtitle="Visão detalhada de receita, custos, taxas, margem e evolução do negócio."><div style="display:flex;gap:8px"><select v-model="exportFormat" class="report-export-format"><option value="xlsx">XLSX</option><option value="csv">CSV</option></select><button class="btn" @click="exportReport"><UiIcon name="download"/>Exportar relatório</button></div></PageHeader>
+    <PageHeader title="Relatórios completos" subtitle="Centralize análises e exporte vendas, despesas, produtos, estoque, produção, clientes e conexões em um único arquivo."><div style="display:flex;gap:8px"><select v-model="exportFormat" class="report-export-format" aria-label="Formato da exportação"><option value="xlsx">XLSX</option><option value="csv">CSV</option></select><button class="btn" @click="exportReport"><UiIcon name="download"/>Exportar todos os relatórios</button></div></PageHeader>
     <div class="filters">
       <div class="field"><label>Início</label><input v-model="periodStart" type="date"></div>
       <div class="field"><label>Fim</label><input v-model="periodEnd" type="date"></div>
       <div class="field"><label>Agrupamento</label><select v-model="grouping"><option value="month">Mensal</option><option value="week">Semanal</option><option value="day">Diário</option></select></div>
       <div class="field"><label>Marketplace</label><select v-model="marketplaceFilter"><option v-for="item in marketplaceOptions" :key="item">{{ item }}</option></select></div>
+      <div class="field"><label>Canal de venda</label><select v-model="channelFilter"><option>Todos</option><option>Diretas</option><option>Marketplace</option></select></div>
       <div class="field"><label>Produto</label><select v-model="productFilter"><option v-for="item in productOptions" :key="item">{{ item }}</option></select></div>
       <div class="field"><label>Categoria de despesa</label><select v-model="categoryFilter"><option v-for="item in categoryOptions" :key="item">{{ item }}</option></select></div>
     </div>

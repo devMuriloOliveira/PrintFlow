@@ -1,8 +1,8 @@
 export type Order = {
   dbId?: string;
-  id: string; productId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
+  id: string; productId?: string; clientId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
   gross: number; fee: number; shipping: number; net: number; profit: number; status: string;
-  trackingCode?: string; packedAt?: string | null; shippedAt?: string | null; deliveredAt?: string | null; marketplaceOrder?: boolean
+  trackingCode?: string; packedAt?: string | null; shippedAt?: string | null; deliveredAt?: string | null; marketplaceOrder?: boolean; salesChannel?: 'direct' | 'marketplace'
 }
 
 export type PrintJob = {
@@ -32,13 +32,13 @@ export type Product = {
 export type Expense = {
   id?: string;
   description: string; category: string; supplier: string; value: number; date: string;
-  payment: string; recurrence: string; status: string
+  payment: string; recurrence: string; status: string; nextDueDate?: string; notes?: string
 }
 
 export type Filament = {
   id?: string;
   name: string; maker: string; material: string; type: string; color: string; colorHex: string;
-  initial: number; remaining: number; cost: number; supplier: string; date: string; status: string
+  initial: number; remaining: number; cost: number; supplier: string; date: string; status: string; minStock?: number
 }
 
 export type Printer = {
@@ -82,7 +82,7 @@ export type MarketplaceOrder = {
 
 export type Client = {
   id?: string;
-  name: string; email: string; phone: string; orders: number; revenue: number; ticket: number; last: string
+  name: string; email: string; phone: string; type?: string; document?: string; zip?: string; address?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; origin?: string; notes?: string; tags?: string; status?: string; orders: number; revenue: number; ticket: number; last: string
 }
 
 export type ChartSegment = {
@@ -91,7 +91,7 @@ export type ChartSegment = {
 
 export type Goal = {
   id?: string;
-  name: string; current: number; target: number; color: string; icon: string;
+  name: string; goalType?: string; current: number; target: number; color: string; icon: string;
   periodStart?: string; periodEnd?: string; status?: string
 }
 
@@ -337,6 +337,14 @@ export const useAppData = () => {
     return list
   }
 
+  const generateRecurringExpenses = async () => {
+    const response = await $fetch<{ generated: number; expenses: Expense[] }>(apiUrl('/api/expenses/recurring/generate'), {
+      method: 'POST', headers: resourceHeaders()
+    })
+    data.value.expenses = response.expenses
+    return response.generated
+  }
+
   const syncMarketplaceOrder = async (integrationId: string, externalOrderId: string) => {
     await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(integrationId)}/sync-order`), {
       method: 'POST', body: { externalOrderId }, headers: resourceHeaders()
@@ -423,7 +431,7 @@ export const useAppData = () => {
     error,
     refreshAppData: loadAppData,
     createProduct
-    , uploadProductPrintFile
+    , uploadProductPrintFile, generateRecurringExpenses
     , createMarketplaceIntegration
     , startMarketplaceOAuth
     , disconnectMarketplaceIntegration

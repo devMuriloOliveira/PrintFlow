@@ -5,6 +5,7 @@ import { startPrintFileStorageCleanup } from './jobs/printFileStorageCleanup.js'
 import { startPrintQueueWatchdog } from './jobs/printQueueWatchdog.js'
 import { startAgentHealthWatchdog } from './jobs/agentHealthWatchdog.js'
 import { startTenantDeletionPurge } from './jobs/tenantDeletionPurge.js'
+import { startExpenseRecurringGenerator } from './jobs/expenseRecurringGenerator.js'
 import { syncConfiguredPlatformSuperAdmins } from './services/platformAdmin.js'
 import { handleRequest } from './routes/index.js'
 
@@ -27,6 +28,7 @@ try {
   startPrintQueueWatchdog()
   startAgentHealthWatchdog()
   startTenantDeletionPurge()
+  startExpenseRecurringGenerator()
 
   server.listen(env.port, '0.0.0.0', () => {
     console.log(`PrintFlow API running at http://localhost:${env.port}`)

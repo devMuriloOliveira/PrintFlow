@@ -161,7 +161,9 @@ const resourceConfig = {
       expense_date: dateOrNull(item.date),
       payment: item.payment || '',
       recurrence: item.recurrence || 'Nao recorrente',
-      status: item.status || 'Pago'
+      status: item.status || 'Pago',
+      next_due_date: dateOrNull(item.nextDueDate),
+      notes: item.notes || ''
     })
   },
   filaments: {
@@ -175,6 +177,7 @@ const resourceConfig = {
       color_hex: item.colorHex || '#ccd3df',
       initial_weight: number(item.initial),
       remaining_weight: number(item.remaining),
+      min_stock_weight: Math.max(0, number(item.minStock) || 300),
       cost: number(item.cost),
       supplier: item.supplier || '',
       purchase_date: dateOrNull(item.date),
@@ -230,13 +233,28 @@ const resourceConfig = {
       name: encryptField(item.name),
       name_hash: blindIndex(item.name),
       email: encryptField(item.email || 'nao-informado'),
-      phone: encryptField(item.phone || 'nao-informado')
+      phone: encryptField(item.phone || 'nao-informado'),
+      client_type: item.type || item.clientType || 'Pessoa Fisica',
+      document: encryptField(item.document || ''),
+      document_hash: item.document ? blindIndex(item.document) : '',
+      zip: encryptField(item.zip || ''),
+      address: encryptField(item.address || ''),
+      address_number: encryptField(item.number || item.addressNumber || ''),
+      complement: encryptField(item.complement || ''),
+      district: encryptField(item.district || ''),
+      city: encryptField(item.city || ''),
+      state: encryptField(item.state || ''),
+      origin: item.origin || 'Outro',
+      notes: encryptField(item.notes || ''),
+      tags: item.tags || '',
+      status: item.status || 'active'
     })
   },
   goals: {
     table: 'goals',
     patch: (item) => ({
       name: item.name,
+      goal_type: item.goalType || 'revenue',
       current_value: number(item.current),
       target_value: number(item.target),
       color: item.color || '#1768f2',
@@ -264,6 +282,7 @@ const resourceConfig = {
       shipped_at: item.shippedAt || null,
       delivered_at: item.deliveredAt || null,
       status: item.status || 'Novo'
+      ,sales_channel: item.salesChannel || (String(item.marketplace || '').toLowerCase() === 'manual' ? 'direct' : 'marketplace')
     })
   },
   printJobs: {
@@ -304,8 +323,15 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
   const values = config.patch(item)
   const relatedCreated = []
   if (resource === 'orders') {
-    const clientReference = await findOrCreateClientId(client, tenantId, item.client)
-    const marketplaceReference = await findOrCreateMarketplaceId(client, tenantId, item.marketplace)
+    let clientReference = null
+    if (item.clientId) {
+      const selectedClient = await client.query('select id from clients where tenant_id = $1 and id = $2 limit 1', [tenantId, idOrNull(item.clientId)])
+      clientReference = selectedClient.rows[0] ? { id: selectedClient.rows[0].id, created: false } : null
+    } else {
+      clientReference = await findOrCreateClientId(client, tenantId, item.client)
+    }
+    const isDirect = values.sales_channel === 'direct'
+    const marketplaceReference = isDirect ? null : await findOrCreateMarketplaceId(client, tenantId, item.marketplace)
     values.client_id = clientReference?.id || null
     values.marketplace_id = marketplaceReference?.id || null
     if (clientReference?.created) relatedCreated.push({ resource: 'clients', id: clientReference.id })

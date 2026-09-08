@@ -73,6 +73,7 @@ export const env = {
   maxConcurrentRequestsPerIp: Number(process.env.MAX_CONCURRENT_REQUESTS_PER_IP || 25),
   tenantDeletionGraceDays: Number(process.env.TENANT_DELETION_GRACE_DAYS || 7),
   tenantDeletionPurgeIntervalMs: Number(process.env.TENANT_DELETION_PURGE_INTERVAL_MS || 60 * 60 * 1000),
+  expenseRecurringIntervalMs: Number(process.env.EXPENSE_RECURRING_INTERVAL_MS || 60 * 60 * 1000),
   printFileStorageDir: process.env.PRINT_FILE_STORAGE_DIR || resolve(currentDir, '../../storage/print-files'),
   printFileMaxBytes: Number(process.env.PRINT_FILE_MAX_BYTES || 250 * 1024 * 1024),
   printFileStorageMaxBytes: Number(process.env.PRINT_FILE_STORAGE_MAX_BYTES || 10 * 1024 * 1024 * 1024),

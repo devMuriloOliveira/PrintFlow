@@ -16,7 +16,7 @@ watchEffect(() => {
   if (!editId.value || hydrated.value) return
   const client = clients.value.find(item => item.id === editId.value)
   if (!client) return
-  Object.assign(form, { name: client.name, email: client.email, phone: client.phone })
+  Object.assign(form, { name: client.name, email: client.email, phone: client.phone, type: client.type || 'Pessoa Fisica', document: client.document || '', zip: client.zip || '', address: client.address || '', number: client.number || '', complement: client.complement || '', district: client.district || '', city: client.city || '', state: client.state || '', origin: client.origin || 'Outro', notes: client.notes || '', tags: client.tags || '' })
   hydrated.value = true
 })
 const validate = () => {
@@ -31,7 +31,7 @@ const save = async (again = false) => {
   if (!validate()) return
   if (saving.value) return
   saving.value = true
-  const payload = { id: editId.value, name: form.name, email: form.email || 'sem-email@printflow.local', phone: form.phone || '-', orders: 0, revenue: 0, ticket: 0, last: '-' }
+  const payload = { id: editId.value, name: form.name.trim(), email: form.email.trim() || 'sem-email@printflow.local', phone: form.phone.trim() || '-', type: form.type, document: form.document.trim(), zip: form.zip.trim(), address: form.address.trim(), number: form.number.trim(), complement: form.complement.trim(), district: form.district.trim(), city: form.city.trim(), state: form.state.trim().toUpperCase(), origin: form.origin, notes: form.notes.trim(), tags: form.tags.trim(), status: 'active', orders: 0, revenue: 0, ticket: 0, last: '-' }
   try {
     if (isEditing.value) await updateItem('clients', payload)
     else await createItem('clients', payload)

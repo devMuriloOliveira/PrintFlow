@@ -3,7 +3,7 @@ import { hasDatabase } from '../db/pool.js'
 import { getTenantId } from '../config/tenant.js'
 import { getAuthUser } from './auth.js'
 import { readJsonBody } from '../http/body.js'
-import { sendJson } from '../http/response.js'
+import { sendBuffer, sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
@@ -17,6 +17,7 @@ import {
   applyPrintFileMetadataToProduct,
   extractPrintFileMetadata
 } from '../services/printFileMetadata.js'
+import { generateDueRecurringExpenses } from '../repositories/expensesRepository.js'
 
 const readResource = (resource) => async (req) => {
   const tenantId = await getTenantId(req)
@@ -255,6 +256,13 @@ export const handleResourceDelete = async (req, res, resource, id) => {
   const tenantId = await getTenantId(req)
   const list = hasDatabase ? await deleteResource(tenantId, resource, id, await auditActor(req)) : deleteLocalResource(tenantId, resource, id)
   return sendJson(res, 200, list)
+}
+
+export const handleRecurringExpensesGenerate = async (req, res) => {
+  if (!hasDatabase) return sendJson(res, 501, { error: 'Recorrencias exigem banco de dados.' })
+  const tenantId = await getTenantId(req)
+  const generated = await generateDueRecurringExpenses(tenantId)
+  return sendJson(res, 200, { generated: generated.length, expenses: await listResource(tenantId, 'expenses') })
 }
 
 export const handleFilamentMovements = async (req, res, filamentId) => {

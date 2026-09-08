@@ -3,6 +3,7 @@ const { goals, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
+const goalProgress = (goal: any) => goal.target > 0 ? Math.min(100, Math.max(0, Number(goal.current || 0) / Number(goal.target) * 100)) : 0
 const editGoal = (goal: any) => {
   if (!goal.id) return
   router.push(`/metas/nova?id=${goal.id}`)

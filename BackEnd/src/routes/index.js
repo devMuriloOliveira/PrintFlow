@@ -30,6 +30,7 @@ import {
 import {
   handleProductCreate,
   handleProductPrintFileUpload,
+  handleRecurringExpensesGenerate,
   handleResourceCreate,
   handleResourceDelete,
   handleResourceRead,
@@ -1267,6 +1268,8 @@ export const handleRequest =
       if (filamentMovementsMatch && ['GET', 'POST'].includes(req.method)) {
         return await handleFilamentMovements(req, res, filamentMovementsMatch[1])
       }
+
+      if (req.method === 'POST' && url.pathname === '/api/expenses/recurring/generate') return await handleRecurringExpensesGenerate(req, res)
 
       const resourceMatch =
         url.pathname.match(

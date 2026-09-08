@@ -13,7 +13,12 @@ const editId = computed(() => typeof route.query.id === 'string' ? route.query.i
 const isEditing = computed(() => Boolean(editId.value))
 const hydrated = ref(false)
 const selected = computed(() => goalTypes.find(x => x.name === form.type) || goalTypes[0])
-const progress = computed(() => 0)
+const goalTypeKey = computed(() => ({ trend: 'revenue', money: 'profit', bag: 'orders', tag: 'average_ticket', receipt: 'expense_reduction' }[selected.value.icon] || 'revenue'))
+const progress = computed(() => {
+  const current = goals.value.find(item => item.id === editId.value)?.current || 0
+  return form.target > 0 ? Math.min(100, Math.max(0, Number((current / form.target * 100).toFixed(1)))) : 0
+})
+const remainingDays = computed(() => form.end ? Math.max(0, Math.ceil((new Date(`${form.end}T23:59:59`).getTime() - Date.now()) / 86400000)) : 0)
 const formatted = (value: number) => selected.value.format === 'currency' ? formatCurrency(value) : selected.value.format === 'percent' ? `${value}%` : formatNumber(value)
 watchEffect(() => {
   if (!editId.value || hydrated.value) return
@@ -29,6 +34,7 @@ const validate = () => {
   if (!form.target || form.target <= 0) errors.target = 'Informe o valor desejado.'
   if (!form.start) errors.start = 'Informe a data inicial.'
   if (!form.end) errors.end = 'Informe a data final.'
+  if (form.start && form.end && form.end < form.start) errors.end = 'A data final deve ser posterior à inicial.'
   const first = Object.keys(errors)[0]
   if (first) nextTick(() => document.querySelector(`[data-field="${first}"] input`)?.focus())
   return !first
@@ -38,7 +44,7 @@ const save = async () => {
   if (saving.value) return
   saving.value = true
   try {
-    const payload = { id: editId.value, name: form.name, current: goals.value.find(item => item.id === editId.value)?.current || 0, target: form.target, color: selected.value.color, icon: selected.value.icon, periodStart: form.start, periodEnd: form.end, status: 'Ativa' }
+    const payload = { id: editId.value, name: form.name.trim(), goalType: goalTypeKey.value, current: goals.value.find(item => item.id === editId.value)?.current || 0, target: form.target, color: selected.value.color, icon: selected.value.icon, periodStart: form.start, periodEnd: form.end, status: 'Ativa' }
     if (isEditing.value) await updateItem('goals', payload)
     else await createItem('goals', payload)
     notify(isEditing.value ? 'Meta atualizada com sucesso.' : 'Meta cadastrada com sucesso.')
@@ -64,7 +70,7 @@ const cancel = () => {
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="chart" />4. Comparação</h2><div class="form-grid"><div class="field col-5"><label>Comparar com período anterior</label><div class="switch-row"><span>{{form.compare ? 'Ativado' : 'Desativado'}}</span><button type="button" class="switch" :class="{active:form.compare}" @click="form.compare=!form.compare" /></div></div><div v-if="form.compare" class="field col-4"><label>Valor período anterior</label><input v-model.number="form.previous" type="number" step=".01"></div></div></div>
         <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alterações' : 'Criar Meta' }}</button></div>
       </form>
-      <aside class="detail-card"><div class="detail-card__head"><span class="metric-card__icon" :style="{color:selected.color}"><UiIcon :name="selected.icon" /></span><div><h3>Meta de {{form.type}}</h3><p>{{form.name || 'Nome da meta'}}</p></div></div><div class="detail-card__body"><div style="display:flex;justify-content:space-between;margin-bottom:9px"><strong>{{formatted(0)}}</strong><span style="color:var(--muted)">de {{formatted(form.target)}}</span></div><div class="progress"><span :style="{width:`${progress}%`,background:selected.color}" /></div><small style="display:block;color:var(--muted);margin-top:8px">{{progress}}% concluído</small><div class="summary-box"><div class="detail-list__row"><span>Período</span><strong>{{form.start || '-'}} - {{form.end || '-'}}</strong></div><div class="detail-list__row"><span>Dias restantes</span><strong>31 dias</strong></div></div><div class="info-note" style="margin-top:12px"><UiIcon name="info" :size="18" />O progresso será atualizado automaticamente conforme novas vendas forem registradas.</div></div></aside>
+      <aside class="detail-card"><div class="detail-card__head"><span class="metric-card__icon" :style="{color:selected.color}"><UiIcon :name="selected.icon" /></span><div><h3>Meta de {{form.type}}</h3><p>{{form.name || 'Nome da meta'}}</p></div></div><div class="detail-card__body"><div style="display:flex;justify-content:space-between;margin-bottom:9px"><strong>{{formatted(goals.find(item => item.id === editId)?.current || 0)}}</strong><span style="color:var(--muted)">de {{formatted(form.target)}}</span></div><div class="progress"><span :style="{width:`${progress}%`,background:selected.color}" /></div><small style="display:block;color:var(--muted);margin-top:8px">{{progress}}% concluído</small><div class="summary-box"><div class="detail-list__row"><span>Período</span><strong>{{form.start || '-'}} - {{form.end || '-'}}</strong></div><div class="detail-list__row"><span>Dias restantes</span><strong>{{remainingDays}} dias</strong></div></div><div class="info-note" style="margin-top:12px"><UiIcon name="info" :size="18" />O progresso será atualizado automaticamente conforme novas vendas forem registradas.</div></div></aside>
     </div>
   </div>
 </template>

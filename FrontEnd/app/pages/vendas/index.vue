@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, orders, printers, printJobs, createItem, updateItem, deleteItem } = useAppData()
+const { products, orders, printers, printJobs, clients, createItem, updateItem, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -11,6 +11,7 @@ const selectedMetric = ref<'gross' | 'net' | 'profit' | 'orders'>('gross')
 const chartPeriod = ref<'week' | 'month' | 'year'>('month')
 const manualQuantities = reactive<Record<string, number>>({})
 const savingProduct = reactive<Record<string, boolean>>({})
+const manualClientId = ref('')
 const assigningPrinter = reactive<Record<string, boolean>>({})
 const selectedOrderId = ref('')
 const orderStages = ['Novo', 'Producao', 'Impresso', 'Embalando', 'Enviado', 'Entregue']
@@ -158,8 +159,10 @@ const saveManualQuantity = async (product: any, rawQty: number) => {
       dbId: existing?.dbId,
       productId: product.id,
       date,
-      client: 'Venda manual',
-      marketplace: 'Manual',
+      clientId: manualClientId.value || undefined,
+      client: clients.value.find(client => client.id === manualClientId.value)?.name || 'Venda manual',
+      marketplace: '',
+      salesChannel: 'direct',
       product: product.name,
       qty,
       gross,
@@ -272,6 +275,7 @@ const marketplaceBars = computed(() => {
       <LineChart :values="detailedChart.values" :labels="detailedChart.labels" :color="selectedDetail.color" />
     </PanelCard>
     <PanelCard title="Registrar vendas por produto" subtitle="Informe rapidamente as unidades vendidas hoje para cada produto cadastrado.">
+      <div class="field" style="max-width:520px;margin-bottom:16px"><label>Cliente da venda direta</label><select v-model="manualClientId"><option value="">Venda avulsa / cliente não cadastrado</option><option v-for="client in clients.filter(c => c.status !== 'inactive')" :key="client.id" :value="client.id">{{ client.name }}{{ client.phone ? ` · ${client.phone}` : '' }}</option></select><small>Use um cliente para vincular histórico e ticket da venda P2P.</small></div>
       <div v-if="!products.length" class="empty-state">
         <div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado.</h3><p>Cadastre seu primeiro produto para registrar vendas por quantidade.</p><NuxtLink class="btn btn--primary" to="/produtos/novo">Cadastrar Produto</NuxtLink></div>
       </div>

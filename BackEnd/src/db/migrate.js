@@ -836,6 +836,27 @@ export const migrate =
       `
     )
 
+    for (const column of [
+      "client_type text not null default 'Pessoa Fisica'",
+      "document text not null default ''",
+      "document_hash text",
+      "zip text not null default ''",
+      "address text not null default ''",
+      "address_number text not null default ''",
+      "complement text not null default ''",
+      "district text not null default ''",
+      "city text not null default ''",
+      "state text not null default ''",
+      "origin text not null default 'Outro'",
+      "notes text not null default ''",
+      "tags text not null default ''",
+      "status text not null default 'active'"
+    ]) {
+      await query(`alter table clients add column if not exists ${column}`)
+    }
+
+    await query(`create index if not exists clients_tenant_document_hash_idx on clients (tenant_id, document_hash)`)
+
     await query(
       `
         create index if not exists
@@ -1577,6 +1598,16 @@ export const migrate =
           next_due_date
             date,
 
+          notes
+            text
+            not null
+            default '',
+
+          recurrence_parent_id
+            bigint
+            references expenses(id)
+            on delete set null,
+
           created_at
             timestamptz
             not null
@@ -1584,6 +1615,10 @@ export const migrate =
         )
       `
     )
+
+    await query(`alter table expenses add column if not exists notes text not null default ''`)
+    await query(`alter table expenses add column if not exists recurrence_parent_id bigint references expenses(id) on delete set null`)
+    await query(`create unique index if not exists expenses_recurrence_once_idx on expenses (tenant_id, recurrence_parent_id, expense_date) where recurrence_parent_id is not null`)
 
     // ==================================================
     // FILAMENTS
@@ -1638,6 +1673,11 @@ export const migrate =
             numeric(12,2)
             not null
             default 0,
+
+          min_stock_weight
+            numeric(12,2)
+            not null
+            default 300,
 
           cost
             numeric(12,2)
@@ -2415,12 +2455,17 @@ export const migrate =
       "delivery_tracking_code text not null default ''",
       'packed_at timestamptz',
       'shipped_at timestamptz',
-      'delivered_at timestamptz'
+      'delivered_at timestamptz',
+      "sales_channel text not null default 'marketplace'"
     ]) {
       await query(`alter table orders add column if not exists ${column}`)
     }
 
+    await query(`update orders o set sales_channel = 'direct' from marketplaces m where o.marketplace_id = m.id and o.tenant_id = m.tenant_id and lower(m.name) = 'manual' and o.sales_channel = 'marketplace'`)
+
     await query(`alter table company_settings add column if not exists preferences jsonb not null default '{}'::jsonb`)
+
+    await query(`alter table goals add column if not exists goal_type text not null default 'revenue'`)
 
     await query(`create table if not exists tenant_audit_requests (
       id text primary key, tenant_id text not null references tenants(id) on delete cascade,
@@ -2536,6 +2581,8 @@ export const migrate =
     await query(`alter table calculator_simulations add column if not exists created_by text`)
     await query(`alter table calculator_simulations add column if not exists snapshot jsonb not null default '{}'::jsonb`)
     await query(`create index if not exists calculator_simulations_lookup_idx on calculator_simulations (tenant_id, created_at desc)`)
+
+    await query(`alter table filaments add column if not exists min_stock_weight numeric(12,2) not null default 300`)
 
     // ==================================================
     // EXPORT HISTORY

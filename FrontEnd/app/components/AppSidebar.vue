@@ -16,7 +16,6 @@ const items = [
   { label: 'Clientes', to: '/clientes', icon: 'users' },
   { label: 'Relatórios', to: '/relatorios', icon: 'chart' },
   { label: 'Metas', to: '/metas', icon: 'target' },
-  { label: 'Exportações', to: '/exportacoes', icon: 'download' },
   { label: 'Calculadora 3D', to: '/calculadora-3d', icon: 'calculator' },
   { label: 'Configurações', to: '/configuracoes', icon: 'settings' }
 ]

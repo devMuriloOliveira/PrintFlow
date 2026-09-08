@@ -11,7 +11,7 @@ export const createFilamentMovement = async (tenantId, filamentId, payload, audi
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('A quantidade deve ser maior que zero')
   if (!reason) throw new Error('Informe o motivo da movimentacao')
 
-  const current = await client.query('select id, remaining_weight from filaments where tenant_id = $1 and id = $2 for update', [tenantId, filamentId])
+  const current = await client.query('select id, remaining_weight, min_stock_weight from filaments where tenant_id = $1 and id = $2 for update', [tenantId, filamentId])
   if (!current.rowCount) throw new Error('Registro nao encontrado')
   const previousWeight = Number(current.rows[0].remaining_weight || 0)
   const resultingWeight = type === 'in' ? previousWeight + quantity : type === 'out' ? previousWeight - quantity : quantity
@@ -19,7 +19,7 @@ export const createFilamentMovement = async (tenantId, filamentId, payload, audi
 
   const updated = await client.query(
     `update filaments set remaining_weight = $3,
-       status = case when $3 = 0 then 'Esgotado' when $3 < 300 then 'Baixo estoque' else 'Em estoque' end,
+       status = case when $3 = 0 then 'Esgotado' when $3 <= min_stock_weight then 'Baixo estoque' else 'Em estoque' end,
        updated_at = now() where tenant_id = $1 and id = $2 returning status`,
     [tenantId, filamentId, resultingWeight]
   )
