@@ -2,7 +2,7 @@ export type Order = {
   dbId?: string;
   id: string; productId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
   gross: number; fee: number; shipping: number; net: number; profit: number; status: string;
-  trackingCode?: string; packedAt?: string | null; shippedAt?: string | null; deliveredAt?: string | null
+  trackingCode?: string; packedAt?: string | null; shippedAt?: string | null; deliveredAt?: string | null; marketplaceOrder?: boolean
 }
 
 export type PrintJob = {

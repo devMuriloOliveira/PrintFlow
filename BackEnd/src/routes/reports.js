@@ -10,14 +10,35 @@ const filenameDate = () => new Date().toISOString().slice(0, 19).replace(/[T:]/g
 
 const loadReport = async (tenantId, filters) => withTenant(tenantId, async (client) => {
   const ordersParams = [tenantId, filters.from, filters.to]
-  const orderWhere = ['o.tenant_id = $1', 'o.order_date >= $2', 'o.order_date <= $3']
-  if (filters.marketplace) { ordersParams.push(filters.marketplace); orderWhere.push(`coalesce(m.name, 'Sem marketplace') = $${ordersParams.length}`) }
-  if (filters.product) { ordersParams.push(filters.product); orderWhere.push(`o.product_name = $${ordersParams.length}`) }
+  const orderWhere = ['sr.tenant_id = $1', 'sr.order_date >= $2', "sr.order_date < ($3::date + interval '1 day')"]
+  if (filters.marketplace) { ordersParams.push(filters.marketplace); orderWhere.push(`sr.marketplace = $${ordersParams.length}`) }
+  if (filters.product) { ordersParams.push(filters.product); orderWhere.push(`sr.product = $${ordersParams.length}`) }
   const expensesParams = [tenantId, filters.from, filters.to]
   const expenseWhere = ['e.tenant_id = $1', 'e.expense_date >= $2', 'e.expense_date <= $3']
   if (filters.category) { expensesParams.push(filters.category); expenseWhere.push(`e.category = $${expensesParams.length}`) }
   const [orders, expenses, products] = await Promise.all([
-    client.query(`select to_char(o.order_date, 'YYYY-MM-DD') as date, coalesce(m.name, 'Sem marketplace') as marketplace, o.product_name as product, o.quantity, o.gross, o.fee, o.shipping, o.net, o.profit from orders o left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id where ${orderWhere.join(' and ')} order by o.order_date, o.id`, ordersParams),
+    client.query(`
+      with sales_rows as (
+        select o.tenant_id, o.id, o.order_date, coalesce(m.name, 'Sem marketplace') as marketplace,
+          o.product_name as product, o.quantity, o.gross, o.fee, o.shipping, o.net, o.profit
+        from orders o
+        left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
+        where o.tenant_id = $1
+
+        union all
+
+        select s.tenant_id, s.id, s.sold_at as order_date, coalesce(m.name, s.platform) as marketplace,
+          s.product_name as product, s.quantity, s.gross, s.marketplace_fee as fee, s.shipping, s.net, s.profit
+        from tracked_sales s
+        left join marketplaces m on m.id = s.marketplace_id and m.tenant_id = s.tenant_id
+        where s.tenant_id = $1
+      )
+      select to_char(sr.order_date, 'YYYY-MM-DD') as date, sr.marketplace, sr.product, sr.quantity,
+        sr.gross, sr.fee, sr.shipping, sr.net, sr.profit
+      from sales_rows sr
+      where ${orderWhere.join(' and ')}
+      order by sr.order_date, sr.id
+    `, ordersParams),
     client.query(`select to_char(e.expense_date, 'YYYY-MM-DD') as date, e.description, e.category, e.supplier, e.amount, e.status from expenses e where ${expenseWhere.join(' and ')} order by e.expense_date, e.id`, expensesParams),
     client.query(`select name, sku, category, price, cost, profit, margin from products where tenant_id = $1 order by name`, [tenantId])
   ])
