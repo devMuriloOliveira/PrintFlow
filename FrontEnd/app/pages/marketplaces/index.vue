@@ -1,13 +1,16 @@
 <script setup lang="ts">
-const { marketplaces, products, marketplaceOrders, deleteItem, refreshMarketplaceOrders, linkMarketplaceOrderProduct } = useAppData()
+const { marketplaces, marketplaceIntegrations, products, marketplaceOrders, deleteItem, updateItem, refreshMarketplaceOrders, linkMarketplaceOrderProduct, startMarketplaceOAuth } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
+const route = useRoute()
 const saleValue = ref(100)
 const selectedName = ref('Shopee')
 const marketplaceFilter = ref('Todos os canais')
 const marketplaceSearch = ref('')
 const linkingOrderId = ref('')
+const changingMarketplaceId = ref('')
+const oauthLoading = ref(false)
 const selectedProductByOrder = reactive<Record<string, string>>({})
 const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
 const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
@@ -20,14 +23,46 @@ const clearMarketplaceFilters = () => { marketplaceFilter.value = 'Todos os cana
 const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
 const pendingMarketplaceOrders = computed(() => marketplaceOrders.value.filter((order: any) => !['completed', 'cancelled', 'canceled', 'refunded'].includes(String(order.printJobStatus || order.status || '').toLowerCase())))
+const marketplaceConnections = computed(() => marketplaceIntegrations.value.filter((integration: any) => integration.platform === 'mercado_livre'))
 const editMarketplace = (marketplace: any) => {
   if (!marketplace.id) return
   router.push(`/marketplaces/novo?id=${marketplace.id}`)
 }
 const removeMarketplace = async (marketplace: any) => {
   if (!marketplace.id || !window.confirm(`Excluir marketplace?\n\n${marketplace.name}\n\nEsta ação não poderá ser desfeita.`)) return
-  await deleteItem('marketplaces', marketplace.id)
-  notify('Marketplace excluído com sucesso.')
+  changingMarketplaceId.value = marketplace.id
+  try {
+    await deleteItem('marketplaces', marketplace.id)
+    notify('Marketplace excluído com sucesso.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível excluir o marketplace.', 'info')
+  } finally {
+    changingMarketplaceId.value = ''
+  }
+}
+const toggleMarketplace = async (marketplace: any) => {
+  if (!marketplace.id || changingMarketplaceId.value) return
+  changingMarketplaceId.value = marketplace.id
+  try {
+    await updateItem('marketplaces', { ...marketplace, active: !marketplace.active })
+    notify(marketplace.active ? 'Marketplace desativado.' : 'Marketplace ativado.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível atualizar o status do marketplace.', 'info')
+  } finally {
+    changingMarketplaceId.value = ''
+  }
+}
+const connectAnotherMercadoLivreAccount = async () => {
+  if (oauthLoading.value) return
+  const confirmed = window.confirm('Conectar outra conta do Mercado Livre?\n\nNa próxima página, entre com a conta principal que deseja adicionar. Se autorizar a mesma conta, a conexão existente será atualizada.')
+  if (!confirmed) return
+  oauthLoading.value = true
+  try {
+    window.location.href = await startMarketplaceOAuth('mercado_livre')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível iniciar a autorização do Mercado Livre.', 'info')
+    oauthLoading.value = false
+  }
 }
 const marketplaceOrderLabel = (order: any) => {
   if (order.printJobStatus === 'awaiting_confirmation') return 'Aguardando confirmação'
@@ -56,12 +91,16 @@ const linkOrderProduct = async (order: any) => {
 }
 onMounted(() => {
   void refreshMarketplaceOrders().catch(() => {})
+  if (route.query.oauth === 'connected' && route.query.platform === 'mercado_livre') {
+    notify('Conta do Mercado Livre conectada com sucesso.')
+    void router.replace({ query: {} })
+  }
 })
 </script>
 
 <template>
   <div>
-    <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Novo Marketplace</a></PageHeader>
+    <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><div style="display:flex;gap:8px"><button type="button" class="btn" :disabled="oauthLoading" @click="connectAnotherMercadoLivreAccount"><UiIcon name="plus" />{{ oauthLoading ? 'Abrindo...' : 'Conectar conta ML' }}</button><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Novo Marketplace</a></div></PageHeader>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <div>
         <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" :points="marketplaces.map(marketplace => marketplace.active ? 1 : 0)" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" :points="marketplaces.map(marketplace => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0))" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" :points="marketplaces.map(marketplace => Number(marketplace.net || 0))" /><MetricCard label="Maior Taxa" :value="metrics.percent((metrics.highestFeeMarketplace.value?.commission || 0) + (metrics.highestFeeMarketplace.value?.financial || 0) + (metrics.highestFeeMarketplace.value?.ads || 0) + (metrics.highestFeeMarketplace.value?.others || 0))" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" :points="marketplaces.map(marketplace => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0))" /></div>
@@ -82,13 +121,17 @@ onMounted(() => {
                   <td>{{formatCurrency(m.gross)}}</td>
                   <td class="money-positive">{{formatCurrency(m.net)}}</td>
                   <td>{{m.orders}}</td>
-                  <td><button class="switch" :class="{active:m.active}" /></td>
-                  <td><button class="row-action" title="Excluir marketplace" @click.stop="removeMarketplace(m)"><UiIcon name="close" :size="16" /></button></td>
+                  <td><button class="switch" :class="{active:m.active}" :disabled="changingMarketplaceId === m.id" :title="m.active ? 'Desativar marketplace' : 'Ativar marketplace'" @click.stop="toggleMarketplace(m)" /></td>
+                  <td><button class="row-action" :disabled="changingMarketplaceId === m.id" title="Excluir marketplace" @click.stop="removeMarketplace(m)"><UiIcon name="close" :size="16" /></button></td>
                 </tr>
               </tbody>
             </table>
           </div>
           <div class="table-footer"><span>Exibindo {{ filteredMarketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
+        </PanelCard>
+        <PanelCard title="Contas conectadas do Mercado Livre" subtitle="Cada conta OAuth recebe pedidos separadamente; as taxas permanecem configuradas no canal Mercado Livre." style="margin-top:12px">
+          <div v-for="integration in marketplaceConnections" :key="integration.id" class="detail-list__row"><span><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }}</small></span><span class="badge" :class="integration.status === 'connected' ? 'badge--green' : 'badge--gray'">{{ integration.status === 'connected' ? 'Conectada' : integration.status }}</span></div>
+          <div v-if="!marketplaceConnections.length" style="color:var(--muted);font-size:11px">Nenhuma conta OAuth conectada ainda.</div>
         </PanelCard>
       </div>
       <aside>

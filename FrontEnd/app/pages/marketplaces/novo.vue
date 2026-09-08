@@ -12,6 +12,8 @@ const saleValue = ref(100)
 const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const isEditing = computed(() => Boolean(editId.value))
 const hydrated = ref(false)
+const connectionMode = ref<'oauth' | 'manual'>('oauth')
+const persistedConnectionStatus = ref('manual')
 
 const platforms = [
   { id: 'mercado_livre', name: 'Mercado Livre', short: 'ML', color: '#ffe600', webhook: '/webhooks/mercadolivre', commission: 16, fixed: 5, financial: 0, ads: 3 },
@@ -41,9 +43,9 @@ const form = reactive({
 })
 
 const selectedPlatform = computed(() => platforms.find((item) => item.id === form.platform) || platforms[0])
-const requiresToken = computed(() => form.platform !== 'custom' && !isEditing.value)
+const requiresManualCredentials = computed(() => form.platform !== 'custom' && connectionMode.value === 'manual' && !isEditing.value)
 const webhookUrl = computed(() => selectedPlatform.value.webhook ? `${apiBase}${selectedPlatform.value.webhook}` : '')
-const connectionStatus = computed(() => form.platform === 'custom' ? 'manual' : 'connected')
+const connectionStatus = computed(() => form.platform === 'custom' ? 'manual' : persistedConnectionStatus.value)
 const fees = computed(() => ({
   commission: saleValue.value * form.commission / 100,
   fixed: form.fixed,
@@ -64,6 +66,7 @@ watch(() => form.platform, (platformId) => {
   form.fixed = platform.fixed
   form.financial = platform.financial
   form.ads = platform.ads
+  connectionMode.value = platformId === 'custom' ? 'manual' : 'oauth'
 })
 
 watchEffect(() => {
@@ -71,14 +74,15 @@ watchEffect(() => {
   const item = marketplaces.value.find(marketplace => marketplace.id === editId.value)
   if (!item) return
   Object.assign(form, { platform: item.platform || 'custom', name: item.name, short: item.short, color: item.color, active: item.active, commission: item.commission, fixed: item.fixed, financial: item.financial, ads: item.ads, others: item.others })
+  persistedConnectionStatus.value = item.connectionStatus || 'manual'
   hydrated.value = true
 })
 
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
   if (!form.name.trim()) errors.name = 'Informe o nome do canal.'
-  if (requiresToken.value && !form.accountExternalId.trim()) errors.accountExternalId = 'Informe o ID da conta externa.'
-  if (requiresToken.value && !form.accessToken.trim()) errors.accessToken = 'Informe o access token da integração.'
+  if (requiresManualCredentials.value && !form.accountExternalId.trim()) errors.accountExternalId = 'Informe o ID da conta externa.'
+  if (requiresManualCredentials.value && !form.accessToken.trim()) errors.accessToken = 'Informe o access token da integração.'
   if (form.commission < 0) errors.commission = 'Informe uma comissão válida.'
   if (!form.startDate.trim()) errors.startDate = 'Informe a data de início.'
   const first = Object.keys(errors)[0]
@@ -125,7 +129,7 @@ const save = async () => {
     if (isEditing.value) await updateItem('marketplaces', payload)
     else await createItem('marketplaces', payload)
 
-    if (!isEditing.value && requiresToken.value) {
+    if (!isEditing.value && requiresManualCredentials.value) {
       await createMarketplaceIntegration({
         platform: form.platform,
         marketplaceName: form.name,
@@ -138,7 +142,7 @@ const save = async () => {
       })
     }
 
-    notify(isEditing.value ? 'Marketplace atualizado com sucesso.' : requiresToken.value ? 'Marketplace conectado com sucesso.' : 'Marketplace cadastrado com sucesso.')
+    notify(isEditing.value ? 'Marketplace atualizado com sucesso.' : requiresManualCredentials.value ? 'Marketplace conectado com sucesso.' : 'Marketplace cadastrado com sucesso.')
     navigateTo('/marketplaces')
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível salvar o marketplace.', 'info')
@@ -171,13 +175,13 @@ const cancel = () => {
           <div class="field col-3"><label>Status</label><select v-model="form.active"><option :value="true">Ativo</option><option :value="false">Inativo</option></select></div>
         </div></div>
 
-        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais e webhook</h2><div v-if="form.platform !== 'custom'" class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />Use OAuth oficial quando as credenciais do servidor estiverem configuradas. Os campos manuais continuam disponíveis para teste local.</div><button v-if="form.platform !== 'custom'" type="button" class="btn btn--primary" style="margin-bottom:12px" :disabled="oauthLoading" @click="connectOfficialOAuth">{{ oauthLoading ? 'Abrindo...' : 'Conectar com OAuth oficial' }}</button><div class="form-grid">
-          <div v-if="requiresToken" class="field col-4" data-field="accountExternalId" :class="{'field--error':errors.accountExternalId}"><label>ID da conta externa *</label><input v-model="form.accountExternalId" :placeholder="form.platform==='shopee'?'Shop ID':'Seller/User ID'"><small v-if="errors.accountExternalId" class="field__error">{{errors.accountExternalId}}</small></div>
-          <div class="field col-4"><label>Nome da conexão</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
-          <div v-if="requiresToken" class="field col-4"><label>Expira em</label><input v-model="form.tokenExpiresAt" type="datetime-local"></div>
-          <div v-if="requiresToken" class="field col-6" data-field="accessToken" :class="{'field--error':errors.accessToken}"><label>Access token *</label><input v-model="form.accessToken" type="password" autocomplete="off" placeholder="Obrigatório e criptografado"><small v-if="errors.accessToken" class="field__error">{{errors.accessToken}}</small></div>
-          <div v-if="requiresToken" class="field col-6"><label>Refresh token</label><input v-model="form.refreshToken" type="password" autocomplete="off" placeholder="Opcional e criptografado"></div>
-          <div v-if="requiresToken" class="field col-12"><label>Escopos/permissões</label><input v-model="form.scopes" placeholder="orders.read, finances.read"></div>
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais e webhook</h2><template v-if="form.platform !== 'custom'"><div class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />O OAuth identifica automaticamente a conta vendedora e guarda os tokens de forma criptografada. Para adicionar outra conta, entre no Mercado Livre com a outra conta principal antes de autorizar.</div><div class="form-actions" style="justify-content:flex-start;margin:0 0 12px"><button type="button" class="btn btn--primary" :disabled="oauthLoading" @click="connectOfficialOAuth">{{ oauthLoading ? 'Abrindo...' : 'Conectar outra conta com OAuth oficial' }}</button><button type="button" class="btn" :class="{ 'btn--primary': connectionMode === 'manual' }" @click="connectionMode = connectionMode === 'manual' ? 'oauth' : 'manual'">{{ connectionMode === 'manual' ? 'Usar OAuth oficial' : 'Configuração manual' }}</button></div></template><div v-if="requiresManualCredentials" class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />Use somente se você recebeu credenciais do serviço. O ID externo é o Seller/User ID e permite diferenciar contas da mesma empresa.</div><div class="form-grid">
+          <div v-if="requiresManualCredentials" class="field col-4" data-field="accountExternalId" :class="{'field--error':errors.accountExternalId}"><label>ID da conta externa *</label><input v-model="form.accountExternalId" :placeholder="form.platform==='shopee'?'Shop ID':'Seller/User ID'"><small v-if="errors.accountExternalId" class="field__error">{{errors.accountExternalId}}</small></div>
+          <div v-if="requiresManualCredentials" class="field col-4"><label>Nome da conexão</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
+          <div v-if="requiresManualCredentials" class="field col-4"><label>Expira em</label><input v-model="form.tokenExpiresAt" type="datetime-local"></div>
+          <div v-if="requiresManualCredentials" class="field col-6" data-field="accessToken" :class="{'field--error':errors.accessToken}"><label>Access token *</label><input v-model="form.accessToken" type="password" autocomplete="off" placeholder="Obrigatório e criptografado"><small v-if="errors.accessToken" class="field__error">{{errors.accessToken}}</small></div>
+          <div v-if="requiresManualCredentials" class="field col-6"><label>Refresh token</label><input v-model="form.refreshToken" type="password" autocomplete="off" placeholder="Opcional e criptografado"></div>
+          <div v-if="requiresManualCredentials" class="field col-12"><label>Escopos/permissões</label><input v-model="form.scopes" placeholder="orders.read, finances.read"></div>
           <div v-if="webhookUrl" class="field col-12"><label>URL do webhook para configurar no serviço</label><div class="copy-field"><input :value="webhookUrl" readonly><button class="btn" type="button" @click="copyWebhook"><UiIcon name="download" :size="15"/>Copiar</button></div></div>
         </div></div>
 
