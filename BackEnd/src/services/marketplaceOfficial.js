@@ -28,6 +28,7 @@ const optionalJsonFetch = async (url, options = {}) => {
 
 const shipmentSellerCost = (shipment) => {
   const candidates = [
+    shipment?.senders?.[0]?.cost,
     shipment?.seller?.cost,
     shipment?.costs?.seller?.cost,
     shipment?.costs?.senders?.[0]?.cost,
@@ -280,9 +281,14 @@ export const fetchMarketplaceOrderDetails = async (integration, externalOrderId)
     })
     const sale = normalizeMarketplaceOrder('mercado_livre', order)
     const shippingId = sale.feeBreakdown?.shippingId
-    const [shipment, discounts] = await Promise.all([
+    const [shipment, shipmentCosts, discounts] = await Promise.all([
       shippingId
         ? optionalJsonFetch(`https://api.mercadolibre.com/shipments/${encodeURIComponent(shippingId)}`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        })
+        : null,
+      shippingId
+        ? optionalJsonFetch(`https://api.mercadolibre.com/shipments/${encodeURIComponent(shippingId)}/costs`, {
           headers: { Authorization: `Bearer ${accessToken}` }
         })
         : null,
@@ -290,7 +296,7 @@ export const fetchMarketplaceOrderDetails = async (integration, externalOrderId)
         headers: { Authorization: `Bearer ${accessToken}` }
       })
     ])
-    const sellerShipping = shipmentSellerCost(shipment)
+    const sellerShipping = shipmentSellerCost(shipmentCosts) ?? shipmentSellerCost(shipment)
     const shipping = sellerShipping === undefined ? sale.shipping : Number(sellerShipping)
     return {
       ...sale,
@@ -298,7 +304,7 @@ export const fetchMarketplaceOrderDetails = async (integration, externalOrderId)
       feeBreakdown: {
         ...sale.feeBreakdown,
         shipping,
-        shippingSource: sellerShipping === undefined ? 'order' : 'mercadolivre.shipments',
+        shippingSource: sellerShipping === undefined ? 'order' : shipmentCosts ? 'mercadolivre.shipments.costs' : 'mercadolivre.shipments',
         discounts: discounts || sale.feeBreakdown?.discounts || null
       }
     }

@@ -99,6 +99,8 @@ test('normaliza taxas detalhadas do pedido Mercado Livre', () => {
   })
 
   assert.equal(sale.marketplaceFee, 23.48)
+  assert.equal(sale.feeBreakdown.commission, 23.48)
+  assert.equal(sale.feeBreakdown.commissionSource, 'mercadolivre.orders.order_items')
   assert.equal(sale.shipping, 8.5)
   assert.equal(sale.feeBreakdown.source, 'mercadolivre.orders')
   assert.equal(sale.feeBreakdown.shippingId, 'shipment-1')

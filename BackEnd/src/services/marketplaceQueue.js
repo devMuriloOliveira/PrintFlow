@@ -45,6 +45,7 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       saleFee: number(orderItem.sale_fee)
     }))
     const marketplaceFee = number(data.marketplace_fee ?? payload.marketplace_fee)
+    const commission = itemFeeBreakdown.reduce((total, item) => total + item.saleFee * item.quantity, 0)
     const shippingValue = data.shipping?.cost ?? payload.shipping?.cost ?? data.shipping ?? payload.shipping
     const shipping = number(shippingValue)
     return {
@@ -63,6 +64,8 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       feeBreakdown: {
         source: 'mercadolivre.orders',
         marketplaceFee,
+        commission,
+        commissionSource: itemFeeBreakdown.some((item) => item.saleFee > 0) ? 'mercadolivre.orders.order_items' : 'unavailable',
         itemSaleFees: itemFeeBreakdown,
         shipping,
         shippingId: firstText(data.shipping?.id, payload.shipping_id),
