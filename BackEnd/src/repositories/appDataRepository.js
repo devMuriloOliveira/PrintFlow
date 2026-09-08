@@ -225,14 +225,15 @@ const readMarketplaces = async (client, tenantId) => {
     select m.id, m.name, m.short, m.color, m.platform, m.connection_status, m.commission, m.fixed, m.financial, m.ads, m.others, m.active,
       coalesce(o.gross, 0) + coalesce(ts.gross, 0) as gross,
       coalesce(o.net, 0) + coalesce(ts.net, 0) as net,
+      coalesce(o.fees, 0) + coalesce(ts.fees, 0) as fees,
       (coalesce(o.orders, 0) + coalesce(ts.orders, 0))::int as orders
     from marketplaces m
     left join (
-      select marketplace_id, sum(gross) as gross, sum(net) as net, count(id)::int as orders
+      select marketplace_id, sum(gross) as gross, sum(net) as net, sum(fee) as fees, count(id)::int as orders
       from orders where tenant_id = $1 group by marketplace_id
     ) o on o.marketplace_id = m.id
     left join (
-      select marketplace_id, sum(gross) as gross, sum(net) as net, count(id)::int as orders
+      select marketplace_id, sum(gross) as gross, sum(net) as net, sum(marketplace_fee) as fees, count(id)::int as orders
       from tracked_sales where tenant_id = $1 group by marketplace_id
     ) ts on ts.marketplace_id = m.id
     where m.tenant_id = $1
@@ -240,7 +241,7 @@ const readMarketplaces = async (client, tenantId) => {
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, short: row.short, color: row.color, commission: number(row.commission),
     fixed: number(row.fixed), financial: number(row.financial), ads: number(row.ads), others: number(row.others),
-    gross: number(row.gross), net: number(row.net), orders: Number(row.orders), active: row.active,
+    gross: number(row.gross), net: number(row.net), fees: number(row.fees), orders: Number(row.orders), active: row.active,
     platform: row.platform, connectionStatus: row.connection_status }))
 }
 

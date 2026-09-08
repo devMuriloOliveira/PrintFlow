@@ -53,7 +53,7 @@ export type Printer = {
 export type Marketplace = {
   id?: string;
   name: string; short: string; color: string; commission: number; fixed: number; financial: number;
-  ads: number; others: number; gross: number; net: number; orders: number; active: boolean;
+  ads: number; others: number; gross: number; net: number; fees?: number; orders: number; active: boolean;
   platform?: string; connectionStatus?: string
 }
 
