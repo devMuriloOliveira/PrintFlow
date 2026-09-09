@@ -1,5 +1,5 @@
 import test from 'node:test'
-import { backupStatus, normalizedSettings } from '../src/routes/settings.js'
+import { backupStatus, formatTenantDataCsv, normalizedSettings } from '../src/routes/settings.js'
 import assert from 'node:assert/strict'
 import { canAccessRequest, requiredPermissionForRequest } from '../src/auth/authorization.js'
 
@@ -38,4 +38,11 @@ test('personalizacao aceita somente cor hexadecimal e URL HTTPS', () => {
   const invalid = normalizedSettings({ preferences: { accentColor: 'blue', logoUrl: 'http://example.com/logo.png' } })
   assert.equal(invalid.preferences.accentColor, '#1768f2')
   assert.equal(invalid.preferences.logoUrl, '')
+})
+
+test('portabilidade organiza todos os dados em CSV sem perder campos aninhados', () => {
+  const csv = formatTenantDataCsv({ settings: { name: 'Oficina; 3D' }, orders: [{ id: 'order-1', totals: { net: 42 } }] })
+  assert.match(csv, /Colecao.*Registro.*Campo.*Valor/)
+  assert.match(csv, /settings.*name.*Oficina; 3D/)
+  assert.match(csv, /orders.*totals.*\{\"\"net\"\":42\}/)
 })

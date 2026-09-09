@@ -2487,6 +2487,33 @@ export const migrate =
     await query(`alter table tenant_audit_requests add column if not exists category text not null default 'audit'`)
     await query(`alter table tenant_audit_requests add column if not exists priority text not null default 'normal'`)
     await query(`alter table tenant_audit_requests add column if not exists requester_role text not null default ''`)
+    await query(`alter table tenant_audit_requests add column if not exists request_kind text not null default 'support'`)
+    await query(`alter table tenant_audit_requests add column if not exists privacy_right text not null default ''`)
+    await query(`alter table tenant_audit_requests add column if not exists due_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists responsible_id text`)
+    await query(`alter table tenant_audit_requests add column if not exists privacy_anonymized_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_assigned_to text`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_assigned_at timestamptz`)
+    await query(`create index if not exists tenant_audit_requests_chat_assigned_idx on tenant_audit_requests (chat_assigned_to, updated_at desc)`)
+    await query(`
+      create table if not exists platform_chat_collaborators (
+        request_id text not null references tenant_audit_requests(id) on delete cascade,
+        user_id text not null,
+        added_by text not null,
+        created_at timestamptz not null default now(),
+        primary key (request_id, user_id)
+      )
+    `)
+    await query(`create index if not exists platform_chat_collaborators_user_idx on platform_chat_collaborators (user_id, request_id)`)
+    await query(`update tenant_audit_requests set request_kind = 'privacy' where category = 'privacy' and request_kind <> 'privacy'`)
+    await query(`do $$ begin
+      if not exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_request_kind_check' and conrelid = 'tenant_audit_requests'::regclass) then
+        alter table tenant_audit_requests add constraint tenant_audit_requests_request_kind_check check (request_kind in ('support', 'privacy'));
+      end if;
+      if not exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_privacy_right_check' and conrelid = 'tenant_audit_requests'::regclass) then
+        alter table tenant_audit_requests add constraint tenant_audit_requests_privacy_right_check check (privacy_right in ('', 'access', 'correction', 'deletion', 'opposition', 'portability', 'sharing'));
+      end if;
+    end $$`)
     await query(`do $$
       begin
         if exists (
@@ -2644,6 +2671,7 @@ export const migrate =
         create table if not exists operational_notifications (
           id bigserial primary key,
           tenant_id text not null references tenants(id) on delete cascade,
+          recipient_id text,
           type text not null default 'system',
           severity text not null default 'info',
           title text not null,
@@ -2657,6 +2685,8 @@ export const migrate =
         )
       `
     )
+    await query(`alter table operational_notifications add column if not exists recipient_id text`)
+    await query(`create index if not exists operational_notifications_recipient_idx on operational_notifications (tenant_id, recipient_id, created_at desc)`)
 
     await query(`
       create table if not exists financial_history (

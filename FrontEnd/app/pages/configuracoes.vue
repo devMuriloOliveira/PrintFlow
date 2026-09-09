@@ -20,7 +20,7 @@ const exportHistory = ref<Array<{ id: string; fileName: string; format: string; 
 const backupLoading = ref(false)
 const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
 const submittingSupport = ref(false)
-const supportDraft = reactive({ subject: '', category: 'technical', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
+const supportDraft = reactive({ subject: '', category: 'technical', privacyRight: '', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
@@ -35,6 +35,7 @@ const tabs = [
   ['Personalizacao', 'settings', 'Marca, aparencia e preferencias'],
   ['Integracoes', 'box', 'Marketplaces e servicos'],
   ['Backup e Dados', 'download', 'Exportar e restaurar dados'],
+  ['Privacidade e LGPD', 'shield', 'Dados pessoais e direitos dos titulares'],
   ['Ajuda e Suporte', 'info', 'Solicitacoes e atendimentos']
 ]
 const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0 })
@@ -50,7 +51,7 @@ const roles = [
 
 const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
 const isOwner = computed(() => auth.user.value?.role === 'owner')
-const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', audit: 'Auditoria excepcional' }[category] || category)
+const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', privacy: 'Privacidade e LGPD', audit: 'Auditoria excepcional' }[category] || category)
 const supportStatusLabel = (status: string) => ({ pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada' }[status] || status)
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
 const memberBadge = (status: string) => status === 'active' ? 'badge badge--green' : 'badge badge--orange'
@@ -229,11 +230,11 @@ const submitSupportRequest = async () => {
   submittingSupport.value = true
   try {
     const created = await createSupportRequest({
-      subject: supportDraft.subject, category: supportDraft.category, priority: supportDraft.priority, reason: supportDraft.reason,
+      subject: supportDraft.subject, category: supportDraft.category, privacyRight: supportDraft.category === 'privacy' ? supportDraft.privacyRight : undefined, priority: supportDraft.priority, reason: supportDraft.reason,
       currentPassword: supportDraft.category === 'audit' ? supportDraft.currentPassword : undefined,
       scope: supportDraft.category === 'audit' ? { entityType: supportDraft.entityType, entityId: supportDraft.entityId } : {}
     })
-    Object.assign(supportDraft, { subject: '', category: 'technical', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
+    Object.assign(supportDraft, { subject: '', category: 'technical', privacyRight: '', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
     notify(`Solicitacao criada. Protocolo ${created.id}`)
   } catch (error: any) {
     notify(error?.data?.error || 'Nao foi possivel criar a solicitacao.')
@@ -251,6 +252,15 @@ const loadIntegrations = async () => {
 
 const integrationStatus = (status: string) => ({ connected: 'Conectado', active: 'Conectado', online: 'Online', not_configured: 'Nao configurado', offline: 'Offline', revoked: 'Revogado' }[status] || status)
 const integrationBadge = (status: string) => ['connected', 'active', 'online'].includes(status) ? 'badge badge--green' : status === 'not_configured' || status === 'revoked' ? 'badge badge--orange' : 'badge badge--gray'
+const openPrivacySupport = (subject = 'Solicitacao de privacidade e LGPD', privacyRight = 'access') => {
+  supportDraft.category = 'privacy'
+  supportDraft.privacyRight = privacyRight
+  supportDraft.priority = 'normal'
+  supportDraft.subject = subject
+  supportDraft.reason = ''
+  active.value = 'Ajuda e Suporte'
+}
+const openBackupSettings = () => { active.value = 'Backup e Dados' }
 
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes') void loadMembers()
@@ -262,7 +272,11 @@ watch(active, (tab) => {
 
 watch(members, syncMemberDrafts, { immediate: true })
 watch(settings, syncSettings, { immediate: true })
-watch(() => supportDraft.category, (category) => { if (category === 'audit') supportDraft.priority = 'high' })
+watch(() => supportDraft.category, (category) => {
+  if (category === 'audit') supportDraft.priority = 'high'
+  if (category === 'privacy' && !supportDraft.privacyRight) supportDraft.privacyRight = 'access'
+  if (category !== 'privacy') supportDraft.privacyRight = ''
+})
 </script>
 
 <template>
@@ -360,6 +374,36 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
           <div v-else class="info-note"><UiIcon name="shield" />Somente o Owner pode solicitar a exclusao da empresa.</div>
         </div>
 
+        <div v-else-if="active === 'Privacidade e LGPD'" class="settings-security-card">
+          <div><h2>Privacidade e LGPD</h2><p>Consulte os controles da sua empresa e abra uma solicitação quando precisar exercer um direito.</p></div>
+          <div class="info-note" style="margin-top:16px"><UiIcon name="info" />Este é o centro interno da empresa. A plataforma PrintFlow atua como controladora dos dados tratados no produto. O canal atende somente usuários autenticados.</div>
+
+          <div class="integration-section">
+            <div class="integration-section__head"><div><h3>Seus dados</h3><p>Baixe uma cópia ou peça uma alteração nos dados tratados pela empresa.</p></div><UiIcon name="users" /></div>
+            <div class="form-grid">
+              <div class="info-note col-6"><UiIcon name="download" /><div><strong>Exportar dados da empresa</strong><br>Gera o arquivo disponível no fluxo de Backup e Dados, sem credenciais ou sessões.<br><button class="btn" style="margin-top:8px" :disabled="exportingData" @click="downloadTenantData">{{ exportingData ? 'Gerando...' : 'Exportar agora' }}</button></div></div>
+              <div class="info-note col-6"><UiIcon name="edit" /><div><strong>Consultar ou corrigir dados</strong><br>Abra uma solicitação com o escopo necessário e acompanhe o protocolo.<br><button class="btn" style="margin-top:8px" @click="openPrivacySupport('Consulta e acesso aos dados', 'access')">Solicitar acesso</button><button class="btn" style="margin:8px 0 0 6px" @click="openPrivacySupport('Solicitacao de correcao de dados', 'correction')">Pedir correção</button></div></div>
+            </div>
+          </div>
+
+          <div class="integration-section">
+            <div class="integration-section__head"><div><h3>Direitos dos titulares</h3><p>Solicitações são registradas e avaliadas conforme a base legal aplicável.</p></div><UiIcon name="shield" /></div>
+            <div class="form-grid">
+              <div class="info-note col-6"><UiIcon name="close" /><div><strong>Eliminação ou oposição</strong><br>Solicite a exclusão ou questione um tratamento específico.<br><button class="btn" style="margin-top:8px" @click="openPrivacySupport('Solicitacao de eliminacao de dados', 'deletion')">Solicitar exclusão</button><button class="btn" style="margin:8px 0 0 6px" @click="openPrivacySupport('Solicitacao de oposicao ao tratamento', 'opposition')">Registrar oposição</button></div></div>
+              <div class="info-note col-6"><UiIcon name="box" /><div><strong>Compartilhamento e portabilidade</strong><br>Peça informações sobre compartilhamentos ou a portabilidade quando aplicável.<br><button class="btn" style="margin-top:8px" @click="openPrivacySupport('Informacoes sobre compartilhamento', 'sharing')">Solicitar informações</button><button class="btn" style="margin:8px 0 0 6px" @click="openPrivacySupport('Solicitacao de portabilidade', 'portability')">Pedir portabilidade</button></div></div>
+            </div>
+          </div>
+
+          <div class="integration-section">
+            <div class="integration-section__head"><div><h3>Acompanhar solicitações</h3><p>Veja protocolos, status e converse com a equipe responsável.</p></div><button class="btn" @click="active = 'Ajuda e Suporte'">Abrir solicitações</button></div>
+          </div>
+
+          <div class="integration-section">
+            <div class="integration-section__head"><div><h3>Documentos e transparência</h3><p>Os documentos públicos serão disponibilizados assim que o controlador e o canal oficial forem cadastrados.</p></div><UiIcon name="receipt" /></div>
+            <div class="info-note"><UiIcon name="info" />Retenção operacional definida: solicitações LGPD encerradas são anonimizadas após 7 dias, preservando protocolo, status e trilha de auditoria. Finalidades, bases legais, operadores, transferências internacionais e contato do encarregado ainda precisam ser cadastrados pelo controlador.</div>
+          </div>
+        </div>
+
         <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Suas preferencias sao salvas para esta empresa.</p></div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas por e-mail</span><input v-model="preferences.emailAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label><label class="field col-6"><span>Resumo diario</span><input v-model="preferences.dailySummary" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
         <div v-else-if="active === 'Personalizacao'" class="settings-security-card">
           <div><h2>Identidade visual</h2><p>Personalize a marca exibida para todos os membros desta empresa.</p></div>
@@ -391,7 +435,8 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
           <form class="integration-section" @submit.prevent="submitSupportRequest">
             <div class="form-grid">
               <label class="field col-8"><span>Assunto</span><input v-model="supportDraft.subject" minlength="4" maxlength="120" required placeholder="Resuma o que voce precisa"></label>
-              <label class="field col-4"><span>Categoria</span><select v-model="supportDraft.category"><option value="technical">Suporte tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracoes</option><option value="account">Conta e permissoes</option><option value="data_backup">Backup e dados</option><option value="audit">Auditoria excepcional</option></select></label>
+              <label class="field col-4"><span>Categoria</span><select v-model="supportDraft.category"><option value="technical">Suporte tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracoes</option><option value="account">Conta e permissoes</option><option value="data_backup">Backup e dados</option><option value="privacy">Privacidade e LGPD</option><option value="audit">Auditoria excepcional</option></select></label>
+              <label v-if="supportDraft.category === 'privacy'" class="field col-4"><span>Direito relacionado</span><select v-model="supportDraft.privacyRight" required><option value="access">Consulta e acesso</option><option value="correction">Correcao</option><option value="deletion">Eliminacao</option><option value="opposition">Oposicao</option><option value="portability">Portabilidade</option><option value="sharing">Compartilhamento</option></select></label>
               <label class="field col-4"><span>Prioridade</span><select v-model="supportDraft.priority" :disabled="supportDraft.category === 'audit'"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option></select></label>
               <label class="field col-12"><span>Descricao detalhada</span><textarea v-model="supportDraft.reason" minlength="12" maxlength="1000" required placeholder="Descreva o problema, impacto e resultado esperado"></textarea></label>
               <template v-if="supportDraft.category === 'audit'">
@@ -406,7 +451,7 @@ watch(() => supportDraft.category, (category) => { if (category === 'audit') sup
 
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px"><div><h2>Minhas solicitacoes</h2><p>Somente voce e a equipe de suporte acessam estas conversas.</p></div><button class="btn" @click="loadSupport">Atualizar</button></div>
           <div v-if="!supportRequests.length" class="empty-state"><div><h3>Nenhuma solicitacao encontrada</h3><p>Use o formulario acima para iniciar um atendimento.</p></div></div>
-          <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Categoria</th><th>Prioridade</th><th>Status</th><th>Criada em</th><th>Acao</th></tr></thead><tbody><tr v-for="request in supportRequests" :key="request.id"><td>{{ request.id }}</td><td>{{ request.subject }}</td><td>{{ supportCategoryLabel(request.category) }}</td><td>{{ request.priority }}</td><td><span class="badge">{{ supportStatusLabel(request.status) }}</span></td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
+          <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Tipo</th><th>Status</th><th>Prazo</th><th>Responsavel</th><th>Criada em</th><th>Acao</th></tr></thead><tbody><tr v-for="request in supportRequests" :key="request.id"><td>{{ request.id }}</td><td>{{ request.subject }}<small v-if="request.requestKind === 'privacy'">{{ request.privacyRight || 'Direito do titular' }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : supportCategoryLabel(request.category) }}</td><td><span class="badge">{{ supportStatusLabel(request.status) }}</span></td><td>{{ request.dueAt ? new Date(request.dueAt).toLocaleDateString('pt-BR') : '-' }}</td><td>{{ request.responsibleName || 'Ainda nao atribuido' }}</td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
         </div>
       </section>
 

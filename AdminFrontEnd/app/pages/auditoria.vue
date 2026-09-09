@@ -24,12 +24,15 @@ const filteredPlatformAudit = computed(() => {
   return platformAudit.value.filter(event => `${event.action} ${event.summary} ${event.context || ''} ${event.targetTenantId || ''} ${event.reason || ''}`.toLowerCase().includes(term))
 })
 
-const downloadAuditReport = () => {
+const downloadAuditReport = async () => {
   if (!authorizedTenantAudit.value) return
   const tenantId = encodeURIComponent(authorizedTenantAudit.value.tenant.id)
   const accessRequestId = encodeURIComponent(authorizedTenantAudit.value.accessRequestId)
   const period = reportPeriod()
-  return session.download(`/api/platform-admin/tenants/${tenantId}/audit-export?accessRequestId=${accessRequestId}&format=${auditExportFormat.value}${period ? `&${period}` : ''}`, `Relatorio_Auditoria_de_Empresa.${auditExportFormat.value}`)
+  reportLoading.value = true; actionError.value = ''
+  try { await session.download(`/api/platform-admin/tenants/${tenantId}/audit-export?accessRequestId=${accessRequestId}&format=${auditExportFormat.value}${period ? `&${period}` : ''}`, `Relatorio_Auditoria_de_Empresa.${auditExportFormat.value}`) }
+  catch (cause: any) { actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel gerar o relatorio autorizado.' }
+  finally { reportLoading.value = false }
 }
 
 const downloadAdministrativeReport = async () => {

@@ -7,6 +7,8 @@ const {
   AUDIT_CHAT_OPEN_STATUSES,
   cancelRequesterRequest,
   createPlatformAuditChatActions,
+  createPlatformChatAssignmentActions,
+  createPlatformPrivacyRequestActions,
   findRequesterRequest,
   isAuditChatOpenStatus,
   mapAuditRequestRow,
@@ -81,7 +83,11 @@ test('retorno preserva decisao e horarios depois do encerramento', () => {
 
 test('normaliza suporte comum sem exigir escopo e protege auditoria', () => {
   const support = normalizeSupportRequest({ category: 'technical', subject: 'Falha na fila', reason: 'A fila nao inicia a impressao.', priority: 'high', scope: { entityId: 'ignorado' } })
-  assert.deepEqual(support, { category: 'technical', subject: 'Falha na fila', reason: 'A fila nao inicia a impressao.', priority: 'high', scope: {} })
+  assert.deepEqual(support, { category: 'technical', subject: 'Falha na fila', reason: 'A fila nao inicia a impressao.', priority: 'high', privacyRight: '', requestKind: 'support', scope: {} })
+
+  const privacy = normalizeSupportRequest({ category: 'privacy', privacyRight: 'access', subject: 'Solicitacao LGPD', reason: 'Preciso confirmar quais dados pessoais sao tratados.' })
+  assert.deepEqual(privacy, { category: 'privacy', subject: 'Solicitacao LGPD', reason: 'Preciso confirmar quais dados pessoais sao tratados.', priority: 'normal', privacyRight: 'access', requestKind: 'privacy', scope: {} })
+  assert.throws(() => normalizeSupportRequest({ category: 'privacy', subject: 'Solicitacao LGPD', reason: 'Preciso confirmar quais dados pessoais sao tratados.' }), /direito relacionado/)
 
   const audit = normalizeSupportRequest({ category: 'audit', subject: 'Auditar pedido', reason: 'Preciso conferir os eventos do pedido.', priority: 'low', scope: { entityType: 'order', entityId: 'order-1' } })
   assert.equal(audit.priority, 'high')
@@ -192,4 +198,121 @@ test('protocolo somente autoriza relatorio para auditoria aprovada pelo mesmo su
 
   const deny = createApprovedDataAccessChecker(async () => ({ rowCount: 0, rows: [] }))
   await assert.rejects(deny({ id: 'outro-admin' }, 'support-audit', 'tenant-test'), /nao aprovada ou expirada/)
+})
+
+test('triagem LGPD registra status, prazo, responsavel e justificativa', async () => {
+  const calls = []
+  const dueAt = new Date('2026-09-12T15:00:00.000Z')
+  const actions = createPlatformPrivacyRequestActions(async (sql, params) => {
+    calls.push({ sql, params })
+    return {
+      rowCount: 1,
+      rows: [{
+        id: 'privacy-1', tenant_id: 'tenant-test', requested_by: 'user-test', requester_name: 'Solicitante',
+        status: params[1], category: 'privacy', request_kind: 'privacy', privacy_right: 'access',
+        priority: 'normal', reason: 'Quais dados sao tratados?', scope: {}, requester_role: 'owner',
+        responsible_id: params[2], responsible_name: 'Administrador', due_at: params[3],
+        review_reason: params[4], reviewed_by: params[2], chat_opened_at: '2026-09-09T12:00:00.000Z',
+        chat_closed_at: null, expires_at: null, created_at: '2026-09-09T11:00:00.000Z', updated_at: '2026-09-09T12:00:00.000Z'
+      }]
+    }
+  })
+
+  const request = await actions.update({ id: 'admin-test' }, 'privacy-1', {
+    status: 'under_review', dueAt: dueAt.toISOString(), reason: 'Prazo definido e atendimento iniciado.'
+  })
+
+  assert.equal(request.status, 'under_review')
+  assert.equal(request.requestKind, 'privacy')
+  assert.equal(request.privacyRight, 'access')
+  assert.equal(request.responsibleId, 'admin-test')
+  assert.equal(new Date(request.dueAt).toISOString(), dueAt.toISOString())
+  assert.equal(request.reviewReason, 'Prazo definido e atendimento iniciado.')
+  assert.match(calls[0].sql, /request_kind = 'privacy'/)
+  assert.deepEqual(calls[0].params.slice(0, 3), ['privacy-1', 'under_review', 'admin-test'])
+})
+
+test('atribuicao exclusiva permite assumir uma vez e somente o responsavel pode transferir', async () => {
+  const state = { assignedTo: null }
+  const actions = createPlatformChatAssignmentActions(async (sql, params) => {
+    if (sql.includes("select id from users")) return { rowCount: 1, rows: [{ id: params[0] }] }
+    if (sql.includes('chat_assigned_to is null')) {
+      if (state.assignedTo) return { rowCount: 0, rows: [] }
+      state.assignedTo = params[1]
+      return { rowCount: 1, rows: [{ id: params[0], tenant_id: 'tenant-test', chat_assigned_to: state.assignedTo, status: 'under_review' }] }
+    }
+    if (sql.includes('set chat_assigned_to = $3')) {
+      if (state.assignedTo !== params[1]) return { rowCount: 0, rows: [] }
+      state.assignedTo = params[2]
+      return { rowCount: 1, rows: [{ tenant_id: 'tenant-test', chat_assigned_to: state.assignedTo }] }
+    }
+    throw new Error(`Consulta inesperada no teste: ${sql}`)
+  })
+
+  await actions.claim({ id: 'admin-a' }, 'chat-1')
+  await assert.rejects(actions.claim({ id: 'admin-b' }, 'chat-1'), /ja atribuida/)
+  await assert.rejects(actions.transfer({ id: 'admin-b' }, 'chat-1', 'admin-c'), /responsavel atual/)
+  const transfer = await actions.transfer({ id: 'admin-a' }, 'chat-1', 'admin-c')
+  assert.equal(transfer.chat_assigned_to, 'admin-c')
+})
+
+test('ciclo LGPD cobre protocolo, atribuicao, prazo, atendimento e encerramento', async () => {
+  const normalized = normalizeSupportRequest({
+    category: 'privacy', privacyRight: 'access', subject: 'Acesso aos dados',
+    reason: 'Solicito a confirmacao dos dados pessoais tratados pela plataforma.'
+  })
+  const state = {
+    id: 'privacy-cycle-1', tenantId: 'tenant-cycle', status: 'pending', requestKind: normalized.requestKind,
+    privacyRight: normalized.privacyRight, assignedTo: null, dueAt: null, messages: [], reviewedBy: null,
+    chatOpenedAt: null, chatClosedAt: null
+  }
+  const row = () => ({
+    id: state.id, tenant_id: state.tenantId, requested_by: 'user-cycle', requester_name: 'Titular',
+    status: state.status, category: 'privacy', request_kind: state.requestKind, privacy_right: state.privacyRight,
+    priority: 'normal', reason: normalized.reason, scope: {}, requester_role: 'owner', responsible_id: state.reviewedBy,
+    responsible_name: 'Admin LGPD', due_at: state.dueAt, review_reason: 'Atendimento concluido dentro do prazo.',
+    reviewed_by: state.reviewedBy, chat_assigned_to: state.assignedTo, chat_assignee_name: 'Admin LGPD',
+    chat_opened_at: state.chatOpenedAt, chat_closed_at: state.chatClosedAt, expires_at: null,
+    created_at: '2026-09-09T10:00:00.000Z', updated_at: '2026-09-09T10:30:00.000Z'
+  })
+  const claim = createPlatformChatAssignmentActions(async (sql, params) => {
+    if (sql.includes('chat_assigned_to is null')) {
+      if (state.assignedTo) return { rowCount: 0, rows: [] }
+      state.assignedTo = params[1]; state.status = 'under_review'; state.reviewedBy = params[1]; state.chatOpenedAt = '2026-09-09T10:05:00.000Z'
+      return { rowCount: 1, rows: [row()] }
+    }
+    throw new Error(`Consulta inesperada no ciclo: ${sql}`)
+  })
+  const triage = createPlatformPrivacyRequestActions(async (sql, params) => {
+    state.status = params[1]; state.reviewedBy = params[2]; state.dueAt = params[3]
+    state.chatOpenedAt ||= '2026-09-09T10:05:00.000Z'
+    state.chatClosedAt = state.status === 'closed' ? '2026-09-09T10:30:00.000Z' : null
+    return { rowCount: 1, rows: [row()] }
+  })
+  const chat = createPlatformAuditChatActions(async (sql, params) => {
+    if (sql.includes('with writable_request')) {
+      state.messages.push(params[2]); state.status = 'under_review'; state.reviewedBy = params[1]
+      return { rowCount: 1, rows: [{ tenant_id: state.tenantId }] }
+    }
+    if (sql.includes("set status = 'closed'")) {
+      state.status = 'closed'; state.chatClosedAt = '2026-09-09T10:30:00.000Z'
+      return { rowCount: 1, rows: [{ tenant_id: state.tenantId, chat_opened_at: state.chatOpenedAt, chat_closed_at: state.chatClosedAt }] }
+    }
+    throw new Error(`Consulta inesperada no atendimento: ${sql}`)
+  })
+
+  assert.equal(state.id, 'privacy-cycle-1')
+  await claim.claim({ id: 'admin-cycle' }, state.id)
+  await triage.update({ id: 'admin-cycle' }, state.id, { status: 'under_review', dueAt: '2026-09-12T10:00:00.000Z', reason: 'Prazo e responsavel registrados.' })
+  await chat.addMessage({ id: 'admin-cycle' }, state.id, 'Atendimento iniciado e protocolo confirmado.')
+  await chat.close({ id: 'admin-cycle' }, state.id)
+
+  assert.equal(state.requestKind, 'privacy')
+  assert.equal(state.privacyRight, 'access')
+  assert.equal(state.assignedTo, 'admin-cycle')
+  assert.equal(new Date(state.dueAt).toISOString(), '2026-09-12T10:00:00.000Z')
+  assert.deepEqual(state.messages, ['Atendimento iniciado e protocolo confirmado.'])
+  assert.equal(state.status, 'closed')
+  assert.ok(state.chatOpenedAt)
+  assert.ok(state.chatClosedAt)
 })

@@ -42,6 +42,8 @@ const actionLabels = {
   'platform.tenant_audit.read': 'Relatorio de empresa consultado',
   'platform.tenant_audit.exported': 'Relatorio de empresa exportado',
   'platform.support.chat_report_exported': 'Relatorio de conversa exportado',
+  'platform.support.requests_report_exported': 'Relatorio interno de solicitacoes exportado',
+  'platform.privacy_portability.exported': 'Portabilidade LGPD exportada',
   'platform.data_access.requested': 'Solicitacao segura de acesso iniciada',
   'platform.data_access.verified': 'CNPJ confirmado para acesso ao relatorio',
   'platform.data_access.rejected': 'Confirmacao de CNPJ recusada',
@@ -61,6 +63,9 @@ const actionLabels = {
   'settings.updated': 'Configuracoes da empresa atualizadas',
   'settings.data_exported': 'Dados da empresa exportados',
   'support.request.created': 'Solicitacao de suporte criada',
+  'privacy.request.created': 'Solicitacao LGPD criada',
+  'privacy.request.due_soon': 'Prazo de solicitacao LGPD se aproxima',
+  'privacy.request.anonymized': 'Solicitacao LGPD anonimizada por retencao',
   'support.request.message_sent': 'Mensagem de suporte enviada',
   'support.request.cancelled': 'Solicitacao de suporte cancelada',
   'agent.offline': 'Agent ficou offline',
@@ -106,6 +111,7 @@ export const writeOperationalNotification = async (tenantId, event = {}, client 
 
   const params = [
     String(tenantId),
+    text(event.recipientId || '', 120) || null,
     text(event.type || 'system', 80),
     normalizeSeverity(event.severity),
     text(event.title || 'Atualizacao operacional', 180),
@@ -117,8 +123,8 @@ export const writeOperationalNotification = async (tenantId, event = {}, client 
 
   const sql = `
     insert into operational_notifications (
-      tenant_id, type, severity, title, message, entity_type, entity_id, dedupe_key
-    ) values ($1, $2, $3, $4, $5, $6, $7, $8)
+      tenant_id, recipient_id, type, severity, title, message, entity_type, entity_id, dedupe_key
+    ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     on conflict (tenant_id, dedupe_key) do nothing
     returning id, created_at
   `

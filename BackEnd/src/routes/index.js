@@ -95,7 +95,14 @@ import {
   handlePlatformAuditMessageCreate,
   handlePlatformAuditMessagesList,
   handlePlatformAuditRequestsList,
+  handlePlatformSupportRequestsReport,
+  handlePlatformChatAssigneesList,
+  handlePlatformChatClaim,
+  handlePlatformChatTransfer,
+  handlePlatformChatCollaboratorAdd,
   handlePlatformOverview,
+      handlePlatformPrivacyRequestUpdate,
+      handlePlatformPrivacyPortabilityExport,
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
   handlePlatformTenantStatusUpdate
@@ -942,6 +949,7 @@ export const handleRequest =
         return await handlePlatformTenantDeletionAudit(req, res, url)
       }
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit-requests') return await handlePlatformAuditRequestsList(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/chat-assignees') return await handlePlatformChatAssigneesList(req, res)
       const platformAuditRequestMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/messages$/)
       if (req.method === 'GET' && platformAuditRequestMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformAuditRequestMessagesMatch[1])
       if (req.method === 'POST' && platformAuditRequestMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformAuditRequestMessagesMatch[1])
@@ -950,6 +958,7 @@ export const handleRequest =
       const platformAuditRequestCloseMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/close-chat$/)
       if (req.method === 'POST' && platformAuditRequestCloseMatch) return await handlePlatformAuditChatClose(req, res, platformAuditRequestCloseMatch[1])
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests') return await handlePlatformAuditRequestsList(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests/report') return await handlePlatformSupportRequestsReport(req, res)
       const platformSupportMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/messages$/)
       if (req.method === 'GET' && platformSupportMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformSupportMessagesMatch[1])
       if (req.method === 'POST' && platformSupportMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformSupportMessagesMatch[1])
@@ -959,6 +968,16 @@ export const handleRequest =
       if (req.method === 'POST' && platformSupportDecisionMatch) return await handlePlatformAuditDecision(req, res, platformSupportDecisionMatch[1])
       const platformSupportCloseMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/close-chat$/)
       if (req.method === 'POST' && platformSupportCloseMatch) return await handlePlatformAuditChatClose(req, res, platformSupportCloseMatch[1])
+      const platformChatClaimMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/claim$/)
+      if (req.method === 'POST' && platformChatClaimMatch) return await handlePlatformChatClaim(req, res, platformChatClaimMatch[1])
+      const platformChatTransferMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/transfer$/)
+      if (req.method === 'POST' && platformChatTransferMatch) return await handlePlatformChatTransfer(req, res, platformChatTransferMatch[1])
+      const platformChatCollaboratorMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/collaborators$/)
+      if (req.method === 'POST' && platformChatCollaboratorMatch) return await handlePlatformChatCollaboratorAdd(req, res, platformChatCollaboratorMatch[1])
+      const platformPrivacyUpdateMatch = url.pathname.match(/^\/api\/platform-admin\/privacy-requests\/([^/]+)$/)
+      if (req.method === 'POST' && platformPrivacyUpdateMatch) return await handlePlatformPrivacyRequestUpdate(req, res, platformPrivacyUpdateMatch[1])
+      const platformPrivacyExportMatch = url.pathname.match(/^\/api\/platform-admin\/privacy-requests\/([^/]+)\/export$/)
+      if (req.method === 'GET' && platformPrivacyExportMatch) return await handlePlatformPrivacyPortabilityExport(req, res, platformPrivacyExportMatch[1])
 
       const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)
       if (req.method === 'GET' && platformTenantAuditMatch) {

@@ -145,7 +145,7 @@ export type BackupStatus = {
   export: { enabled: boolean; format: 'json'; excludes: string[] }
   restore: { enabled: false; reason: string }
 }
-export type SupportRequest = { id: string; status: string; subject: string; category: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string }
+export type SupportRequest = { id: string; status: string; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
 export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
 export type FinancialHistoryEntry = { id: string; resource: string; resourceId: string; snapshot: Record<string, any>; source: string; createdAt: string }
 export type CalculatorSimulation = { id: string; name: string; pricePerKg: number; weight: number; durationMinutes: number; energyEnabled: boolean; energyRate: number; watts: number; margin: number; directCost: number; suggestedPrice: number; snapshot: Record<string, any>; createdAt: string }

@@ -3,11 +3,14 @@ import { hasDatabase, query, withTenant } from '../db/pool.js'
 import { verifyPassword } from '../auth/password.js'
 import { decryptField } from '../security/crypto.js'
 import { writeAuditEvent } from './operationalEvents.js'
+import { loadAppData } from '../repositories/appDataRepository.js'
 
 const id = () => `support_${randomBytes(16).toString('hex')}`
 const clean = (value, max = 1000) => String(value || '').trim().slice(0, max)
-const categories = new Set(['technical', 'financial', 'integration', 'account', 'data_backup', 'audit'])
+const categories = new Set(['technical', 'financial', 'integration', 'account', 'data_backup', 'privacy', 'audit'])
 const priorities = new Set(['low', 'normal', 'high'])
+const privacyRights = new Set(['access', 'correction', 'deletion', 'opposition', 'portability', 'sharing'])
+const platformRequestStatuses = new Set(['pending', 'under_review', 'rejected', 'closed'])
 export const AUDIT_CHAT_OPEN_STATUSES = Object.freeze(['pending', 'under_review', 'approved', 'rejected'])
 export const isAuditChatOpenStatus = (status) => AUDIT_CHAT_OPEN_STATUSES.includes(status)
 const writable = new Set(AUDIT_CHAT_OPEN_STATUSES)
@@ -21,8 +24,17 @@ export const mapAuditRequestRow = (row) => ({
   id: row.id, tenantId: row.tenant_id, requestedBy: String(row.requested_by), status: row.status,
   requesterName: clean(decryptField(row.requester_name), 160),
   subject: row.subject || row.reason, category: row.category || 'audit', priority: row.priority || 'normal',
+  requestKind: row.request_kind || (row.category === 'privacy' ? 'privacy' : 'support'),
+  privacyRight: row.privacy_right || '',
   requesterRole: row.requester_role || '',
   reason: row.reason, scope: row.scope || {}, reviewerId: row.reviewed_by ? String(row.reviewed_by) : null,
+  responsibleId: row.responsible_id ? String(row.responsible_id) : null,
+  responsibleName: clean(decryptField(row.responsible_name || ''), 160),
+  chatAssigneeId: row.chat_assigned_to ? String(row.chat_assigned_to) : null,
+  chatAssigneeName: clean(decryptField(row.chat_assignee_name || ''), 160),
+  chatAssignedAt: row.chat_assigned_at || null,
+  chatCollaborators: Array.isArray(row.chat_collaborators) ? row.chat_collaborators : [],
+  dueAt: row.due_at || null,
   reviewReason: row.review_reason || '', decision: row.review_reason ? (row.expires_at ? 'approved' : 'rejected') : null,
   expiresAt: row.expires_at, chatOpenedAt: row.chat_opened_at, chatClosedAt: row.chat_closed_at,
   createdAt: row.created_at, updatedAt: row.updated_at
@@ -38,7 +50,9 @@ export const normalizeSupportRequest = (payload = {}) => {
   const reason = clean(payload.reason, 1000)
   if (subject.length < 4) throw new Error('Informe um assunto para a solicitacao.')
   if (reason.length < 12) throw new Error('Descreva a solicitacao com pelo menos 12 caracteres.')
-  return { subject, category, priority, reason, scope: category === 'audit' ? scopeFor(payload.scope) : {} }
+  const privacyRight = category === 'privacy' ? String(payload.privacyRight || '') : ''
+  if (category === 'privacy' && !privacyRights.has(privacyRight)) throw new Error('Informe o direito relacionado a solicitacao de privacidade.')
+  return { subject, category, priority, reason, privacyRight, requestKind: category === 'privacy' ? 'privacy' : 'support', scope: category === 'audit' ? scopeFor(payload.scope) : {} }
 }
 
 export const createTenantAuditRequest = async (user, payload) => {
@@ -50,9 +64,9 @@ export const createTenantAuditRequest = async (user, payload) => {
       if (!account.rowCount || !verifyPassword(clean(payload.currentPassword, 500), account.rows[0].password_hash)) throw new Error('Senha atual invalida.')
     }
     const requestId = id()
-    await client.query('insert into tenant_audit_requests (id, tenant_id, requested_by, requester_role, subject, category, priority, reason, scope, chat_opened_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now())', [requestId, user.tenantId, String(user.id), clean(user.role, 40), request.subject, request.category, request.priority, request.reason, JSON.stringify(request.scope)])
-    await writeAuditEvent(user.tenantId, { action: 'support.request.created', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: requestId, details: { category: request.category, priority: request.priority, requesterRole: clean(user.role, 40), scope: request.scope } }, client)
-    return { id: requestId, status: 'pending', ...request, requesterRole: clean(user.role, 40) }
+    await client.query('insert into tenant_audit_requests (id, tenant_id, requested_by, requester_role, subject, category, request_kind, privacy_right, priority, reason, scope, chat_opened_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, now())', [requestId, user.tenantId, String(user.id), clean(user.role, 40), request.subject, request.category, request.requestKind, request.privacyRight, request.priority, request.reason, JSON.stringify(request.scope)])
+    await writeAuditEvent(user.tenantId, { action: request.requestKind === 'privacy' ? 'privacy.request.created' : 'support.request.created', actorType: 'user', actorId: user.id, entityType: request.requestKind === 'privacy' ? 'privacy_request' : 'support_request', entityId: requestId, details: { category: request.category, privacyRight: request.privacyRight, priority: request.priority, requesterRole: clean(user.role, 40), scope: request.scope } }, client)
+    return { id: requestId, status: 'pending', ...request, requesterRole: clean(user.role, 40), responsibleId: null, responsibleName: '', dueAt: null }
   })
 }
 
@@ -82,29 +96,87 @@ export const addTenantAuditMessage = async (user, requestId, body) => {
 export const cancelRequesterRequest = (client, user, requestId) => client.query("update tenant_audit_requests set status = 'cancelled', updated_at = now() where id = $1 and tenant_id = $2 and requested_by::text = $3 and status = 'pending' returning id", [requestId, user.tenantId, String(user.id)])
 export const cancelTenantAuditRequest = async (user, requestId) => withTenant(user.tenantId, async (client) => { const result = await cancelRequesterRequest(client, user, requestId); if (!result.rowCount) throw new Error('Solicitacao nao encontrada ou indisponivel.'); await writeAuditEvent(user.tenantId, { action: 'support.request.cancelled', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: requestId }, client) })
 
-export const listPlatformAuditRequests = async () => (await query(`
-  select request.*, coalesce(nullif(trim(account.name), ''), '') as requester_name
+export const listPlatformAuditRequests = async (user) => (await query(`
+  select request.*, coalesce(nullif(trim(account.name), ''), '') as requester_name,
+         coalesce(nullif(trim(responsible.name), ''), '') as responsible_name,
+         coalesce(nullif(trim(assignee.name), ''), '') as chat_assignee_name,
+         coalesce(collaborators.items, '[]'::json) as chat_collaborators
     from tenant_audit_requests request
     left join users account
       on account.id::text = request.requested_by
      and account.tenant_id = request.tenant_id
+    left join users responsible
+      on responsible.id::text = request.responsible_id
+    left join users assignee
+      on assignee.id::text = request.chat_assigned_to
+    left join lateral (
+      select json_agg(json_build_object('id', collaborator.user_id, 'name', collaborator_user.name) order by collaborator.created_at) as items
+        from platform_chat_collaborators collaborator
+        left join users collaborator_user on collaborator_user.id::text = collaborator.user_id
+       where collaborator.request_id = request.id
+    ) collaborators on true
+   where request.chat_assigned_to is null
+      or request.chat_assigned_to = $1
+      or exists (
+        select 1 from platform_chat_collaborators visible_collaborator
+         where visible_collaborator.request_id = request.id and visible_collaborator.user_id = $1
+      )
    order by request.created_at desc
    limit 200
-`)).rows.map(mapAuditRequestRow)
+`, [String(user.id)])).rows.map((row) => ({ ...mapAuditRequestRow(row), chatCollaborators: (row.chat_collaborators || []).map((collaborator) => ({ id: String(collaborator.id), name: clean(decryptField(collaborator.name || ''), 160) })) }))
+
+export const createPlatformPrivacyRequestActions = (runQuery = query) => ({
+  update: async (user, requestId, payload = {}) => {
+    const status = String(payload.status || 'under_review')
+    if (!platformRequestStatuses.has(status)) throw new Error('Status de solicitacao invalido.')
+    const dueAt = payload.dueAt ? new Date(String(payload.dueAt)) : null
+    if (payload.dueAt && Number.isNaN(dueAt.getTime())) throw new Error('Prazo de solicitacao invalido.')
+    const reason = clean(payload.reason, 500)
+    if (!reason || reason.length < 8) throw new Error('Informe um motivo com pelo menos 8 caracteres.')
+    const result = await runQuery(`
+      update tenant_audit_requests
+         set status = $2, responsible_id = $3, due_at = $4, review_reason = $5,
+             reviewed_by = $3,
+             chat_opened_at = case when $2 = 'under_review' then coalesce(chat_opened_at, now()) else chat_opened_at end,
+             chat_closed_at = case when $2 in ('closed', 'rejected') then coalesce(chat_closed_at, now()) else chat_closed_at end,
+             updated_at = now()
+       where id = $1 and request_kind = 'privacy' and status not in ('cancelled', 'closed', 'expired')
+       returning *
+    `, [requestId, status, String(user.id), dueAt, reason])
+    if (!result.rowCount) throw new Error('Solicitacao de privacidade indisponivel.')
+    return mapAuditRequestRow(result.rows[0])
+  }
+})
+const platformPrivacyRequestActions = createPlatformPrivacyRequestActions()
+export const updatePlatformSupportRequest = (...args) => platformPrivacyRequestActions.update(...args)
+
+export const getPlatformPrivacyPortabilityExport = async (requestId) => {
+  const result = await query(`
+    select id, tenant_id, status, privacy_right
+      from tenant_audit_requests
+     where id = $1 and request_kind = 'privacy' and privacy_right = 'portability'
+     limit 1
+  `, [requestId])
+  if (!result.rowCount) throw new Error('Solicitacao de portabilidade nao encontrada.')
+  const request = result.rows[0]
+  if (request.status !== 'closed') throw new Error('A portabilidade somente pode ser exportada apos o encerramento da solicitacao.')
+  return { requestId: request.id, tenantId: request.tenant_id, data: await loadAppData(request.tenant_id) }
+}
 export const mapPlatformAuditMessage = (row) => ({ ...row, body: decryptField(row.body) })
-export const platformAuditMessages = async (requestId, range = {}) => {
+export const platformAuditMessages = async (requestId, range = {}, user = null) => {
   const result = await query(`select id, tenant_id, sender_type, sender_id, body, created_at
     from tenant_audit_request_messages where request_id = $1
+      and ($4::text is null or exists (select 1 from tenant_audit_requests request where request.id = $1 and (request.chat_assigned_to = $4 or exists (select 1 from platform_chat_collaborators collaborator where collaborator.request_id = request.id and collaborator.user_id = $4))))
       and ($2::date is null or created_at >= $2::date)
       and ($3::date is null or created_at < $3::date + interval '1 day')
-    order by created_at asc limit 200`, [requestId, range.from || null, range.to || null])
+    order by created_at asc limit 200`, [requestId, range.from || null, range.to || null, user ? String(user.id) : null])
   return {
     tenantId: result.rows[0]?.tenant_id || null,
     messages: result.rows.map(({ tenant_id, ...row }) => mapPlatformAuditMessage(row))
   }
 }
 
-export const getPlatformAuditChatReport = async (requestId, range = {}) => {
+export const getPlatformAuditChatReport = async (requestId, range = {}, user = null) => {
   const request = await query(`
     select request.id, request.tenant_id, request.subject, request.created_at,
            tenant.name as company_name, account.name as requester_name
@@ -112,10 +184,13 @@ export const getPlatformAuditChatReport = async (requestId, range = {}) => {
       join tenants tenant on tenant.id = request.tenant_id
       left join users account on account.id::text = request.requested_by and account.tenant_id = request.tenant_id
      where request.id = $1
+       and ($2::text is null or request.chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators collaborator where collaborator.request_id = request.id and collaborator.user_id = $2)
+       )
      limit 1
-  `, [requestId])
+  `, [requestId, user ? String(user.id) : null])
   if (!request.rowCount) throw new Error('Solicitacao nao encontrada.')
-  const conversation = await platformAuditMessages(requestId, range)
+  const conversation = await platformAuditMessages(requestId, range, user)
+  if (!conversation.tenantId) throw new Error('Conversa indisponivel.')
   return {
     id: request.rows[0].id, tenantId: request.rows[0].tenant_id, subject: request.rows[0].subject,
     createdAt: request.rows[0].created_at, companyName: decryptField(request.rows[0].company_name),
@@ -133,6 +208,7 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
            set status = case when status = 'pending' then 'under_review' else status end,
                reviewed_by = $2, chat_opened_at = coalesce(chat_opened_at, now()), updated_at = now()
          where id = $1 and status = any($4::text[])
+           and (chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators c where c.request_id = tenant_audit_requests.id and c.user_id = $2))
          returning tenant_id
       )
       insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body)
@@ -147,6 +223,7 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
          set status = 'closed', reviewed_by = $2,
              chat_opened_at = coalesce(chat_opened_at, now()), chat_closed_at = now(), updated_at = now()
        where id = $1 and status = any($3::text[])
+         and (chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators c where c.request_id = tenant_audit_requests.id and c.user_id = $2))
        returning tenant_id, chat_opened_at, chat_closed_at
     `, [requestId, String(user.id), AUDIT_CHAT_OPEN_STATUSES])
     if (!result.rowCount) throw new Error('Conversa indisponivel.')
@@ -162,6 +239,7 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
              expires_at = case when $2 = 'approved' then now() + interval '30 minutes' else null end,
              updated_at = now()
        where id = $1 and category = 'audit' and status in ('pending', 'under_review')
+         and (chat_assigned_to = $3 or exists (select 1 from platform_chat_collaborators c where c.request_id = tenant_audit_requests.id and c.user_id = $3))
        returning tenant_id, expires_at
     `, [requestId, status, String(user.id), reviewReason])
     if (!result.rowCount) throw new Error('Solicitacao indisponivel.')
@@ -169,7 +247,54 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
   }
 })
 
+export const createPlatformChatAssignmentActions = (runQuery = query) => ({
+  claim: async (user, requestId) => {
+    const result = await runQuery(`
+      update tenant_audit_requests
+         set chat_assigned_to = $2, chat_assigned_at = coalesce(chat_assigned_at, now()),
+             status = case when status = 'pending' then 'under_review' else status end,
+             reviewed_by = $2, chat_opened_at = coalesce(chat_opened_at, now()), updated_at = now()
+       where id = $1 and status = any($3::text[]) and chat_assigned_to is null
+       returning *
+    `, [requestId, String(user.id), AUDIT_CHAT_OPEN_STATUSES])
+    if (!result.rowCount) throw new Error('Conversa indisponivel ou ja atribuida.')
+    return mapAuditRequestRow(result.rows[0])
+  },
+  transfer: async (user, requestId, targetUserId) => {
+    const target = clean(targetUserId, 120)
+    if (!target || target === String(user.id)) throw new Error('Informe outro superadmin para a transferencia.')
+    const targetResult = await runQuery(`select id from users where id::text = $1 and role = 'platform_super_admin' and status = 'active' limit 1`, [target])
+    if (!targetResult.rowCount) throw new Error('Superadmin de destino indisponivel.')
+    const result = await runQuery(`
+      update tenant_audit_requests
+         set chat_assigned_to = $3, chat_assigned_at = now(), updated_at = now()
+       where id = $1 and chat_assigned_to = $2 and status = any($4::text[])
+       returning tenant_id, chat_assigned_to
+    `, [requestId, String(user.id), target, AUDIT_CHAT_OPEN_STATUSES])
+    if (!result.rowCount) throw new Error('Somente o responsavel atual pode transferir esta conversa.')
+    return result.rows[0]
+  },
+  addCollaborator: async (user, requestId, collaboratorId) => {
+    const collaborator = clean(collaboratorId, 120)
+    if (!collaborator || collaborator === String(user.id)) throw new Error('Informe outro superadmin para colaborar.')
+    const targetResult = await runQuery(`select id from users where id::text = $1 and role = 'platform_super_admin' and status = 'active' limit 1`, [collaborator])
+    if (!targetResult.rowCount) throw new Error('Superadmin colaborador indisponivel.')
+    const result = await runQuery(`
+      insert into platform_chat_collaborators (request_id, user_id, added_by)
+      select request_id, $3, $2 from (select id as request_id from tenant_audit_requests where id = $1 and chat_assigned_to = $2 and status = any($4::text[])) eligible
+      on conflict (request_id, user_id) do nothing
+      returning request_id, user_id, (select tenant_id from tenant_audit_requests where id = request_id) as tenant_id
+    `, [requestId, String(user.id), collaborator, AUDIT_CHAT_OPEN_STATUSES])
+    if (!result.rowCount) throw new Error('Somente o responsavel atual pode incluir colaboradores nesta conversa.')
+    return result.rows[0]
+  }
+})
+
 const platformAuditChatActions = createPlatformAuditChatActions()
+const platformChatAssignmentActions = createPlatformChatAssignmentActions()
 export const addPlatformAuditMessage = (...args) => platformAuditChatActions.addMessage(...args)
 export const closePlatformAuditChat = (...args) => platformAuditChatActions.close(...args)
 export const decidePlatformAuditRequest = (...args) => platformAuditChatActions.decide(...args)
+export const claimPlatformAuditChat = (...args) => platformChatAssignmentActions.claim(...args)
+export const transferPlatformAuditChat = (...args) => platformChatAssignmentActions.transfer(...args)
+export const addPlatformChatCollaborator = (...args) => platformChatAssignmentActions.addCollaborator(...args)

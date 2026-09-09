@@ -126,6 +126,28 @@ export const usePlatformAdminWorkspace = () => {
   }
 
   const refreshRequests = () => loadRequests(true)
+  const updatePrivacyRequest = async (requestId: string, body: { status: string; dueAt?: string; reason: string }) => {
+    const updated = await session.request<AuditRequest>(`/api/platform-admin/privacy-requests/${encodeURIComponent(requestId)}`, { method: 'POST', body })
+    requests.value = requests.value.map(request => request.id === requestId ? updated : request)
+    resourceUpdatedAt.value = { ...resourceUpdatedAt.value, requests: Date.now() }
+    return updated
+  }
+  const loadChatAssignees = () => session.request<Array<{ id: string; name: string }>>('/api/platform-admin/chat-assignees')
+  const exportSupportRequestsReport = () => session.download('/api/platform-admin/support-requests/report', 'Relatorio_Solicitacoes_PrintFlow.csv')
+  const claimChat = async (requestId: string) => {
+    const updated = await session.request<AuditRequest>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/claim`, { method: 'POST', body: {} })
+    requests.value = requests.value.map(request => request.id === requestId ? updated : request)
+    return updated
+  }
+  const transferChat = async (requestId: string, targetUserId: string) => {
+    await session.request(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/transfer`, { method: 'POST', body: { targetUserId } })
+    await refreshRequests()
+  }
+  const addChatCollaborator = async (requestId: string, targetUserId: string) => {
+    await session.request(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/collaborators`, { method: 'POST', body: { targetUserId } })
+    await refreshRequests()
+  }
+  const exportPrivacyPortability = (requestId: string) => session.download(`/api/platform-admin/privacy-requests/${encodeURIComponent(requestId)}/export`, `PrintFlow_Portabilidade_${requestId}.csv`)
   const refreshTenants = () => loadTenants(true)
 
   const activeRequests = computed(() => requests.value.filter(request => isChatOpen(request.status)))
@@ -133,6 +155,6 @@ export const usePlatformAdminWorkspace = () => {
 
   return {
     session, overview, tenants, requests, messagesByRequest, authorizedTenantAudit, loading, error,
-    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, refreshRequests, refreshTenants, clearWorkspace, activeRequests, closedRequests
+    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, refreshRequests, updatePrivacyRequest, exportPrivacyPortability, loadChatAssignees, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

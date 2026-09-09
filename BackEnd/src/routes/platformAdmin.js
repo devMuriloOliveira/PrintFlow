@@ -2,6 +2,7 @@ import { getAuthUser } from './auth.js'
 import ExcelJS from 'exceljs'
 import { readJsonBody } from '../http/body.js'
 import { sendBuffer, sendJson, sendText } from '../http/response.js'
+import { withTenant } from '../db/pool.js'
 import {
   getPlatformOverview,
   createDataAccessRequest,
@@ -10,13 +11,15 @@ import {
   requireApprovedDataAccess,
   isPlatformSuperAdmin,
   listPlatformAdminAudit,
+  listPlatformChatAssignees,
   listPlatformTenants,
   listTenantOperationalAudit,
   updatePlatformTenantStatus,
   writePlatformAudit
 } from '../services/platformAdmin.js'
 import { listTenantDeletionAudit } from '../services/tenantDeletion.js'
-import { addPlatformAuditMessage, closePlatformAuditChat, decidePlatformAuditRequest, getPlatformAuditChatReport, listPlatformAuditRequests, platformAuditMessages } from '../services/tenantAuditRequests.js'
+import { addPlatformAuditMessage, addPlatformChatCollaborator, claimPlatformAuditChat, closePlatformAuditChat, decidePlatformAuditRequest, getPlatformAuditChatReport, getPlatformPrivacyPortabilityExport, listPlatformAuditRequests, platformAuditMessages, transferPlatformAuditChat, updatePlatformSupportRequest } from '../services/tenantAuditRequests.js'
+import { formatTenantDataCsv } from './settings.js'
 
 const requirePlatformAdmin = async (req, res) => {
   const user = await getAuthUser(req)
@@ -188,15 +191,28 @@ export const handleDataAccessVerify = async (req, res, requestId) => {
   catch (error) { await writePlatformAudit(req, user, { action: 'platform.data_access.rejected', targetResource: 'data_access', targetResourceId: requestId }); throw error }
 }
 
-export const handlePlatformAuditRequestsList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests()) }
+export const handlePlatformAuditRequestsList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests(user)) }
+export const handlePlatformChatAssigneesList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformChatAssignees()) }
+export const handlePlatformSupportRequestsReport = async (req, res) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const requests = await listPlatformAuditRequests(user)
+  await writePlatformAudit(req, user, {
+    action: 'platform.support.requests_report_exported', targetResource: 'support_requests_report',
+    details: { requestCount: requests.length, format: 'csv' }
+  })
+  return sendText(res, 200, platformReportCsv('Relatorio interno de solicitacoes', [
+    ['Protocolo', 'Empresa', 'Tipo', 'Direito LGPD', 'Status', 'Responsavel', 'Prazo', 'Criado em', 'Atualizado em'],
+    ...requests.map((request) => [request.id, request.tenantId, request.requestKind === 'privacy' ? 'LGPD' : request.category, request.privacyRight || '', request.status, request.responsibleName || request.chatAssigneeName || '', request.dueAt || '', request.createdAt, request.updatedAt || ''])
+  ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Relatorio_Solicitacoes_PrintFlow.csv"', 'Cache-Control': 'no-store' })
+}
 export const handlePlatformAuditMessagesList = async (req, res, requestId) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
-  const result = await platformAuditMessages(requestId)
+  const result = await platformAuditMessages(requestId, {}, user)
   return sendJson(res, 200, result.messages)
 }
 export const handlePlatformAuditChatReport = async (req, res, requestId, url) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
-  const range = reportRange(url); const report = await getPlatformAuditChatReport(requestId, range)
+  const range = reportRange(url); const report = await getPlatformAuditChatReport(requestId, range, user)
   await writePlatformAudit(req, user, { action: 'platform.support.chat_report_exported', targetTenantId: report.tenantId, targetResource: 'support_chat_report', targetResourceId: requestId, details: { messageCount: report.messages.length, format: 'csv', ...range } })
   return sendText(res, 200, platformReportCsv('Relatorio de conversa de suporte', [
     ['Protocolo', report.id], ['Empresa', report.companyName], ['Solicitante', report.requesterName], ['Assunto', report.subject], ['Aberto em', report.createdAt], [],
@@ -206,6 +222,36 @@ export const handlePlatformAuditChatReport = async (req, res, requestId, url) =>
 export const handlePlatformAuditMessageCreate = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { await addPlatformAuditMessage(user, requestId, (await readJsonBody(req)).body); await writePlatformAudit(req, user, { action: 'platform.support.message_sent', targetResource: 'support_request', targetResourceId: requestId }); return sendJson(res, 201, {}) } }
 export const handlePlatformAuditDecision = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const payload = await readJsonBody(req); const decision = await decidePlatformAuditRequest(user, requestId, payload.approved === true, payload.reason); await writePlatformAudit(req, user, { action: payload.approved === true ? 'platform.data_access.approved' : 'platform.data_access.rejected', targetTenantId: decision.tenantId, targetResource: 'audit_request', targetResourceId: requestId, reason: payload.reason }); return sendJson(res, 200, decision) } }
 export const handlePlatformAuditChatClose = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const result = await closePlatformAuditChat(user, requestId); await writePlatformAudit(req, user, { action: 'platform.support.chat_closed', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { openedAt: result.chat_opened_at, closedAt: result.chat_closed_at } }); return sendJson(res, 200, result) } }
+export const handlePlatformChatClaim = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const result = await claimPlatformAuditChat(user, requestId); await writePlatformAudit(req, user, { action: 'platform.support.chat_claimed', targetTenantId: result.tenantId, targetResource: 'support_request_chat', targetResourceId: requestId }); return sendJson(res, 200, result) }
+export const handlePlatformChatTransfer = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await transferPlatformAuditChat(user, requestId, payload.targetUserId); await writePlatformAudit(req, user, { action: 'platform.support.chat_transferred', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { targetUserId: result.chat_assigned_to } }); return sendJson(res, 200, result) }
+export const handlePlatformChatCollaboratorAdd = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await addPlatformChatCollaborator(user, requestId, payload.targetUserId); await writePlatformAudit(req, user, { action: 'platform.support.chat_collaborator_added', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { collaboratorId: result.user_id } }); return sendJson(res, 201, result) }
+export const handlePlatformPrivacyRequestUpdate = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const updated = await updatePlatformSupportRequest(user, requestId, await readJsonBody(req))
+  await writePlatformAudit(req, user, { action: 'platform.privacy_request.updated', targetTenantId: updated.tenantId, targetResource: 'privacy_request', targetResourceId: requestId, reason: updated.reviewReason, details: { status: updated.status, dueAt: updated.dueAt, responsibleId: updated.responsibleId } })
+  return sendJson(res, 200, updated)
+}
+
+export const handlePlatformPrivacyPortabilityExport = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const report = await getPlatformPrivacyPortabilityExport(requestId)
+  const fileName = `PrintFlow_Portabilidade_${report.tenantId}_${new Date().toISOString().slice(0, 10)}.csv`
+  const recordCount = Object.values(report.data).reduce((total, value) => total + (Array.isArray(value) ? value.length : value ? 1 : 0), 0)
+  await withTenant(report.tenantId, (client) => client.query(
+    'insert into export_history (tenant_id, file_name, export_type, file_format, record_count) values ($1, $2, $3, $4, $5)',
+    [report.tenantId, fileName, 'privacy_portability', 'csv', recordCount]
+  ))
+  await writePlatformAudit(req, user, {
+    action: 'platform.privacy_portability.exported', targetTenantId: report.tenantId,
+    targetResource: 'privacy_portability_export', targetResourceId: requestId,
+    details: { format: 'csv', recordCount }
+  })
+  return sendText(res, 200, formatTenantDataCsv(report.data), {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${fileName}"`,
+    'Cache-Control': 'no-store'
+  })
+}
 
 export const handlePlatformTenantStatusUpdate = async (req, res, tenantId) => {
   const user = await requirePlatformAdmin(req, res)

@@ -12,11 +12,11 @@ export const handleOperationalNotificationsList = async (req, res, url) => {
 
   const result = await tenantQuery(user.tenantId, `
     select id, type, severity, title, message, entity_type, entity_id, read_at, created_at
-      from operational_notifications
-     where tenant_id = $1
+     from operational_notifications
+     where tenant_id = $1 and (recipient_id is null or recipient_id = $3)
      order by created_at desc
      limit $2
-  `, [user.tenantId, limitFromUrl(url)])
+  `, [user.tenantId, limitFromUrl(url), String(user.id)])
 
   return sendJson(res, 200, result.rows.map((row) => ({
     id: String(row.id), type: row.type, severity: row.severity, title: row.title,

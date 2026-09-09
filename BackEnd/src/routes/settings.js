@@ -12,6 +12,25 @@ const hexColor = (value) => /^#[0-9a-f]{6}$/i.test(String(value || '').trim())
   : '#1768f2'
 const settingsFields = ['name', 'document', 'phone', 'email', 'address', 'district', 'city', 'state', 'zip', 'country', 'currency', 'timezone']
 const encryptedFields = new Set(['name', 'document', 'phone', 'email', 'address', 'district', 'city', 'state', 'zip'])
+const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""').replace(/[\r\n]+/g, ' ')}"`
+
+export const formatTenantDataCsv = (data = {}) => {
+  const rows = [['Colecao', 'Registro', 'Campo', 'Valor']]
+  for (const [collection, value] of Object.entries(data)) {
+    if (Array.isArray(value)) {
+      value.forEach((record, index) => {
+        for (const [field, fieldValue] of Object.entries(record && typeof record === 'object' ? record : { value: record })) {
+          rows.push([collection, index + 1, field, typeof fieldValue === 'object' && fieldValue !== null ? JSON.stringify(fieldValue) : fieldValue])
+        }
+      })
+    } else if (value && typeof value === 'object') {
+      for (const [field, fieldValue] of Object.entries(value)) rows.push([collection, 1, field, typeof fieldValue === 'object' && fieldValue !== null ? JSON.stringify(fieldValue) : fieldValue])
+    } else if (value !== null && value !== undefined) {
+      rows.push([collection, 1, 'value', value])
+    }
+  }
+  return `\ufeff${rows.map((row) => row.map(csvCell).join(';')).join('\r\n')}\r\n`
+}
 
 export const normalizedSettings = (payload = {}) => {
   const result = {}

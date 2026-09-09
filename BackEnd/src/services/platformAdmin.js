@@ -29,6 +29,14 @@ export const isPlatformSuperAdmin = async (user) => {
   return Boolean(result.rowCount)
 }
 
+export const listPlatformChatAssignees = async () => (await query(`
+  select u.id, u.name
+    from users u
+    join platform_super_admins sa on sa.user_id = u.id and sa.status = 'active'
+   where u.role = 'platform_super_admin' and u.status = 'active'
+   order by u.name
+`)).rows.map((row) => ({ id: String(row.id), name: decryptField(row.name) }))
+
 const requestIpHash = (req) => createHash('sha256')
   .update(`${env.authSecret}:${String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '')}`)
   .digest('hex')

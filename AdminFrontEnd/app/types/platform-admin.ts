@@ -29,9 +29,18 @@ export type AuditRequest = {
   requesterName: string
   status: string
   subject: string
-  category: 'technical' | 'financial' | 'integration' | 'account' | 'data_backup' | 'audit'
+  category: 'technical' | 'financial' | 'integration' | 'account' | 'data_backup' | 'privacy' | 'audit'
+  requestKind?: 'support' | 'privacy'
+  privacyRight?: string
   priority: 'low' | 'normal' | 'high'
   requesterRole: string
+  responsibleId?: string | null
+  responsibleName?: string
+  chatAssigneeId?: string | null
+  chatAssigneeName?: string
+  chatAssignedAt?: string | null
+  chatCollaborators?: Array<{ id: string; name: string }>
+  dueAt?: string | null
   reason: string
   scope: { entityType?: string; entityId?: string; periodStart?: string; periodEnd?: string }
   reviewerId?: string | null
