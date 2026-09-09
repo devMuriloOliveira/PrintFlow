@@ -1,4 +1,4 @@
-type AdminUser = { id: string; name: string; email: string; role: string }
+type AdminUser = { id: string; name: string; email: string; role: string; platformRole?: string }
 
 export const useAdminSession = () => {
   const config = useRuntimeConfig()
