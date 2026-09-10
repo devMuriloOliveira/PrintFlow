@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/empresas/(.*)",
+      "destination": "/200.html"
+    }
+  ]
+}
