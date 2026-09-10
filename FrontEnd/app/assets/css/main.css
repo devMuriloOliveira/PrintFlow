@@ -32,6 +32,7 @@ input, select, textarea { color: var(--ink); }
 
 .app-shell { min-height: 100vh; }
 .app-body { min-width: 0; margin-left: 272px; transition: margin .22s var(--ease-out); }
+.page-loading-hint { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
 .page-shell { min-height: calc(100vh - 70px); padding: 20px 24px 36px; overflow-x: hidden; }
 .app-shell--compact .page-shell { padding: 12px 16px 24px; }
 .page-enter-active,.page-leave-active { transition: opacity .16s var(--ease-out), transform .16s var(--ease-out); }

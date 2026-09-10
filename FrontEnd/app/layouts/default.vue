@@ -10,7 +10,13 @@ const brandStyle = computed(() => ({
   '--blue': String(preferences.value.accentColor || '#1768f2'),
   '--blue-dark': String(preferences.value.accentColor || '#1768f2')
 }))
-onMounted(() => { if (auth.isAuthenticated.value) void refreshSupport().catch(() => {}) })
+onMounted(() => {
+  if (!auth.isAuthenticated.value) return
+  const schedule = typeof window.requestIdleCallback === 'function'
+    ? (callback: () => void) => window.requestIdleCallback(callback, { timeout: 1500 })
+    : (callback: () => void) => window.setTimeout(callback, 700)
+  schedule(() => { void refreshSupport().catch(() => {}) })
+})
 </script>
 
 <template>
@@ -28,6 +34,6 @@ onMounted(() => { if (auth.isAuthenticated.value) void refreshSupport().catch(()
         <span>{{ toast.message }}</span>
       </div>
     </Transition>
-    <SupportRequestChat v-if="activeRequest" :request-id="activeRequest.id" :status="activeRequest.status" />
+    <SupportRequestChat v-if="activeRequest" :request-id="activeRequest.id" :status="activeRequest.status" :support-status="activeRequest.supportStatus" :request-kind="activeRequest.requestKind" />
   </div>
 </template>

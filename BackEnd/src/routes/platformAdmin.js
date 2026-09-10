@@ -11,6 +11,7 @@ import {
   requireApprovedDataAccess,
   isPlatformSuperAdmin,
   listPlatformAdminAudit,
+  listPlatformSupportHistory,
   listPlatformChatAssignees,
   listPlatformTenants,
   listTenantOperationalAudit,
@@ -18,8 +19,10 @@ import {
   writePlatformAudit
 } from '../services/platformAdmin.js'
 import { listTenantDeletionAudit } from '../services/tenantDeletion.js'
-import { addPlatformAuditMessage, addPlatformChatCollaborator, claimPlatformAuditChat, closePlatformAuditChat, decidePlatformAuditRequest, getPlatformAuditChatReport, getPlatformPrivacyPortabilityExport, listPlatformAuditRequests, platformAuditMessages, transferPlatformAuditChat, updatePlatformSupportRequest } from '../services/tenantAuditRequests.js'
+import { listPlatformAdminNotifications, markPlatformAdminNotificationRead } from '../services/platformAdminNotifications.js'
+import { addPlatformAuditMessage, addPlatformChatCollaborator, autoAssignPlatformSupport, bulkUpdatePlatformSupport, claimPlatformAuditChat, closePlatformAuditChat, decidePlatformAuditRequest, getPlatformAuditChatReport, getPlatformPrivacyPortabilityExport, getPlatformSupportMetrics, listPlatformAuditRequests, listPlatformSupportMacros, listPlatformSupportSlaRules, platformAuditMessages, reopenPlatformSupportChat, snoozePlatformSupport, transferPlatformAuditChat, updatePlatformSupportMetadata, updatePlatformSupportRequest, updatePlatformSupportSlaRule } from '../services/tenantAuditRequests.js'
 import { formatTenantDataCsv } from './settings.js'
+import { addPlatformSupportAttachment, listPlatformSupportAttachments, readPlatformSupportAttachment } from '../services/supportAttachments.js'
 
 const requirePlatformAdmin = async (req, res) => {
   const user = await getAuthUser(req)
@@ -191,11 +194,14 @@ export const handleDataAccessVerify = async (req, res, requestId) => {
   catch (error) { await writePlatformAudit(req, user, { action: 'platform.data_access.rejected', targetResource: 'data_access', targetResourceId: requestId }); throw error }
 }
 
-export const handlePlatformAuditRequestsList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests(user)) }
+export const handlePlatformAuditRequestsList = async (req, res, url) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests(user, { search: url?.searchParams.get('search'), category: url?.searchParams.get('category'), status: url?.searchParams.get('status'), assigneeId: url?.searchParams.get('assigneeId'), tenantId: url?.searchParams.get('tenantId'), from: url?.searchParams.get('from'), to: url?.searchParams.get('to'), limit: url?.searchParams.get('limit') })) }
+export const handlePlatformNotificationsList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAdminNotifications(user)) }
+export const handlePlatformNotificationRead = async (req, res, notificationId) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await markPlatformAdminNotificationRead(user, notificationId)) }
 export const handlePlatformChatAssigneesList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformChatAssignees()) }
-export const handlePlatformSupportRequestsReport = async (req, res) => {
+export const handlePlatformSupportMacrosList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformSupportMacros()) }
+export const handlePlatformSupportRequestsReport = async (req, res, url) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
-  const requests = await listPlatformAuditRequests(user)
+  const requests = await listPlatformAuditRequests(user, { search: url?.searchParams.get('search'), category: url?.searchParams.get('category'), status: url?.searchParams.get('status'), assigneeId: url?.searchParams.get('assigneeId'), tenantId: url?.searchParams.get('tenantId'), from: url?.searchParams.get('from'), to: url?.searchParams.get('to'), limit: url?.searchParams.get('limit') })
   await writePlatformAudit(req, user, {
     action: 'platform.support.requests_report_exported', targetResource: 'support_requests_report',
     details: { requestCount: requests.length, format: 'csv' }
@@ -204,6 +210,29 @@ export const handlePlatformSupportRequestsReport = async (req, res) => {
     ['Protocolo', 'Empresa', 'Tipo', 'Direito LGPD', 'Status', 'Responsavel', 'Prazo', 'Criado em', 'Atualizado em'],
     ...requests.map((request) => [request.id, request.tenantId, request.requestKind === 'privacy' ? 'LGPD' : request.category, request.privacyRight || '', request.status, request.responsibleName || request.chatAssigneeName || '', request.dueAt || '', request.createdAt, request.updatedAt || ''])
   ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Relatorio_Solicitacoes_PrintFlow.csv"', 'Cache-Control': 'no-store' })
+}
+export const handlePlatformSupportMetrics = async (req, res, url) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await getPlatformSupportMetrics({ from: url?.searchParams.get('from'), to: url?.searchParams.get('to') }))
+}
+export const handlePlatformSupportHistory = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformSupportHistory(user, requestId))
+}
+export const handlePlatformSupportAttachmentsList = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformSupportAttachments(user, requestId))
+}
+export const handlePlatformSupportAttachmentCreate = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const attachment = await addPlatformSupportAttachment(user, requestId, await readJsonBody(req, 8 * 1024 * 1024))
+  await writePlatformAudit(req, user, { action: 'platform.support.attachment_added', targetTenantId: attachment.tenantId, targetResource: 'support_request_attachment', targetResourceId: attachment.id, details: { requestId, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes } })
+  return sendJson(res, 201, attachment)
+}
+export const handlePlatformSupportAttachmentRead = async (req, res, requestId, attachmentId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const attachment = await readPlatformSupportAttachment(user, requestId, attachmentId)
+  return sendBuffer(res, 200, attachment.body, { 'Content-Type': attachment.mime_type, 'Content-Disposition': `attachment; filename="${attachment.original_name.replace(/"/g, '')}"` })
 }
 export const handlePlatformAuditMessagesList = async (req, res, requestId) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
@@ -219,17 +248,70 @@ export const handlePlatformAuditChatReport = async (req, res, requestId, url) =>
     ['Data', 'Remetente', 'Mensagem'], ...report.messages.map((message) => [message.created_at, message.sender_type === 'superadmin' ? 'Suporte tecnico' : report.requesterName, message.body])
   ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="Relatorio_Conversa_${requestId}.csv"`, 'Cache-Control': 'no-store' })
 }
-export const handlePlatformAuditMessageCreate = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { await addPlatformAuditMessage(user, requestId, (await readJsonBody(req)).body); await writePlatformAudit(req, user, { action: 'platform.support.message_sent', targetResource: 'support_request', targetResourceId: requestId }); return sendJson(res, 201, {}) } }
+export const handlePlatformAuditMessageCreate = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const payload = await readJsonBody(req); await addPlatformAuditMessage(user, requestId, payload); await writePlatformAudit(req, user, { action: payload.visibility === 'internal' ? 'platform.support.internal_note_added' : 'platform.support.message_sent', targetResource: 'support_request', targetResourceId: requestId }); return sendJson(res, 201, {}) } }
 export const handlePlatformAuditDecision = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const payload = await readJsonBody(req); const decision = await decidePlatformAuditRequest(user, requestId, payload.approved === true, payload.reason); await writePlatformAudit(req, user, { action: payload.approved === true ? 'platform.data_access.approved' : 'platform.data_access.rejected', targetTenantId: decision.tenantId, targetResource: 'audit_request', targetResourceId: requestId, reason: payload.reason }); return sendJson(res, 200, decision) } }
 export const handlePlatformAuditChatClose = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (user) { const result = await closePlatformAuditChat(user, requestId); await writePlatformAudit(req, user, { action: 'platform.support.chat_closed', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { openedAt: result.chat_opened_at, closedAt: result.chat_closed_at } }); return sendJson(res, 200, result) } }
+export const handlePlatformSupportReopen = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await reopenPlatformSupportChat(user, requestId, payload.reason); await writePlatformAudit(req, user, { action: 'platform.support.reopened', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, reason: payload.reason }); return sendJson(res, 200, result) }
+export const handlePlatformSupportSnooze = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await snoozePlatformSupport(user, requestId, payload.until); await writePlatformAudit(req, user, { action: 'platform.support.snoozed', targetTenantId: result.tenantId, targetResource: 'support_request', targetResourceId: requestId, details: { until: result.supportSnoozedUntil } }); return sendJson(res, 200, result) }
 export const handlePlatformChatClaim = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const result = await claimPlatformAuditChat(user, requestId); await writePlatformAudit(req, user, { action: 'platform.support.chat_claimed', targetTenantId: result.tenantId, targetResource: 'support_request_chat', targetResourceId: requestId }); return sendJson(res, 200, result) }
-export const handlePlatformChatTransfer = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await transferPlatformAuditChat(user, requestId, payload.targetUserId); await writePlatformAudit(req, user, { action: 'platform.support.chat_transferred', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { targetUserId: result.chat_assigned_to } }); return sendJson(res, 200, result) }
+export const handlePlatformChatTransfer = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await transferPlatformAuditChat(user, requestId, payload.targetUserId, payload.reason); await writePlatformAudit(req, user, { action: 'platform.support.chat_transferred', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, reason: payload.reason, details: { targetUserId: result.chat_assigned_to } }); return sendJson(res, 200, result) }
 export const handlePlatformChatCollaboratorAdd = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await addPlatformChatCollaborator(user, requestId, payload.targetUserId); await writePlatformAudit(req, user, { action: 'platform.support.chat_collaborator_added', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { collaboratorId: result.user_id } }); return sendJson(res, 201, result) }
 export const handlePlatformPrivacyRequestUpdate = async (req, res, requestId) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
   const updated = await updatePlatformSupportRequest(user, requestId, await readJsonBody(req))
   await writePlatformAudit(req, user, { action: 'platform.privacy_request.updated', targetTenantId: updated.tenantId, targetResource: 'privacy_request', targetResourceId: requestId, reason: updated.reviewReason, details: { status: updated.status, dueAt: updated.dueAt, responsibleId: updated.responsibleId } })
   return sendJson(res, 200, updated)
+}
+
+export const handlePlatformSupportMetadataUpdate = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const updated = await updatePlatformSupportMetadata(user, requestId, await readJsonBody(req))
+  await writePlatformAudit(req, user, { action: 'platform.support.metadata_updated', targetTenantId: updated.tenantId, targetResource: 'support_request', targetResourceId: requestId, details: { supportStatus: updated.supportStatus, tags: updated.supportTags, firstResponseDueAt: updated.supportFirstResponseDueAt, resolutionDueAt: updated.supportResolutionDueAt } })
+  return sendJson(res, 200, updated)
+}
+export const handlePlatformSupportBulkUpdate = async (req, res) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const payload = await readJsonBody(req)
+  const rows = await bulkUpdatePlatformSupport(user, payload.requestIds, payload.operation, payload.supportStatus)
+  for (const row of rows) {
+    await writePlatformAudit(req, user, {
+      action: payload.operation === 'claim' ? 'platform.support.chat_claimed' : 'platform.support.bulk_updated',
+      targetTenantId: row.tenant_id, targetResource: 'support_request', targetResourceId: row.id,
+      details: { bulk: true, operation: payload.operation, supportStatus: row.support_status }
+    })
+  }
+  return sendJson(res, 200, { updated: rows.map((row) => ({ id: row.id, supportStatus: row.support_status, chatAssigneeId: row.chat_assigned_to })) })
+}
+
+export const handlePlatformSupportSlaRulesList = async (req, res) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformSupportSlaRules())
+}
+
+export const handlePlatformSupportSlaRuleUpdate = async (req, res, ruleId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const updated = await updatePlatformSupportSlaRule(user, ruleId, await readJsonBody(req))
+  await writePlatformAudit(req, user, { action: 'platform.support.sla_rule_updated', targetResource: 'support_sla_rule', targetResourceId: ruleId, details: { category: updated.category, priority: updated.priority, firstResponseMinutes: updated.firstResponseMinutes, resolutionMinutes: updated.resolutionMinutes, active: updated.active } })
+  return sendJson(res, 200, updated)
+}
+
+export const handlePlatformSupportAutoAssign = async (req, res) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const payload = await readJsonBody(req)
+  const reason = String(payload.reason || '').trim()
+  if (reason.length < 8) return sendJson(res, 400, { error: 'Informe um motivo com pelo menos 8 caracteres.' })
+  const rows = await autoAssignPlatformSupport(payload.requestIds)
+  for (const row of rows) {
+    await writePlatformAudit(req, user, {
+      action: 'platform.support.auto_assigned',
+      targetTenantId: row.tenant_id,
+      targetResource: 'support_request',
+      targetResourceId: row.id,
+      reason,
+      details: { assignedTo: row.chat_assigned_to, mode: 'least_loaded' }
+    })
+  }
+  return sendJson(res, 200, { updated: rows.map((row) => ({ id: row.id, chatAssigneeId: row.chat_assigned_to, supportStatus: row.support_status })) })
 }
 
 export const handlePlatformPrivacyPortabilityExport = async (req, res, requestId) => {

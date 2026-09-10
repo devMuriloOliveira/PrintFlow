@@ -91,15 +91,30 @@ import {
   handleDataAccessVerify,
   handlePlatformAuditDecision,
   handlePlatformAuditChatClose,
+  handlePlatformSupportReopen,
   handlePlatformAuditChatReport,
   handlePlatformAuditMessageCreate,
   handlePlatformAuditMessagesList,
   handlePlatformAuditRequestsList,
+  handlePlatformSupportMetrics,
+  handlePlatformSupportBulkUpdate,
+  handlePlatformSupportAutoAssign,
+  handlePlatformSupportSlaRulesList,
+  handlePlatformSupportSlaRuleUpdate,
+  handlePlatformSupportHistory,
+  handlePlatformSupportAttachmentsList,
+  handlePlatformSupportAttachmentCreate,
+  handlePlatformSupportAttachmentRead,
+  handlePlatformNotificationsList,
+  handlePlatformNotificationRead,
   handlePlatformSupportRequestsReport,
   handlePlatformChatAssigneesList,
+  handlePlatformSupportMacrosList,
   handlePlatformChatClaim,
   handlePlatformChatTransfer,
   handlePlatformChatCollaboratorAdd,
+  handlePlatformSupportMetadataUpdate,
+  handlePlatformSupportSnooze,
   handlePlatformOverview,
       handlePlatformPrivacyRequestUpdate,
       handlePlatformPrivacyPortabilityExport,
@@ -108,7 +123,7 @@ import {
   handlePlatformTenantStatusUpdate
 } from './platformAdmin.js'
 
-import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList } from './auditRequests.js'
+import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList, handleTenantSupportAttachmentCreate, handleTenantSupportAttachmentRead, handleTenantSupportAttachmentsList } from './auditRequests.js'
 
 import {
   handlePrintJobApprove,
@@ -886,6 +901,11 @@ export const handleRequest =
       const supportRequestMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)$/)
       if (req.method === 'DELETE' && supportRequestMatch) return await handleTenantAuditRequestCancel(req, res, supportRequestMatch[1])
       const supportMessagesMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/messages$/)
+      const supportAttachmentsMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/attachments$/)
+      if (req.method === 'GET' && supportAttachmentsMatch) return await handleTenantSupportAttachmentsList(req, res, supportAttachmentsMatch[1])
+      if (req.method === 'POST' && supportAttachmentsMatch) return await handleTenantSupportAttachmentCreate(req, res, supportAttachmentsMatch[1])
+      const supportAttachmentReadMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/attachments\/([^/]+)$/)
+      if (req.method === 'GET' && supportAttachmentReadMatch) return await handleTenantSupportAttachmentRead(req, res, supportAttachmentReadMatch[1], supportAttachmentReadMatch[2])
       if (req.method === 'GET' && supportMessagesMatch) return await handleTenantAuditMessagesList(req, res, supportMessagesMatch[1])
       if (req.method === 'POST' && supportMessagesMatch) return await handleTenantAuditMessageCreate(req, res, supportMessagesMatch[1])
 
@@ -948,8 +968,12 @@ export const handleRequest =
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenant-deletions') {
         return await handlePlatformTenantDeletionAudit(req, res, url)
       }
-      if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit-requests') return await handlePlatformAuditRequestsList(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit-requests') return await handlePlatformAuditRequestsList(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/notifications') return await handlePlatformNotificationsList(req, res)
+      const platformNotificationReadMatch = url.pathname.match(/^\/api\/platform-admin\/notifications\/([^/]+)\/read$/)
+      if (req.method === 'POST' && platformNotificationReadMatch) return await handlePlatformNotificationRead(req, res, platformNotificationReadMatch[1])
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/chat-assignees') return await handlePlatformChatAssigneesList(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-macros') return await handlePlatformSupportMacrosList(req, res)
       const platformAuditRequestMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/messages$/)
       if (req.method === 'GET' && platformAuditRequestMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformAuditRequestMessagesMatch[1])
       if (req.method === 'POST' && platformAuditRequestMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformAuditRequestMessagesMatch[1])
@@ -957,9 +981,22 @@ export const handleRequest =
       if (req.method === 'POST' && platformAuditRequestDecisionMatch) return await handlePlatformAuditDecision(req, res, platformAuditRequestDecisionMatch[1])
       const platformAuditRequestCloseMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/close-chat$/)
       if (req.method === 'POST' && platformAuditRequestCloseMatch) return await handlePlatformAuditChatClose(req, res, platformAuditRequestCloseMatch[1])
-      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests') return await handlePlatformAuditRequestsList(req, res)
-      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests/report') return await handlePlatformSupportRequestsReport(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests') return await handlePlatformAuditRequestsList(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-metrics') return await handlePlatformSupportMetrics(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-sla-rules') return await handlePlatformSupportSlaRulesList(req, res)
+      const platformSupportSlaRuleMatch = url.pathname.match(/^\/api\/platform-admin\/support-sla-rules\/([^/]+)$/)
+      if (req.method === 'POST' && platformSupportSlaRuleMatch) return await handlePlatformSupportSlaRuleUpdate(req, res, platformSupportSlaRuleMatch[1])
+      if (req.method === 'POST' && url.pathname === '/api/platform-admin/support-requests/bulk') return await handlePlatformSupportBulkUpdate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/platform-admin/support-requests/auto-assign') return await handlePlatformSupportAutoAssign(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests/report') return await handlePlatformSupportRequestsReport(req, res, url)
       const platformSupportMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/messages$/)
+      const platformSupportHistoryMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/history$/)
+      if (req.method === 'GET' && platformSupportHistoryMatch) return await handlePlatformSupportHistory(req, res, platformSupportHistoryMatch[1])
+      const platformSupportAttachmentsMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/attachments$/)
+      if (req.method === 'GET' && platformSupportAttachmentsMatch) return await handlePlatformSupportAttachmentsList(req, res, platformSupportAttachmentsMatch[1])
+      if (req.method === 'POST' && platformSupportAttachmentsMatch) return await handlePlatformSupportAttachmentCreate(req, res, platformSupportAttachmentsMatch[1])
+      const platformSupportAttachmentReadMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/attachments\/([^/]+)$/)
+      if (req.method === 'GET' && platformSupportAttachmentReadMatch) return await handlePlatformSupportAttachmentRead(req, res, platformSupportAttachmentReadMatch[1], platformSupportAttachmentReadMatch[2])
       if (req.method === 'GET' && platformSupportMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformSupportMessagesMatch[1])
       if (req.method === 'POST' && platformSupportMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformSupportMessagesMatch[1])
       const platformSupportChatReportMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/report$/)
@@ -968,12 +1005,18 @@ export const handleRequest =
       if (req.method === 'POST' && platformSupportDecisionMatch) return await handlePlatformAuditDecision(req, res, platformSupportDecisionMatch[1])
       const platformSupportCloseMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/close-chat$/)
       if (req.method === 'POST' && platformSupportCloseMatch) return await handlePlatformAuditChatClose(req, res, platformSupportCloseMatch[1])
+      const platformSupportReopenMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/reopen$/)
+      if (req.method === 'POST' && platformSupportReopenMatch) return await handlePlatformSupportReopen(req, res, platformSupportReopenMatch[1])
+      const platformSupportSnoozeMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/snooze$/)
+      if (req.method === 'POST' && platformSupportSnoozeMatch) return await handlePlatformSupportSnooze(req, res, platformSupportSnoozeMatch[1])
       const platformChatClaimMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/claim$/)
       if (req.method === 'POST' && platformChatClaimMatch) return await handlePlatformChatClaim(req, res, platformChatClaimMatch[1])
       const platformChatTransferMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/transfer$/)
       if (req.method === 'POST' && platformChatTransferMatch) return await handlePlatformChatTransfer(req, res, platformChatTransferMatch[1])
       const platformChatCollaboratorMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/collaborators$/)
       if (req.method === 'POST' && platformChatCollaboratorMatch) return await handlePlatformChatCollaboratorAdd(req, res, platformChatCollaboratorMatch[1])
+      const platformSupportMetadataMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/metadata$/)
+      if (req.method === 'POST' && platformSupportMetadataMatch) return await handlePlatformSupportMetadataUpdate(req, res, platformSupportMetadataMatch[1])
       const platformPrivacyUpdateMatch = url.pathname.match(/^\/api\/platform-admin\/privacy-requests\/([^/]+)$/)
       if (req.method === 'POST' && platformPrivacyUpdateMatch) return await handlePlatformPrivacyRequestUpdate(req, res, platformPrivacyUpdateMatch[1])
       const platformPrivacyExportMatch = url.pathname.match(/^\/api\/platform-admin\/privacy-requests\/([^/]+)\/export$/)

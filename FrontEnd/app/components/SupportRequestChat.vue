@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import type { SupportMessage } from '../composables/useAppData'
+import type { SupportAttachment, SupportMessage } from '../composables/useAppData'
 
-const props = defineProps<{ requestId: string; status: string }>()
-const { listSupportMessages, sendSupportMessage } = useAppData()
-const { refresh: refreshRequests } = useSupportRequests()
+const props = defineProps<{ requestId: string; status: string; supportStatus?: string; requestKind?: string }>()
+const { listSupportMessages, sendSupportMessage, listSupportAttachments, uploadSupportAttachment, downloadSupportAttachment } = useAppData()
+const { refresh: refreshRequests, selectRequest } = useSupportRequests()
 const openStatuses = ['pending', 'under_review', 'approved', 'rejected']
 const canWrite = computed(() => openStatuses.includes(props.status))
+const supportsAttachments = computed(() => props.requestKind !== 'privacy')
 const open = ref(false)
 const messages = ref<SupportMessage[]>([])
+const attachments = ref<SupportAttachment[]>([])
 const draft = ref('')
 const loading = ref(false)
 const sending = ref(false)
@@ -21,7 +23,8 @@ let refreshSequence = 0
 
 const senderLabel = (senderType: SupportMessage['senderType']) => senderType === 'support' ? 'Suporte tecnico' : 'Você'
 const messageTime = (createdAt: string) => new Date(createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
-const statusLabel = computed(() => ({ pending: 'Aguardando atendimento', under_review: 'Em atendimento', approved: 'Acesso aprovado', rejected: 'Solicitação recusada' }[props.status] || 'Encerrada'))
+const displayStatus = computed(() => props.requestKind === 'support' ? (props.supportStatus || props.status) : props.status)
+const statusLabel = computed(() => ({ pending: 'Aguardando atendimento', under_review: 'Em atendimento', approved: 'Acesso aprovado', rejected: 'Solicitação recusada', new: 'Novo', in_progress: 'Em atendimento', waiting_customer: 'Aguardando sua resposta', waiting_internal: 'Aguardando equipe', resolved: 'Resolvido — você pode responder para reabrir', reopened: 'Reaberto', closed: 'Encerrada' }[displayStatus.value] || 'Encerrada'))
 const scrollToLatest = async () => {
   await nextTick()
   if (messagesElement.value) messagesElement.value.scrollTop = messagesElement.value.scrollHeight
@@ -33,7 +36,7 @@ const refresh = async (autoOpen = false) => {
   const sequence = ++refreshSequence
   loading.value = true
   try {
-    const next = await listSupportMessages(requestId)
+    const [next, nextAttachments] = await Promise.all([listSupportMessages(requestId), supportsAttachments.value ? listSupportAttachments(requestId) : Promise.resolve([])])
     if (sequence !== refreshSequence || requestId !== props.requestId) return
     const latestSupportMessage = [...next].reverse().find(message => message.senderType === 'support')
     const hasNewMessage = Boolean(next.length && next.at(-1)?.id !== latestMessageId.value)
@@ -41,6 +44,7 @@ const refresh = async (autoOpen = false) => {
     latestSupportMessageId.value = latestSupportMessage?.id || ''
     latestMessageId.value = next.at(-1)?.id || ''
     messages.value = next
+    attachments.value = nextAttachments
     if (hasNewMessage && open.value) await scrollToLatest()
   } finally {
     if (sequence === refreshSequence) loading.value = false
@@ -49,6 +53,7 @@ const refresh = async (autoOpen = false) => {
 
 watch(() => props.requestId, async () => {
   messages.value = []
+  attachments.value = []
   latestSupportMessageId.value = ''
   latestMessageId.value = ''
   sendError.value = ''
@@ -59,6 +64,14 @@ watch(() => props.requestId, async () => {
 const poll = async () => {
   try { await Promise.all([refresh(true), refreshRequests()]) } catch { /* A proxima atualizacao tenta novamente. */ }
 }
+const attach = async (event: Event) => {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file || sending.value) return
+  sending.value = true; sendError.value = ''
+  try { await uploadSupportAttachment(props.requestId, file); attachments.value = await listSupportAttachments(props.requestId) }
+  catch { sendError.value = 'Nao foi possivel enviar o anexo agora.' }
+  finally { sending.value = false; (event.target as HTMLInputElement).value = '' }
+}
 onMounted(() => { refreshTimer = setInterval(() => void poll(), 5000) })
 onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
@@ -68,8 +81,13 @@ const send = async () => {
   sending.value = true
   sendError.value = ''
   try {
-    await sendSupportMessage(props.requestId, body)
+    const result = await sendSupportMessage(props.requestId, body)
     draft.value = ''
+    if (result.createdNewProtocol && result.requestId !== props.requestId) {
+      await refreshRequests()
+      selectRequest(result.requestId)
+      return
+    }
     await refresh()
     await scrollToLatest()
   } catch {
@@ -113,6 +131,7 @@ const copyProtocol = async () => {
         <p v-if="!messages.length && !loading" class="empty-message">Aguardando o início do atendimento.</p>
       </div>
       <form v-if="canWrite" class="audit-chat__composer" @submit.prevent="send">
+        <div v-if="supportsAttachments" class="audit-chat__attachments"><label>Adicionar anexo<input type="file" accept="application/pdf,text/plain,text/csv,image/png,image/jpeg" @change="attach"></label><button v-for="attachment in attachments" :key="attachment.id" type="button" @click="downloadSupportAttachment(props.requestId, attachment)">{{ attachment.originalName }}</button></div>
         <textarea v-model="draft" maxlength="1000" placeholder="Escreva sua mensagem" aria-label="Escreva sua mensagem" @keydown.enter.exact.prevent="send" />
         <div><small>{{ draft.length }}/1000</small><button class="btn btn--primary" :disabled="!draft.trim() || sending">{{ sending ? 'Enviando...' : 'Enviar' }}</button></div>
         <p v-if="sendError" class="audit-chat__error" role="alert">{{ sendError }}</p>

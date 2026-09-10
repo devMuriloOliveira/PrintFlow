@@ -49,6 +49,12 @@ export type AuditRequest = {
   expiresAt?: string | null
   chatOpenedAt?: string | null
   chatClosedAt?: string | null
+  supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'
+  supportTags?: string[]
+  supportFirstResponseDueAt?: string | null
+  supportResolutionDueAt?: string | null
+  supportReopenUntil?: string | null
+  supportParentRequestId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -58,6 +64,7 @@ export type Message = {
   sender_type: 'owner' | 'requester' | 'superadmin'
   sender_id: string
   body: string
+  visibility?: 'public' | 'internal'
   created_at: string
 }
 
@@ -82,6 +89,36 @@ export type PlatformAudit = {
   targetResourceId: string
   reason: string
   createdAt: string
+}
+
+export type PlatformNotification = {
+  id: string
+  type: string
+  severity: string
+  title: string
+  message: string
+  entityType: string
+  entityId: string
+  readAt?: string | null
+  createdAt: string
+}
+
+export type SupportMacro = { id: string; name: string; body: string; category: string }
+export type SupportSlaRule = { id: string; category: string; priority: string; firstResponseMinutes: number; resolutionMinutes: number; active: boolean; updatedAt?: string }
+export type SupportAttachment = { id: string; requestId: string; originalName: string; mimeType: string; sizeBytes: number; expiresAt: string; createdAt: string }
+
+export type SupportMetrics = {
+  total: number
+  waitingCustomer: number
+  waitingInternal: number
+  overdue: number
+  reopened: number
+  averageFirstResponseMinutes: number
+  averageResolutionMinutes: number
+  byCategory: Array<{ category: string; total: number }>
+  byAssignee: Array<{ id: string | null; name: string; total: number }>
+  byTenant: Array<{ tenantId: string; total: number }>
+  lgpd: { total: number; withinDeadline: number; overdue: number }
 }
 
 export type DeletionAudit = {

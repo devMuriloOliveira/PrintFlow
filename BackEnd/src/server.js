@@ -7,6 +7,8 @@ import { startAgentHealthWatchdog } from './jobs/agentHealthWatchdog.js'
 import { startTenantDeletionPurge } from './jobs/tenantDeletionPurge.js'
 import { startExpenseRecurringGenerator } from './jobs/expenseRecurringGenerator.js'
 import { startPrivacyRequestRetention } from './jobs/privacyRequestRetention.js'
+import { startSupportSlaWatchdog } from './jobs/supportSlaWatchdog.js'
+import { startSupportAttachmentCleanup } from './jobs/supportAttachmentCleanup.js'
 import { syncConfiguredPlatformSuperAdmins } from './services/platformAdmin.js'
 import { handleRequest } from './routes/index.js'
 
@@ -31,6 +33,8 @@ try {
   startTenantDeletionPurge()
   startExpenseRecurringGenerator()
   startPrivacyRequestRetention()
+  startSupportSlaWatchdog()
+  startSupportAttachmentCleanup()
 
   server.listen(env.port, '0.0.0.0', () => {
     console.log(`PrintFlow API running at http://localhost:${env.port}`)

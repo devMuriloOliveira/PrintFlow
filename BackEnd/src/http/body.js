@@ -1,9 +1,9 @@
-export const readJsonBody = (req) => new Promise((resolve, reject) => {
+export const readJsonBody = (req, maxBytes = 1_000_000) => new Promise((resolve, reject) => {
   let body = ''
 
   req.on('data', (chunk) => {
     body += chunk
-    if (body.length > 1_000_000) {
+    if (body.length > maxBytes) {
       reject(new Error('Payload muito grande'))
       req.destroy()
     }

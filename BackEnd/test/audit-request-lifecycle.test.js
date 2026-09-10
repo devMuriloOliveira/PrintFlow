@@ -5,16 +5,21 @@ process.env.DATABASE_URL = ''
 
 const {
   AUDIT_CHAT_OPEN_STATUSES,
+  autoAssignPlatformSupport,
+  bulkUpdatePlatformSupport,
   cancelRequesterRequest,
   createPlatformAuditChatActions,
   createPlatformChatAssignmentActions,
+  createPlatformSupportMetadataActions,
   createPlatformPrivacyRequestActions,
   findRequesterRequest,
   isAuditChatOpenStatus,
   mapAuditRequestRow,
   mapPlatformAuditMessage,
   mapTenantSupportMessage,
-  normalizeSupportRequest
+  normalizeSupportRequest,
+  supportReopenDecision,
+  updatePlatformSupportSlaRule
 } = await import('../src/services/tenantAuditRequests.js')
 const { encryptField } = await import('../src/security/crypto.js')
 const { createApprovedDataAccessChecker } = await import('../src/services/platformAdmin.js')
@@ -113,6 +118,22 @@ test('retorno administrativo descriptografa a mensagem sem expor a cifra', () =>
   assert.equal(message.body, 'Preciso de ajuda com a fila.')
 })
 
+test('nota interna permanece identificada como privada no retorno administrativo', () => {
+  const message = mapPlatformAuditMessage({ id: 9, sender_type: 'superadmin', sender_id: 'admin-a', body: encryptField('Aguardando equipe tecnica.'), visibility: 'internal', created_at: '2026-09-04T12:00:00.000Z' })
+  assert.equal(message.visibility, 'internal')
+  assert.equal(message.body, 'Aguardando equipe tecnica.')
+})
+
+test('metadados de suporte validam status, tags e responsavel', async () => {
+  const calls = []
+  const actions = createPlatformSupportMetadataActions(async (sql, params) => { calls.push({ sql, params }); return { rowCount: 1, rows: [{ id: 'support-1', tenant_id: 'tenant-a', request_kind: 'support', support_status: params[1], support_tags: JSON.parse(params[2]), created_at: '2026-09-04T12:00:00.000Z', updated_at: '2026-09-04T12:00:00.000Z' }] } })
+  const updated = await actions.update({ id: 'admin-a' }, 'support-1', { supportStatus: 'waiting_customer', tags: 'login, urgente, login' })
+  assert.equal(updated.supportStatus, 'waiting_customer')
+  assert.deepEqual(updated.supportTags, ['login', 'urgente'])
+  assert.equal(calls[0].params[5], 'admin-a')
+  await assert.rejects(actions.update({ id: 'admin-a' }, 'support-1', { supportStatus: 'unknown', tags: '' }), /Status de suporte invalido/)
+})
+
 test('solicitante somente cancela o proprio protocolo antes do atendimento', async () => {
   const calls = []
   const client = { query: async (sql, params) => { calls.push({ sql, params }); return { rowCount: 1, rows: [{ id: params[0] }] } } }
@@ -172,6 +193,18 @@ test('estados finais bloqueiam novas mensagens, decisoes e encerramentos', async
     await assert.rejects(store.actions.close(admin, `auditreq-${status}`), /indisponivel/)
     await assert.rejects(store.actions.decide(admin, `auditreq-${status}`, true, 'Decisao que deve permanecer bloqueada.'), /indisponivel/)
   }
+})
+
+test('suporte encerrado pode ser reaberto somente com justificativa', async () => {
+  const calls = []
+  const actions = createPlatformAuditChatActions(async (sql, params) => {
+    calls.push({ sql, params })
+    return { rowCount: 1, rows: [{ tenant_id: 'tenant-test', support_reopened_at: '2026-09-04T13:00:00.000Z' }] }
+  })
+  const reopened = await actions.reopen(admin, 'support-closed', 'Cliente enviou novas informacoes.')
+  assert.equal(reopened.tenant_id, 'tenant-test')
+  assert.equal(calls[0].params[2], 'Cliente enviou novas informacoes.')
+  await assert.rejects(actions.reopen(admin, 'support-closed', 'curto'), /motivo da reabertura/)
 })
 
 test('decisao exige justificativa detalhada', async () => {
@@ -251,8 +284,9 @@ test('atribuicao exclusiva permite assumir uma vez e somente o responsavel pode 
 
   await actions.claim({ id: 'admin-a' }, 'chat-1')
   await assert.rejects(actions.claim({ id: 'admin-b' }, 'chat-1'), /ja atribuida/)
-  await assert.rejects(actions.transfer({ id: 'admin-b' }, 'chat-1', 'admin-c'), /responsavel atual/)
-  const transfer = await actions.transfer({ id: 'admin-a' }, 'chat-1', 'admin-c')
+  await assert.rejects(actions.transfer({ id: 'admin-b' }, 'chat-1', 'admin-c', 'Transferencia autorizada.'), /responsavel atual/)
+  await assert.rejects(actions.transfer({ id: 'admin-a' }, 'chat-1', 'admin-c', 'curto'), /motivo/)
+  const transfer = await actions.transfer({ id: 'admin-a' }, 'chat-1', 'admin-c', 'Transferencia autorizada.')
   assert.equal(transfer.chat_assigned_to, 'admin-c')
 })
 
@@ -315,4 +349,44 @@ test('ciclo LGPD cobre protocolo, atribuicao, prazo, atendimento e encerramento'
   assert.equal(state.status, 'closed')
   assert.ok(state.chatOpenedAt)
   assert.ok(state.chatClosedAt)
+})
+
+test('acao em lote atualiza somente suportes atribuidos ao admin e limita a selecao', async () => {
+  const rows = [{ id: 'support-1', tenant_id: 'tenant-1', chat_assigned_to: 'admin-1', support_status: 'waiting_customer', updated_at: new Date() }]
+  const result = await bulkUpdatePlatformSupport({ id: 'admin-1' }, ['support-1', 'support-1'], 'status', 'waiting_customer', async () => ({ rowCount: 1, rows }))
+  assert.deepEqual(result, rows)
+})
+
+test('distribuicao da fila atribui somente pendentes ao superadmin menos carregado', async () => {
+  const calls = []
+  const runQuery = async (sql, params) => {
+    calls.push({ sql, params })
+    if (sql.startsWith('select id from tenant_audit_requests')) return { rowCount: 2, rows: [{ id: 'support-1' }, { id: 'support-2' }] }
+    if (sql.includes('from users admin')) return { rowCount: 1, rows: [{ id: 'admin-queue' }] }
+    if (sql.trimStart().startsWith('update tenant_audit_requests')) return { rowCount: 1, rows: [{ id: params[0], tenant_id: 'tenant-1', chat_assigned_to: params[1], support_status: 'in_progress' }] }
+    throw new Error(`Consulta inesperada na distribuicao: ${sql}`)
+  }
+  const result = await autoAssignPlatformSupport(['support-1', 'support-2'], runQuery)
+  assert.deepEqual(result.map((row) => row.id), ['support-1', 'support-2'])
+  assert.equal(calls.filter((call) => call.sql.trimStart().startsWith('update tenant_audit_requests')).length, 2)
+  assert.equal(calls[0].params[1][0], 'support-1')
+  await assert.rejects(autoAssignPlatformSupport([], runQuery), /Selecione pelo menos um atendimento/)
+})
+
+test('regra de SLA valida limites e atualiza somente a regra indicada', async () => {
+  let received
+  const updated = await updatePlatformSupportSlaRule({ id: 'admin-1' }, 'sla-default-normal', { category: '*', priority: 'normal', firstResponseMinutes: 60, resolutionMinutes: 1440, active: true }, async (sql, params) => {
+    received = { sql, params }
+    return { rowCount: 1, rows: [{ id: params[0], category: params[1], priority: params[2], first_response_minutes: params[3], resolution_minutes: params[4], active: params[5], updated_at: new Date() }] }
+  })
+  assert.equal(updated.firstResponseMinutes, 60)
+  assert.equal(received.params[0], 'sla-default-normal')
+  await assert.rejects(updatePlatformSupportSlaRule({ id: 'admin-1' }, 'sla-default-normal', { category: 'invalid', priority: 'normal', firstResponseMinutes: 60, resolutionMinutes: 1440 }, async () => ({ rowCount: 0, rows: [] })), /Categoria de SLA invalida/)
+})
+
+test('reabertura respeita a janela e muda para novo protocolo depois do prazo', () => {
+  const resolvedAt = new Date('2026-09-01T12:00:00.000Z')
+  const request = { request_kind: 'support', support_status: 'resolved', support_resolved_at: resolvedAt }
+  assert.equal(supportReopenDecision(request, new Date('2026-09-05T12:00:00.000Z')).mode, 'reopen')
+  assert.equal(supportReopenDecision(request, new Date('2026-09-09T12:00:00.000Z')).mode, 'new_protocol')
 })

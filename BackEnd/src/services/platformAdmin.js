@@ -215,6 +215,28 @@ export const listPlatformAdminAudit = async (limit = 100, range = {}) => {
   })
 }
 
+export const listPlatformSupportHistory = async (user, requestId, limit = 100) => {
+  const result = await query(`
+    select event.id, event.action, event.target_tenant_id, event.target_resource, event.target_resource_id,
+           event.reason, event.details, event.created_at
+      from platform_admin_audit_events event
+     where event.target_resource_id = $1
+       and event.target_resource like 'support%'
+       and exists (
+         select 1 from tenant_audit_requests request
+          where request.id = $1
+            and (request.chat_assigned_to is null or request.chat_assigned_to = $2
+              or exists (select 1 from platform_chat_collaborators c where c.request_id = request.id and c.user_id = $2))
+       )
+     order by event.created_at desc
+     limit $3
+  `, [requestId, String(user.id), Math.min(200, Math.max(1, Number(limit) || 100))])
+  return result.rows.map((row) => {
+    const description = describeAuditEvent(row)
+    return { id: String(row.id), action: row.action, targetTenantId: row.target_tenant_id, targetResource: row.target_resource, targetResourceId: row.target_resource_id, reason: row.reason, details: row.details || {}, summary: description.summary, context: description.context, createdAt: row.created_at }
+  })
+}
+
 export const updatePlatformTenantStatus = async (tenantId, payload = {}) => {
   const accountStatus = ['active', 'suspended', 'blocked'].includes(payload.accountStatus) ? payload.accountStatus : ''
   const billingStatus = ['not_configured', 'active', 'pending', 'overdue', 'cancelled'].includes(payload.billingStatus) ? payload.billingStatus : ''

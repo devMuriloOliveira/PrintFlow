@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, orders, expenses, expenseSegments, filaments, goals, printers, printJobs } = useAppData()
+const { products, orders, expenses, expenseSegments, filaments, goals, printers, printJobs, pending } = useAppData()
 const metrics = useBusinessMetrics()
 
 const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
@@ -92,6 +92,7 @@ const operationalAlerts = computed(() => [
 <template>
   <div>
     <PageHeader title="Dashboard" subtitle="Resumo geral do seu negócio de impressão 3D" />
+    <div v-if="pending" class="page-loading-hint" role="status">Carregando seus dados...</div>
 
     <div class="metrics-grid">
       <MetricCard label="Faturamento Total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Dados do banco" color="blue" :points="monthlyRevenue" />

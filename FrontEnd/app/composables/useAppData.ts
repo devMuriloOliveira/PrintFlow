@@ -145,8 +145,9 @@ export type BackupStatus = {
   export: { enabled: boolean; format: 'json'; excludes: string[] }
   restore: { enabled: false; reason: string }
 }
-export type SupportRequest = { id: string; status: string; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
+export type SupportRequest = { id: string; status: string; supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; supportFirstResponseDueAt?: string | null; supportResolutionDueAt?: string | null; supportReopenUntil?: string | null; supportReopenedAt?: string | null; supportParentRequestId?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
 export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
+export type SupportAttachment = { id: string; requestId: string; originalName: string; mimeType: string; sizeBytes: number; expiresAt: string; createdAt: string }
 export type FinancialHistoryEntry = { id: string; resource: string; resourceId: string; snapshot: Record<string, any>; source: string; createdAt: string }
 export type CalculatorSimulation = { id: string; name: string; pricePerKg: number; weight: number; durationMinutes: number; energyEnabled: boolean; energyRate: number; watts: number; margin: number; directCost: number; suggestedPrice: number; snapshot: Record<string, any>; createdAt: string }
 export type InventoryMovement = { id: string; type: 'in' | 'out' | 'adjustment'; quantity: number; previousQuantity: number; resultingQuantity: number; reason: string; createdAt: string }
@@ -405,7 +406,17 @@ export const useAppData = () => {
   const createSupportRequest = (body: Record<string, unknown>) => $fetch<SupportRequest>(apiUrl('/api/support/requests'), { method: 'POST', body, headers: resourceHeaders() })
   const cancelSupportRequest = (id: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}`), { method: 'DELETE', headers: resourceHeaders() })
   const listSupportMessages = (id: string) => $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { headers: resourceHeaders() })
-  const sendSupportMessage = (id: string, body: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
+  const sendSupportMessage = (id: string, body: string) => $fetch<{ requestId: string; createdNewProtocol: boolean; previousRequestId?: string | null }>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
+  const listSupportAttachments = (id: string) => $fetch<SupportAttachment[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { headers: resourceHeaders() })
+  const uploadSupportAttachment = async (id: string, file: File) => {
+    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || '').split(',').pop() || ''); reader.onerror = reject; reader.readAsDataURL(file) })
+    return $fetch<SupportAttachment>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { method: 'POST', body: { fileName: file.name, mimeType: file.type, data }, headers: resourceHeaders() })
+  }
+  const downloadSupportAttachment = async (id: string, attachment: SupportAttachment) => {
+    const response = await fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`), { credentials: 'include', headers: resourceHeaders() })
+    if (!response.ok) throw new Error('Nao foi possivel baixar o anexo.')
+    const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob()); link.download = attachment.originalName; link.click(); URL.revokeObjectURL(link.href)
+  }
 
   const loadIntegrationsOverview = () => $fetch<IntegrationsOverview>(apiUrl('/api/integrations/overview'), {
     headers: resourceHeaders()
@@ -451,6 +462,9 @@ export const useAppData = () => {
     , listSupportRequests
     , createSupportRequest
     , cancelSupportRequest
+    , listSupportAttachments
+    , uploadSupportAttachment
+    , downloadSupportAttachment
     , listSupportMessages
     , sendSupportMessage
     , loadIntegrationsOverview

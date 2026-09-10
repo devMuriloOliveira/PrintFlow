@@ -2,7 +2,7 @@
 defineProps<{ title: string; subtitle: string; requestCount?: number }>()
 const search = defineModel<string>('search', { default: '' })
 const session = useAdminSession()
-const { clearWorkspace } = usePlatformAdminWorkspace()
+const { clearWorkspace, notifications, loadNotifications, markNotificationRead } = usePlatformAdminWorkspace()
 const route = useRoute()
 
 const nav = [
@@ -20,6 +20,8 @@ const logout = async () => {
   await session.logout()
   await navigateTo('/login')
 }
+const unreadNotifications = computed(() => notifications.value.filter(notification => !notification.readAt))
+onMounted(() => void loadNotifications().catch(() => {}))
 </script>
 
 <template>
@@ -40,7 +42,7 @@ const logout = async () => {
     <div class="admin-main">
       <header class="admin-topbar">
         <div class="top-search"><span></span><input v-model="search" placeholder="Buscar nesta pagina..."></div>
-        <div class="admin-user"><span class="avatar">SA</span><div><strong>{{ session.user.value?.name || 'Superadmin' }}</strong><small>Administrador da plataforma</small></div><button class="logout" @click="logout">Sair</button></div>
+        <div class="admin-user"><details class="admin-notifications"><summary aria-label="Notificacoes de suporte">N<span v-if="unreadNotifications.length" class="nav-count">{{ unreadNotifications.length }}</span></summary><div class="notification-popover"><p v-if="!notifications.length" class="empty-state">Nenhuma notificacao.</p><button v-for="notification in notifications.slice(0, 8)" :key="notification.id" :class="{ unread: !notification.readAt }" @click="markNotificationRead(notification.id)"><strong>{{ notification.title }}</strong><small>{{ notification.message }}</small></button></div></details><span class="avatar">SA</span><div><strong>{{ session.user.value?.name || 'Superadmin' }}</strong><small>Administrador da plataforma</small></div><button class="logout" @click="logout">Sair</button></div>
       </header>
       <main class="admin-content">
         <div class="page-heading"><div><h1>{{ title }}</h1><p>{{ subtitle }}</p></div><slot name="actions" /></div>

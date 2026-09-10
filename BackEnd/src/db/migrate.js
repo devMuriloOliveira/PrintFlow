@@ -2,6 +2,9 @@ import {
   hasDatabase,
   query
 } from './pool.js'
+import { env } from '../config/env.js'
+
+const supportReopenWindowDays = Math.min(30, Math.max(1, Number(env.supportReopenWindowDays) || 7))
 
 // ======================================================
 // TABELAS COM ISOLAMENTO POR TENANT
@@ -431,6 +434,14 @@ export const migrate =
 
     await query(`create index if not exists platform_admin_audit_events_created_at_idx on platform_admin_audit_events (created_at desc)`)
     await query(`create index if not exists platform_admin_audit_events_target_tenant_idx on platform_admin_audit_events (target_tenant_id, created_at desc)`)
+    await query(`create table if not exists platform_admin_notifications (
+      id bigserial primary key, recipient_id text not null, type text not null default 'support',
+      severity text not null default 'info', title text not null, message text not null default '',
+      entity_type text not null default '', entity_id text not null default '', dedupe_key text not null,
+      read_at timestamptz, created_at timestamptz not null default now(),
+      unique (recipient_id, dedupe_key)
+    )`)
+    await query(`create index if not exists platform_admin_notifications_recipient_idx on platform_admin_notifications (recipient_id, read_at, created_at desc)`)
 
     await query(`
       create table if not exists platform_data_access_requests (
@@ -2494,7 +2505,17 @@ export const migrate =
     await query(`alter table tenant_audit_requests add column if not exists privacy_anonymized_at timestamptz`)
     await query(`alter table tenant_audit_requests add column if not exists chat_assigned_to text`)
     await query(`alter table tenant_audit_requests add column if not exists chat_assigned_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_status text not null default 'new'`)
+    await query(`alter table tenant_audit_requests add column if not exists support_tags jsonb not null default '[]'::jsonb`)
+    await query(`alter table tenant_audit_requests add column if not exists support_first_response_due_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_resolution_due_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_resolved_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_reopened_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_snoozed_until timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_reopen_until timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_parent_request_id text`)
     await query(`create index if not exists tenant_audit_requests_chat_assigned_idx on tenant_audit_requests (chat_assigned_to, updated_at desc)`)
+    await query(`create index if not exists tenant_audit_requests_support_parent_idx on tenant_audit_requests (support_parent_request_id, created_at desc)`)
     await query(`
       create table if not exists platform_chat_collaborators (
         request_id text not null references tenant_audit_requests(id) on delete cascade,
@@ -2505,6 +2526,63 @@ export const migrate =
       )
     `)
     await query(`create index if not exists platform_chat_collaborators_user_idx on platform_chat_collaborators (user_id, request_id)`)
+    await query(`
+      create table if not exists tenant_audit_request_attachments (
+        id text primary key, tenant_id text not null, request_id text not null references tenant_audit_requests(id) on delete cascade,
+        uploader_type text not null check (uploader_type in ('requester','superadmin')), uploader_id text not null,
+        original_name text not null, storage_key text not null unique, mime_type text not null, size_bytes integer not null,
+        expires_at timestamptz not null, created_at timestamptz not null default now(), deleted_at timestamptz
+      )
+    `)
+    await query(`create index if not exists tenant_audit_request_attachments_request_idx on tenant_audit_request_attachments (request_id, created_at desc)`)
+    await query(`create table if not exists platform_support_macros (
+      id text primary key, name text not null unique, body text not null,
+      category text not null default 'general', active boolean not null default true,
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+    )`)
+    await query(`
+      create table if not exists platform_support_sla_rules (
+        id text primary key, category text not null default '*', priority text not null default '*',
+        first_response_minutes integer not null check (first_response_minutes > 0),
+        resolution_minutes integer not null check (resolution_minutes > 0), active boolean not null default true,
+        created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+        unique (category, priority)
+      )
+    `)
+    await query(`insert into platform_support_sla_rules (id, category, priority, first_response_minutes, resolution_minutes) values
+      ('sla-default-low', '*', 'low', 1440, 10080),
+      ('sla-default-normal', '*', 'normal', 480, 10080),
+      ('sla-default-high', '*', 'high', 240, 4320)
+      on conflict (category, priority) do nothing`)
+    await query(`insert into platform_support_macros (id, name, body, category) values
+      ('macro-login', 'Problema de login', 'Vamos verificar o acesso a sua conta. Por favor, confirme o horario aproximado da falha e a mensagem exibida.', 'account'),
+      ('macro-integration', 'Falha de integracao', 'Vamos analisar a integracao informada. Envie, por favor, o protocolo e o horario aproximado do erro.', 'integration'),
+      ('macro-analysis', 'Pedido em analise', 'Sua solicitacao esta em analise pela equipe responsavel. Atualizaremos este protocolo assim que houver uma conclusao.', 'general'),
+      ('macro-more-data', 'Solicitar dados', 'Para continuarmos a analise, precisamos de algumas informacoes adicionais sobre o ocorrido.', 'general'),
+      ('macro-close', 'Confirmar encerramento', 'A solicitacao foi resolvida. Se precisar de algo relacionado ao mesmo assunto, responda antes do encerramento definitivo.', 'general'),
+      ('macro-lgpd-export', 'Orientacao LGPD', 'A solicitacao relacionada a dados pessoais sera tratada dentro do protocolo e do prazo legal aplicavel.', 'privacy')
+      on conflict (name) do nothing`)
+    await query(`alter table tenant_audit_request_messages add column if not exists visibility text not null default 'public'`)
+    await query(`update tenant_audit_requests
+       set support_resolved_at = coalesce(support_resolved_at, updated_at, now()),
+           support_reopen_until = coalesce(support_reopen_until, coalesce(support_resolved_at, updated_at, now()) + ($1::int * interval '1 day'))
+     where request_kind = 'support' and support_status = 'resolved'`, [supportReopenWindowDays])
+    await query(`update tenant_audit_requests
+       set support_status = case
+         when status = 'pending' then 'new'
+         when status in ('closed', 'cancelled', 'expired') then 'resolved'
+         else 'in_progress'
+       end
+     where support_status is null or support_status not in ('new','in_progress','waiting_customer','waiting_internal','resolved','reopened')`)
+    await query(`do $$ begin
+      if exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_support_status_check' and conrelid = 'tenant_audit_requests'::regclass) then
+        alter table tenant_audit_requests drop constraint tenant_audit_requests_support_status_check;
+      end if;
+      alter table tenant_audit_requests add constraint tenant_audit_requests_support_status_check check (support_status in ('new','in_progress','waiting_customer','waiting_internal','resolved','reopened'));
+      if not exists (select 1 from pg_constraint where conname = 'tenant_audit_request_messages_visibility_check' and conrelid = 'tenant_audit_request_messages'::regclass) then
+        alter table tenant_audit_request_messages add constraint tenant_audit_request_messages_visibility_check check (visibility in ('public','internal'));
+      end if;
+    end $$`)
     await query(`update tenant_audit_requests set request_kind = 'privacy' where category = 'privacy' and request_kind <> 'privacy'`)
     await query(`do $$ begin
       if not exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_request_kind_check' and conrelid = 'tenant_audit_requests'::regclass) then
