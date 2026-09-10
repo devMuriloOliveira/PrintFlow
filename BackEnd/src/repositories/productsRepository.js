@@ -1,5 +1,6 @@
 import { tenantQuery, withTenant } from '../db/pool.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
+import { assertTenantResourceLimit } from '../services/subscriptionEntitlements.js'
 import { recordFinancialSnapshot } from './financialHistoryRepository.js'
 
 const mapProduct = (row) => ({
@@ -80,6 +81,7 @@ export const createProduct = async (tenantId, product, audit = null) => {
     )
 
     const existing = await client.query('select id from products where tenant_id = $1 and sku = $2 limit 1', [tenantId, product.sku])
+    if (!existing.rowCount) await assertTenantResourceLimit(client, tenantId, 'products')
     const created = await client.query(
     `insert into products (
       tenant_id, name, subtitle, sku, category, description, printer_id, printer, price, weight, print_time,

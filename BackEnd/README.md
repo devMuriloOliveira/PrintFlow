@@ -48,6 +48,14 @@ Variaveis principais:
 - `RATE_LIMIT_MAX_REQUESTS`: limite geral por janela.
 - `RATE_LIMIT_AUTH_MAX_REQUESTS`: limite para rotas de autenticacao.
 - `MAX_CONCURRENT_REQUESTS_PER_IP`: limite de concorrencia por IP.
+- `PRINT_QUEUE_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de comandos de impressao pendentes.
+- `AGENT_OFFLINE_AFTER_MS`: tempo sem heartbeat para considerar o Agent indisponivel.
+- `AGENT_HEALTH_WATCHDOG_INTERVAL_MS`: frequencia de verificacao da saude dos Agents.
+- `SUBSCRIPTION_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de prazos das assinaturas.
+- `SUBSCRIPTION_WARNING_MS`: antecedencia dos avisos de vencimento da assinatura.
+- `ASAAS_ENVIRONMENT`: `sandbox` durante homologacao e `production` somente depois da validacao completa.
+- `ASAAS_API_KEY` e `ASAAS_WEBHOOK_TOKEN`: segredos exclusivos do Asaas, configurados apenas no ambiente de deploy.
+- `ASAAS_MONTHLY_PRICE` e `ASAAS_YEARLY_PRICE`: valores da assinatura única em reais, usados para gerar os links recorrentes do Asaas.
 - `EXPENSE_RECURRING_INTERVAL_MS`: intervalo da geração automática de despesas recorrentes vencidas.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
@@ -86,6 +94,17 @@ Checklist de producao:
   API e informar essa URL em `APP_PUBLIC_URL`.
 - Confirmar que `/healthz`, login, a calculadora e um pedido de teste respondem
   no ambiente publicado antes de conectar uma impressora real.
+- Configurar o monitor externo para consultar somente `GET /healthz`. O resumo
+  autenticado `GET /api/operational-health` fica restrito a usuarios com acesso
+  de producao e deve ser acompanhado pelo painel de Notificacoes.
+- Para o Asaas, iniciar com `ASAAS_ENVIRONMENT=sandbox`, cadastrar
+  `ASAAS_API_KEY`, um `ASAAS_WEBHOOK_TOKEN` aleatorio com ao menos 32 caracteres
+  e os valores `ASAAS_MONTHLY_PRICE=59.90` e `ASAAS_YEARLY_PRICE=598.80`. Depois do deploy, criar no painel Asaas o webhook
+  `POST https://SUA-API.onrender.com/webhooks/asaas`, usar o mesmo token no
+  cabeçalho de autenticação e habilitar os eventos `PAYMENT_CREATED`,
+  `PAYMENT_RECEIVED`, `PAYMENT_CONFIRMED`, `PAYMENT_OVERDUE`,
+  `PAYMENT_DELETED` e `PAYMENT_REFUNDED`. O retorno do checkout não confirma a
+  cobrança: somente o webhook autenticado atualiza a assinatura.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 
@@ -141,6 +160,12 @@ Autenticacao:
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+
+Assinatura Asaas (restrita ao Owner):
+
+- `GET /api/billing/asaas`
+- `POST /api/billing/asaas/payment-link`
+- `POST /webhooks/asaas`
 
 Dados do aplicativo:
 

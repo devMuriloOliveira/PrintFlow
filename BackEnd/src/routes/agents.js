@@ -31,6 +31,10 @@ import {
   writeOperationalNotification
 } from '../services/operationalEvents.js'
 
+import {
+  assertTenantResourceLimit
+} from '../services/subscriptionEntitlements.js'
+
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
 // ======================================================
@@ -640,6 +644,16 @@ export const handleAgentPair =
     // ==================================================
     // CRIAR SECRET DO AGENT
     // ==================================================
+
+    await withTenant(
+      pairing.tenant_id,
+      client =>
+        assertTenantResourceLimit(
+          client,
+          pairing.tenant_id,
+          'agents'
+        )
+    )
 
     const agentSecret =
       `pf_agent_${crypto

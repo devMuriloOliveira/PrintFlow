@@ -3,7 +3,7 @@ import { writeAuditEvent } from '../services/operationalEvents.js'
 
 const movementTypes = new Set(['in', 'out', 'adjustment'])
 
-export const createFilamentMovement = async (tenantId, filamentId, payload, audit = null) => withTenant(tenantId, async (client) => {
+export const createFilamentMovementWithClient = async (client, tenantId, filamentId, payload, audit = null) => {
   const type = String(payload?.type || '')
   const quantity = Number(payload?.quantity || 0)
   const reason = String(payload?.reason || '').trim().slice(0, 240)
@@ -35,7 +35,11 @@ export const createFilamentMovement = async (tenantId, filamentId, payload, audi
     details: { movementType: type, quantity, previousQuantity: previousWeight, resultingQuantity: resultingWeight, reason }
   }, client)
   return { ...movement.rows[0], status: updated.rows[0].status }
-})
+}
+
+export const createFilamentMovement = async (tenantId, filamentId, payload, audit = null) => withTenant(tenantId, async (client) =>
+  createFilamentMovementWithClient(client, tenantId, filamentId, payload, audit)
+)
 
 export const listFilamentMovements = async (tenantId, filamentId) => withTenant(tenantId, async (client) => {
   const result = await client.query(

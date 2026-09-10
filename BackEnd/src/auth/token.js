@@ -12,8 +12,6 @@ export const createToken = (user, session = {}) => {
   const payload = base64url(JSON.stringify({
     sub: String(user.id),
     tenantId: user.tenantId,
-    name: user.name,
-    email: user.email,
     role: user.role,
     platformRole: user.platformRole || '',
     tokenVersion: Number(user.tokenVersion || 0),

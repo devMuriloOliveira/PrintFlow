@@ -73,6 +73,7 @@ export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname === '/api/members/invitations') return 'members.manage'
   if (pathname.startsWith('/api/members/')) return 'members.manage'
   if (pathname === '/api/operational-audit-events') return 'audit.read'
+  if (pathname === '/api/operational-health') return 'production.read'
   if (pathname.startsWith('/api/operational-notifications')) return 'notifications.read'
 
   if (pathname.startsWith('/api/expenses') || pathname.startsWith('/api/goals') || pathname.startsWith('/api/expense-segments')) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const { notify } = useUi()
 const auth = useAuth()
-const { settings, marketplaceIntegrations, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview } = useAppData()
+const { settings, marketplaceIntegrations, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getAsaasBilling, createAsaasPaymentLink } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
@@ -23,12 +23,17 @@ const submittingSupport = ref(false)
 const supportDraft = reactive({ subject: '', category: 'technical', privacyRight: '', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
+const billingLoading = ref(false)
+const creatingBillingLink = ref(false)
+const asaasBilling = ref<Awaited<ReturnType<typeof getAsaasBilling>> | null>(null)
+const billingForm = reactive<{ billingCycle: 'monthly' | 'yearly' }>({ billingCycle: 'monthly' })
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
 const memberDrafts = reactive<Record<string, { role: string; status: string }>>({})
 const invite = reactive({ email: '', role: 'usuario' as 'admin' | 'financeiro' | 'producao' | 'usuario' })
 const tabs = [
   ['Empresa', 'building', 'Informacoes da empresa'],
   ['Financeiro', 'money', 'Impostos, moedas e contas'],
+  ['Assinatura', 'money', 'Plano e pagamento da plataforma'],
   ['Usuarios e Permissoes', 'users', 'Gestao de usuarios e acessos'],
   ['Notificacoes', 'bell', 'E-mails e alertas do sistema'],
   ['Seguranca', 'shield', 'Acesso, 2FA e sessoes'],
@@ -51,6 +56,10 @@ const roles = [
 
 const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
 const isOwner = computed(() => auth.user.value?.role === 'owner')
+const selectedBillingPlan = computed(() => asaasBilling.value?.plans[0] || null)
+const billingPlanValue = computed(() => selectedBillingPlan.value?.[billingForm.billingCycle] || 0)
+const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const subscriptionStatus = (status: string) => ({ trial: 'Em teste', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carencia', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
 const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', privacy: 'Privacidade e LGPD', audit: 'Auditoria excepcional' }[category] || category)
 const supportStatusLabel = (status: string) => ({ pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada' }[status] || status)
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
@@ -249,6 +258,28 @@ const loadIntegrations = async () => {
   integrationsLoading.value = true
   try { integrationsOverview.value = await loadIntegrationsOverview() } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel carregar as integracoes.') } finally { integrationsLoading.value = false }
 }
+const loadAsaasBilling = async () => {
+  if (!isOwner.value) return
+  billingLoading.value = true
+  try {
+    asaasBilling.value = await getAsaasBilling()
+    if (selectedBillingPlan.value && !selectedBillingPlan.value[billingForm.billingCycle === 'monthly' ? 'monthlyEnabled' : 'yearlyEnabled']) {
+      billingForm.billingCycle = selectedBillingPlan.value.monthlyEnabled ? 'monthly' : 'yearly'
+    }
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel consultar a assinatura.')
+  } finally { billingLoading.value = false }
+}
+const startAsaasCheckout = async () => {
+  if (!selectedBillingPlan.value || billingPlanValue.value <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
+  creatingBillingLink.value = true
+  try {
+    const result = await createAsaasPaymentLink({ planCode: selectedBillingPlan.value.code, billingCycle: billingForm.billingCycle })
+    window.location.assign(result.url)
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
+  } finally { creatingBillingLink.value = false }
+}
 
 const integrationStatus = (status: string) => ({ connected: 'Conectado', active: 'Conectado', online: 'Online', not_configured: 'Nao configurado', offline: 'Offline', revoked: 'Revogado' }[status] || status)
 const integrationBadge = (status: string) => ['connected', 'active', 'online'].includes(status) ? 'badge badge--green' : status === 'not_configured' || status === 'revoked' ? 'badge badge--orange' : 'badge badge--gray'
@@ -267,6 +298,7 @@ watch(active, (tab) => {
   if (tab === 'Seguranca') void loadSessions()
   if (tab === 'Backup e Dados') void loadBackup()
   if (tab === 'Integracoes') void loadIntegrations()
+  if (tab === 'Assinatura') void loadAsaasBilling()
   if (tab === 'Ajuda e Suporte') void loadSupport()
 })
 
@@ -307,6 +339,23 @@ watch(() => supportDraft.category, (category) => {
           <div class="form-grid"><label class="field col-4"><span>Moeda</span><select v-model="company.currency"><option value="Real (R$)">Real (R$)</option><option value="Dolar (US$)">Dolar (US$)</option><option value="Euro (EUR)">Euro (EUR)</option></select></label><label class="field col-4"><span>Fuso horario</span><input v-model="company.timezone"></label><label class="field col-4"><span>Custo do kWh</span><input v-model.number="company.kwh" type="number" min="0" step=".01"></label><label class="field col-4"><span>Margem padrao (%)</span><input v-model.number="preferences.defaultMargin" type="number" min="0" step=".1"></label><label class="field col-4"><span>Custos fixos mensais</span><input v-model.number="preferences.monthlyFixedCost" type="number" min="0" step=".01"></label><label class="field col-4"><span>Unidades planejadas por mes</span><input v-model.number="preferences.plannedMonthlyUnits" type="number" min="0" step="1"></label></div>
           <div class="info-note" style="margin:16px 0"><UiIcon name="info" />O custo fixo e rateado por unidade somente em novos calculos. Produtos ja salvos preservam a composicao financeira original.</div>
           <button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">{{ savingSettings ? 'Salvando...' : 'Salvar parametros' }}</button>
+        </div>
+
+        <div v-else-if="active === 'Assinatura'" class="settings-security-card">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>Escolha a cobranca mensal ou anual e conclua o pagamento em uma pagina segura do Asaas.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadAsaasBilling">Atualizar</button></div>
+          <div v-if="!isOwner" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Somente o Owner pode consultar ou alterar a assinatura da empresa.</div>
+          <div v-else-if="billingLoading" class="empty-state"><div><h3>Consultando assinatura</h3></div></div>
+          <template v-else-if="asaasBilling">
+            <div v-if="asaasBilling.subscription" class="info-note" style="margin-top:16px"><UiIcon name="check" />Plano atual: <strong>{{ asaasBilling.subscription.planName || asaasBilling.subscription.planCode }}</strong> · {{ subscriptionStatus(asaasBilling.subscription.status) }}<span v-if="asaasBilling.subscription.currentPeriodEnd"> · vigencia ate {{ new Date(asaasBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</span>.</div>
+            <div v-if="asaasBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(asaasBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="asaasBilling.checkout.url" rel="noopener noreferrer">Abrir link</a>.</div>
+            <div v-if="!asaasBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Asaas ainda nao foi configurado no ambiente. Cadastre as variaveis no Render antes de gerar um link.</div>
+            <form v-else class="integration-section" style="margin-top:16px" @submit.prevent="startAsaasCheckout">
+              <div class="integration-section__head"><div><h3>Assinatura PrintFlow</h3><p>Os dados do meio de pagamento sao informados diretamente ao Asaas e nao ficam no PrintFlow.</p></div><span class="badge badge--orange">{{ asaasBilling.environment === 'sandbox' ? 'Sandbox' : 'Producao' }}</span></div>
+              <div class="form-grid"><label class="field col-12"><span>Periodo de cobranca</span><select v-model="billingForm.billingCycle" required><option value="monthly" :disabled="!selectedBillingPlan?.monthlyEnabled">Mensal — {{ currency(selectedBillingPlan?.monthly || 0) }}</option><option value="yearly" :disabled="!selectedBillingPlan?.yearlyEnabled">Anual — {{ currency(selectedBillingPlan?.yearly || 0) }}</option></select></label></div>
+              <div v-if="selectedBillingPlan" class="info-note" style="margin-top:16px"><UiIcon name="info" />{{ selectedBillingPlan.description || 'Assinatura da plataforma.' }}<br><strong>Valor: {{ currency(billingPlanValue) }} por {{ billingForm.billingCycle === 'yearly' ? 'ano' : 'mes' }}</strong></div>
+              <button class="btn btn--primary" style="margin-top:16px" type="submit" :disabled="creatingBillingLink || !selectedBillingPlan || billingPlanValue <= 0">{{ creatingBillingLink ? 'Abrindo checkout...' : 'Continuar no Asaas' }}</button>
+            </form>
+          </template>
         </div>
 
         <div v-else-if="active === 'Usuarios e Permissoes'">

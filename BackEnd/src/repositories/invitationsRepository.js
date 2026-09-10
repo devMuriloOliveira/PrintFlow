@@ -5,6 +5,7 @@ import { hasDatabase, query, tenantQuery, withTenant } from '../db/pool.js'
 import { blindIndex, decryptField, encryptField } from '../security/crypto.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { sendInvitationEmail } from '../services/email.js'
+import { assertTenantResourceLimit } from '../services/subscriptionEntitlements.js'
 
 const inviteRoles = new Set(['admin', 'financeiro', 'producao', 'usuario'])
 export const INVITATION_TTL_HOURS = 48
@@ -24,6 +25,7 @@ export const createInvitation = async ({ actor, email, role }) => {
 
   const token = `invite_${randomBytes(32).toString('base64url')}`
   const invitation = await withTenant(actor.tenantId, async (client) => {
+    await assertTenantResourceLimit(client, actor.tenantId, 'users', { includePendingInvitations: true })
     const result = await client.query(`
       insert into tenant_invitations (id, tenant_id, email, email_hash, role, token_hash, invited_by, expires_at)
       values ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(hours => $8::int))
@@ -100,6 +102,7 @@ export const acceptInvitation = async ({ token, name, password }) => {
     if (!invite) throw new Error('Convite invalido ou expirado.')
     const exists = await client.query('select id from users where email_hash = $1 limit 1', [invite.email_hash])
     if (exists.rowCount) throw new Error('Convite invalido ou expirado.')
+    await assertTenantResourceLimit(client, found.tenant_id, 'users')
     const userResult = await client.query(`insert into users (tenant_id, name, email, email_hash, password_hash, role, status, token_version) values ($1, $2, $3, $4, $5, 'admin', 'active', 0) returning id, tenant_id, name, email, status, token_version`, [invite.tenant_id, encryptField(String(name).trim()), invite.email, invite.email_hash, hashPassword(password)])
     const user = userResult.rows[0]
     await client.query(`insert into tenant_memberships (tenant_id, user_id, role, status) values ($1, $2, $3, 'active')`, [invite.tenant_id, user.id, invite.role])

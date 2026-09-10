@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, orders, printers, printJobs, clients, createItem, updateItem, deleteItem } = useAppData()
+const { products, orders, printers, printJobs, clients, createItem, updateItem, deleteItem, advanceOrderStage: advanceOrderStageRequest } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -73,7 +73,7 @@ const advanceOrderStage = async (stage: string) => {
   if (stage === 'Enviado' && !trackingDraft.value.trim()) return notify('Informe o codigo de rastreio antes de enviar.')
   updatingOrderStage.value = true
   try {
-    await updateItem('orders', { ...order, status: stage, trackingCode: trackingDraft.value.trim(), packedAt: stage === 'Embalando' ? new Date().toISOString() : order.packedAt, shippedAt: stage === 'Enviado' ? new Date().toISOString() : order.shippedAt, deliveredAt: stage === 'Entregue' ? new Date().toISOString() : order.deliveredAt })
+    await advanceOrderStageRequest(String(order.dbId || order.id), stage, trackingDraft.value.trim())
     notify(`Pedido atualizado para ${stageLabel(stage)}.`)
   } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar o pedido.') } finally { updatingOrderStage.value = false }
 }

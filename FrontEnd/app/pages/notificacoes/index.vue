@@ -1,5 +1,9 @@
 <script setup lang="ts">
 const { notifications, unreadCount, loading, refreshNotifications, markNotificationRead } = useOperationalNotifications()
+const auth = useAuth()
+const config = useRuntimeConfig()
+const health = ref<{ offlineAgents: number; activePrints: number; queuedPrints: number; pendingConfirmations: number; pendingAlerts: number; integrationsWithError: number; checkedAt: string } | null>(null)
+const healthLoading = ref(false)
 
 const severityClass = (severity: string) => ({
   success: 'badge--green', warning: 'badge--orange', error: 'badge--red', info: 'badge--blue'
@@ -13,14 +17,36 @@ const notificationTime = (value: string) => new Intl.DateTimeFormat('pt-BR', {
   dateStyle: 'short', timeStyle: 'short'
 }).format(new Date(value))
 
-onMounted(() => { void refreshNotifications() })
+const refreshHealth = async () => {
+  if (!auth.authHeaders.value.Authorization || healthLoading.value) return
+  healthLoading.value = true
+  try {
+    health.value = await $fetch<NonNullable<typeof health.value>>(`${String(config.public.apiBase || '').replace(/\/$/, '')}/api/operational-health`, { headers: auth.authHeaders.value })
+  } catch {
+    health.value = null
+  } finally {
+    healthLoading.value = false
+  }
+}
+const refreshAll = () => { void refreshNotifications(); void refreshHealth() }
+onMounted(() => { refreshAll() })
 </script>
 
 <template>
   <div>
     <PageHeader title="Notificações" subtitle="Acompanhe eventos de produção, marketplaces e operação.">
-      <template #actions><button class="btn" :disabled="loading" @click="refreshNotifications">{{ loading ? 'Atualizando...' : 'Atualizar' }}</button></template>
+      <template #actions><button class="btn" :disabled="loading || healthLoading" @click="refreshAll">{{ loading || healthLoading ? 'Atualizando...' : 'Atualizar' }}</button></template>
     </PageHeader>
+
+    <PanelCard title="Saúde operacional" subtitle="Resumo do ambiente da sua empresa, sem expor dados técnicos sensíveis." style="margin-bottom:12px">
+      <div class="stat-strip">
+        <div class="stat-box"><small>Impressões ativas</small><strong>{{ health?.activePrints ?? '-' }}</strong></div>
+        <div class="stat-box"><small>Na fila</small><strong>{{ health?.queuedPrints ?? '-' }}</strong></div>
+        <div class="stat-box"><small>Agents offline</small><strong :class="{ 'money-negative': (health?.offlineAgents || 0) > 0 }">{{ health?.offlineAgents ?? '-' }}</strong></div>
+        <div class="stat-box"><small>Alertas pendentes</small><strong :class="{ 'money-negative': (health?.pendingAlerts || 0) > 0 }">{{ health?.pendingAlerts ?? '-' }}</strong></div>
+      </div>
+      <small v-if="health" style="display:block;margin-top:10px;color:var(--muted)">Atualizado em {{ notificationTime(health.checkedAt) }} · {{ health.pendingConfirmations }} confirmação(ões) pendente(s) · {{ health.integrationsWithError }} integração(ões) com atenção.</small>
+    </PanelCard>
 
     <PanelCard title="Central de notificações" :subtitle="unreadCount ? `${unreadCount} não lida${unreadCount === 1 ? '' : 's'}` : 'Tudo em dia'">
       <div v-if="loading && !notifications.length" class="empty-state"><div><h3>Consultando notificações</h3></div></div>

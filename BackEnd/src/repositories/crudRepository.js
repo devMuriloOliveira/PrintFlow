@@ -4,6 +4,7 @@ import { listResource } from './appDataRepository.js'
 import { blindIndex, encryptField } from '../security/crypto.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { recordFinancialSnapshot } from './financialHistoryRepository.js'
+import { assertTenantResourceLimit } from '../services/subscriptionEntitlements.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
@@ -315,6 +316,7 @@ const configFor = (resource) => {
 
 const writePatch = async (client, tenantId, resource, item, id = null) => {
   const config = configFor(resource)
+  if (!id && resource === 'printers') await assertTenantResourceLimit(client, tenantId, resource)
   if (config.create && !id) {
     const created = await config.create(tenantId, item)
     return { id: created.id, changedFields: safeChangedFields({}, item) }

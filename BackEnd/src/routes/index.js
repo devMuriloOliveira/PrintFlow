@@ -28,6 +28,10 @@ import {
 } from '../auth/authorization.js'
 
 import {
+  assertTenantRequestEntitlement
+} from '../services/subscriptionEntitlements.js'
+
+import {
   handleProductCreate,
   handleProductPrintFileUpload,
   handleRecurringExpensesGenerate,
@@ -36,6 +40,7 @@ import {
   handleResourceRead,
   handleResourceUpdate,
   handleFilamentMovements,
+  handleOrderStageAdvance,
   readRoutes
 } from './resources.js'
 
@@ -48,6 +53,11 @@ import {
 
 import { handleFinancialReportExport } from './reports.js'
 import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } from './calculator.js'
+import {
+  handleAsaasBillingSummary,
+  handleAsaasPaymentLinkCreate,
+  handleAsaasWebhook
+} from './billing.js'
 
 import {
   handleAmazonWebhook,
@@ -69,6 +79,7 @@ import {
 
 import {
   handleOperationalAuditList,
+  handleOperationalHealth,
   handleOperationalNotificationRead,
   handleOperationalNotificationsList
 } from './operations.js'
@@ -396,6 +407,18 @@ export const handleRequest =
         )
       }
 
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/webhooks/asaas'
+      ) {
+        return await handleAsaasWebhook(
+          req,
+          res
+        )
+      }
+
       // ==================================================
       // ROTAS PÚBLICAS DO AGENT
       // ==================================================
@@ -569,6 +592,14 @@ export const handleRequest =
         if (!canAccessRequest(user, req.method, url.pathname)) {
           return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
         }
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/asaas' || url.pathname === '/api/billing/asaas/payment-link'
+        if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
+          try {
+            await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname })
+          } catch (error) {
+            return sendJson(res, 403, { error: error.message || 'A assinatura nao permite esta operacao.' })
+          }
+        }
       }
 
       // ==================================================
@@ -577,6 +608,14 @@ export const handleRequest =
 
       if (req.method === 'GET' && url.pathname === '/api/members') {
         return await handleMembersList(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/billing/asaas') {
+        return await handleAsaasBillingSummary(req, res)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/billing/asaas/payment-link') {
+        return await handleAsaasPaymentLinkCreate(req, res)
       }
 
       if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
@@ -1068,6 +1107,10 @@ export const handleRequest =
         return await handleOperationalNotificationsList(req, res, url)
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/operational-health') {
+        return await handleOperationalHealth(req, res)
+      }
+
       const notificationReadMatch = url.pathname.match(/^\/api\/operational-notifications\/([^/]+)\/read$/)
       if (req.method === 'POST' && notificationReadMatch) {
         return await handleOperationalNotificationRead(req, res, notificationReadMatch[1])
@@ -1349,6 +1392,9 @@ export const handleRequest =
       if (filamentMovementsMatch && ['GET', 'POST'].includes(req.method)) {
         return await handleFilamentMovements(req, res, filamentMovementsMatch[1])
       }
+
+      const orderStageMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/advance-stage$/)
+      if (req.method === 'POST' && orderStageMatch) return await handleOrderStageAdvance(req, res, orderStageMatch[1])
 
       if (req.method === 'POST' && url.pathname === '/api/expenses/recurring/generate') return await handleRecurringExpensesGenerate(req, res)
 

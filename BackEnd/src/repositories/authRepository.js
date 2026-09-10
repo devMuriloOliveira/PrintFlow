@@ -33,11 +33,11 @@ const publicUser = (row) => ({
   tokenVersion: Number(row.token_version || 0)
 })
 
-const publicUserFromPayload = (payload) => ({
+const publicUserFromPayload = (payload, user = {}) => ({
   id: String(payload.sub),
   tenantId: payload.tenantId,
-  name: payload.name,
-  email: payload.email,
+  name: user.name || '',
+  email: user.email || '',
   role: payload.role,
   platformRole: payload.platformRole || '',
   status: 'active',
@@ -109,7 +109,7 @@ export const validateAccessPayload = async (payload) => {
       !entry.revokedAt &&
       entry.expiresAt > new Date()
     )
-    return activeSession ? publicUserFromPayload(payload) : null
+    return activeSession ? publicUserFromPayload(payload, user) : null
   }
 
   const result = await tenantQuery(

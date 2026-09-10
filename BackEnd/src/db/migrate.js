@@ -41,11 +41,13 @@ const tenantTables = [
   'tenant_memberships',
   'tenant_invitations',
   'tenant_subscriptions',
+  'tenant_billing_checkouts',
   'tenant_billing_records',
   'tenant_subscription_events'
 ]
 const platformTenantTables = new Set([
   'tenant_subscriptions',
+  'tenant_billing_checkouts',
   'tenant_billing_records',
   'tenant_subscription_events'
 ])
@@ -458,6 +460,41 @@ export const migrate =
     await query(`alter table tenant_subscriptions add column if not exists provider_subscription_id text`)
     await query(`alter table tenant_subscriptions add column if not exists last_provider_sync_at timestamptz`)
     await query(`create index if not exists tenant_subscriptions_status_idx on tenant_subscriptions (status, current_period_end)`)
+    await query(`create unique index if not exists tenant_subscriptions_provider_subscription_unique on tenant_subscriptions (provider, provider_subscription_id) where provider_subscription_id is not null and provider_subscription_id <> ''`)
+    await query(`
+      create table if not exists tenant_billing_checkouts (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        plan_id text not null references platform_plans(id) on delete restrict,
+        billing_cycle text not null check (billing_cycle in ('monthly', 'yearly')),
+        amount numeric(12,2) not null check (amount > 0),
+        currency text not null default 'BRL',
+        status text not null default 'creating' check (status in ('creating', 'open', 'paid', 'cancelled', 'expired', 'failed')),
+        provider text not null,
+        provider_checkout_id text,
+        checkout_url text not null default '',
+        created_by text not null default '',
+        expires_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`create unique index if not exists tenant_billing_checkouts_provider_unique on tenant_billing_checkouts (provider, provider_checkout_id) where provider_checkout_id is not null and provider_checkout_id <> ''`)
+    await query(`create index if not exists tenant_billing_checkouts_lookup_idx on tenant_billing_checkouts (tenant_id, created_at desc)`)
+    await query(`
+      create table if not exists payment_provider_events (
+        id bigserial primary key,
+        provider text not null,
+        provider_event_id text not null,
+        event_type text not null,
+        provider_resource_id text not null default '',
+        tenant_id text references tenants(id) on delete set null,
+        received_at timestamptz not null default now(),
+        processed_at timestamptz,
+        unique (provider, provider_event_id)
+      )
+    `)
+    await query(`create index if not exists payment_provider_events_tenant_idx on payment_provider_events (tenant_id, received_at desc)`)
     await query(`
       create table if not exists tenant_billing_records (
         id text primary key,
@@ -481,6 +518,7 @@ export const migrate =
     await query(`alter table tenant_billing_records add column if not exists provider text`)
     await query(`alter table tenant_billing_records add column if not exists provider_invoice_id text`)
     await query(`create index if not exists tenant_billing_records_lookup_idx on tenant_billing_records (tenant_id, due_at desc)`)
+    await query(`create unique index if not exists tenant_billing_records_provider_invoice_unique on tenant_billing_records (provider, provider_invoice_id) where provider_invoice_id is not null and provider_invoice_id <> ''`)
     await query(`
       create table if not exists tenant_subscription_events (
         id bigserial primary key,
@@ -491,24 +529,26 @@ export const migrate =
         new_state jsonb not null default '{}'::jsonb,
         reason text not null default '',
         actor_user_id text not null default '',
-        source text not null default 'manual' check (source in ('manual', 'provider')),
+        source text not null default 'manual' check (source in ('manual', 'provider', 'system')),
         provider text,
         provider_event_id text,
         created_at timestamptz not null default now()
       )
     `)
-    await query(`alter table tenant_subscription_events add column if not exists source text not null default 'manual' check (source in ('manual', 'provider'))`)
+    await query(`alter table tenant_subscription_events add column if not exists source text not null default 'manual' check (source in ('manual', 'provider', 'system'))`)
+    await query(`alter table tenant_subscription_events drop constraint if exists tenant_subscription_events_source_check`)
+    await query(`alter table tenant_subscription_events add constraint tenant_subscription_events_source_check check (source in ('manual', 'provider', 'system'))`)
     await query(`alter table tenant_subscription_events add column if not exists provider text`)
     await query(`alter table tenant_subscription_events add column if not exists provider_event_id text`)
     await query(`create index if not exists tenant_subscription_events_lookup_idx on tenant_subscription_events (tenant_id, created_at desc)`)
     await query(`
       insert into platform_plans (id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features)
       values
-        ('plan_starter', 'starter', 'Starter', 'Plano inicial para operacoes menores', 0, 0, '{"users":3,"printers":2,"agents":2,"products":100,"storageMb":500}', '{"marketplaces":false,"advancedReports":false}'),
-        ('plan_growth', 'growth', 'Growth', 'Plano para operacoes em crescimento', 0, 0, '{"users":10,"printers":5,"agents":5,"products":1000,"storageMb":5000}', '{"marketplaces":true,"advancedReports":true}'),
-        ('plan_scale', 'scale', 'Scale', 'Plano para operacoes de maior volume', 0, 0, '{"users":50,"printers":25,"agents":25,"products":10000,"storageMb":25000}', '{"marketplaces":true,"advancedReports":true,"prioritySupport":true}')
+        ('plan_starter', 'starter', 'PrintFlow', 'Assinatura unica da plataforma', 59.90, 598.80, '{}', '{"marketplaces":true,"advancedReports":true,"prioritySupport":true}')
       on conflict (code) do nothing
     `)
+    await query(`update platform_plans set name = 'PrintFlow', description = 'Assinatura unica da plataforma', monthly_reference_price = 59.90, yearly_reference_price = 598.80, limits = '{}'::jsonb, features = '{"marketplaces":true,"advancedReports":true,"prioritySupport":true}'::jsonb, active = true, updated_at = now() where code = 'starter'`)
+    await query(`update platform_plans set active = false, updated_at = now() where code in ('growth', 'scale')`)
 
     await query(`
       create table if not exists platform_super_admins (

@@ -57,7 +57,7 @@ const save = async () => {
         <div class="field col-2"><label>Taxas</label><input v-model.number="form.fee" type="number" step=".01"></div>
         <div class="field col-2"><label>Frete</label><input v-model.number="form.shipping" type="number" step=".01"></div>
         <div class="field col-2"><label>Custo</label><input v-model.number="form.cost" type="number" step=".01"></div>
-        <div class="field col-2"><label>Status</label><select v-model="form.status"><option>Novo</option><option value="Producao">Produção</option><option>Impresso</option><option>Embalando</option><option>Enviado</option><option>Entregue</option><option>Cancelado</option></select></div>
+        <div class="field col-2"><label>Etapa operacional</label><input :value="form.status === 'Producao' ? 'Produção' : form.status" readonly aria-readonly="true"></div>
       </div>
       <div class="summary-box"><div class="detail-list__row"><span>Receita líquida</span><strong>{{ formatCurrency(net) }}</strong></div><div class="detail-list__row"><span>Lucro</span><strong>{{ formatCurrency(profit) }}</strong></div></div>
       <div class="form-actions"><NuxtLink class="btn" to="/vendas">Cancelar</NuxtLink><button class="btn btn--primary" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar Alterações' : 'Salvar Venda' }}</button></div>

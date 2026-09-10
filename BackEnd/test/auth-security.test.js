@@ -197,6 +197,18 @@ test('logout revoga refresh token e invalida access token da sessao', async () =
   assert.equal(refreshAfterLogout.status, 400)
 })
 
+test('access token contem apenas os dados minimos de sessao e permissao', () => {
+  const token = createToken({
+    id: 'usuario-1', tenantId: 'empresa-1', name: 'Nome privado', email: 'privado@example.com',
+    role: 'admin', platformRole: '', tokenVersion: 3
+  }, { sessionId: 'sessao-1' })
+  const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'))
+
+  assert.deepEqual(Object.keys(payload).sort(), ['exp', 'platformRole', 'role', 'sid', 'sub', 'tenantId', 'tokenVersion'])
+  assert.equal(payload.name, undefined)
+  assert.equal(payload.email, undefined)
+})
+
 test('alteracao de senha exige a senha atual e invalida as sessoes anteriores', async () => {
   const session = await registerSession('troca-senha', '127.0.0.211')
 
@@ -303,6 +315,57 @@ test('CORS permite somente as origens configuradas', async () => {
   })
   assert.equal(blocked.status, 403)
   assert.equal(blocked.headers['Access-Control-Allow-Origin'], undefined)
+})
+
+test('fluxo operacional do pedido exige etapas sequenciais e rastreio para envio', async () => {
+  const session = await registerSession('fluxo-pedido', '127.0.5.10')
+  const created = await request({
+    method: 'POST', path: '/api/orders', token: session.accessToken, ip: '127.0.5.11',
+    body: { id: `PED-FLUXO-${Date.now()}`, product: 'Produto teste', qty: 1, status: 'Novo', salesChannel: 'direct' }
+  })
+  assert.equal(created.status, 201)
+  const order = created.body[0]
+  const path = `/api/orders/${order.dbId || order.id}/advance-stage`
+
+  assert.equal((await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Producao' } })).status, 200)
+  const skipped = await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Entregue' } })
+  assert.equal(skipped.status, 400)
+  assert.equal(skipped.body.error, 'O pedido deve avancar uma etapa por vez.')
+  assert.equal((await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Impresso' } })).status, 200)
+  assert.equal((await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Embalando' } })).status, 200)
+  const missingTracking = await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Enviado' } })
+  assert.equal(missingTracking.status, 400)
+  const sent = await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Enviado', trackingCode: 'BR123456789' } })
+  assert.equal(sent.status, 200)
+  assert.equal(sent.body.order.trackingCode, 'BR123456789')
+  assert.ok(sent.body.order.shippedAt)
+})
+
+test('edicao generica nao permite pular a etapa operacional do pedido', async () => {
+  const session = await registerSession('edicao-etapa-pedido', '127.0.5.15')
+  const created = await request({
+    method: 'POST', path: '/api/orders', token: session.accessToken,
+    body: { id: `PED-EDICAO-${Date.now()}`, product: 'Produto teste', qty: 1, status: 'Novo' }
+  })
+  assert.equal(created.status, 201)
+  const order = created.body[0]
+  const response = await request({
+    method: 'PUT', path: `/api/orders/${order.dbId || order.id}`, token: session.accessToken,
+    body: { ...order, status: 'Entregue' }
+  })
+  assert.equal(response.status, 400)
+  assert.equal(response.body.error, 'Altere a etapa do pedido pelo acompanhamento operacional.')
+})
+
+test('saude operacional retorna somente contagens para perfis de producao', async () => {
+  const session = await registerSession('saude-operacional', '127.0.5.20')
+  const response = await request({ method: 'GET', path: '/api/operational-health', token: session.accessToken })
+
+  assert.equal(response.status, 200)
+  assert.equal(typeof response.body.activePrints, 'number')
+  assert.equal(typeof response.body.pendingAlerts, 'number')
+  assert.ok(response.body.checkedAt)
+  assert.equal(response.body.lastError, undefined)
 })
 
 test('sessoes mostram metadados minimos sem expor o IP completo', async () => {

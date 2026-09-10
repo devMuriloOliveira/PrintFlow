@@ -4,6 +4,9 @@ import { hasDatabase, withTenant } from '../db/pool.js'
 import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { listResource } from '../repositories/appDataRepository.js'
+import { createFilamentMovementWithClient } from '../repositories/inventoryRepository.js'
+import { getAuthUser } from './auth.js'
+import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
 const intOrNull = (value) => {
   const parsed = Number(value)
@@ -43,7 +46,39 @@ const findLocalJob = (list, id) =>
 const syncLocalOrderStatus = (tenantId, orderId, status) => {
   if (!orderId) return
   const order = getTenantData(tenantId).orders.find((item) => itemId(item) === String(orderId))
-  if (order && !['Cancelado', 'Entregue'].includes(String(order.status || ''))) order.status = status
+  const expectedCurrentStatus = status === 'Producao' ? 'Novo' : 'Producao'
+  if (order && String(order.status || 'Novo') === expectedCurrentStatus) order.status = status
+}
+
+const materialUsageForJob = (product, quantity) => {
+  const filamentId = String(product?.filament_id ?? product?.filamentId ?? '').trim() || null
+  const pieceWeight = Number(product?.weight ?? product?.cost_breakdown?.materialWeight ?? product?.costBreakdown?.materialWeight ?? 0)
+  const wastePercent = Math.max(0, Number(product?.cost_breakdown?.wastePercent ?? product?.costBreakdown?.wastePercent ?? 0))
+  const grams = Math.round(pieceWeight * normalizeQuantity(quantity) * (1 + wastePercent / 100) * 100) / 100
+  return { filamentId, grams }
+}
+
+const syncOrderStatusFromPrintJob = async (client, tenantId, orderId, nextStatus, printJobId) => {
+  if (!orderId) return
+  const current = await client.query(
+    'select id, status from orders where tenant_id = $1 and id = $2 for update',
+    [tenantId, orderId]
+  )
+  if (!current.rowCount) return
+
+  const fromStatus = String(current.rows[0].status || 'Novo')
+  const expectedCurrentStatus = nextStatus === 'Producao' ? 'Novo' : 'Producao'
+  if (fromStatus !== expectedCurrentStatus) return
+
+  await client.query(
+    'update orders set status = $3 where tenant_id = $1 and id = $2',
+    [tenantId, orderId, nextStatus]
+  )
+  await writeAuditEvent(tenantId, {
+    action: 'orders.stage_advanced', actorType: 'system',
+    entityType: 'orders', entityId: String(orderId),
+    details: { fromStatus, toStatus: nextStatus, source: 'print_job', printJobId: String(printJobId) }
+  }, client)
 }
 
 export const handlePrintJobEnqueue = async (req, res) => {
@@ -379,7 +414,7 @@ export const handlePrintJobApprove = async (req, res, printJobId) => {
   if (hasDatabase) {
     await withTenant(tenantId, async (client) => {
       const jobResult = await client.query(
-        `select id, printer_id, agent_printer_id, status
+        `select id, order_id, printer_id, agent_printer_id, status
            from print_jobs
           where tenant_id = $1
             and id = $2
@@ -411,7 +446,7 @@ export const handlePrintJobApprove = async (req, res, printJobId) => {
             and id = $2`,
         [tenantId, printJobId, Number(priorityResult.rows[0]?.next_priority || 1)]
       )
-      if (job.order_id) await client.query("update orders set status = 'Producao' where tenant_id = $1 and id = $2 and status not in ('Cancelado', 'Entregue')", [tenantId, job.order_id])
+      await syncOrderStatusFromPrintJob(client, tenantId, job.order_id, 'Producao', printJobId)
     })
 
     return sendPrintJobs(req, res)
@@ -466,7 +501,7 @@ export const handlePrintJobStartManual = async (req, res, printJobId) => {
       if (!result.rowCount) {
         throw new Error('Esta impressora ja possui uma impressao em andamento ou este item nao esta mais na fila.')
       }
-      if (result.rows[0].order_id) await client.query("update orders set status = 'Producao' where tenant_id = $1 and id = $2 and status not in ('Cancelado', 'Entregue')", [tenantId, result.rows[0].order_id])
+      await syncOrderStatusFromPrintJob(client, tenantId, result.rows[0].order_id, 'Producao', printJobId)
     })
 
     return sendPrintJobs(req, res)
@@ -497,6 +532,7 @@ export const handlePrintJobStartManual = async (req, res, printJobId) => {
 
 export const handlePrintJobComplete = async (req, res, printJobId) => {
   const tenantId = await getTenantId(req)
+  const user = await getAuthUser(req)
 
   if (hasDatabase) {
     await withTenant(tenantId, async (client) => {
@@ -508,12 +544,41 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
           where tenant_id = $1
             and id = $2
             and status in ('printing', 'paused')
-          returning id, order_id`,
+          returning id, order_id, product_id, quantity`,
         [tenantId, printJobId]
       )
 
       if (!result.rowCount) throw new Error('Registro nao encontrado')
-      if (result.rows[0].order_id) await client.query("update orders set status = 'Impresso' where tenant_id = $1 and id = $2 and status not in ('Cancelado', 'Entregue')", [tenantId, result.rows[0].order_id])
+      await syncOrderStatusFromPrintJob(client, tenantId, result.rows[0].order_id, 'Impresso', printJobId)
+
+      const productResult = await client.query(
+        'select id, name, filament_id, weight, cost_breakdown from products where tenant_id = $1 and id = $2 limit 1',
+        [tenantId, result.rows[0].product_id]
+      )
+      const product = productResult.rows[0]
+      const usage = materialUsageForJob(product, result.rows[0].quantity)
+
+      if (!usage.filamentId || usage.grams <= 0) {
+        await writeOperationalNotification(tenantId, {
+          type: 'inventory.production_recipe_missing', severity: 'warning', title: 'Consumo de material pendente',
+          message: 'A impressão foi concluída, mas o produto não possui filamento ou peso válidos para baixar o estoque.',
+          entityType: 'print_job', entityId: String(printJobId), dedupeKey: `inventory-recipe-missing:${printJobId}`
+        }, client)
+        return
+      }
+
+      try {
+        await createFilamentMovementWithClient(client, tenantId, usage.filamentId, {
+          type: 'out', quantity: usage.grams,
+          reason: `Consumo confirmado pela conclusão da impressão #${printJobId}`
+        }, user ? { actorId: user.id, actorType: 'user' } : null)
+      } catch (error) {
+        await writeOperationalNotification(tenantId, {
+          type: 'inventory.production_consumption_pending', severity: 'warning', title: 'Consumo de material pendente',
+          message: `A impressão foi concluída, mas o estoque não foi baixado: ${String(error.message || 'verifique o filamento').slice(0, 260)}`,
+          entityType: 'print_job', entityId: String(printJobId), dedupeKey: `inventory-consumption-pending:${printJobId}`
+        }, client)
+      }
     })
 
     return sendPrintJobs(req, res)
@@ -529,5 +594,11 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
   job.completedAt ||= new Date().toISOString()
   job.updatedAt = new Date().toISOString()
   syncLocalOrderStatus(tenantId, job.orderId, 'Impresso')
+  const product = getTenantData(tenantId).products.find((item) => itemId(item) === String(job.productId))
+  const usage = materialUsageForJob(product, job.quantity)
+  const filament = getTenantData(tenantId).filaments.find((item) => itemId(item) === String(usage.filamentId))
+  if (filament && usage.grams > 0 && Number(filament.remaining || 0) >= usage.grams) {
+    filament.remaining = Number(filament.remaining || 0) - usage.grams
+  }
   return sendPrintJobs(req, res)
 }

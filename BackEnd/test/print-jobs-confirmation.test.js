@@ -89,3 +89,18 @@ test('pedido de marketplace precisa ser confirmado antes de iniciar impressao', 
   assert.equal(started.status, 200)
   assert.equal(data.printJobs[0].status, 'printing')
 })
+
+test('conclusao confirmada baixa uma vez o filamento vinculado a receita', async () => {
+  const data = getTenantData('demo')
+  data.filaments = [{ id: 'filament-consumption', name: 'PLA azul', remaining: 100, min: 20 }]
+  data.products = [{ id: 'product-consumption', name: 'Produto com receita', filamentId: 'filament-consumption', weight: 20, costBreakdown: { wastePercent: 10 } }]
+  data.orders = [{ id: 'order-consumption', status: 'Producao' }]
+  data.printJobs = [{ id: 'job-consumption', orderId: 'order-consumption', productId: 'product-consumption', quantity: 2, printerId: 'printer-consumption', status: 'printing' }]
+
+  const completed = await request({ path: '/api/print-jobs/job-consumption/complete' })
+
+  assert.equal(completed.status, 200)
+  assert.equal(data.printJobs[0].status, 'completed')
+  assert.equal(data.orders[0].status, 'Impresso')
+  assert.equal(data.filaments[0].remaining, 56)
+})
