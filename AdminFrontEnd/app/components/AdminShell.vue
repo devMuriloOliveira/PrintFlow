@@ -7,10 +7,10 @@ const route = useRoute()
 
 const nav = [
   { to: '/', label: 'Central', mark: 'C' },
-  { to: '/solicitacoes', label: 'Solicitacoes', mark: 'S' },
-  { to: '/chats', label: 'Chats', mark: 'M' },
+  { to: '/chats', label: 'Atendimentos', mark: 'A' },
+  { to: '/solicitacoes', label: 'Solicitacoes LGPD', mark: 'L' },
   { to: '/empresas', label: 'Empresas', mark: 'E' },
-  { to: '/auditoria', label: 'Auditoria', mark: 'A' },
+  { to: '/auditoria', label: 'Auditoria', mark: 'G' },
   { to: '/exclusoes', label: 'Exclusoes', mark: 'X' }
 ]
 

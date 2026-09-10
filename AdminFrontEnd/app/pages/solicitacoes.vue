@@ -48,7 +48,7 @@ onMounted(() => void load({ tenants: true, requests: true }))
 </script>
 
 <template>
-  <AdminShell v-model:search="search" title="Solicitacoes" subtitle="Gerencie suporte e auditorias solicitados pelos usuarios" :request-count="activeRequests.length">
+  <AdminShell v-model:search="search" title="Solicitacoes LGPD" subtitle="Gerencie direitos dos titulares e protocolos de privacidade" :request-count="activeRequests.length">
     <template #actions><select v-model="categoryFilter" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option><option value="technical">Tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracoes</option><option value="account">Conta</option><option value="data_backup">Backup e dados</option><option value="privacy">LGPD</option><option value="audit">Auditoria</option></select><button class="button button--quiet" :disabled="reportLoading" @click="exportRequestsReport">Exportar CSV</button><button class="button button--quiet" :disabled="refreshing" @click="update">Atualizar</button></template>
     <p v-if="error" class="feedback feedback--error">{{ error }}</p>
     <div class="request-tabs">

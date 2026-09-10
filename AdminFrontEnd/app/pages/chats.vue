@@ -7,7 +7,7 @@ const {
   statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, loadChatAssignees, loadSupportMacros, claimChat, transferChat, addChatCollaborator, updateSupportMetadata, reopenSupportChat, snoozeSupport, bulkUpdateSupport, autoAssignSupport
 } = usePlatformAdminWorkspace()
 const search = ref('')
-const queueFilter = ref<'all' | 'unassigned' | 'mine' | 'collaborating' | 'waiting_customer' | 'waiting_internal' | 'overdue' | 'closed'>('all')
+const queueFilter = ref<'open' | 'all' | 'unassigned' | 'mine' | 'collaborating' | 'waiting_customer' | 'waiting_internal' | 'overdue' | 'closed'>('open')
 const selectedRequest = ref<AuditRequest | null>(null)
 const messages = computed<Message[]>(() => selectedRequest.value ? messagesByRequest.value[selectedRequest.value.id] || [] : [])
 const canParticipate = computed(() => {
@@ -45,6 +45,7 @@ const isOverdue = (request: AuditRequest) => {
   const due = request.supportResolutionDueAt || request.supportFirstResponseDueAt
   return request.requestKind === 'support' && request.supportStatus !== 'resolved' && Boolean(due && new Date(due).getTime() < Date.now())
 }
+const isClosedRequest = (request: AuditRequest) => ['closed', 'cancelled', 'expired'].includes(request.status) || request.supportStatus === 'resolved'
 
 const filteredRequests = computed(() => {
   const term = search.value.trim().toLowerCase()
@@ -52,14 +53,15 @@ const filteredRequests = computed(() => {
   return requests.value.filter(request => {
     const collaborator = request.chatCollaborators?.some(item => item.id === currentId)
     const supportStatus = request.supportStatus || request.status
-    const matchesQueue = queueFilter.value === 'all'
-      || (queueFilter.value === 'unassigned' && !request.chatAssigneeId)
-      || (queueFilter.value === 'mine' && request.chatAssigneeId === currentId)
-      || (queueFilter.value === 'collaborating' && collaborator)
-      || (queueFilter.value === 'waiting_customer' && supportStatus === 'waiting_customer')
-      || (queueFilter.value === 'waiting_internal' && supportStatus === 'waiting_internal')
-      || (queueFilter.value === 'overdue' && isOverdue(request))
-      || (queueFilter.value === 'closed' && (['closed', 'cancelled', 'expired'].includes(request.status) || request.supportStatus === 'resolved'))
+    const matchesQueue = queueFilter.value === 'closed'
+      ? isClosedRequest(request)
+      : !isClosedRequest(request) && (queueFilter.value === 'open' || queueFilter.value === 'all'
+        || (queueFilter.value === 'unassigned' && !request.chatAssigneeId)
+        || (queueFilter.value === 'mine' && request.chatAssigneeId === currentId)
+        || (queueFilter.value === 'collaborating' && collaborator)
+        || (queueFilter.value === 'waiting_customer' && supportStatus === 'waiting_customer')
+        || (queueFilter.value === 'waiting_internal' && supportStatus === 'waiting_internal')
+        || (queueFilter.value === 'overdue' && isOverdue(request)))
     const content = `${request.id} ${request.subject} ${request.reason} ${request.category} ${request.requesterName} ${supportStatus} ${tenantFor(request.tenantId)?.name || request.tenantId}`.toLowerCase()
     return matchesQueue && (!term || content.includes(term))
   })
@@ -265,10 +267,10 @@ onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer) })
 </script>
 
 <template>
-  <AdminShell v-model:search="search" title="Chats" subtitle="Atendimento seguro entre superadmin e usuarios" :request-count="activeRequests.length">
+  <AdminShell v-model:search="search" title="Atendimentos" subtitle="Fila segura de suporte e protocolos LGPD" :request-count="activeRequests.length">
     <template #actions><button class="button button--quiet" :disabled="actionLoading" @click="update">Atualizar</button></template>
     <p v-if="error || actionError" class="feedback feedback--error">{{ actionError || error }}</p>
-    <div class="request-card" style="margin:10px 0;display:flex;gap:8px;align-items:end;flex-wrap:wrap"><label>Fila<select v-model="queueFilter" aria-label="Fila de atendimento"><option value="all">Todas visiveis</option><option value="unassigned">Nao atribuidas</option><option value="mine">Minhas</option><option value="collaborating">Colaborador</option><option value="waiting_customer">Aguardando cliente</option><option value="waiting_internal">Aguardando equipe</option><option value="overdue">Em atraso</option><option value="closed">Encerradas</option></select></label><label>Categoria<select v-model="categoryFilter"><option value="">Todas</option><option value="technical">Tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracao</option><option value="account">Conta</option><option value="data_backup">Backup</option><option value="privacy">Privacidade</option></select></label><label>Responsavel<select v-model="assigneeFilter"><option value="">Todos</option><option value="unassigned">Nao atribuidas</option><option v-for="admin in chatAssignees" :key="admin.id" :value="admin.id">{{ admin.name }}</option></select></label><label>Empresa<select v-model="tenantFilter"><option value="">Todas</option><option v-for="tenant in tenants" :key="tenant.id" :value="tenant.id">{{ tenant.name }}</option></select></label><label>De<input v-model="fromFilter" type="date"></label><label>Ate<input v-model="toFilter" type="date"></label><button class="button button--quiet" :disabled="actionLoading" @click="applyServerFilters">Filtrar servidor</button></div>
+    <div class="request-card" style="margin:10px 0;display:flex;gap:8px;align-items:end;flex-wrap:wrap"><label>Fila<select v-model="queueFilter" aria-label="Fila de atendimento"><option value="open">Em aberto</option><option value="all">Todas em aberto</option><option value="unassigned">Nao atribuidas</option><option value="mine">Minhas</option><option value="collaborating">Colaborador</option><option value="waiting_customer">Aguardando cliente</option><option value="waiting_internal">Aguardando equipe</option><option value="overdue">Em atraso</option><option value="closed">Encerradas</option></select></label><label>Categoria<select v-model="categoryFilter"><option value="">Todas</option><option value="technical">Tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracao</option><option value="account">Conta</option><option value="data_backup">Backup</option><option value="privacy">Privacidade</option></select></label><label>Responsavel<select v-model="assigneeFilter"><option value="">Todos</option><option value="unassigned">Nao atribuidas</option><option v-for="admin in chatAssignees" :key="admin.id" :value="admin.id">{{ admin.name }}</option></select></label><label>Empresa<select v-model="tenantFilter"><option value="">Todas</option><option v-for="tenant in tenants" :key="tenant.id" :value="tenant.id">{{ tenant.name }}</option></select></label><label>De<input v-model="fromFilter" type="date"></label><label>Ate<input v-model="toFilter" type="date"></label><button class="button button--quiet" :disabled="actionLoading" @click="applyServerFilters">Filtrar servidor</button></div>
     <div class="request-card" style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label>Atendimentos em lote<select v-model="selectedBatchIds" multiple size="3" aria-label="Selecionar atendimentos"><option v-for="request in filteredRequests" :key="request.id" :value="request.id">{{ request.id }} · {{ requesterName(request) }}</option></select></label><select v-model="bulkOperation" aria-label="Acao em lote"><option value="claim">Assumir selecionados</option><option value="status">Alterar status</option></select><select v-if="bulkOperation === 'status'" v-model="bulkStatus" aria-label="Status em lote"><option value="in_progress">Em atendimento</option><option value="waiting_customer">Aguardando cliente</option><option value="waiting_internal">Aguardando equipe</option><option value="resolved">Resolvido</option><option value="reopened">Reaberto</option></select><button class="button button--quiet" :disabled="actionLoading || !selectedBatchIds.length" @click="applyBulkOperation">Aplicar</button><button class="button button--quiet" :disabled="actionLoading || !selectedBatchIds.length" @click="autoAssignSelected">Distribuir fila</button></div>
     <div class="chat-layout">
       <aside class="chat-overview"><h2>Visao geral</h2><div><span>Em atendimento</span><strong>{{ requests.filter(request => request.status !== 'pending' && isChatOpen(request.status)).length }}</strong></div><div><span>Aguardando resposta</span><strong>{{ requests.filter(request => request.status === 'pending').length }}</strong></div><div><span>Encerrados</span><strong>{{ closedRequests.length }}</strong></div></aside>
