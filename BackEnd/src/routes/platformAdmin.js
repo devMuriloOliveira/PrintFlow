@@ -14,6 +14,13 @@ import {
   listPlatformSupportHistory,
   listPlatformChatAssignees,
   listPlatformTenants,
+  listPlatformPlans,
+  getPlatformTenantDetails,
+  listPlatformTenantUsers,
+  listPlatformTenantSubscriptionEvents,
+  updatePlatformTenantSubscription,
+  createPlatformTenantBillingRecord,
+  listPlatformTenantBillingRecords,
   listTenantOperationalAudit,
   updatePlatformTenantStatus,
   writePlatformAudit
@@ -47,6 +54,47 @@ export const handlePlatformTenantsList = async (req, res) => {
   const tenants = await listPlatformTenants()
   await writePlatformAudit(req, user, { action: 'platform.tenants.list' })
   return sendJson(res, 200, tenants)
+}
+
+export const handlePlatformPlansList = async (req, res) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformPlans())
+}
+
+export const handlePlatformTenantDetails = async (req, res, tenantId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await getPlatformTenantDetails(tenantId))
+}
+
+export const handlePlatformTenantUsers = async (req, res, tenantId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformTenantUsers(tenantId))
+}
+
+export const handlePlatformTenantSubscriptionEvents = async (req, res, tenantId, url) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformTenantSubscriptionEvents(tenantId, url.searchParams.get('limit')))
+}
+
+export const handlePlatformTenantBillingRecords = async (req, res, tenantId, url) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  return sendJson(res, 200, await listPlatformTenantBillingRecords(tenantId, url.searchParams.get('limit')))
+}
+
+export const handlePlatformTenantSubscriptionUpdate = async (req, res, tenantId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const payload = await readJsonBody(req)
+  const details = await updatePlatformTenantSubscription(tenantId, payload, user.id)
+  await writePlatformAudit(req, user, { action: 'platform.tenant_subscription.updated', targetTenantId: tenantId, targetResource: 'tenant_subscription', reason: payload.reason, details: { status: payload.status, planId: payload.planId || null, billingCycle: payload.billingCycle } })
+  return sendJson(res, 200, details)
+}
+
+export const handlePlatformTenantBillingRecordCreate = async (req, res, tenantId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const payload = await readJsonBody(req)
+  const record = await createPlatformTenantBillingRecord(tenantId, payload, user.id)
+  await writePlatformAudit(req, user, { action: 'platform.tenant_billing_record.created', targetTenantId: tenantId, targetResource: 'tenant_billing_record', targetResourceId: record.id, reason: payload.reason || payload.notes, details: { amount: record.amount, status: record.status } })
+  return sendJson(res, 201, record)
 }
 
 export const handlePlatformAdminAudit = async (req, res, url) => {

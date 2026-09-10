@@ -39,8 +39,16 @@ const tenantTables = [
   'operational_notifications',
   'operational_audit_events',
   'tenant_memberships',
-  'tenant_invitations'
+  'tenant_invitations',
+  'tenant_subscriptions',
+  'tenant_billing_records',
+  'tenant_subscription_events'
 ]
+const platformTenantTables = new Set([
+  'tenant_subscriptions',
+  'tenant_billing_records',
+  'tenant_subscription_events'
+])
 
 // ======================================================
 // HABILITAR RLS POR TENANT
@@ -79,19 +87,13 @@ const enableTenantIsolation =
         on ${table}
 
         using (
-          tenant_id =
-          current_setting(
-            'app.tenant_id',
-            true
-          )
+          tenant_id = current_setting('app.tenant_id', true)
+          ${platformTenantTables.has(table) ? "or current_setting('app.platform_admin', true) = 'true'" : ''}
         )
 
         with check (
-          tenant_id =
-          current_setting(
-            'app.tenant_id',
-            true
-          )
+          tenant_id = current_setting('app.tenant_id', true)
+          ${platformTenantTables.has(table) ? "or current_setting('app.platform_admin', true) = 'true'" : ''}
         )
       `
     )
@@ -405,6 +407,108 @@ export const migrate =
     `)
     await query(`create index if not exists tenant_invitations_tenant_id_idx on tenant_invitations (tenant_id)`)
     await query(`create index if not exists tenant_invitations_email_hash_idx on tenant_invitations (email_hash)`)
+
+    // ==================================================
+    // PLANOS E ASSINATURAS INTERNAS DA PLATAFORMA
+    // ==================================================
+
+    await query(`
+      create table if not exists platform_plans (
+        id text primary key,
+        code text not null unique,
+        name text not null,
+        description text not null default '',
+        monthly_reference_price numeric(12,2) not null default 0 check (monthly_reference_price >= 0),
+        yearly_reference_price numeric(12,2) not null default 0 check (yearly_reference_price >= 0),
+        limits jsonb not null default '{}'::jsonb,
+        features jsonb not null default '{}'::jsonb,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`
+      create table if not exists tenant_subscriptions (
+        id text primary key,
+        tenant_id text not null unique references tenants(id) on delete cascade,
+        plan_id text references platform_plans(id) on delete restrict,
+        status text not null default 'trial' check (status in ('trial','active','past_due','grace','paused','courtesy','cancelled','ended')),
+        billing_cycle text not null default 'monthly' check (billing_cycle in ('monthly','yearly','manual')),
+        started_at timestamptz,
+        current_period_start timestamptz,
+        current_period_end timestamptz,
+        trial_ends_at timestamptz,
+        grace_ends_at timestamptz,
+        cancelled_at timestamptz,
+        cancellation_reason text not null default '',
+        manual_override boolean not null default false,
+        source text not null default 'manual' check (source in ('manual', 'provider')),
+        provider text,
+        provider_customer_id text,
+        provider_subscription_id text,
+        last_provider_sync_at timestamptz,
+        notes text not null default '',
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table tenant_subscriptions add column if not exists source text not null default 'manual' check (source in ('manual', 'provider'))`)
+    await query(`alter table tenant_subscriptions add column if not exists provider text`)
+    await query(`alter table tenant_subscriptions add column if not exists provider_customer_id text`)
+    await query(`alter table tenant_subscriptions add column if not exists provider_subscription_id text`)
+    await query(`alter table tenant_subscriptions add column if not exists last_provider_sync_at timestamptz`)
+    await query(`create index if not exists tenant_subscriptions_status_idx on tenant_subscriptions (status, current_period_end)`)
+    await query(`
+      create table if not exists tenant_billing_records (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        subscription_id text references tenant_subscriptions(id) on delete set null,
+        reference text not null default '',
+        amount numeric(12,2) not null default 0 check (amount >= 0),
+        currency text not null default 'BRL',
+        due_at timestamptz,
+        paid_at timestamptz,
+        status text not null default 'pending' check (status in ('pending','paid','overdue','void','courtesy')),
+        source text not null default 'manual' check (source in ('manual', 'provider')),
+        provider text,
+        provider_invoice_id text,
+        notes text not null default '',
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table tenant_billing_records add column if not exists source text not null default 'manual' check (source in ('manual', 'provider'))`)
+    await query(`alter table tenant_billing_records add column if not exists provider text`)
+    await query(`alter table tenant_billing_records add column if not exists provider_invoice_id text`)
+    await query(`create index if not exists tenant_billing_records_lookup_idx on tenant_billing_records (tenant_id, due_at desc)`)
+    await query(`
+      create table if not exists tenant_subscription_events (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        subscription_id text references tenant_subscriptions(id) on delete set null,
+        action text not null,
+        previous_state jsonb not null default '{}'::jsonb,
+        new_state jsonb not null default '{}'::jsonb,
+        reason text not null default '',
+        actor_user_id text not null default '',
+        source text not null default 'manual' check (source in ('manual', 'provider')),
+        provider text,
+        provider_event_id text,
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table tenant_subscription_events add column if not exists source text not null default 'manual' check (source in ('manual', 'provider'))`)
+    await query(`alter table tenant_subscription_events add column if not exists provider text`)
+    await query(`alter table tenant_subscription_events add column if not exists provider_event_id text`)
+    await query(`create index if not exists tenant_subscription_events_lookup_idx on tenant_subscription_events (tenant_id, created_at desc)`)
+    await query(`
+      insert into platform_plans (id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features)
+      values
+        ('plan_starter', 'starter', 'Starter', 'Plano inicial para operacoes menores', 0, 0, '{"users":3,"printers":2,"agents":2,"products":100,"storageMb":500}', '{"marketplaces":false,"advancedReports":false}'),
+        ('plan_growth', 'growth', 'Growth', 'Plano para operacoes em crescimento', 0, 0, '{"users":10,"printers":5,"agents":5,"products":1000,"storageMb":5000}', '{"marketplaces":true,"advancedReports":true}'),
+        ('plan_scale', 'scale', 'Scale', 'Plano para operacoes de maior volume', 0, 0, '{"users":50,"printers":25,"agents":25,"products":10000,"storageMb":25000}', '{"marketplaces":true,"advancedReports":true,"prioritySupport":true}')
+      on conflict (code) do nothing
+    `)
 
     await query(`
       create table if not exists platform_super_admins (

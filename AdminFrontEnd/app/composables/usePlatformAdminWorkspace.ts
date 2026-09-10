@@ -1,4 +1,4 @@
-import type { AuditRequest, AuthorizedTenantAudit, Message, Overview, PlatformAudit, PlatformNotification, SupportAttachment, SupportMacro, SupportMetrics, SupportSlaRule, Tenant } from '~/types/platform-admin'
+import type { AuditRequest, AuthorizedTenantAudit, Message, Overview, PlatformAudit, PlatformNotification, SupportAttachment, SupportMacro, SupportMetrics, SupportSlaRule, Tenant, PlatformPlan, TenantDetails, TenantSubscriptionEvent, TenantUser, TenantBillingRecord } from '~/types/platform-admin'
 
 type LoadOptions = { overview?: boolean; tenants?: boolean; requests?: boolean }
 type Resource = keyof LoadOptions
@@ -24,6 +24,11 @@ export const usePlatformAdminWorkspace = () => {
   const supportSlaRules = useState<SupportSlaRule[]>('platform-admin-support-sla-rules', () => [])
   const supportHistory = useState<Record<string, PlatformAudit[]>>('platform-admin-support-history', () => ({}))
   const supportAttachments = useState<Record<string, SupportAttachment[]>>('platform-admin-support-attachments', () => ({}))
+  const tenantDetails = useState<TenantDetails | null>('platform-admin-tenant-details', () => null)
+  const tenantUsers = useState<TenantUser[]>('platform-admin-tenant-users', () => [])
+  const tenantSubscriptionEvents = useState<TenantSubscriptionEvent[]>('platform-admin-tenant-subscription-events', () => [])
+  const platformPlans = useState<PlatformPlan[]>('platform-admin-plans', () => [])
+  const tenantBillingRecords = useState<TenantBillingRecord[]>('platform-admin-tenant-billing-records', () => [])
 
   const formatDate = (value?: string | null) => value ? new Date(value).toLocaleString('pt-BR') : '-'
   const tenantFor = (id: string) => tenants.value.find(tenant => tenant.id === id)
@@ -31,7 +36,7 @@ export const usePlatformAdminWorkspace = () => {
     pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada',
     new: 'Novo', in_progress: 'Em atendimento', waiting_customer: 'Aguardando cliente', waiting_internal: 'Aguardando equipe', resolved: 'Resolvido', reopened: 'Reaberto',
     cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada', active: 'Ativa',
-    suspended: 'Suspensa', blocked: 'Bloqueada', overdue: 'Atrasada', not_configured: 'Nao configurada'
+    suspended: 'Suspensa', blocked: 'Bloqueada', overdue: 'Atrasada', pending: 'Pendente', paid: 'Paga', void: 'Anulada', not_configured: 'Nao configurada', trial: 'Em teste', past_due: 'Inadimplente', grace: 'Em carencia', paused: 'Pausada', courtesy: 'Cortesia', ended: 'Encerrada'
   }[status] || status)
   const statusClass = (status: string) => `status-pill status-pill--${status.replace('_', '-')}`
   const isChatOpen = (status: string) => chatOpenStatuses.includes(status)
@@ -51,6 +56,11 @@ export const usePlatformAdminWorkspace = () => {
     supportSlaRules.value = []
     supportHistory.value = {}
     supportAttachments.value = {}
+    tenantDetails.value = null
+    tenantUsers.value = []
+    tenantSubscriptionEvents.value = []
+    platformPlans.value = []
+    tenantBillingRecords.value = []
     workspaceUserId.value = ''
     inFlight.clear()
   }
@@ -187,6 +197,13 @@ export const usePlatformAdminWorkspace = () => {
     supportSlaRules.value = await session.request<SupportSlaRule[]>('/api/platform-admin/support-sla-rules')
     return supportSlaRules.value
   }
+  const loadPlatformPlans = async () => { platformPlans.value = await session.request<PlatformPlan[]>('/api/platform-admin/plans'); return platformPlans.value }
+  const loadTenantDetails = async (tenantId: string) => { tenantDetails.value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/details`); return tenantDetails.value }
+  const loadTenantUsers = async (tenantId: string) => { tenantUsers.value = await session.request<TenantUser[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/users`); return tenantUsers.value }
+  const loadTenantSubscriptionEvents = async (tenantId: string) => { tenantSubscriptionEvents.value = await session.request<TenantSubscriptionEvent[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription-events`); return tenantSubscriptionEvents.value }
+  const loadTenantBillingRecords = async (tenantId: string) => { tenantBillingRecords.value = await session.request<TenantBillingRecord[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/billing-records`); return tenantBillingRecords.value }
+  const updateTenantSubscription = async (tenantId: string, body: Record<string, unknown>) => { const value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription`, { method: 'POST', body }); tenantDetails.value = value; await loadTenantSubscriptionEvents(tenantId); return value }
+  const createTenantBillingRecord = async (tenantId: string, body: Record<string, unknown>) => { const value = await session.request<TenantBillingRecord>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/billing-records`, { method: 'POST', body }); tenantBillingRecords.value = [value, ...tenantBillingRecords.value]; await loadTenantSubscriptionEvents(tenantId); return value }
   const updateSupportSlaRule = async (ruleId: string, body: Partial<SupportSlaRule>) => {
     const updated = await session.request<SupportSlaRule>(`/api/platform-admin/support-sla-rules/${encodeURIComponent(ruleId)}`, { method: 'POST', body })
     supportSlaRules.value = supportSlaRules.value.map(rule => rule.id === ruleId ? updated : rule)
@@ -242,7 +259,7 @@ export const usePlatformAdminWorkspace = () => {
   const closedRequests = computed(() => requests.value.filter(request => ['closed', 'cancelled', 'expired'].includes(request.status) || request.supportStatus === 'resolved'))
 
   return {
-    session, overview, tenants, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, loading, error,
-    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
+    session, overview, tenants, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
+    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

@@ -41,5 +41,25 @@ export const withTenant = async (tenantId, callback) => {
   }
 }
 
+export const withPlatformAdmin = async (callback) => {
+  if (!pool) {
+    throw new Error('DATABASE_URL nao configurada')
+  }
+
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    await client.query("select set_config('app.platform_admin', 'true', true)")
+    const result = await callback(client)
+    await client.query('commit')
+    return result
+  } catch (error) {
+    await client.query('rollback')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 export const tenantQuery = (tenantId, text, params = []) =>
   withTenant(tenantId, (client) => client.query(text, params))

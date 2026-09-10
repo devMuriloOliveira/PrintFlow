@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { env } from '../config/env.js'
-import { query, withTenant } from '../db/pool.js'
+import { query, withPlatformAdmin, withTenant } from '../db/pool.js'
 import { blindIndexesForLookup, decryptField } from '../security/crypto.js'
 import { describeAuditEvent } from './operationalEvents.js'
 
 const text = (value, max = 500) => String(value || '').trim().slice(0, max)
 const configuredEmails = () => env.platformSuperAdminEmails
+const platformQuery = (statement, params = []) => withPlatformAdmin((client) => client.query(statement, params))
 
 export const syncConfiguredPlatformSuperAdmins = async () => {
   const emails = configuredEmails()
@@ -60,6 +61,13 @@ const tenantRow = (row) => ({
   accountStatus: row.account_status,
   billingStatus: row.billing_status,
   billingDueAt: row.billing_due_at,
+  planId: row.plan_id ? String(row.plan_id) : null,
+  planName: row.plan_name || 'Sem plano',
+  subscriptionStatus: row.subscription_status || 'not_configured',
+  billingCycle: row.billing_cycle || 'manual',
+  currentPeriodEnd: row.current_period_end || null,
+  trialEndsAt: row.trial_ends_at || null,
+  graceEndsAt: row.grace_ends_at || null,
   createdAt: row.created_at,
   users: Number(row.users || 0),
   activeUsers: Number(row.active_users || 0),
@@ -88,21 +96,135 @@ export const getPlatformOverview = async () => {
 }
 
 export const listPlatformTenants = async () => {
-  const result = await query(`
+  const result = await platformQuery(`
     select t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
+      sub.plan_id, plan.name as plan_name, sub.status as subscription_status, sub.billing_cycle,
+      sub.current_period_end, sub.trial_ends_at, sub.grace_ends_at,
       count(distinct u.id) as users,
       count(distinct u.id) filter (where u.status = 'active') as active_users,
       count(distinct a.id) as agents,
       count(distinct a.id) filter (where a.status = 'online') as online_agents,
       count(distinct p.id) as printers
     from tenants t
+    left join tenant_subscriptions sub on sub.tenant_id = t.id
+    left join platform_plans plan on plan.id = sub.plan_id
     left join users u on u.tenant_id = t.id
     left join agents a on a.tenant_id = t.id
     left join agent_printers p on p.tenant_id = t.id
-    group by t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at
+    group by t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
+      sub.plan_id, plan.name, sub.status, sub.billing_cycle, sub.current_period_end, sub.trial_ends_at, sub.grace_ends_at
     order by t.created_at desc
   `)
   return result.rows.map(tenantRow)
+}
+
+export const listPlatformPlans = async () => {
+  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features, active, created_at, updated_at from platform_plans order by active desc, name asc`)
+  return result.rows.map((row) => ({
+    id: String(row.id), code: row.code, name: row.name, description: row.description || '',
+    monthlyReferencePrice: Number(row.monthly_reference_price || 0), yearlyReferencePrice: Number(row.yearly_reference_price || 0),
+    limits: row.limits || {}, features: row.features || {}, active: Boolean(row.active), createdAt: row.created_at, updatedAt: row.updated_at
+  }))
+}
+
+export const getPlatformTenantDetails = async (tenantId) => {
+  const result = await platformQuery(`
+    select t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
+      sub.id as subscription_id, sub.plan_id, plan.name as plan_name, sub.status as subscription_status,
+      sub.billing_cycle, sub.started_at, sub.current_period_start, sub.current_period_end,
+      sub.trial_ends_at, sub.grace_ends_at, sub.cancelled_at, sub.cancellation_reason, sub.manual_override, sub.source as subscription_source, sub.provider, sub.last_provider_sync_at, sub.notes as subscription_notes,
+      (select count(*)::int from users where tenant_id = t.id) as users,
+      (select count(*)::int from users where tenant_id = t.id and status = 'active') as active_users,
+      (select count(*)::int from agents where tenant_id = t.id) as agents,
+      (select count(*)::int from agent_printers where tenant_id = t.id) as printers,
+      (select count(*)::int from products where tenant_id = t.id) as products,
+      (select count(*)::int from orders where tenant_id = t.id) as orders
+    from tenants t
+    left join tenant_subscriptions sub on sub.tenant_id = t.id
+    left join platform_plans plan on plan.id = sub.plan_id
+    where t.id = $1 limit 1
+  `, [tenantId])
+  if (!result.rowCount) throw new Error('Empresa nao encontrada.')
+  const row = result.rows[0]
+  return {
+    ...tenantRow(row),
+    subscription: row.subscription_id ? {
+      id: String(row.subscription_id), planId: row.plan_id ? String(row.plan_id) : null, planName: row.plan_name || 'Sem plano',
+      status: row.subscription_status, billingCycle: row.billing_cycle, startedAt: row.started_at,
+      currentPeriodStart: row.current_period_start, currentPeriodEnd: row.current_period_end,
+      trialEndsAt: row.trial_ends_at, graceEndsAt: row.grace_ends_at, cancelledAt: row.cancelled_at,
+      cancellationReason: row.cancellation_reason || '', manualOverride: Boolean(row.manual_override), source: row.subscription_source || 'manual', provider: row.provider || '', lastProviderSyncAt: row.last_provider_sync_at || null, notes: row.subscription_notes || ''
+    } : null,
+    usage: { users: Number(row.users || 0), activeUsers: Number(row.active_users || 0), agents: Number(row.agents || 0), printers: Number(row.printers || 0), products: Number(row.products || 0), orders: Number(row.orders || 0) }
+  }
+}
+
+export const listPlatformTenantUsers = async (tenantId) => {
+  const exists = await query('select 1 from tenants where id = $1 limit 1', [tenantId])
+  if (!exists.rowCount) throw new Error('Empresa nao encontrada.')
+  const result = await query(`select id, name, role, status, created_at, updated_at from users where tenant_id = $1 order by status asc, name asc`, [tenantId])
+  return result.rows.map((row) => ({ id: String(row.id), name: decryptField(row.name), role: row.role, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }))
+}
+
+export const listPlatformTenantSubscriptionEvents = async (tenantId, limit = 100) => {
+  const result = await platformQuery(`select id, action, previous_state, new_state, reason, actor_user_id, source, provider, created_at from tenant_subscription_events where tenant_id = $1 order by created_at desc limit $2`, [tenantId, Math.min(200, Math.max(1, Number(limit) || 100))])
+  return result.rows.map((row) => ({ id: String(row.id), action: row.action, previousState: row.previous_state || {}, newState: row.new_state || {}, reason: row.reason || '', actorUserId: row.actor_user_id || '', source: row.source || 'manual', provider: row.provider || '', createdAt: row.created_at }))
+}
+
+const subscriptionStatuses = new Set(['trial', 'active', 'past_due', 'grace', 'paused', 'courtesy', 'cancelled', 'ended'])
+const billingCycles = new Set(['monthly', 'yearly', 'manual'])
+
+export const updatePlatformTenantSubscription = async (tenantId, payload = {}, actorId = '') => {
+  const status = String(payload.status || '').trim()
+  const billingCycle = String(payload.billingCycle || '').trim()
+  const reason = text(payload.reason, 500)
+  if (!subscriptionStatuses.has(status)) throw new Error('Status de assinatura invalido.')
+  if (!billingCycles.has(billingCycle)) throw new Error('Ciclo de cobranca invalido.')
+  if (reason.length < 8) throw new Error('Informe um motivo com pelo menos 8 caracteres.')
+  await withPlatformAdmin(async (client) => {
+    const tenant = await client.query('select id from tenants where id = $1 limit 1', [tenantId])
+    if (!tenant.rowCount) throw new Error('Empresa nao encontrada.')
+    if (payload.planId) {
+      const plan = await client.query('select id from platform_plans where id = $1 and active = true limit 1', [String(payload.planId)])
+      if (!plan.rowCount) throw new Error('Plano ativo nao encontrado.')
+    }
+    const current = await client.query('select * from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId])
+    const previous = current.rows[0] || {}
+    const id = previous.id ? String(previous.id) : `subscription_${randomBytes(12).toString('hex')}`
+    const result = await client.query(`
+    insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, current_period_start, current_period_end, trial_ends_at, grace_ends_at, cancelled_at, cancellation_reason, manual_override, notes)
+    values ($1, $2, $3, $4, $5, coalesce($6::timestamptz, now()), $7::timestamptz, $8::timestamptz, $9::timestamptz, $10::timestamptz, $11::timestamptz, $12, true, $13)
+    on conflict (tenant_id) do update set plan_id = excluded.plan_id, status = excluded.status, billing_cycle = excluded.billing_cycle,
+      current_period_start = excluded.current_period_start, current_period_end = excluded.current_period_end, trial_ends_at = excluded.trial_ends_at,
+      grace_ends_at = excluded.grace_ends_at, cancelled_at = excluded.cancelled_at, cancellation_reason = excluded.cancellation_reason,
+      manual_override = true, notes = excluded.notes, updated_at = now()
+    returning *
+    `, [id, tenantId, payload.planId || previous.plan_id || null, status, billingCycle, payload.startedAt || previous.started_at || null, payload.currentPeriodStart || previous.current_period_start || null, payload.currentPeriodEnd || previous.current_period_end || null, payload.trialEndsAt || previous.trial_ends_at || null, payload.graceEndsAt || previous.grace_ends_at || null, status === 'cancelled' ? (payload.cancelledAt || new Date().toISOString()) : null, status === 'cancelled' ? text(payload.cancellationReason || reason, 500) : '', text(payload.notes, 1000)])
+    const next = result.rows[0]
+    await client.query('insert into tenant_subscription_events (tenant_id, subscription_id, action, previous_state, new_state, reason, actor_user_id, source) values ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8)', [tenantId, id, 'subscription.updated', JSON.stringify({ status: previous.status || null, planId: previous.plan_id || null, billingCycle: previous.billing_cycle || null }), JSON.stringify({ status: next.status, planId: next.plan_id, billingCycle: next.billing_cycle }), reason, String(actorId || ''), 'manual'])
+  })
+  return getPlatformTenantDetails(tenantId)
+}
+
+export const createPlatformTenantBillingRecord = async (tenantId, payload = {}, actorId = '') => {
+  const amount = Number(payload.amount)
+  const status = String(payload.status || 'pending')
+  const reason = text(payload.reason || payload.notes, 500)
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('Valor de cobranca invalido.')
+  if (!['pending', 'paid', 'overdue', 'void', 'courtesy'].includes(status)) throw new Error('Status de cobranca invalido.')
+  if (reason.length < 8) throw new Error('Informe um motivo com pelo menos 8 caracteres.')
+  return withPlatformAdmin(async (client) => {
+    const exists = await client.query('select id from tenants where id = $1 limit 1', [tenantId]); if (!exists.rowCount) throw new Error('Empresa nao encontrada.')
+    const id = `billing_${randomBytes(12).toString('hex')}`
+    const result = await client.query(`insert into tenant_billing_records (id, tenant_id, reference, amount, currency, due_at, paid_at, status, source, notes) values ($1,$2,$3,$4,$5,$6::timestamptz,$7::timestamptz,$8,$9,$10) returning id, tenant_id, reference, amount, currency, due_at, paid_at, status, source, notes, created_at`, [id, tenantId, text(payload.reference, 120), amount, text(payload.currency || 'BRL', 8), payload.dueAt || null, status === 'paid' ? (payload.paidAt || new Date().toISOString()) : null, status, 'manual', reason])
+    await client.query('insert into tenant_subscription_events (tenant_id, action, new_state, reason, actor_user_id, source) values ($1,$2,$3::jsonb,$4,$5,$6)', [tenantId, 'billing.recorded', JSON.stringify({ billingRecordId: id, amount, status }), reason, String(actorId || ''), 'manual'])
+    return { ...result.rows[0], amount: Number(result.rows[0].amount || 0) }
+  })
+}
+
+export const listPlatformTenantBillingRecords = async (tenantId, limit = 100) => {
+  const result = await platformQuery('select id, reference, amount, currency, due_at, paid_at, status, source, provider, provider_invoice_id, notes, created_at from tenant_billing_records where tenant_id = $1 order by due_at desc nulls last, created_at desc limit $2', [tenantId, Math.min(200, Math.max(1, Number(limit) || 100))])
+  return result.rows.map((row) => ({ id: String(row.id), reference: row.reference, amount: Number(row.amount || 0), currency: row.currency, dueAt: row.due_at, paidAt: row.paid_at, status: row.status, source: row.source || 'manual', provider: row.provider || '', providerInvoiceId: row.provider_invoice_id || '', notes: row.notes || '', createdAt: row.created_at }))
 }
 
 export const listTenantOperationalAudit = async (tenantId, limit = 100, range = {}) => withTenant(tenantId, async (client) => {

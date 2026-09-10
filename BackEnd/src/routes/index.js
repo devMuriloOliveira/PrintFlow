@@ -120,6 +120,13 @@ import {
       handlePlatformPrivacyPortabilityExport,
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
+  handlePlatformPlansList,
+  handlePlatformTenantDetails,
+  handlePlatformTenantUsers,
+  handlePlatformTenantSubscriptionEvents,
+  handlePlatformTenantBillingRecords,
+  handlePlatformTenantSubscriptionUpdate,
+  handlePlatformTenantBillingRecordCreate,
   handlePlatformTenantStatusUpdate
 } from './platformAdmin.js'
 
@@ -957,6 +964,18 @@ export const handleRequest =
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenants') {
         return await handlePlatformTenantsList(req, res)
       }
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/plans') return await handlePlatformPlansList(req, res)
+      const platformTenantDetailsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/details$/)
+      if (req.method === 'GET' && platformTenantDetailsMatch) return await handlePlatformTenantDetails(req, res, platformTenantDetailsMatch[1])
+      const platformTenantUsersMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/users$/)
+      if (req.method === 'GET' && platformTenantUsersMatch) return await handlePlatformTenantUsers(req, res, platformTenantUsersMatch[1])
+      const platformTenantSubscriptionEventsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/subscription-events$/)
+      if (req.method === 'GET' && platformTenantSubscriptionEventsMatch) return await handlePlatformTenantSubscriptionEvents(req, res, platformTenantSubscriptionEventsMatch[1], url)
+      const platformTenantBillingRecordsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/billing-records$/)
+      if (req.method === 'GET' && platformTenantBillingRecordsMatch) return await handlePlatformTenantBillingRecords(req, res, platformTenantBillingRecordsMatch[1], url)
+      const platformTenantSubscriptionMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/subscription$/)
+      if (req.method === 'POST' && platformTenantSubscriptionMatch) return await handlePlatformTenantSubscriptionUpdate(req, res, platformTenantSubscriptionMatch[1])
+      if (req.method === 'POST' && platformTenantBillingRecordsMatch) return await handlePlatformTenantBillingRecordCreate(req, res, platformTenantBillingRecordsMatch[1])
 
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit') {
         return await handlePlatformAdminAudit(req, res, url)

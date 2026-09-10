@@ -5,9 +5,12 @@ type AccessRequest = { tenant: Tenant; id: string; reason: string; cnpj: string;
 
 const {
   session, tenants, requests, authorizedTenantAudit, error, activeRequests,
-  statusClass, load, refreshTenants
+  statusClass, statusLabel, load, refreshTenants
 } = usePlatformAdminWorkspace()
 const search = ref('')
+const accountFilter = ref('')
+const billingFilter = ref('')
+const subscriptionFilter = ref('')
 const accessRequest = ref<AccessRequest | null>(null)
 const actionError = ref('')
 const actionLoading = ref(false)
@@ -15,8 +18,22 @@ const statusChange = ref<{ tenant: Tenant; accountStatus: string; billingStatus:
 
 const filteredTenants = computed(() => {
   const term = search.value.trim().toLowerCase()
-  if (!term) return tenants.value
-  return tenants.value.filter(tenant => `${tenant.name} ${tenant.cnpj} ${tenant.id}`.toLowerCase().includes(term))
+  return tenants.value.filter((tenant) => {
+    const matchesTerm = !term || `${tenant.name} ${tenant.cnpj} ${tenant.id}`.toLowerCase().includes(term)
+    return matchesTerm && (!accountFilter.value || tenant.accountStatus === accountFilter.value) && (!billingFilter.value || tenant.billingStatus === billingFilter.value) && (!subscriptionFilter.value || (subscriptionFilter.value === 'not_configured' ? !tenant.planId : tenant.subscriptionStatus === subscriptionFilter.value))
+  })
+})
+const subscriptionSummary = computed(() => {
+  const now = Date.now()
+  const sevenDays = now + 7 * 24 * 60 * 60 * 1000
+  return [
+    { label: 'Ativas', value: tenants.value.filter(tenant => tenant.subscriptionStatus === 'active').length, className: 'status-pill--active' },
+    { label: 'Em teste', value: tenants.value.filter(tenant => tenant.subscriptionStatus === 'trial').length, className: 'status-pill--under-review' },
+    { label: 'Em carencia', value: tenants.value.filter(tenant => tenant.subscriptionStatus === 'grace' || tenant.subscriptionStatus === 'past_due').length, className: 'status-pill--overdue' },
+    { label: 'Cobranca atencao', value: tenants.value.filter(tenant => ['pending', 'overdue'].includes(tenant.billingStatus)).length, className: 'status-pill--overdue' },
+    { label: 'Vencem em 7 dias', value: tenants.value.filter((tenant) => { const dueAt = new Date(tenant.billingDueAt || tenant.currentPeriodEnd || '').getTime(); return Number.isFinite(dueAt) && dueAt >= now && dueAt <= sevenDays }).length, className: 'status-pill--under-review' },
+    { label: 'Sem plano', value: tenants.value.filter(tenant => !tenant.planId).length, className: 'status-pill--not-configured' }
+  ]
 })
 
 const openTenantAccess = (tenant: Tenant) => {
@@ -81,7 +98,9 @@ onMounted(() => void load({ tenants: true, requests: true }))
 <template>
   <AdminShell v-model:search="search" title="Empresas" subtitle="Gerencie os tenants da plataforma" :request-count="activeRequests.length">
     <p v-if="error || actionError" class="feedback feedback--error">{{ actionError || error }}</p>
-    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Empresa</th><th>CNPJ</th><th>Usuarios</th><th>Agents</th><th>Impressoras</th><th>Conta</th><th>Cobranca</th><th></th></tr></thead><tbody><tr v-for="tenant in filteredTenants" :key="tenant.id"><td><strong>{{ tenant.name || 'Empresa sem nome' }}</strong><small>{{ tenant.id }}</small></td><td>{{ tenant.cnpj }}</td><td>{{ tenant.activeUsers }}/{{ tenant.users }}</td><td>{{ tenant.onlineAgents }}/{{ tenant.agents }}</td><td>{{ tenant.printers }}</td><td><select :value="tenant.accountStatus" :class="statusClass(tenant.accountStatus)" @change="requestTenantStatusChange(tenant, 'accountStatus', ($event.target as HTMLSelectElement).value)"><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></td><td><select :value="tenant.billingStatus" :class="statusClass(tenant.billingStatus)" @change="requestTenantStatusChange(tenant, 'billingStatus', ($event.target as HTMLSelectElement).value)"><option value="not_configured">Nao configurada</option><option value="active">Em dia</option><option value="pending">Pendente</option><option value="overdue">Atrasada</option><option value="cancelled">Cancelada</option></select></td><td><button class="table-action" @click="openTenantAccess(tenant)">Acesso seguro</button></td></tr><tr v-if="!filteredTenants.length"><td colspan="8" class="empty-state">Nenhuma empresa encontrada.</td></tr></tbody></table></div></section>
+    <section class="company-summary"><article v-for="item in subscriptionSummary" :key="item.label"><span>{{ item.label }}</span><strong :class="item.className">{{ item.value }}</strong><small>empresas</small></article></section>
+    <section class="panel company-filters"><label>Conta<select v-model="accountFilter"><option value="">Todas</option><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></label><label>Cobranca<select v-model="billingFilter"><option value="">Todas</option><option value="active">Em dia</option><option value="pending">Pendente</option><option value="overdue">Atrasada</option><option value="cancelled">Cancelada</option></select></label><label>Assinatura<select v-model="subscriptionFilter"><option value="">Todas</option><option value="active">Ativa</option><option value="trial">Em teste</option><option value="grace">Em carencia</option><option value="past_due">Inadimplente</option><option value="paused">Pausada</option><option value="not_configured">Sem plano</option></select></label><button class="button button--quiet" :disabled="!accountFilter && !billingFilter && !subscriptionFilter" @click="accountFilter = ''; billingFilter = ''; subscriptionFilter = ''">Limpar filtros</button><small>{{ filteredTenants.length }} de {{ tenants.length }} empresas</small></section>
+    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Empresa</th><th>Plano / assinatura</th><th>CNPJ</th><th>Usuarios</th><th>Agents</th><th>Impressoras</th><th>Conta</th><th>Cobranca</th><th></th></tr></thead><tbody><tr v-for="tenant in filteredTenants" :key="tenant.id"><td><strong>{{ tenant.name || 'Empresa sem nome' }}</strong><small>{{ tenant.id }}</small></td><td><strong>{{ tenant.planName || 'Sem plano' }}</strong><small><span :class="statusClass(tenant.subscriptionStatus || 'not_configured')">{{ statusLabel(tenant.subscriptionStatus || 'not_configured') }}</span></small></td><td>{{ tenant.cnpj }}</td><td>{{ tenant.activeUsers }}/{{ tenant.users }}</td><td>{{ tenant.onlineAgents }}/{{ tenant.agents }}</td><td>{{ tenant.printers }}</td><td><select :value="tenant.accountStatus" :class="statusClass(tenant.accountStatus)" @change="requestTenantStatusChange(tenant, 'accountStatus', ($event.target as HTMLSelectElement).value)"><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></td><td><select :value="tenant.billingStatus" :class="statusClass(tenant.billingStatus)" @change="requestTenantStatusChange(tenant, 'billingStatus', ($event.target as HTMLSelectElement).value)"><option value="not_configured">Nao configurada</option><option value="active">Em dia</option><option value="pending">Pendente</option><option value="overdue">Atrasada</option><option value="cancelled">Cancelada</option></select></td><td><NuxtLink class="table-action" :to="`/empresas/${tenant.id}`">Gerenciar</NuxtLink><button class="table-action" @click="openTenantAccess(tenant)">Acesso seguro</button></td></tr><tr v-if="!filteredTenants.length"><td colspan="9" class="empty-state">Nenhuma empresa encontrada.</td></tr></tbody></table></div></section>
     <section v-if="accessRequest" class="access-modal"><div class="modal-card"><button class="modal-close" @click="accessRequest = null">Fechar</button><span class="section-kicker">Acesso protegido</span><h2>{{ accessRequest.tenant.name }}</h2><p>O acesso exige motivo, confirmacao do CNPJ e expira em 30 minutos.</p><p v-if="actionError" class="feedback feedback--error">{{ actionError }}</p><form v-if="accessRequest.status === 'reason'" @submit.prevent="requestTenantAccess"><label>Motivo detalhado<textarea v-model="accessRequest.reason" minlength="12" maxlength="500" required></textarea></label><button class="button button--primary" :disabled="actionLoading">Continuar</button></form><form v-else @submit.prevent="verifyTenantAccess"><label>Confirme o CNPJ informado pelo cliente<input v-model="accessRequest.cnpj" inputmode="numeric" autocomplete="off" required></label><button class="button button--primary" :disabled="actionLoading">Confirmar e abrir</button></form></div></section>
     <section v-if="statusChange" class="access-modal"><div class="modal-card"><button class="modal-close" :disabled="actionLoading" @click="statusChange = null">Cancelar</button><span class="section-kicker">Alteracao auditada</span><h2>{{ statusChange.tenant.name }}</h2><p>Conta: <strong>{{ statusChange.accountStatus }}</strong> · Cobranca: <strong>{{ statusChange.billingStatus }}</strong></p><form @submit.prevent="updateTenantStatus"><label>Motivo da alteracao<textarea v-model="statusChange.reason" minlength="8" maxlength="500" required autofocus></textarea></label><button class="button button--primary" :disabled="actionLoading || statusChange.reason.trim().length < 8">{{ actionLoading ? 'Salvando...' : 'Confirmar alteracao' }}</button></form></div></section>
   </AdminShell>
