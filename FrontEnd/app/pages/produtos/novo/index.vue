@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { calculatePricing } from '../../utils/pricing.js'
+import { calculatePricing } from '../../../utils/pricing.js'
 const { products, printers, filaments, settings, createProduct, updateItem, uploadProductPrintFile } = useAppData()
 const { notify } = useUi()
 const router = useRouter()
@@ -185,7 +185,7 @@ const validate = () => {
   if (!form.printFileFormat.trim()) errors.printFileFormat = 'Informe o formato do arquivo.'
   if (form.printFileFormat && !allowedPrintFileFormats.has(form.printFileFormat.toLowerCase())) errors.printFileFormat = 'Use 3MF, G-code ou BGCODE.'
   const fileExtension = form.printFileName.split('.').pop()?.toLowerCase() || ''
-  if (fileExtension && form.printFileFormat && fileExtension !== form.printFileFormat.toLowerCase()) errors.printFileFormat = 'Formato diferente da extensao do arquivo.'
+  if (fileExtension && form.printFileFormat && fileExtension !== form.printFileFormat.toLowerCase()) errors.printFileFormat = 'Formato diferente da extensão do arquivo.'
   if (!Number(form.nozzleMm) || Number(form.nozzleMm) <= 0) errors.nozzleMm = 'Informe o diâmetro do bico usado na receita.'
   if (!Number(form.layer) || Number(form.layer) <= 0) errors.layer = 'Informe a altura de camada.'
   if (!Number(form.infill) || Number(form.infill) <= 0 || Number(form.infill) > 100) errors.infill = 'Informe preenchimento entre 1% e 100%.'

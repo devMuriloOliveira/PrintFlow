@@ -2,7 +2,7 @@
 const { filaments, printers, products, marketplaces, settings, listCalculatorSimulations, createCalculatorSimulation } = useAppData()
 const { notify } = useUi()
 const route = useRoute()
-import { calculatePricing } from '../utils/pricing.js'
+import { calculatePricing } from '../../utils/pricing.js'
 const productId = ref(''), filamentId = ref(''), printerId = ref('')
 const simulationName = ref('')
 const priceKg = ref(100), weight = ref(150), wastePercent = ref(0), hours = ref(6), minutes = ref(0)

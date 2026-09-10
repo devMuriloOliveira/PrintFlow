@@ -363,7 +363,7 @@ const changePrintJobPrinter = async (job: any, printerId: string) => {
     await movePrintJobPrinter(String(job.id), String(targetPrinter.id), String(targetPrinter.agentPrinterId || ''))
     notify('Item movido para outra impressora.')
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'NÃ£o foi possÃ­vel atualizar a fila.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível atualizar a fila.', 'info')
   } finally {
     queueLoadingId.value = ''
   }
