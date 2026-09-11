@@ -93,7 +93,10 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
   if (!plan || !cycle) throw new Error('Plano ou ciclo de cobranca invalido.')
   const amount = number(plan[cycle])
   if (amount <= 0) throw new Error('O valor da assinatura ainda nao foi configurado.')
-  if (!text(actorEmail, 320)) throw new Error('O Owner precisa possuir um e-mail valido para iniciar a assinatura.')
+  const payerEmail = env.mercadoPagoEnvironment === 'sandbox'
+    ? text(env.mercadoPagoTestPayerEmail, 320)
+    : text(actorEmail, 320)
+  if (!payerEmail) throw new Error('O Owner precisa possuir um e-mail valido para iniciar a assinatura.')
 
   const pending = await withTenant(tenantId, (client) => client.query(`
     select id, checkout_url, expires_at
@@ -115,7 +118,7 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
       body: JSON.stringify({
         reason: `PrintFlow - assinatura ${cycle === 'yearly' ? 'anual' : 'mensal'}`,
         external_reference: checkoutId,
-        payer_email: text(actorEmail, 320),
+        payer_email: payerEmail,
         auto_recurring: {
           frequency: cycle === 'yearly' ? 12 : 1,
           frequency_type: 'months',

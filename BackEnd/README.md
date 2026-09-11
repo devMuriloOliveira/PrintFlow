@@ -56,6 +56,7 @@ Variaveis principais:
 - `MERCADO_PAGO_ENVIRONMENT`: `sandbox` durante homologacao e `production` somente depois da validacao completa.
 - `MERCADO_PAGO_ACCESS_TOKEN`: credencial privada do Mercado Pago, configurada somente no ambiente de deploy.
 - `MERCADO_PAGO_WEBHOOK_SECRET`: segredo da assinatura HMAC configurado para a aplicacao Mercado Pago.
+- `MERCADO_PAGO_TEST_PAYER_EMAIL`: e-mail do comprador de teste usado somente em sandbox.
 - `EXPENSE_RECURRING_INTERVAL_MS`: intervalo da geração automática de despesas recorrentes vencidas.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
@@ -98,7 +99,8 @@ Checklist de producao:
   autenticado `GET /api/operational-health` fica restrito a usuarios com acesso
   de producao e deve ser acompanhado pelo painel de Notificacoes.
 - Para o Mercado Pago, iniciar com `MERCADO_PAGO_ENVIRONMENT=sandbox`, cadastrar
-  `MERCADO_PAGO_ACCESS_TOKEN` e `MERCADO_PAGO_WEBHOOK_SECRET`. Depois do deploy,
+  `MERCADO_PAGO_ACCESS_TOKEN`, `MERCADO_PAGO_WEBHOOK_SECRET` e o e-mail do
+  comprador de teste em `MERCADO_PAGO_TEST_PAYER_EMAIL`. Depois do deploy,
   configurar na aplicacao Mercado Pago o webhook
   `POST https://SUA-API.onrender.com/webhooks/mercado-pago` e habilitar
   `subscription_preapproval`, `subscription_authorized_payment` e `payment`.

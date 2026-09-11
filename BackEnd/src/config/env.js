@@ -28,6 +28,7 @@ const webhookSharedSecret = process.env.WEBHOOK_SHARED_SECRET || ''
 const mercadoPagoAccessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || ''
 const mercadoPagoWebhookSecret = process.env.MERCADO_PAGO_WEBHOOK_SECRET || ''
 const mercadoPagoEnvironment = process.env.MERCADO_PAGO_ENVIRONMENT === 'production' ? 'production' : 'sandbox'
+const mercadoPagoTestPayerEmail = process.env.MERCADO_PAGO_TEST_PAYER_EMAIL || 'test@testuser.com'
 const defaultAuthTokenTtlSeconds = 15 * 60
 const defaultRefreshTokenTtlSeconds = 30 * 24 * 60 * 60
 const legacyDataEncryptionKeys = String(process.env.LEGACY_DATA_ENCRYPTION_KEYS || '')
@@ -68,6 +69,7 @@ export const env = {
   mercadoPagoAccessToken,
   mercadoPagoWebhookSecret,
   mercadoPagoEnvironment,
+  mercadoPagoTestPayerEmail,
   mercadoPagoApiUrl: 'https://api.mercadopago.com',
   platformSuperAdminEmails: String(process.env.PLATFORM_SUPER_ADMIN_EMAILS || '')
     .split(',')
