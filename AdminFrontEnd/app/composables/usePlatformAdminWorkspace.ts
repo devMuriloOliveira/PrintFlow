@@ -198,6 +198,11 @@ export const usePlatformAdminWorkspace = () => {
     return supportSlaRules.value
   }
   const loadPlatformPlans = async () => { platformPlans.value = await session.request<PlatformPlan[]>('/api/platform-admin/plans'); return platformPlans.value }
+  const updatePlatformPlanBillingConfiguration = async (planId: string, body: { mercadoPagoMonthlyPlanId: string; mercadoPagoYearlyPlanId: string; trialDays: number; reason: string }) => {
+    const updated = await session.request<PlatformPlan>(`/api/platform-admin/plans/${encodeURIComponent(planId)}/billing-configuration`, { method: 'POST', body })
+    platformPlans.value = platformPlans.value.map(plan => plan.id === updated.id ? updated : plan)
+    return updated
+  }
   const loadTenantDetails = async (tenantId: string) => { tenantDetails.value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/details`); return tenantDetails.value }
   const loadTenantUsers = async (tenantId: string) => { tenantUsers.value = await session.request<TenantUser[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/users`); return tenantUsers.value }
   const loadTenantSubscriptionEvents = async (tenantId: string) => { tenantSubscriptionEvents.value = await session.request<TenantSubscriptionEvent[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription-events`); return tenantSubscriptionEvents.value }
@@ -260,6 +265,6 @@ export const usePlatformAdminWorkspace = () => {
 
   return {
     session, overview, tenants, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
-    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
+    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, updatePlatformPlanBillingConfiguration, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

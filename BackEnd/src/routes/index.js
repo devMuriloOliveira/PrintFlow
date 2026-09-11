@@ -132,6 +132,7 @@ import {
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
   handlePlatformPlansList,
+  handlePlatformPlanBillingConfigurationUpdate,
   handlePlatformTenantDetails,
   handlePlatformTenantUsers,
   handlePlatformTenantSubscriptionEvents,
@@ -1005,6 +1006,8 @@ export const handleRequest =
         return await handlePlatformTenantsList(req, res)
       }
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/plans') return await handlePlatformPlansList(req, res)
+      const platformPlanBillingConfigMatch = url.pathname.match(/^\/api\/platform-admin\/plans\/([^/]+)\/billing-configuration$/)
+      if (req.method === 'POST' && platformPlanBillingConfigMatch) return await handlePlatformPlanBillingConfigurationUpdate(req, res, platformPlanBillingConfigMatch[1])
       const platformTenantDetailsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/details$/)
       if (req.method === 'GET' && platformTenantDetailsMatch) return await handlePlatformTenantDetails(req, res, platformTenantDetailsMatch[1])
       const platformTenantUsersMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/users$/)

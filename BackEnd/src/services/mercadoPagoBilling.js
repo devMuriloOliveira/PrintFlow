@@ -44,10 +44,13 @@ const mercadoPagoRequest = async (path, options = {}) => {
 }
 
 const activePlans = async () => {
-  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price from platform_plans where code = $1 and active = true limit 1`, [billingPlanCode])
+  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days from platform_plans where code = $1 and active = true limit 1`, [billingPlanCode])
   return result.rows.map((plan) => ({
     id: String(plan.id), code: plan.code, name: plan.name, description: plan.description || '',
-    monthly: number(plan.monthly_reference_price), yearly: number(plan.yearly_reference_price)
+    monthly: number(plan.monthly_reference_price), yearly: number(plan.yearly_reference_price),
+    mercadoPagoMonthlyPlanId: text(plan.mercado_pago_monthly_plan_id, 160),
+    mercadoPagoYearlyPlanId: text(plan.mercado_pago_yearly_plan_id, 160),
+    trialDays: Math.max(0, Math.min(30, Number(plan.trial_days) || 0))
   }))
 }
 
@@ -98,6 +101,18 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
     : text(actorEmail, 320)
   if (!payerEmail) throw new Error('O Owner precisa possuir um e-mail valido para iniciar a assinatura.')
 
+  const previousSubscription = await withTenant(tenantId, (client) => client.query(
+    'select trial_used_at from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId]
+  ))
+  const hasUsedTrial = Boolean(previousSubscription.rows[0]?.trial_used_at)
+  const providerPlanId = hasUsedTrial
+    ? ''
+    : cycle === 'yearly' ? plan.mercadoPagoYearlyPlanId : plan.mercadoPagoMonthlyPlanId
+  if (!hasUsedTrial && !providerPlanId) {
+    throw new Error('O plano selecionado ainda nao possui o ID do plano Mercado Pago configurado pelo superadmin.')
+  }
+  const trialDays = providerPlanId ? plan.trialDays : 0
+
   const pending = await withTenant(tenantId, (client) => client.query(`
     select id, checkout_url, expires_at
       from tenant_billing_checkouts
@@ -108,9 +123,9 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
 
   const checkoutId = `mercado_pago_checkout_${randomBytes(12).toString('hex')}`
   await withTenant(tenantId, (client) => client.query(`
-    insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by)
-    values ($1, $2, $3, $4, $5, '${provider}', 'creating', $6)
-  `, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || '')]))
+    insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days)
+    values ($1, $2, $3, $4, $5, '${provider}', 'creating', $6, $7, $8)
+  `, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), providerPlanId, trialDays]))
 
   try {
     const subscription = await mercadoPagoRequest('/preapproval', {
@@ -119,12 +134,14 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
         reason: `PrintFlow - assinatura ${cycle === 'yearly' ? 'anual' : 'mensal'}`,
         external_reference: checkoutId,
         payer_email: payerEmail,
-        auto_recurring: {
-          frequency: cycle === 'yearly' ? 12 : 1,
-          frequency_type: 'months',
-          transaction_amount: amount,
-          currency_id: 'BRL'
-        },
+        ...(providerPlanId ? { preapproval_plan_id: providerPlanId } : {
+          auto_recurring: {
+            frequency: cycle === 'yearly' ? 12 : 1,
+            frequency_type: 'months',
+            transaction_amount: amount,
+            currency_id: 'BRL'
+          }
+        }),
         back_url: checkoutReturnUrl('success'),
         status: 'pending'
       })
@@ -172,35 +189,50 @@ const syncPreapproval = async (client, { resource, eventId, action }) => {
   const checkout = checkoutResult.rows[0]
   if (!checkout) return { ignored: true }
   const tenantId = checkout.tenant_id
+  const providerStatus = text(resource.status, 80).toLowerCase()
+  if (providerStatus === 'pending') return { tenantId, pending: true }
   const currentResult = await client.query(`select * from tenant_subscriptions where tenant_id = $1 limit 1`, [tenantId])
   let subscription = currentResult.rows[0]
-  const providerState = subscriptionStatus(resource.status)
+  const trialDays = Math.max(0, Number(checkout.trial_days) || 0)
+  const nextPaymentAt = resource.next_payment_date || null
+  const fallbackTrialEnd = trialDays ? new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000).toISOString() : null
+  const trialEndsAt = providerStatus === 'authorized' && trialDays ? (nextPaymentAt || fallbackTrialEnd) : null
+  const providerState = providerStatus === 'authorized'
+    ? (trialEndsAt ? 'trial' : 'active')
+    : subscriptionStatus(providerStatus)
+  if (!providerState) return { tenantId, ignored: true }
   const providerCustomerId = text(resource.payer_id, 160) || null
 
   if (!subscription) {
     const created = await client.query(`
-      insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, manual_override, source, provider, provider_customer_id, provider_subscription_id, last_provider_sync_at)
-      values ($1,$2,$3,$4,$5,now(),false,'provider','${provider}',$6,$7,now()) returning *
-    `, [`subscription_${randomBytes(12).toString('hex')}`, tenantId, checkout.plan_id, providerState || 'past_due', checkout.billing_cycle, providerCustomerId, providerSubscriptionId])
+      insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, trial_started_at, trial_ends_at, trial_used_at, current_period_end, manual_override, source, provider, provider_customer_id, provider_subscription_id, last_provider_sync_at)
+      values ($1,$2,$3,$4,$5,now(),$6::timestamptz,$7::timestamptz,$8::timestamptz,$9::timestamptz,false,'provider','${provider}',$10,$11,now()) returning *
+    `, [`subscription_${randomBytes(12).toString('hex')}`, tenantId, checkout.plan_id, providerState, checkout.billing_cycle, trialEndsAt ? new Date().toISOString() : null, trialEndsAt, trialEndsAt ? new Date().toISOString() : null, providerState === 'active' ? nextPaymentAt : null, providerCustomerId, providerSubscriptionId])
     subscription = created.rows[0]
   } else if (!(subscription.manual_override && subscription.status === 'courtesy') && (subscription.provider === provider || text(resource.status, 80).toLowerCase() === 'authorized')) {
     await client.query(`
       update tenant_subscriptions
          set plan_id = $2, billing_cycle = $3, status = coalesce(nullif($4, ''), status), provider = '${provider}',
              provider_customer_id = coalesce($5, provider_customer_id), provider_subscription_id = $6,
+             trial_started_at = case when $4 = 'trial' then coalesce(trial_started_at, now()) else trial_started_at end,
+             trial_ends_at = case when $4 = 'trial' then $7::timestamptz else trial_ends_at end,
+             trial_used_at = case when $4 = 'trial' then coalesce(trial_used_at, now()) else trial_used_at end,
+             current_period_end = case when $4 = 'active' then coalesce($8::timestamptz, current_period_end) else current_period_end end,
              source = 'provider', last_provider_sync_at = now(), cancelled_at = case when $4 = 'cancelled' then now() else cancelled_at end,
              updated_at = now()
        where id = $1
-    `, [subscription.id, checkout.plan_id, checkout.billing_cycle, providerState, providerCustomerId, providerSubscriptionId])
+    `, [subscription.id, checkout.plan_id, checkout.billing_cycle, providerState, providerCustomerId, providerSubscriptionId, trialEndsAt, nextPaymentAt])
   }
 
+  if (providerState === 'trial') await client.query(`update tenants set billing_status = 'trial', billing_due_at = $2::timestamptz where id = $1`, [tenantId, trialEndsAt])
+  if (providerState === 'active') await client.query(`update tenants set billing_status = 'active', billing_due_at = $2::timestamptz where id = $1`, [tenantId, nextPaymentAt])
   if (providerState === 'cancelled') await client.query(`update tenants set billing_status = 'cancelled' where id = $1`, [tenantId])
   if (providerState === 'paused') await client.query(`update tenants set billing_status = 'paused' where id = $1`, [tenantId])
   if (providerState === 'cancelled') await client.query(`update tenant_billing_checkouts set status = 'cancelled', updated_at = now() where id = $1`, [checkout.id])
   await recordSubscriptionEvent(client, {
     tenantId, subscriptionId: subscription.id, eventId, action: `mercado_pago.${text(action, 120) || 'subscription_preapproval'}`,
     reason: 'Atualizacao de assinatura recebida do Mercado Pago.',
-    state: { providerSubscriptionId, status: text(resource.status, 80) }
+    state: { providerSubscriptionId, status: providerStatus, trialEndsAt: trialEndsAt || null, trialDays }
   })
   return { tenantId, subscriptionId: subscription.id }
 }

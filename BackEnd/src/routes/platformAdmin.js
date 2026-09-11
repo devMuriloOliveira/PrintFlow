@@ -15,6 +15,7 @@ import {
   listPlatformChatAssignees,
   listPlatformTenants,
   listPlatformPlans,
+  updatePlatformPlanBillingConfiguration,
   getPlatformTenantDetails,
   listPlatformTenantUsers,
   listPlatformTenantSubscriptionEvents,
@@ -59,6 +60,19 @@ export const handlePlatformTenantsList = async (req, res) => {
 export const handlePlatformPlansList = async (req, res) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
   return sendJson(res, 200, await listPlatformPlans())
+}
+
+export const handlePlatformPlanBillingConfigurationUpdate = async (req, res, planId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const payload = await readJsonBody(req)
+  const reason = String(payload.reason || '').trim()
+  if (reason.length < 8) return sendJson(res, 400, { error: 'Informe um motivo com pelo menos 8 caracteres.' })
+  const plan = await updatePlatformPlanBillingConfiguration(planId, payload)
+  await writePlatformAudit(req, user, {
+    action: 'platform.billing_plan.updated', targetResource: 'platform_plan', targetResourceId: plan.id, reason,
+    details: { code: plan.code, trialDays: plan.trialDays, monthlyPlanConfigured: Boolean(plan.mercadoPagoMonthlyPlanId), yearlyPlanConfigured: Boolean(plan.mercadoPagoYearlyPlanId) }
+  })
+  return sendJson(res, 200, plan)
 }
 
 export const handlePlatformTenantDetails = async (req, res, tenantId) => {

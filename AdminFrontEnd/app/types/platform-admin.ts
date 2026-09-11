@@ -30,7 +30,7 @@ export type Tenant = {
   printers: number
 }
 
-export type PlatformPlan = { id: string; code: string; name: string; description: string; monthlyReferencePrice: number; yearlyReferencePrice: number; limits: Record<string, number>; features: Record<string, boolean>; active: boolean; createdAt: string; updatedAt?: string }
+export type PlatformPlan = { id: string; code: string; name: string; description: string; monthlyReferencePrice: number; yearlyReferencePrice: number; mercadoPagoMonthlyPlanId: string; mercadoPagoYearlyPlanId: string; trialDays: number; limits: Record<string, number>; features: Record<string, boolean>; active: boolean; createdAt: string; updatedAt?: string }
 export type TenantDetails = Tenant & { subscription: { id: string; planId?: string | null; planName: string; status: string; billingCycle: string; startedAt?: string | null; currentPeriodStart?: string | null; currentPeriodEnd?: string | null; trialEndsAt?: string | null; graceEndsAt?: string | null; cancelledAt?: string | null; cancellationReason: string; manualOverride: boolean; source: string; provider: string; lastProviderSyncAt?: string | null; notes: string } | null; usage: { users: number; activeUsers: number; agents: number; printers: number; products: number; orders: number } }
 export type TenantSubscriptionEvent = { id: string; action: string; previousState: Record<string, unknown>; newState: Record<string, unknown>; reason: string; actorUserId: string; source: string; provider: string; createdAt: string }
 export type TenantUser = { id: string; name: string; role: string; status: string; createdAt: string; updatedAt?: string }

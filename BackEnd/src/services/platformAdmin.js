@@ -119,12 +119,35 @@ export const listPlatformTenants = async () => {
 }
 
 export const listPlatformPlans = async () => {
-  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features, active, created_at, updated_at from platform_plans order by active desc, name asc`)
+  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days, limits, features, active, created_at, updated_at from platform_plans order by active desc, name asc`)
   return result.rows.map((row) => ({
     id: String(row.id), code: row.code, name: row.name, description: row.description || '',
     monthlyReferencePrice: Number(row.monthly_reference_price || 0), yearlyReferencePrice: Number(row.yearly_reference_price || 0),
+    mercadoPagoMonthlyPlanId: row.mercado_pago_monthly_plan_id || '', mercadoPagoYearlyPlanId: row.mercado_pago_yearly_plan_id || '', trialDays: Number(row.trial_days || 0),
     limits: row.limits || {}, features: row.features || {}, active: Boolean(row.active), createdAt: row.created_at, updatedAt: row.updated_at
   }))
+}
+
+export const updatePlatformPlanBillingConfiguration = async (planId, payload = {}) => {
+  const monthlyPlanId = text(payload.mercadoPagoMonthlyPlanId, 160)
+  const yearlyPlanId = text(payload.mercadoPagoYearlyPlanId, 160)
+  const trialDays = Number(payload.trialDays)
+  if (!monthlyPlanId || !yearlyPlanId) throw new Error('Informe os IDs dos planos mensal e anual do Mercado Pago.')
+  if (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 30) throw new Error('O periodo de teste deve ter entre 0 e 30 dias.')
+  const result = await query(`
+    update platform_plans
+       set mercado_pago_monthly_plan_id = $2, mercado_pago_yearly_plan_id = $3, trial_days = $4, updated_at = now()
+     where id = $1
+     returning id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days, limits, features, active, created_at, updated_at
+  `, [planId, monthlyPlanId, yearlyPlanId, trialDays])
+  if (!result.rowCount) throw new Error('Plano nao encontrado.')
+  const row = result.rows[0]
+  return {
+    id: String(row.id), code: row.code, name: row.name, description: row.description || '',
+    monthlyReferencePrice: Number(row.monthly_reference_price || 0), yearlyReferencePrice: Number(row.yearly_reference_price || 0),
+    mercadoPagoMonthlyPlanId: row.mercado_pago_monthly_plan_id || '', mercadoPagoYearlyPlanId: row.mercado_pago_yearly_plan_id || '', trialDays: Number(row.trial_days || 0),
+    limits: row.limits || {}, features: row.features || {}, active: Boolean(row.active), createdAt: row.created_at, updatedAt: row.updated_at
+  }
 }
 
 export const getPlatformTenantDetails = async (tenantId) => {

@@ -429,6 +429,11 @@ export const migrate =
         updated_at timestamptz not null default now()
       )
     `)
+    await query(`alter table platform_plans add column if not exists mercado_pago_monthly_plan_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists mercado_pago_yearly_plan_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists trial_days integer not null default 7`)
+    await query(`alter table platform_plans drop constraint if exists platform_plans_trial_days_check`)
+    await query(`alter table platform_plans add constraint platform_plans_trial_days_check check (trial_days between 0 and 30)`)
     await query(`
       create table if not exists tenant_subscriptions (
         id text primary key,
@@ -459,6 +464,14 @@ export const migrate =
     await query(`alter table tenant_subscriptions add column if not exists provider_customer_id text`)
     await query(`alter table tenant_subscriptions add column if not exists provider_subscription_id text`)
     await query(`alter table tenant_subscriptions add column if not exists last_provider_sync_at timestamptz`)
+    await query(`alter table tenant_subscriptions add column if not exists trial_started_at timestamptz`)
+    await query(`alter table tenant_subscriptions add column if not exists trial_used_at timestamptz`)
+    await query(`
+      update tenant_subscriptions
+         set trial_used_at = coalesce(trial_used_at, trial_ends_at, started_at, created_at)
+       where trial_used_at is null
+         and status in ('trial', 'active', 'past_due', 'grace', 'paused', 'courtesy', 'cancelled', 'ended')
+    `)
     await query(`create index if not exists tenant_subscriptions_status_idx on tenant_subscriptions (status, current_period_end)`)
     await query(`create unique index if not exists tenant_subscriptions_provider_subscription_unique on tenant_subscriptions (provider, provider_subscription_id) where provider_subscription_id is not null and provider_subscription_id <> ''`)
     await query(`
@@ -481,6 +494,8 @@ export const migrate =
     `)
     await query(`create unique index if not exists tenant_billing_checkouts_provider_unique on tenant_billing_checkouts (provider, provider_checkout_id) where provider_checkout_id is not null and provider_checkout_id <> ''`)
     await query(`create index if not exists tenant_billing_checkouts_lookup_idx on tenant_billing_checkouts (tenant_id, created_at desc)`)
+    await query(`alter table tenant_billing_checkouts add column if not exists provider_plan_id text not null default ''`)
+    await query(`alter table tenant_billing_checkouts add column if not exists trial_days integer not null default 0`)
     await query(`
       create table if not exists payment_provider_events (
         id bigserial primary key,
