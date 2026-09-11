@@ -85,7 +85,7 @@ export type Client = {
   name: string; email: string; phone: string; type?: string; document?: string; zip?: string; address?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; origin?: string; notes?: string; tags?: string; status?: string; orders: number; revenue: number; ticket: number; last: string
 }
 
-export type AsaasBillingSummary = {
+export type MercadoPagoBillingSummary = {
   configured: boolean;
   environment: 'sandbox' | 'production';
   plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
@@ -397,12 +397,12 @@ export const useAppData = () => {
     headers: resourceHeaders()
   })
 
-  const getAsaasBilling = () => $fetch<AsaasBillingSummary>(apiUrl('/api/billing/asaas'), {
+  const getMercadoPagoBilling = () => $fetch<MercadoPagoBillingSummary>(apiUrl('/api/billing/mercado-pago'), {
     headers: resourceHeaders()
   })
 
-  const createAsaasPaymentLink = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) =>
-    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/asaas/payment-link'), {
+  const createMercadoPagoCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) =>
+    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/mercado-pago/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
     })
 
@@ -477,8 +477,8 @@ export const useAppData = () => {
     , linkMarketplaceOrderProduct
     , updateSettings
     , exportTenantData
-    , getAsaasBilling
-    , createAsaasPaymentLink
+    , getMercadoPagoBilling
+    , createMercadoPagoCheckout
     , listSettingsExports
     , listFinancialHistory
     , exportFinancialReport

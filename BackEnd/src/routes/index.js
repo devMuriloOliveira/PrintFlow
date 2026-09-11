@@ -54,9 +54,9 @@ import {
 import { handleFinancialReportExport } from './reports.js'
 import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } from './calculator.js'
 import {
-  handleAsaasBillingSummary,
-  handleAsaasPaymentLinkCreate,
-  handleAsaasWebhook
+  handleMercadoPagoBillingSummary,
+  handleMercadoPagoCheckoutCreate,
+  handleMercadoPagoWebhook
 } from './billing.js'
 
 import {
@@ -411,11 +411,12 @@ export const handleRequest =
         req.method ===
           'POST' &&
         url.pathname ===
-          '/webhooks/asaas'
+          '/webhooks/mercado-pago'
       ) {
-        return await handleAsaasWebhook(
+        return await handleMercadoPagoWebhook(
           req,
-          res
+          res,
+          url
         )
       }
 
@@ -592,7 +593,7 @@ export const handleRequest =
         if (!canAccessRequest(user, req.method, url.pathname)) {
           return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
         }
-        const isBillingRecoveryRoute = url.pathname === '/api/billing/asaas' || url.pathname === '/api/billing/asaas/payment-link'
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout'
         if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
           try {
             await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname })
@@ -610,12 +611,12 @@ export const handleRequest =
         return await handleMembersList(req, res)
       }
 
-      if (req.method === 'GET' && url.pathname === '/api/billing/asaas') {
-        return await handleAsaasBillingSummary(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/billing/mercado-pago') {
+        return await handleMercadoPagoBillingSummary(req, res)
       }
 
-      if (req.method === 'POST' && url.pathname === '/api/billing/asaas/payment-link') {
-        return await handleAsaasPaymentLinkCreate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') {
+        return await handleMercadoPagoCheckoutCreate(req, res)
       }
 
       if (req.method === 'POST' && url.pathname === '/api/members/invitations') {

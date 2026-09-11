@@ -25,9 +25,9 @@ const productionLike = isProduction || Boolean(databaseUrl)
 const authSecret = process.env.AUTH_SECRET || ''
 const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY || ''
 const webhookSharedSecret = process.env.WEBHOOK_SHARED_SECRET || ''
-const asaasApiKey = process.env.ASAAS_API_KEY || ''
-const asaasWebhookToken = process.env.ASAAS_WEBHOOK_TOKEN || ''
-const asaasEnvironment = process.env.ASAAS_ENVIRONMENT === 'production' ? 'production' : 'sandbox'
+const mercadoPagoAccessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || ''
+const mercadoPagoWebhookSecret = process.env.MERCADO_PAGO_WEBHOOK_SECRET || ''
+const mercadoPagoEnvironment = process.env.MERCADO_PAGO_ENVIRONMENT === 'production' ? 'production' : 'sandbox'
 const defaultAuthTokenTtlSeconds = 15 * 60
 const defaultRefreshTokenTtlSeconds = 30 * 24 * 60 * 60
 const legacyDataEncryptionKeys = String(process.env.LEGACY_DATA_ENCRYPTION_KEYS || '')
@@ -47,8 +47,8 @@ const requireProductionSecret = (name, value, minLength = 32) => {
 requireProductionSecret('AUTH_SECRET', authSecret)
 requireProductionSecret('DATA_ENCRYPTION_KEY', dataEncryptionKey)
 requireProductionSecret('WEBHOOK_SHARED_SECRET', webhookSharedSecret)
-if (asaasApiKey && asaasWebhookToken.length < 32) {
-  throw new Error('ASAAS_WEBHOOK_TOKEN deve possuir ao menos 32 caracteres quando ASAAS_API_KEY estiver configurada.')
+if (mercadoPagoAccessToken && !mercadoPagoWebhookSecret) {
+  throw new Error('MERCADO_PAGO_WEBHOOK_SECRET obrigatorio quando MERCADO_PAGO_ACCESS_TOKEN estiver configurado.')
 }
 if (productionLike && !String(process.env.CORS_ALLOWED_ORIGINS || '').trim()) {
   throw new Error('CORS_ALLOWED_ORIGINS obrigatorio quando o backend usa banco real.')
@@ -65,12 +65,10 @@ export const env = {
   dataEncryptionKey,
   legacyDataEncryptionKeys,
   webhookSharedSecret,
-  asaasApiKey,
-  asaasWebhookToken,
-  asaasEnvironment,
-  asaasApiUrl: asaasEnvironment === 'production' ? 'https://api.asaas.com/v3' : 'https://api-sandbox.asaas.com/v3',
-  asaasMonthlyPrice: Number(process.env.ASAAS_MONTHLY_PRICE || 59.90),
-  asaasYearlyPrice: Number(process.env.ASAAS_YEARLY_PRICE || 598.80),
+  mercadoPagoAccessToken,
+  mercadoPagoWebhookSecret,
+  mercadoPagoEnvironment,
+  mercadoPagoApiUrl: 'https://api.mercadopago.com',
   platformSuperAdminEmails: String(process.env.PLATFORM_SUPER_ADMIN_EMAILS || '')
     .split(',')
     .map((value) => value.trim().toLowerCase())
