@@ -19,6 +19,16 @@ test('empresa sem assinatura configurada preserva o acesso atual', () => {
   assert.equal(supportsSubscriptionFeature(entitlement, 'advancedReports'), true)
 })
 
+test('empresa nova sem checkout fica somente leitura ate iniciar a assinatura', () => {
+  const entitlement = entitlementFromSubscription(null, false)
+
+  assert.equal(entitlement.configured, false)
+  assert.equal(entitlement.status, 'payment_required')
+  assert.equal(entitlement.mode, 'read_only')
+  assert.equal(canUseSubscriptionRequest({ method: 'POST', pathname: '/api/orders', entitlement }), false)
+  assert.equal(canUseSubscriptionRequest({ method: 'POST', pathname: '/api/support/requests', entitlement }), true)
+})
+
 test('assinatura vencida fica somente leitura e preserva suporte', () => {
   const entitlement = entitlementFromSubscription({
     status: 'past_due',

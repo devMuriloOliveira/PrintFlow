@@ -206,6 +206,9 @@ export const migrate =
     await query(`alter table tenants add column if not exists account_status text not null default 'active'`)
     await query(`alter table tenants add column if not exists billing_status text not null default 'not_configured'`)
     await query(`alter table tenants add column if not exists billing_due_at timestamptz`)
+    // Empresas existentes permanecem no acesso historico. Cadastros novos entram
+    // no fluxo comercial e so ganham escrita apos checkout autorizado.
+    await query(`alter table tenants add column if not exists billing_enforcement_exempt boolean not null default true`)
 
     // ==================================================
     // USERS

@@ -83,6 +83,28 @@ const activePlans = async () => {
   }))
 }
 
+const planFromRow = (plan) => ({
+  id: String(plan.id), code: plan.code, name: plan.name, description: plan.description || '',
+  monthly: number(plan.monthly_reference_price), yearly: number(plan.yearly_reference_price),
+  mercadoPagoMonthlyPlanId: text(plan.mercado_pago_monthly_plan_id, 160),
+  mercadoPagoYearlyPlanId: text(plan.mercado_pago_yearly_plan_id, 160),
+  trialDays: Math.max(0, Math.min(30, Number(plan.trial_days) || 0))
+})
+
+const ensureMercadoPagoPlans = async (plan) => {
+  if (plan.mercadoPagoMonthlyPlanId && plan.mercadoPagoYearlyPlanId) return plan
+  const providerPlans = await synchronizeMercadoPagoPlans({ name: plan.name, monthly: plan.monthly, yearly: plan.yearly, trialDays: plan.trialDays })
+  const updated = await withPlatformAdmin((client) => client.query(`
+    update platform_plans
+       set mercado_pago_monthly_plan_id = $2,
+           mercado_pago_yearly_plan_id = $3,
+           updated_at = now()
+     where id = $1
+     returning id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days
+  `, [plan.id, providerPlans.monthlyPlanId, providerPlans.yearlyPlanId]))
+  return planFromRow(updated.rows[0])
+}
+
 const subscriptionStatus = (value) => {
   const status = text(value, 80).toLowerCase()
   if (status === 'cancelled') return 'cancelled'
@@ -121,7 +143,8 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
   if (!hasDatabase) throw new Error('A cobranca exige banco de dados.')
   if (!env.appPublicUrl) throw new Error('APP_PUBLIC_URL precisa estar configurada antes de ativar o checkout do Mercado Pago.')
   const cycle = ['monthly', 'yearly'].includes(billingCycle) ? billingCycle : ''
-  const plan = (await activePlans()).find((item) => item.code === text(planCode, 80))
+  const selectedPlan = (await activePlans()).find((item) => item.code === text(planCode, 80))
+  const plan = selectedPlan ? await ensureMercadoPagoPlans(selectedPlan) : null
   if (!plan || !cycle) throw new Error('Plano ou ciclo de cobranca invalido.')
   const amount = number(plan[cycle])
   if (amount <= 0) throw new Error('O valor da assinatura ainda nao foi configurado.')
@@ -137,9 +160,6 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
   const providerPlanId = hasUsedTrial
     ? ''
     : cycle === 'yearly' ? plan.mercadoPagoYearlyPlanId : plan.mercadoPagoMonthlyPlanId
-  if (!hasUsedTrial && !providerPlanId) {
-    throw new Error('O plano selecionado ainda nao possui o ID do plano Mercado Pago configurado pelo superadmin.')
-  }
   const trialDays = providerPlanId ? plan.trialDays : 0
 
   const pending = await withTenant(tenantId, (client) => client.query(`

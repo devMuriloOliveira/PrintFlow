@@ -14,9 +14,15 @@ const numberLimit = (value) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
 }
 
-export const entitlementFromSubscription = (subscription = null) => {
+export const entitlementFromSubscription = (subscription = null, billingEnforcementExempt = true) => {
   if (!subscription?.status) {
-    return { configured: false, status: 'not_configured', mode: 'full', limits: {}, features: {} }
+    return {
+      configured: false,
+      status: billingEnforcementExempt ? 'not_configured' : 'payment_required',
+      mode: billingEnforcementExempt ? 'full' : 'read_only',
+      limits: {},
+      features: {}
+    }
   }
 
   const status = String(subscription.status)
@@ -38,7 +44,7 @@ export const canUseSubscriptionRequest = ({ method, pathname, entitlement }) => 
 }
 
 const subscriptionError = () => {
-  const error = new Error('A assinatura desta empresa esta em modo somente leitura. Consulte o administrador da conta.')
+  const error = new Error('A assinatura desta empresa ainda nao foi ativada. O Owner deve concluir o checkout para liberar as operacoes.')
   error.code = 'subscription_read_only'
   return error
 }
@@ -48,13 +54,15 @@ export const resolveTenantEntitlement = async (tenantId, client = null) => {
 
   const read = async (queryClient) => {
     const result = await queryClient.query(`
-      select subscription.status, plan.limits, plan.features
-        from tenant_subscriptions subscription
+      select subscription.status, plan.limits, plan.features, tenant.billing_enforcement_exempt
+        from tenants tenant
+        left join tenant_subscriptions subscription on subscription.tenant_id = tenant.id
         left join platform_plans plan on plan.id = subscription.plan_id
-       where subscription.tenant_id = $1
+       where tenant.id = $1
        limit 1
     `, [tenantId])
-    return entitlementFromSubscription(result.rows[0] || null)
+    const row = result.rows[0] || null
+    return entitlementFromSubscription(row, Boolean(row?.billing_enforcement_exempt))
   }
 
   return client ? read(client) : withTenant(tenantId, read)

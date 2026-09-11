@@ -243,8 +243,8 @@ export const registerUser = async ({ name, email, password, company }) => {
   if (existing.rowCount) throw new Error('Este e-mail ja esta cadastrado.')
 
   await query(
-    `insert into tenants (id, name, email, is_initialized)
-     values ($1, $2, $3, false)
+    `insert into tenants (id, name, email, is_initialized, billing_enforcement_exempt)
+     values ($1, $2, $3, false, false)
      on conflict (id) do nothing`,
     [tenantId, encryptField(companyName), encryptField(normalizedEmail)]
   )
