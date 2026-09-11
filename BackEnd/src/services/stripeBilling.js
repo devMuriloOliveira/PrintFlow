@@ -94,7 +94,7 @@ export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, plan
   if (!priceId || amount <= 0 || !text(actorEmail, 320)) throw new Error('O plano ou o e-mail do Owner ainda nao esta valido para o checkout.')
   const previous = await withTenant(tenantId, (client) => client.query('select trial_used_at from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId]))
   const trialDays = previous.rows[0]?.trial_used_at ? 0 : plan.trialDays
-  const pending = await withTenant(tenantId, (client) => client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open') and checkout_url <> '' order by created_at desc limit 1`, [tenantId]))
+  const pending = await withTenant(tenantId, (client) => client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') and checkout_url <> '' order by created_at desc limit 1`, [tenantId, cycle]))
   if (pending.rowCount) return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
   const checkoutId = `stripe_checkout_${randomBytes(12).toString('hex')}`
   await withTenant(tenantId, (client) => client.query(`insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days) values ($1,$2,$3,$4,$5,'${provider}','creating',$6,$7,$8)`, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), priceId, trialDays]))
