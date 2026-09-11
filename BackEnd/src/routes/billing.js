@@ -56,3 +56,5 @@ export const handleMercadoPagoWebhook = async (req, res, url) => {
   const result = await processMercadoPagoWebhook({ notification, resourceId })
   return sendJson(res, 200, result)
 }
+
+export const handleMercadoPagoWebhookProbe = async (_req, res) => sendJson(res, 200, { ok: true, service: 'mercado-pago-webhook' })

@@ -110,10 +110,10 @@ Checklist de producao:
   usar o Access Token privado de producao e cadastrar o mesmo webhook na aba de
   producao do Mercado Pago. Essa configuracao cria cobrancas reais; o e-mail de
   teste deixa de ser usado.
-- Antes da primeira cobranca, no Superadmin > Empresas, configure os IDs dos
-  planos mensal e anual criados no Mercado Pago e informe 7 dias de teste. Os
-  IDs ficam no banco da plataforma, com alteracao auditada; o Access Token
-  continua apenas nas variaveis privadas do Render.
+- Antes da primeira cobranca, no Superadmin > Empresas, informe os valores e
+  o periodo de teste. A plataforma cria os planos mensal e anual pela API do
+  Mercado Pago e guarda os identificadores com alteracao auditada; o Access
+  Token continua apenas nas variaveis privadas do Render.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 

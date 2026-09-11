@@ -6,7 +6,7 @@ import test from 'node:test'
 process.env.MERCADO_PAGO_WEBHOOK_SECRET = 'mercado-pago-test-webhook-secret'
 
 const { invoiceStatus, mercadoPagoWebhookSignatureMatches } = await import('../src/services/mercadoPagoBilling.js')
-const { handleMercadoPagoWebhook } = await import('../src/routes/billing.js')
+const { handleMercadoPagoWebhook, handleMercadoPagoWebhookProbe } = await import('../src/routes/billing.js')
 
 const webhookRequest = (headers, body) => {
   const request = new EventEmitter()
@@ -56,4 +56,11 @@ test('webhook rejeita assinatura invalida antes de ler ou processar o evento', a
     new URL('https://api.example.test/webhooks/mercado-pago?data.id=12345&type=subscription_preapproval')
   )
   assert.equal(unauthorized.status, 401)
+})
+
+test('sondagem de URL do Mercado Pago responde sem processar pagamento', async () => {
+  const response = webhookResponse()
+  await handleMercadoPagoWebhookProbe({}, response)
+  assert.equal(response.status, 200)
+  assert.match(response.body, /mercado-pago-webhook/)
 })

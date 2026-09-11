@@ -70,7 +70,14 @@ export const handlePlatformPlanBillingConfigurationUpdate = async (req, res, pla
   const plan = await updatePlatformPlanBillingConfiguration(planId, payload)
   await writePlatformAudit(req, user, {
     action: 'platform.billing_plan.updated', targetResource: 'platform_plan', targetResourceId: plan.id, reason,
-    details: { code: plan.code, trialDays: plan.trialDays, monthlyPlanConfigured: Boolean(plan.mercadoPagoMonthlyPlanId), yearlyPlanConfigured: Boolean(plan.mercadoPagoYearlyPlanId) }
+    details: {
+      code: plan.code,
+      monthlyReferencePrice: plan.monthlyReferencePrice,
+      yearlyReferencePrice: plan.yearlyReferencePrice,
+      trialDays: plan.trialDays,
+      monthlyPlanConfigured: Boolean(plan.mercadoPagoMonthlyPlanId),
+      yearlyPlanConfigured: Boolean(plan.mercadoPagoYearlyPlanId)
+    }
   })
   return sendJson(res, 200, plan)
 }

@@ -3,6 +3,7 @@ import { env } from '../config/env.js'
 import { query, withPlatformAdmin, withTenant } from '../db/pool.js'
 import { blindIndexesForLookup, decryptField } from '../security/crypto.js'
 import { describeAuditEvent } from './operationalEvents.js'
+import { synchronizeMercadoPagoPlans } from './mercadoPagoBilling.js'
 
 const text = (value, max = 500) => String(value || '').trim().slice(0, max)
 const configuredEmails = () => env.platformSuperAdminEmails
@@ -129,18 +130,25 @@ export const listPlatformPlans = async () => {
 }
 
 export const updatePlatformPlanBillingConfiguration = async (planId, payload = {}) => {
-  const monthlyPlanId = text(payload.mercadoPagoMonthlyPlanId, 160)
-  const yearlyPlanId = text(payload.mercadoPagoYearlyPlanId, 160)
+  const monthlyReferencePrice = Number(payload.monthlyReferencePrice)
+  const yearlyReferencePrice = Number(payload.yearlyReferencePrice)
   const trialDays = Number(payload.trialDays)
-  if (!monthlyPlanId || !yearlyPlanId) throw new Error('Informe os IDs dos planos mensal e anual do Mercado Pago.')
+  if (!Number.isFinite(monthlyReferencePrice) || monthlyReferencePrice <= 0 || !Number.isFinite(yearlyReferencePrice) || yearlyReferencePrice <= 0) throw new Error('Informe valores mensal e anual validos.')
   if (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 30) throw new Error('O periodo de teste deve ter entre 0 e 30 dias.')
+  const current = await query(`select id, name, monthly_reference_price, yearly_reference_price, trial_days, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id from platform_plans where id = $1 limit 1`, [planId])
+  if (!current.rowCount) throw new Error('Plano nao encontrado.')
+  const plan = current.rows[0]
+  const planChanged = Number(plan.monthly_reference_price) !== monthlyReferencePrice || Number(plan.yearly_reference_price) !== yearlyReferencePrice || Number(plan.trial_days) !== trialDays
+  const hasProviderPlans = Boolean(plan.mercado_pago_monthly_plan_id && plan.mercado_pago_yearly_plan_id)
+  const providerPlans = planChanged || !hasProviderPlans
+    ? await synchronizeMercadoPagoPlans({ name: plan.name, monthly: monthlyReferencePrice, yearly: yearlyReferencePrice, trialDays })
+    : { monthlyPlanId: plan.mercado_pago_monthly_plan_id, yearlyPlanId: plan.mercado_pago_yearly_plan_id }
   const result = await query(`
     update platform_plans
-       set mercado_pago_monthly_plan_id = $2, mercado_pago_yearly_plan_id = $3, trial_days = $4, updated_at = now()
+       set monthly_reference_price = $2, yearly_reference_price = $3, mercado_pago_monthly_plan_id = $4, mercado_pago_yearly_plan_id = $5, trial_days = $6, updated_at = now()
      where id = $1
      returning id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days, limits, features, active, created_at, updated_at
-  `, [planId, monthlyPlanId, yearlyPlanId, trialDays])
-  if (!result.rowCount) throw new Error('Plano nao encontrado.')
+  `, [planId, monthlyReferencePrice, yearlyReferencePrice, providerPlans.monthlyPlanId, providerPlans.yearlyPlanId, trialDays])
   const row = result.rows[0]
   return {
     id: String(row.id), code: row.code, name: row.name, description: row.description || '',

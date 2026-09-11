@@ -32,7 +32,11 @@ const mercadoPagoRequest = async (path, options = {}) => {
       ...(options.headers || {})
     }
   })
-  await response.text()
+  const raw = await response.text()
+  let data = {}
+  if (raw) {
+    try { data = JSON.parse(raw) } catch { data = {} }
+  }
   if (!response.ok) {
     const requestId = text(response.headers.get('x-request-id') || response.headers.get('x-correlation-id'), 120)
     const reference = requestId ? ` (referencia Mercado Pago: ${requestId})` : ''
@@ -41,6 +45,31 @@ const mercadoPagoRequest = async (path, options = {}) => {
     throw error
   }
   return data
+}
+
+const mercadoPagoPlanPayload = ({ name, billingCycle, amount, trialDays }) => ({
+  reason: `PrintFlow - assinatura ${billingCycle === 'yearly' ? 'anual' : 'mensal'} - ${text(name, 120)}`,
+  auto_recurring: {
+    frequency: billingCycle === 'yearly' ? 12 : 1,
+    frequency_type: 'months',
+    transaction_amount: amount,
+    currency_id: 'BRL',
+    ...(trialDays > 0 ? { free_trial: { frequency: trialDays, frequency_type: 'days' } } : {})
+  },
+  back_url: checkoutReturnUrl('success')
+})
+
+export const synchronizeMercadoPagoPlans = async ({ name, monthly, yearly, trialDays }) => {
+  if (!env.appPublicUrl) throw new Error('APP_PUBLIC_URL precisa estar configurada antes de sincronizar os planos do Mercado Pago.')
+  if (monthly <= 0 || yearly <= 0) throw new Error('Os valores mensal e anual precisam ser maiores que zero.')
+  const [monthlyPlan, yearlyPlan] = await Promise.all([
+    mercadoPagoRequest('/preapproval_plan', { method: 'POST', body: JSON.stringify(mercadoPagoPlanPayload({ name, billingCycle: 'monthly', amount: monthly, trialDays })) }),
+    mercadoPagoRequest('/preapproval_plan', { method: 'POST', body: JSON.stringify(mercadoPagoPlanPayload({ name, billingCycle: 'yearly', amount: yearly, trialDays })) })
+  ])
+  const monthlyPlanId = text(monthlyPlan.id, 160)
+  const yearlyPlanId = text(yearlyPlan.id, 160)
+  if (!monthlyPlanId || !yearlyPlanId) throw new Error('O Mercado Pago nao retornou os identificadores dos planos sincronizados.')
+  return { monthlyPlanId, yearlyPlanId }
 }
 
 const activePlans = async () => {

@@ -56,7 +56,8 @@ import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } fro
 import {
   handleMercadoPagoBillingSummary,
   handleMercadoPagoCheckoutCreate,
-  handleMercadoPagoWebhook
+  handleMercadoPagoWebhook,
+  handleMercadoPagoWebhookProbe
 } from './billing.js'
 
 import {
@@ -408,12 +409,9 @@ export const handleRequest =
         )
       }
 
-      if (
-        req.method ===
-          'POST' &&
-        url.pathname ===
-          '/webhooks/mercado-pago'
-      ) {
+      if (req.method === 'GET' && url.pathname === '/webhooks/mercado-pago') return handleMercadoPagoWebhookProbe(req, res)
+
+      if (req.method === 'POST' && url.pathname === '/webhooks/mercado-pago') {
         return await handleMercadoPagoWebhook(
           req,
           res,
