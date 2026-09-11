@@ -85,7 +85,7 @@ export type Client = {
   name: string; email: string; phone: string; type?: string; document?: string; zip?: string; address?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; origin?: string; notes?: string; tags?: string; status?: string; orders: number; revenue: number; ticket: number; last: string
 }
 
-export type MercadoPagoBillingSummary = {
+export type StripeBillingSummary = {
   configured: boolean;
   environment: 'sandbox' | 'production';
   plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
@@ -397,12 +397,12 @@ export const useAppData = () => {
     headers: resourceHeaders()
   })
 
-  const getMercadoPagoBilling = () => $fetch<MercadoPagoBillingSummary>(apiUrl('/api/billing/mercado-pago'), {
+  const getStripeBilling = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
     headers: resourceHeaders()
   })
 
-  const createMercadoPagoCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) =>
-    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/mercado-pago/checkout'), {
+  const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) =>
+    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
     })
 
@@ -477,8 +477,8 @@ export const useAppData = () => {
     , linkMarketplaceOrderProduct
     , updateSettings
     , exportTenantData
-    , getMercadoPagoBilling
-    , createMercadoPagoCheckout
+    , getStripeBilling
+    , createStripeCheckout
     , listSettingsExports
     , listFinancialHistory
     , exportFinancialReport

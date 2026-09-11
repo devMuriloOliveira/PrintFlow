@@ -19,3 +19,19 @@ export const readJsonBody = (req, maxBytes = 1_000_000) => new Promise((resolve,
 
   req.on('error', reject)
 })
+
+export const readRawBody = (req, maxBytes = 1_000_000) => new Promise((resolve, reject) => {
+  const chunks = []
+  let size = 0
+  req.on('data', (chunk) => {
+    size += chunk.length
+    if (size > maxBytes) {
+      reject(new Error('Payload muito grande'))
+      req.destroy()
+      return
+    }
+    chunks.push(Buffer.from(chunk))
+  })
+  req.on('end', () => resolve(Buffer.concat(chunks)))
+  req.on('error', reject)
+})

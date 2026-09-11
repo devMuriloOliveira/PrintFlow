@@ -75,8 +75,8 @@ export const handlePlatformPlanBillingConfigurationUpdate = async (req, res, pla
       monthlyReferencePrice: plan.monthlyReferencePrice,
       yearlyReferencePrice: plan.yearlyReferencePrice,
       trialDays: plan.trialDays,
-      monthlyPlanConfigured: Boolean(plan.mercadoPagoMonthlyPlanId),
-      yearlyPlanConfigured: Boolean(plan.mercadoPagoYearlyPlanId)
+      monthlyPlanConfigured: Boolean(plan.stripeMonthlyPriceId),
+      yearlyPlanConfigured: Boolean(plan.stripeYearlyPriceId)
     }
   })
   return sendJson(res, 200, plan)

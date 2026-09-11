@@ -198,7 +198,7 @@ export const usePlatformAdminWorkspace = () => {
     return supportSlaRules.value
   }
   const loadPlatformPlans = async () => { platformPlans.value = await session.request<PlatformPlan[]>('/api/platform-admin/plans'); return platformPlans.value }
-  const updatePlatformPlanBillingConfiguration = async (planId: string, body: { mercadoPagoMonthlyPlanId: string; mercadoPagoYearlyPlanId: string; trialDays: number; reason: string }) => {
+  const updatePlatformPlanBillingConfiguration = async (planId: string, body: { monthlyReferencePrice: number; yearlyReferencePrice: number; trialDays: number; reason: string }) => {
     const updated = await session.request<PlatformPlan>(`/api/platform-admin/plans/${encodeURIComponent(planId)}/billing-configuration`, { method: 'POST', body })
     platformPlans.value = platformPlans.value.map(plan => plan.id === updated.id ? updated : plan)
     return updated

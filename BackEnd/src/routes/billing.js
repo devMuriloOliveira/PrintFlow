@@ -1,4 +1,4 @@
-import { readJsonBody } from '../http/body.js'
+import { readJsonBody, readRawBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { getAuthUser } from './auth.js'
 import {
@@ -7,6 +7,7 @@ import {
   mercadoPagoWebhookSignatureMatches,
   processMercadoPagoWebhook
 } from '../services/mercadoPagoBilling.js'
+import { createStripeCheckout, getStripeBillingSummary, processStripeWebhook, stripeWebhookSignatureMatches } from '../services/stripeBilling.js'
 
 const owner = async (req, res) => {
   const user = await getAuthUser(req)
@@ -58,3 +59,22 @@ export const handleMercadoPagoWebhook = async (req, res, url) => {
 }
 
 export const handleMercadoPagoWebhookProbe = async (_req, res) => sendJson(res, 200, { ok: true, service: 'mercado-pago-webhook' })
+
+export const handleStripeBillingSummary = async (req, res) => {
+  const user = await owner(req, res); if (!user) return
+  return sendJson(res, 200, await getStripeBillingSummary(user.tenantId))
+}
+
+export const handleStripeCheckoutCreate = async (req, res) => {
+  const user = await owner(req, res); if (!user) return
+  const body = await readJsonBody(req)
+  return sendJson(res, 201, await createStripeCheckout({ tenantId: user.tenantId, actorId: user.userId || user.id, actorEmail: user.email, planCode: String(body.planCode || ''), billingCycle: String(body.billingCycle || '') }))
+}
+
+export const handleStripeWebhook = async (req, res) => {
+  const rawBody = await readRawBody(req, 256_000)
+  if (!stripeWebhookSignatureMatches({ header: req.headers['stripe-signature'], rawBody })) return sendJson(res, 401, { error: 'Webhook nao autorizado.' })
+  let event = {}
+  try { event = rawBody.length ? JSON.parse(rawBody.toString('utf8')) : {} } catch { return sendJson(res, 400, { error: 'Webhook com JSON invalido.' }) }
+  return sendJson(res, 200, await processStripeWebhook({ event }))
+}

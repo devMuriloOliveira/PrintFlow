@@ -57,7 +57,10 @@ import {
   handleMercadoPagoBillingSummary,
   handleMercadoPagoCheckoutCreate,
   handleMercadoPagoWebhook,
-  handleMercadoPagoWebhookProbe
+  handleMercadoPagoWebhookProbe,
+  handleStripeBillingSummary,
+  handleStripeCheckoutCreate,
+  handleStripeWebhook
 } from './billing.js'
 
 import {
@@ -419,6 +422,8 @@ export const handleRequest =
         )
       }
 
+      if (req.method === 'POST' && url.pathname === '/webhooks/stripe') return await handleStripeWebhook(req, res)
+
       // ==================================================
       // ROTAS PÚBLICAS DO AGENT
       // ==================================================
@@ -592,7 +597,7 @@ export const handleRequest =
         if (!canAccessRequest(user, req.method, url.pathname)) {
           return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
         }
-        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout'
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout'
         if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
           try {
             await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname })
@@ -617,6 +622,9 @@ export const handleRequest =
       if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') {
         return await handleMercadoPagoCheckoutCreate(req, res)
       }
+
+      if (req.method === 'GET' && url.pathname === '/api/billing/stripe') return await handleStripeBillingSummary(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/checkout') return await handleStripeCheckoutCreate(req, res)
 
       if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
         return await handleInvitationCreate(req, res)

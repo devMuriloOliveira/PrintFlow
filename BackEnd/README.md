@@ -53,10 +53,8 @@ Variaveis principais:
 - `AGENT_HEALTH_WATCHDOG_INTERVAL_MS`: frequencia de verificacao da saude dos Agents.
 - `SUBSCRIPTION_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de prazos das assinaturas.
 - `SUBSCRIPTION_WARNING_MS`: antecedencia dos avisos de vencimento da assinatura.
-- `MERCADO_PAGO_ENVIRONMENT`: `sandbox` durante homologacao e `production` somente para cobrancas reais.
-- `MERCADO_PAGO_ACCESS_TOKEN`: credencial privada do Mercado Pago, configurada somente no ambiente de deploy.
-- `MERCADO_PAGO_WEBHOOK_SECRET`: segredo da assinatura HMAC configurado para a aplicacao Mercado Pago.
-- `MERCADO_PAGO_TEST_PAYER_EMAIL`: e-mail do comprador de teste usado somente em sandbox.
+- `STRIPE_SECRET_KEY`: chave privada live/teste, configurada somente no ambiente de deploy.
+- `STRIPE_WEBHOOK_SECRET`: segredo `whsec_...` do endpoint Stripe, configurado depois de criar o webhook.
 - `EXPENSE_RECURRING_INTERVAL_MS`: intervalo da geração automática de despesas recorrentes vencidas.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
@@ -98,22 +96,17 @@ Checklist de producao:
 - Configurar o monitor externo para consultar somente `GET /healthz`. O resumo
   autenticado `GET /api/operational-health` fica restrito a usuarios com acesso
   de producao e deve ser acompanhado pelo painel de Notificacoes.
-- Para o Mercado Pago, iniciar com `MERCADO_PAGO_ENVIRONMENT=sandbox`, cadastrar
-  `MERCADO_PAGO_ACCESS_TOKEN`, `MERCADO_PAGO_WEBHOOK_SECRET` e o e-mail do
-  comprador de teste em `MERCADO_PAGO_TEST_PAYER_EMAIL`. Depois do deploy,
-  configurar na aplicacao Mercado Pago o webhook
-  `POST https://SUA-API.onrender.com/webhooks/mercado-pago` e habilitar
-  `subscription_preapproval`, `subscription_authorized_payment` e `payment`.
-  O retorno do checkout nao confirma a cobranca: somente o webhook com assinatura
-  HMAC valida atualiza a assinatura.
-- Para cobrar em producao, mudar `MERCADO_PAGO_ENVIRONMENT` para `production`,
-  usar o Access Token privado de producao e cadastrar o mesmo webhook na aba de
-  producao do Mercado Pago. Essa configuracao cria cobrancas reais; o e-mail de
-  teste deixa de ser usado.
+- Para o Stripe, cadastrar no Dashboard o endpoint `POST
+  https://SUA-API.onrender.com/webhooks/stripe` e habilitar `checkout.session.completed`,
+  `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`,
+  `invoice.payment_failed`, `invoice.marked_uncollectible` e `invoice.voided`.
+  Copiar o segredo `whsec_...` exibido pelo Stripe para `STRIPE_WEBHOOK_SECRET` no
+  Render. O retorno do Checkout nao confirma a assinatura: somente o webhook com
+  assinatura valida altera o acesso.
 - Antes da primeira cobranca, no Superadmin > Empresas, informe os valores e
-  o periodo de teste. A plataforma cria os planos mensal e anual pela API do
-  Mercado Pago e guarda os identificadores com alteracao auditada; o Access
-  Token continua apenas nas variaveis privadas do Render.
+  o periodo de teste. A plataforma cria o produto e os precos mensal/anual pela
+  API do Stripe e guarda os identificadores com alteracao auditada; a chave
+  continua apenas nas variaveis privadas do Render.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 
@@ -170,11 +163,11 @@ Autenticacao:
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 
-Assinatura Mercado Pago (restrita ao Owner):
+Assinatura Stripe (restrita ao Owner):
 
-- `GET /api/billing/mercado-pago`
-- `POST /api/billing/mercado-pago/checkout`
-- `POST /webhooks/mercado-pago`
+- `GET /api/billing/stripe`
+- `POST /api/billing/stripe/checkout`
+- `POST /webhooks/stripe`
 
 Dados do aplicativo:
 
