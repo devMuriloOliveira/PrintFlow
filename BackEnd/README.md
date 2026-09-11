@@ -53,7 +53,7 @@ Variaveis principais:
 - `AGENT_HEALTH_WATCHDOG_INTERVAL_MS`: frequencia de verificacao da saude dos Agents.
 - `SUBSCRIPTION_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de prazos das assinaturas.
 - `SUBSCRIPTION_WARNING_MS`: antecedencia dos avisos de vencimento da assinatura.
-- `MERCADO_PAGO_ENVIRONMENT`: `sandbox` durante homologacao e `production` somente depois da validacao completa.
+- `MERCADO_PAGO_ENVIRONMENT`: `sandbox` durante homologacao e `production` somente para cobrancas reais.
 - `MERCADO_PAGO_ACCESS_TOKEN`: credencial privada do Mercado Pago, configurada somente no ambiente de deploy.
 - `MERCADO_PAGO_WEBHOOK_SECRET`: segredo da assinatura HMAC configurado para a aplicacao Mercado Pago.
 - `MERCADO_PAGO_TEST_PAYER_EMAIL`: e-mail do comprador de teste usado somente em sandbox.
@@ -106,6 +106,10 @@ Checklist de producao:
   `subscription_preapproval`, `subscription_authorized_payment` e `payment`.
   O retorno do checkout nao confirma a cobranca: somente o webhook com assinatura
   HMAC valida atualiza a assinatura.
+- Para cobrar em producao, mudar `MERCADO_PAGO_ENVIRONMENT` para `production`,
+  usar o Access Token privado de producao e cadastrar o mesmo webhook na aba de
+  producao do Mercado Pago. Essa configuracao cria cobrancas reais; o e-mail de
+  teste deixa de ser usado.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 

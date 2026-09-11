@@ -5,6 +5,15 @@ process.env.DATABASE_URL = ''
 
 const { runSupportSlaWatchdog } = await import('../src/jobs/supportSlaWatchdog.js')
 
+test('SLA compara o responsavel textual sem falhar quando o id do superadmin e UUID', async () => {
+  const queries = []
+  await runSupportSlaWatchdog({
+    databaseAvailable: true,
+    runQuery: async (sql, params) => { queries.push({ sql, params }); return { rows: [] } }
+  })
+  assert.match(queries[0].sql, /u\.id::text <> request\.chat_assigned_to/)
+})
+
 test('SLA de suporte alerta primeira resposta e resolucao vencidas ao responsavel', async () => {
   const notifications = []
   const now = new Date('2026-09-09T12:00:00.000Z')

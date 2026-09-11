@@ -22,7 +22,7 @@ export const runSupportSlaWatchdog = async ({ now = new Date(), runQuery = query
           from users u
           join platform_super_admins sa on sa.user_id = u.id and sa.status = 'active'
          where u.role = 'platform_super_admin' and u.status = 'active'
-           and u.id <> request.chat_assigned_to
+           and u.id::text <> request.chat_assigned_to
          order by u.id
          limit 1
       ) escalation on true

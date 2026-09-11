@@ -32,11 +32,11 @@ const mercadoPagoRequest = async (path, options = {}) => {
       ...(options.headers || {})
     }
   })
-  const body = await response.text()
-  let data = {}
-  try { data = body ? JSON.parse(body) : {} } catch { data = {} }
+  await response.text()
   if (!response.ok) {
-    const error = new Error(text(data.message || data.cause?.[0]?.description || `Mercado Pago retornou HTTP ${response.status}`, 500))
+    const requestId = text(response.headers.get('x-request-id') || response.headers.get('x-correlation-id'), 120)
+    const reference = requestId ? ` (referencia Mercado Pago: ${requestId})` : ''
+    const error = new Error(`Mercado Pago retornou HTTP ${response.status}${reference}`)
     error.status = response.status
     throw error
   }

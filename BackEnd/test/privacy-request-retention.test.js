@@ -28,5 +28,8 @@ test('retenção alerta somente responsável e anonimiz​a solicitação encerr
   assert.equal(notifications[0].event.recipientId, 'admin-a')
   assert.equal(notifications[0].event.dedupeKey, 'privacy-request-due-3d:privacy-due')
   assert.equal(audits[0].event.details.retentionDays, 7)
+  assert.match(queries[0].sql, /due_at > \$1::timestamptz/)
+  assert.match(queries[0].sql, /due_at <= \(\$1::timestamptz \+ interval '3 days'\)/)
+  assert.match(queries[1].sql, /updated_at <= \(\$1::timestamptz - interval '7 days'\)/)
   assert.equal(queries.filter(({ sql }) => sql.includes('update tenant_audit_request_messages')).length, 1)
 })

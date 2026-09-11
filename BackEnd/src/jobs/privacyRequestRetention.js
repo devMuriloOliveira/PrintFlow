@@ -11,8 +11,8 @@ export const runPrivacyRequestRetention = async ({ now = new Date(), runQuery = 
      where request_kind = 'privacy'
        and responsible_id is not null
        and status not in ('closed', 'rejected', 'cancelled', 'expired')
-       and due_at > $1
-       and due_at <= $1 + interval '3 days'
+       and due_at > $1::timestamptz
+       and due_at <= ($1::timestamptz + interval '3 days')
        and privacy_anonymized_at is null
   `, [now])
   let notified = 0
@@ -36,7 +36,7 @@ export const runPrivacyRequestRetention = async ({ now = new Date(), runQuery = 
      where request_kind = 'privacy'
        and status in ('closed', 'rejected')
        and privacy_anonymized_at is null
-       and updated_at <= $1 - interval '7 days'
+       and updated_at <= ($1::timestamptz - interval '7 days')
   `, [now])
   let anonymized = 0
   for (const request of toAnonymize.rows) {
