@@ -49,6 +49,9 @@ input, select, textarea { color: var(--ink); }
 .brand__name b { color: #6748f4; font-weight: 600; }
 .sidebar__nav { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 3px; overflow-y: auto; padding-top: 12px; scrollbar-width: none; }
 .sidebar__nav::-webkit-scrollbar { display: none; }
+.nav-section { display: flex; flex-direction: column; gap: 3px; }
+.nav-section + .nav-section { margin-top: 12px; padding-top: 10px; border-top: 1px solid #edf2f8; }
+.nav-section__title { padding: 0 18px 3px; color: #8a96aa; font-size: 10px; font-weight: 800; letter-spacing: .08em; line-height: 1.4; }
 .nav-item { position: relative; display: flex; min-height: 43px; align-items: center; gap: 14px; border-radius: 11px; color: #41506d; font-weight: 600; padding: 0 18px; transition: color .16s var(--ease-out), background .16s var(--ease-out), transform .16s var(--ease-out); }
 .nav-item:hover { color: var(--blue); background: #f6f9ff; transform: translateX(2px); }
 .nav-item.router-link-active,

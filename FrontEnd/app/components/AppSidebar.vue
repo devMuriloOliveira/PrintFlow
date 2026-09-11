@@ -5,19 +5,49 @@ const { settings } = useAppData()
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
 const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
 
-const items = [
-  { label: 'Dashboard', to: '/', icon: 'home' },
-  { label: 'Vendas', to: '/vendas', icon: 'cart' },
-  { label: 'Produtos', to: '/produtos', icon: 'box' },
-  { label: 'Despesas', to: '/despesas', icon: 'receipt' },
-  { label: 'Filamentos', to: '/filamentos', icon: 'spool' },
-  { label: 'Impressoras', to: '/impressoras', icon: 'printer' },
-  { label: 'Marketplaces', to: '/marketplaces', icon: 'store' },
-  { label: 'Clientes', to: '/clientes', icon: 'users' },
-  { label: 'Relatórios', to: '/relatorios', icon: 'chart' },
-  { label: 'Metas', to: '/metas', icon: 'target' },
-  { label: 'Calculadora 3D', to: '/calculadora-3d', icon: 'calculator' },
-  { label: 'Configurações', to: '/configuracoes', icon: 'settings' }
+const sections = [
+  {
+    label: 'PRINCIPAL',
+    items: [
+      { label: 'Dashboard', to: '/', icon: 'home' },
+      { label: 'Vendas', to: '/vendas', icon: 'cart' },
+      { label: 'Produtos', to: '/produtos', icon: 'box' },
+      { label: 'Clientes', to: '/clientes', icon: 'users' }
+    ]
+  },
+  {
+    label: 'CANAIS DE VENDA',
+    items: [
+      { label: 'Marketplaces', to: '/marketplaces', icon: 'store' }
+    ]
+  },
+  {
+    label: 'PRODUÇÃO',
+    items: [
+      { label: 'Calculadora 3D', to: '/calculadora-3d', icon: 'calculator' },
+      { label: 'Filamentos', to: '/filamentos', icon: 'spool' },
+      { label: 'Impressoras', to: '/impressoras', icon: 'printer' }
+    ]
+  },
+  {
+    label: 'FINANCEIRO',
+    items: [
+      { label: 'Despesas', to: '/despesas', icon: 'receipt' }
+    ]
+  },
+  {
+    label: 'ANÁLISES',
+    items: [
+      { label: 'Relatórios', to: '/relatorios', icon: 'chart' },
+      { label: 'Metas', to: '/metas', icon: 'target' }
+    ]
+  },
+  {
+    label: 'SISTEMA',
+    items: [
+      { label: 'Configurações', to: '/configuracoes', icon: 'settings' }
+    ]
+  }
 ]
 </script>
 
@@ -34,30 +64,34 @@ const items = [
     </div>
 
     <nav class="sidebar__nav">
-      <NuxtLink
-        v-for="item in items"
-        :key="item.to"
-        :to="item.to"
-        v-slot="{ href, navigate, isActive, isExactActive }"
-        custom
-      >
-        <a
-          :href="href"
-          class="nav-item"
-          :class="{
-            'nav-item--active': item.to === '/' ? isExactActive : isActive
-          }"
-          @click="
-            event => {
-              navigate(event)
-              emit('close')
-            }
-          "
+      <div v-for="section in sections" :key="section.label" class="nav-section">
+        <span class="nav-section__title">{{ section.label }}</span>
+
+        <NuxtLink
+          v-for="item in section.items"
+          :key="item.to"
+          :to="item.to"
+          v-slot="{ href, navigate, isActive, isExactActive }"
+          custom
         >
-          <UiIcon :name="item.icon" :size="20" />
-          <span>{{ item.label }}</span>
-        </a>
-      </NuxtLink>
+          <a
+            :href="href"
+            class="nav-item"
+            :class="{
+              'nav-item--active': item.to === '/' ? isExactActive : isActive
+            }"
+            @click="
+              event => {
+                navigate(event)
+                emit('close')
+              }
+            "
+          >
+            <UiIcon :name="item.icon" :size="20" />
+            <span>{{ item.label }}</span>
+          </a>
+        </NuxtLink>
+      </div>
     </nav>
 
     <div class="tip-card">
