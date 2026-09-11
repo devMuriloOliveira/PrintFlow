@@ -270,11 +270,13 @@ const loadStripeBilling = async () => {
     notify(error?.data?.error || error?.message || 'Nao foi possivel consultar a assinatura.')
   } finally { billingLoading.value = false }
 }
-const startStripeCheckout = async () => {
-  if (!selectedBillingPlan.value || billingPlanValue.value <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
+const startStripeCheckout = async (cycle: 'monthly' | 'yearly' = billingForm.billingCycle) => {
+  billingForm.billingCycle = cycle
+  const amount = selectedBillingPlan.value?.[cycle] || 0
+  if (!selectedBillingPlan.value || amount <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
   creatingBillingLink.value = true
   try {
-    const result = await createStripeCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: billingForm.billingCycle })
+    const result = await createStripeCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
     window.location.assign(result.url)
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
@@ -353,7 +355,7 @@ watch(() => supportDraft.category, (category) => {
               <div class="integration-section__head"><div><h3>Assinatura PrintFlow</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no PrintFlow.</p></div><span class="badge badge--orange">Producao</span></div>
               <div class="form-grid"><label class="field col-12"><span>Periodo de cobranca</span><select v-model="billingForm.billingCycle" required><option value="monthly" :disabled="!selectedBillingPlan?.monthlyEnabled">Mensal — {{ currency(selectedBillingPlan?.monthly || 0) }}</option><option value="yearly" :disabled="!selectedBillingPlan?.yearlyEnabled">Anual — {{ currency(selectedBillingPlan?.yearly || 0) }}</option></select></label></div>
               <div v-if="selectedBillingPlan" class="info-note" style="margin-top:16px"><UiIcon name="info" />{{ selectedBillingPlan.description || 'Assinatura da plataforma.' }}<br><strong>Valor: {{ currency(billingPlanValue) }} por {{ billingForm.billingCycle === 'yearly' ? 'ano' : 'mes' }}</strong></div>
-              <button class="btn btn--primary" style="margin-top:16px" type="submit" :disabled="creatingBillingLink || !selectedBillingPlan || billingPlanValue <= 0">{{ creatingBillingLink ? 'Abrindo checkout...' : 'Continuar no Stripe' }}</button>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px"><button class="btn btn--primary" type="button" :disabled="creatingBillingLink || !selectedBillingPlan || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout('monthly')">{{ creatingBillingLink ? 'Abrindo checkout...' : 'Assinar mensal' }}</button><button class="btn btn--primary" type="button" :disabled="creatingBillingLink || !selectedBillingPlan || (selectedBillingPlan?.yearly || 0) <= 0" @click="startStripeCheckout('yearly')">{{ creatingBillingLink ? 'Abrindo checkout...' : 'Assinar anual' }}</button></div>
             </form>
           </template>
         </div>
