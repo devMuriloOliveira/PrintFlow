@@ -12,6 +12,9 @@ type AuthResponse = {
   accessToken?: string
   token?: string
   deletionCancelled?: boolean
+  verificationRequired?: boolean
+  mfaRequired?: boolean
+  challengeToken?: string
 }
 
 export type AuthSession = { sessionId: string; createdAt: string; expiresAt: string; lastSeenAt: string; deviceLabel: string; ipMasked: string }
@@ -95,6 +98,17 @@ export const useAuth = () => {
     return session.user
   }
 
+  const completeMfaLogin = async (challengeToken: string, code: string) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/mfa/login'), { method: 'POST', body: { challengeToken, code }, credentials: 'include' })
+    setSession(session)
+    return session.user
+  }
+
+  const setupMfa = () => $fetch<{ secret: string; otpauthUri: string }>(apiUrl('/api/auth/mfa/setup'), { headers: authHeaders.value })
+  const mfaStatus = () => $fetch<{ enabled: boolean }>(apiUrl('/api/auth/mfa/status'), { headers: authHeaders.value })
+  const enableMfa = (secret: string, code: string) => $fetch(apiUrl('/api/auth/mfa/enable'), { method: 'POST', headers: authHeaders.value, body: { secret, code } })
+  const disableMfa = (currentPassword: string) => $fetch(apiUrl('/api/auth/mfa/disable'), { method: 'POST', headers: authHeaders.value, body: { currentPassword } })
+
   const restore = async () => {
     if (!process.client) return
 
@@ -118,6 +132,7 @@ export const useAuth = () => {
       body: { email, password },
       credentials: 'include'
     })
+    if (session.mfaRequired) return { mfaRequired: true, challengeToken: session.challengeToken || '' }
     setSession(session)
     tenantDeletionCancelled.value = Boolean(session.deletionCancelled)
     return session.user
@@ -129,8 +144,8 @@ export const useAuth = () => {
       body: payload,
       credentials: 'include'
     })
-    setSession(session)
-    return session.user
+    if (session.accessToken || session.token) setSession(session)
+    return session
   }
 
   const acceptInvitation = async (payload: { token: string; name: string; password: string }) => {
@@ -150,7 +165,7 @@ export const useAuth = () => {
       body: { currentPassword, newPassword },
       credentials: 'include'
     })
-    setSession(session)
+    if (session.accessToken || session.token) setSession(session)
     return session.user
   }
 
@@ -186,6 +201,11 @@ export const useAuth = () => {
     restore,
     refreshSession,
     login,
+    completeMfaLogin,
+    setupMfa,
+    mfaStatus,
+    enableMfa,
+    disableMfa,
     register,
     acceptInvitation,
     listSessions,

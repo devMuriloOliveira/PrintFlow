@@ -67,7 +67,7 @@ input, select, textarea { color: var(--ink); }
 .nav-item__chevron--open { transform:rotate(180deg); color:var(--blue); }
 .nav-submenu { display:grid; gap:2px; margin:2px 0 8px 31px; padding-left:14px; border-left:2px solid #b8f3e9; }
 .nav-submenu__item { padding:8px 12px; border-radius:8px; color:#687386; font-size:12px; text-decoration:none; }
-.nav-submenu__item:hover, .nav-submenu__item.router-link-active { color:var(--blue); background:#f6f9ff; }
+.nav-submenu__item:hover, .nav-submenu__item--active { color:var(--blue); background:#f6f9ff; }
 .tip-card { display: flex; gap: 12px; border: 1px solid var(--line); border-radius: 13px; padding: 18px 14px; background: #fff; }
 .tip-card__icon { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: var(--blue); background: var(--blue-soft); }
 .tip-card strong { color: var(--blue); font-size: 12px; }
@@ -393,7 +393,15 @@ input, select, textarea { color: var(--ink); }
 .auth-tabs__item { min-height: 38px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-weight: 800; cursor: pointer; }
 .auth-tabs__item--active { color: var(--blue); background: #fff; box-shadow: 0 5px 14px rgba(25,44,84,.1); }
 .auth-error { border: 1px solid #ffd1d1; border-radius: 9px; color: #b42318; background: #fff5f5; margin: 0; padding: 10px 12px; font-size: 11px; font-weight: 700; }
+.auth-hint { margin: -4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.auth-recovery { align-self: flex-start; color: var(--blue); font-size: 11px; font-weight: 700; text-decoration: none; }
 .auth-submit { width: 100%; justify-content: center; margin-top: 2px; }
+.support-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.support-overview .stat-box { min-height: 86px; }
+.support-overview .stat-box strong { display: block; margin: 5px 0 2px; font-size: 23px; color: var(--ink); }
+.support-overview .stat-box span { color: var(--muted); font-size: 10px; }
+.support-protocol { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--blue); font-size: 10px; }
+@media (max-width: 800px) { .support-overview { grid-template-columns: 1fr; } }
 
 @media (max-width: 1400px) {
   .metrics-grid { grid-template-columns: repeat(3, 1fr); }

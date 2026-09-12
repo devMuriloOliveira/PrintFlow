@@ -5,16 +5,21 @@ import { hashPassword, validatePasswordPolicy, verifyPassword } from '../auth/pa
 import { hasDatabase, query, tenantQuery, withTenant } from '../db/pool.js'
 import { blindIndex, blindIndexesForLookup, decryptField, encryptField } from '../security/crypto.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
+import { generateMfaSecret, verifyTotpCode } from '../services/mfa.js'
 
 const memoryUsers = new Map()
 const memoryUsersById = new Map()
 const memoryRefreshTokens = new Map()
+const memoryAuthTokens = new Map()
+const memoryMfa = new Map()
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase()
 const isConfiguredPlatformSuperAdmin = (email) => env.platformSuperAdminEmails.includes(normalizeEmail(email))
 const refreshTokenHash = (token) => createHash('sha256').update(String(token || '')).digest('hex')
 const createRefreshTokenValue = () => `refresh_${randomBytes(32).toString('base64url')}`
 const refreshExpiresAt = () => new Date(Date.now() + env.refreshTokenTtlSeconds * 1000)
+const authTokenHash = (token) => createHash('sha256').update(String(token || '')).digest('hex')
+const authTokenExpiresAt = () => new Date(Date.now() + 15 * 60 * 1000)
 
 const sessionMetadata = (metadata = {}) => ({
   ipMasked: String(metadata.ipMasked || '').slice(0, 80),
@@ -233,7 +238,7 @@ export const registerUser = async ({ name, email, password, company }) => {
 
   if (!hasDatabase) {
     if (memoryUsers.has(normalizedEmail)) throw new Error('Este e-mail ja esta cadastrado.')
-    const user = { id: createOpaqueId('user'), tenant_id: tenantId, name: cleanName, email: normalizedEmail, password_hash: passwordHash, role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '', status: 'active', token_version: 0 }
+    const user = { id: createOpaqueId('user'), tenant_id: tenantId, name: cleanName, email: normalizedEmail, password_hash: passwordHash, role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '', status: 'active', token_version: 0, email_verified_at: env.authRequireEmailVerification ? null : new Date() }
     memoryUsers.set(normalizedEmail, user)
     memoryUsersById.set(String(user.id), user)
     return publicUser(user)
@@ -249,12 +254,18 @@ export const registerUser = async ({ name, email, password, company }) => {
     [tenantId, encryptField(companyName), encryptField(normalizedEmail)]
   )
 
-  const result = await query(
-    `insert into users (tenant_id, name, email, email_hash, password_hash, role, status, token_version)
-     values ($1, $2, $3, $4, $5, $6, 'active', 0)
-     returning id, tenant_id, name, email, role, status, token_version`,
-    [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, passwordHash, isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin']
-  )
+  let result
+  try {
+    result = await query(
+      `insert into users (tenant_id, name, email, email_hash, password_hash, role, status, token_version)
+       values ($1, $2, $3, $4, $5, $6, 'active', 0)
+       returning id, tenant_id, name, email, role, status, token_version`,
+      [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, passwordHash, isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin']
+    )
+  } catch (error) {
+    if (error?.code === '23505') throw new Error('Este e-mail ja esta cadastrado.')
+    throw error
+  }
 
   await tenantQuery(
     tenantId,
@@ -288,11 +299,12 @@ export const loginUser = async ({ email, password }) => {
   if (!hasDatabase) {
     const user = memoryUsers.get(normalizedEmail)
     if (!user || !verifyPassword(password, user.password_hash)) throw new Error('E-mail ou senha invalidos.')
+    if (env.authRequireEmailVerification && !user.email_verified_at) throw new Error('Confirme seu e-mail antes de entrar.')
     return publicUser(user)
   }
 
   const result = await query(
-    `select id, tenant_id, name, email, email_hash, password_hash,
+    `select id, tenant_id, name, email, email_hash, password_hash, email_verified_at,
       case when role = 'platform_super_admin' then role else '' end as platform_role,
       status, token_version
      from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`,
@@ -300,6 +312,7 @@ export const loginUser = async ({ email, password }) => {
   )
   const user = result.rows[0]
   if (!user || !verifyPassword(password, user.password_hash)) throw new Error('E-mail ou senha invalidos.')
+  if (env.authRequireEmailVerification && !user.email_verified_at) throw new Error('Confirme seu e-mail antes de entrar.')
 
   const membershipResult = await tenantQuery(
     user.tenant_id,
@@ -318,6 +331,126 @@ export const loginUser = async ({ email, password }) => {
   }
 
   return publicUser({ ...user, role: membership.role })
+}
+
+export const createAuthEmailToken = async (userId, purpose) => {
+  const token = `auth_${randomBytes(32).toString('base64url')}`
+  const tokenHash = authTokenHash(token)
+  const expiresAt = authTokenExpiresAt()
+  if (!hasDatabase) {
+    for (const [hash, entry] of memoryAuthTokens) if (entry.userId === String(userId) && entry.purpose === purpose && !entry.consumedAt) entry.consumedAt = new Date()
+    memoryAuthTokens.set(tokenHash, { userId: String(userId), purpose, expiresAt, consumedAt: null })
+    return { token, expiresAt }
+  }
+  await query('update auth_email_tokens set consumed_at = now() where user_id = $1 and purpose = $2 and consumed_at is null', [String(userId), purpose])
+  await query('insert into auth_email_tokens (token_hash, user_id, purpose, expires_at) values ($1, $2, $3, $4)', [tokenHash, String(userId), purpose, expiresAt])
+  return { token, expiresAt }
+}
+
+export const consumeAuthEmailToken = async (token, purpose) => {
+  const tokenHash = authTokenHash(token)
+  if (!hasDatabase) {
+    const entry = memoryAuthTokens.get(tokenHash)
+    if (!entry || entry.purpose !== purpose || entry.consumedAt || entry.expiresAt <= new Date()) throw new Error('Token invalido ou expirado.')
+    entry.consumedAt = new Date()
+    return entry.userId
+  }
+  const result = await query(`update auth_email_tokens set consumed_at = now() where token_hash = $1 and purpose = $2 and consumed_at is null and expires_at > now() returning user_id`, [tokenHash, purpose])
+  if (!result.rows[0]) throw new Error('Token invalido ou expirado.')
+  return String(result.rows[0].user_id)
+}
+
+export const markEmailVerified = async (userId) => {
+  if (!hasDatabase) {
+    const user = memoryUsersById.get(String(userId))
+    if (!user) throw new Error('Usuario nao encontrado.')
+    user.email_verified_at = user.email_verified_at || new Date()
+    return
+  }
+  await query('update users set email_verified_at = coalesce(email_verified_at, now()), updated_at = now() where id::text = $1', [String(userId)])
+}
+
+export const resetUserPassword = async (userId, newPassword) => {
+  const passwordError = validatePasswordPolicy(newPassword)
+  if (passwordError) throw new Error(passwordError)
+  if (!hasDatabase) {
+    const stored = memoryUsersById.get(String(userId))
+    if (!stored) throw new Error('Usuario nao encontrado.')
+    stored.password_hash = hashPassword(newPassword)
+    revokeAllMemoryUserSessions(userId)
+    incrementMemoryTokenVersion(userId)
+    return publicUser(stored)
+  }
+  const tokenVersion = await query(`update users set password_hash = $1, token_version = token_version + 1, updated_at = now() where id::text = $2 and status = 'active' returning id, tenant_id, name, email, role, platform_role, status, token_version`, [hashPassword(newPassword), String(userId)])
+  if (!tokenVersion.rows[0]) throw new Error('Usuario nao encontrado.')
+  await query('update refresh_tokens set revoked_at = coalesce(revoked_at, now()) where user_id = $1 and revoked_at is null', [String(userId)])
+  return publicUser(tokenVersion.rows[0])
+}
+
+export const findActiveUserByEmail = async (email) => {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return null
+  if (!hasDatabase) {
+    const stored = memoryUsers.get(normalizedEmail)
+    return stored ? publicUser(stored) : null
+  }
+  const result = await query(`select id, tenant_id, name, email, role, platform_role, status, token_version from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`, [blindIndexesForLookup(normalizedEmail), normalizedEmail])
+  return result.rows[0] ? publicUser(result.rows[0]) : null
+}
+
+export const findActiveUserById = async (userId) => {
+  if (!hasDatabase) {
+    const stored = memoryUsersById.get(String(userId))
+    return stored ? publicUser(stored) : null
+  }
+  const result = await query(`select id, tenant_id, name, email, role, platform_role, status, token_version from users where id::text = $1 and status = 'active' limit 1`, [String(userId)])
+  return result.rows[0] ? publicUser(result.rows[0]) : null
+}
+
+export const createMfaSetup = (email) => {
+  const secret = generateMfaSecret()
+  return { secret, email: String(email || '') }
+}
+
+export const enableUserMfa = async (userId, secret, code) => {
+  if (!verifyTotpCode(secret, code)) throw new Error('Codigo MFA invalido.')
+  if (!hasDatabase) { memoryMfa.set(String(userId), { secret }); return }
+  await query(`insert into user_mfa (user_id, secret, enabled) values ($1, $2, true) on conflict (user_id) do update set secret = excluded.secret, enabled = true, updated_at = now()`, [String(userId), encryptField(secret)])
+}
+
+export const disableUserMfa = async (userId) => {
+  if (!hasDatabase) { memoryMfa.delete(String(userId)); return }
+  await query('delete from user_mfa where user_id = $1', [String(userId)])
+}
+
+export const verifyUserCurrentPassword = async (userId, password) => {
+  const candidate = String(password || '')
+  if (!candidate) return false
+  if (!hasDatabase) {
+    const stored = memoryUsersById.get(String(userId))
+    return Boolean(stored && verifyPassword(candidate, stored.password_hash))
+  }
+  const result = await query('select password_hash from users where id::text = $1 and status = \'active\' limit 1', [String(userId)])
+  return Boolean(result.rows[0] && verifyPassword(candidate, result.rows[0].password_hash))
+}
+
+export const isUserMfaEnabled = async (userId) => {
+  if (!hasDatabase) return memoryMfa.has(String(userId))
+  const result = await query('select 1 from user_mfa where user_id = $1 and enabled = true limit 1', [String(userId)])
+  return Boolean(result.rowCount)
+}
+
+export const createMfaChallenge = async (userId) => createAuthEmailToken(userId, 'mfa_login')
+
+export const consumeMfaChallenge = async (token) => consumeAuthEmailToken(token, 'mfa_login')
+
+export const verifyUserMfa = async (userId, code) => {
+  let secret = memoryMfa.get(String(userId))?.secret || ''
+  if (hasDatabase) {
+    const result = await query('select secret from user_mfa where user_id = $1 and enabled = true limit 1', [String(userId)])
+    secret = result.rows[0] ? decryptField(result.rows[0].secret) : ''
+  }
+  return Boolean(secret && verifyTotpCode(secret, code))
 }
 
 export const changeUserPassword = async (user, { currentPassword, newPassword }) => {

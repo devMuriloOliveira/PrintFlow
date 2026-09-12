@@ -369,7 +369,17 @@ export const migrate =
     `)
     const platformAdminUserIdType = userIdTypeResult.rows[0]?.type === 'uuid' ? 'uuid' : 'bigint'
 
-    await query(`
+  await query(`
+    create table if not exists api_rate_limits (
+      rate_key text primary key,
+      request_count integer not null default 0,
+      reset_at timestamptz not null,
+      updated_at timestamptz not null default now()
+    )
+  `)
+  await query('create index if not exists api_rate_limits_reset_at_idx on api_rate_limits (reset_at)')
+
+  await query(`
       create table if not exists tenant_memberships (
         id bigserial primary key,
         tenant_id text not null references tenants(id) on delete cascade,
@@ -719,6 +729,31 @@ export const migrate =
         )
       `
     )
+
+    await query(`alter table users add column if not exists email_verified_at timestamptz`)
+    await query(`update users set email_verified_at = coalesce(email_verified_at, created_at) where email_verified_at is null`)
+
+    await query(`
+      create table if not exists auth_email_tokens (
+        token_hash text primary key,
+        user_id text not null,
+        purpose text not null,
+        expires_at timestamptz not null,
+        consumed_at timestamptz,
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists auth_email_tokens_active_idx on auth_email_tokens (user_id, purpose, expires_at) where consumed_at is null`)
+
+    await query(`
+      create table if not exists user_mfa (
+        user_id text primary key,
+        secret text not null,
+        enabled boolean not null default false,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
 
     for (const columnDefinition of [
       "ip_masked text not null default ''",

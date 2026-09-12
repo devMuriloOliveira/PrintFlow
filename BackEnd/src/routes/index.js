@@ -16,6 +16,14 @@ import {
   handleMe,
   handleRefresh,
   handleRegister,
+  handleEmailVerification,
+  handlePasswordResetRequest,
+  handlePasswordResetConfirm,
+  handleMfaSetup,
+  handleMfaStatus,
+  handleMfaEnable,
+  handleMfaDisable,
+  handleMfaLogin,
   getAuthUser
 } from './auth.js'
 
@@ -229,7 +237,7 @@ export const handleRequest =
       // ==================================================
 
       const limit =
-        enterRequest(
+        await enterRequest(
           req,
           url.pathname
         )
@@ -330,6 +338,15 @@ export const handleRequest =
           res
         )
       }
+
+      if (req.method === 'POST' && url.pathname === '/api/auth/verify-email') return await handleEmailVerification(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/request') return await handlePasswordResetRequest(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/confirm') return await handlePasswordResetConfirm(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/login') return await handleMfaLogin(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/setup') return await handleMfaSetup(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/auth/mfa/status') return await handleMfaStatus(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/enable') return await handleMfaEnable(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/disable') return await handleMfaDisable(req, res)
 
       if (
         req.method ===

@@ -7,11 +7,14 @@ const config = useRuntimeConfig()
 const mode = ref<'login' | 'register'>('login')
 const loading = ref(false)
 const error = ref('')
+const mfaChallenge = ref('')
+const mfaCode = ref('')
 const form = reactive({
   name: '',
   company: '',
   email: '',
-  password: ''
+  password: '',
+  passwordConfirmation: ''
 })
 
 const title = computed(() => mode.value === 'login' ? 'Entrar no PrintFlow' : 'Criar conta')
@@ -20,19 +23,33 @@ const apiBase = computed(() => String(config.public.apiBase || '').replace(/\/$/
 
 const submit = async () => {
   error.value = ''
+  if (mode.value === 'register' && form.password !== form.passwordConfirmation) {
+    error.value = 'As senhas nao conferem.'
+    return
+  }
   loading.value = true
 
   try {
     if (mode.value === 'login') {
-      await auth.login(form.email, form.password)
+      if (mfaChallenge.value) {
+        await auth.completeMfaLogin(mfaChallenge.value, mfaCode.value)
+        mfaChallenge.value = ''
+      } else {
+        const result = await auth.login(form.email, form.password)
+        if (result?.mfaRequired) { mfaChallenge.value = result.challengeToken || ''; return }
+      }
       notify(auth.tenantDeletionCancelled.value ? 'A exclusao da empresa foi cancelada pelo seu login.' : 'Login realizado com sucesso.')
     } else {
-      await auth.register({
+      const result = await auth.register({
         name: form.name,
         company: form.company,
         email: form.email,
         password: form.password
       })
+      if (result.verificationRequired) {
+        notify('Verifique seu e-mail para ativar a conta.')
+        return
+      }
       notify('Conta criada com sucesso.')
     }
     await navigateTo('/')
@@ -86,11 +103,23 @@ const submit = async () => {
           <input v-model="form.password" type="password" autocomplete="current-password" required minlength="10" placeholder="Mínimo 10 caracteres">
         </label>
 
+        <label v-if="mode === 'register'" class="field">
+          <span>Confirmar senha</span>
+          <input v-model="form.passwordConfirmation" type="password" autocomplete="new-password" required minlength="10" placeholder="Digite a senha novamente">
+        </label>
+
+        <label v-if="mode === 'login' && mfaChallenge" class="field">
+          <span>Codigo do aplicativo autenticador</span>
+          <input v-model="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="000000">
+        </label>
+
+        <p v-if="mode === 'register'" class="auth-hint">Use 10 caracteres, letras maiusculas e minusculas, numero e caractere especial.</p>
+        <NuxtLink v-if="mode === 'login' && !mfaChallenge" class="auth-recovery" to="/redefinir-senha">Esqueci minha senha</NuxtLink>
         <p v-if="error" class="auth-error">{{ error }}</p>
 
         <button class="btn btn--primary auth-submit" type="submit" :disabled="loading">
           <UiIcon name="shield" :size="18" />
-          <span>{{ loading ? 'Aguarde...' : actionLabel }}</span>
+          <span>{{ loading ? 'Aguarde...' : (mfaChallenge ? 'Confirmar codigo' : actionLabel) }}</span>
         </button>
       </form>
     </section>

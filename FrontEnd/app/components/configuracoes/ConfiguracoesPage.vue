@@ -1,11 +1,12 @@
 <script setup lang="ts">
+const props = withDefaults(defineProps<{ initialActive?: string; standalone?: boolean }>(), { initialActive: 'Empresa', standalone: false })
 const { notify } = useUi()
 const auth = useAuth()
 const { settings, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, changeStripeSubscriptionPlan, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
-const active = ref('Empresa')
+const active = ref(props.initialActive)
 const savingMemberId = ref('')
 const inviting = ref(false)
 const invitationActionId = ref('')
@@ -13,6 +14,11 @@ const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string }
 const sessionsLoading = ref(false)
 const changingPassword = ref(false)
 const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '' })
+const mfaLoading = ref(false)
+const mfaSetup = ref<{ secret: string; otpauthUri: string } | null>(null)
+const mfaCode = ref('')
+const mfaDisablePassword = ref('')
+const mfaEnabled = ref(false)
 const deletingTenant = ref(false)
 const savingSettings = ref(false)
 const exportingData = ref(false)
@@ -21,6 +27,7 @@ const backupLoading = ref(false)
 const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
 const submittingSupport = ref(false)
 const supportDraft = reactive({ subject: '', category: 'technical', privacyRight: '', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
+const supportFilter = ref<'open' | 'closed' | 'all'>('open')
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const billingLoading = ref(false)
@@ -35,14 +42,7 @@ const tabs = [
   ['Empresa', 'building', 'Informacoes da empresa'],
   ['Financeiro', 'money', 'Impostos, moedas e contas'],
   ['Assinatura', 'money', 'Plano e pagamento da plataforma'],
-  ['Usuarios e Permissoes', 'users', 'Gestao de usuarios e acessos'],
-  ['Notificacoes', 'bell', 'E-mails e alertas do sistema'],
-  ['Seguranca', 'shield', 'Acesso, 2FA e sessoes'],
-  ['Personalizacao', 'settings', 'Marca, aparencia e preferencias'],
-  ['Integracoes', 'box', 'Marketplaces e servicos'],
-  ['Backup e Dados', 'download', 'Exportar e restaurar dados'],
-  ['Privacidade e LGPD', 'shield', 'Dados pessoais e direitos dos titulares'],
-  ['Ajuda e Suporte', 'info', 'Solicitacoes e atendimentos']
+  ['Notificacoes', 'bell', 'E-mails e alertas do sistema']
 ]
 const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0 })
 const preferences = reactive({ emailAlerts: true, productionAlerts: true, marketplaceAlerts: true, dailySummary: false, compactLayout: false, logoUrl: '', brandName: '', accentColor: '#1768f2', defaultMargin: 40, monthlyFixedCost: 0, plannedMonthlyUnits: 0 })
@@ -57,6 +57,7 @@ const roles = [
 
 const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
 const isOwner = computed(() => auth.user.value?.role === 'owner')
+const isPrivileged = computed(() => ['owner', 'platform_super_admin'].includes(String(auth.user.value?.role || auth.user.value?.platformRole || '')))
 const selectedBillingPlan = computed(() => stripeBilling.value?.plans[0] || null)
 const billingPlanValue = computed(() => selectedBillingPlan.value?.[billingForm.billingCycle] || 0)
 const billingActionLoading = computed(() => creatingBillingLink.value || subscriptionActionLoading.value)
@@ -64,6 +65,9 @@ const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', {
 const subscriptionStatus = (status: string) => ({ trial: 'Em teste', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carencia', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
 const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', privacy: 'Privacidade e LGPD', audit: 'Auditoria excepcional' }[category] || category)
 const supportStatusLabel = (status: string) => ({ pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada' }[status] || status)
+const supportStatusClass = (status: string) => ['closed', 'cancelled', 'expired'].includes(status) ? 'badge badge--gray' : status === 'pending' ? 'badge badge--orange' : 'badge'
+const filteredSupportRequests = computed(() => supportRequests.value.filter((request) => supportFilter.value === 'all' || (supportFilter.value === 'open' ? !['closed', 'cancelled', 'expired'].includes(request.status) : ['closed', 'cancelled', 'expired'].includes(request.status))))
+const supportStats = computed(() => ({ open: supportRequests.value.filter((request) => !['closed', 'cancelled', 'expired'].includes(request.status)).length, waiting: supportRequests.value.filter((request) => request.status === 'pending').length, closed: supportRequests.value.filter((request) => ['closed', 'cancelled', 'expired'].includes(request.status)).length }))
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
 const memberBadge = (status: string) => status === 'active' ? 'badge badge--green' : 'badge badge--orange'
 const memberStatusLabel = (status: string) => status === 'active' ? 'Ativo' : 'Suspenso'
@@ -297,6 +301,20 @@ const startStripeCheckout = async (cycle: 'monthly' | 'yearly' = billingForm.bil
     notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
   } finally { creatingBillingLink.value = false }
 }
+const startMfaSetup = async () => {
+  mfaLoading.value = true
+  try { mfaSetup.value = await auth.setupMfa(); mfaCode.value = ''; notify('Escaneie o QR Code ou use a chave no seu aplicativo autenticador.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel iniciar o MFA.') } finally { mfaLoading.value = false }
+}
+const confirmMfaSetup = async () => {
+  if (!mfaSetup.value || !mfaCode.value.trim()) return notify('Informe o codigo do aplicativo autenticador.')
+  mfaLoading.value = true
+  try { await auth.enableMfa(mfaSetup.value.secret, mfaCode.value); mfaEnabled.value = true; mfaSetup.value = null; mfaCode.value = ''; notify('MFA ativado para este perfil.') } catch (error: any) { notify(error?.data?.error || 'Codigo MFA invalido.') } finally { mfaLoading.value = false }
+}
+const turnOffMfa = async () => {
+  if (!mfaDisablePassword.value) return notify('Informe sua senha atual para desativar o MFA.')
+  mfaLoading.value = true
+  try { await auth.disableMfa(mfaDisablePassword.value); mfaEnabled.value = false; mfaDisablePassword.value = ''; notify('MFA desativado.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel desativar o MFA.') } finally { mfaLoading.value = false }
+}
 const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
   if (!stripeBilling.value?.subscription || subscriptionActionLoading.value) return
   const message = cancelAtPeriodEnd
@@ -339,7 +357,10 @@ const loadSectionOnce = (key: string, loader: () => Promise<unknown>, force = fa
 
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes') void loadSectionOnce('members', loadMembers)
-  if (tab === 'Seguranca') void loadSectionOnce('sessions', loadSessions)
+  if (tab === 'Seguranca') {
+    void loadSectionOnce('sessions', loadSessions)
+    if (isPrivileged.value) void loadSectionOnce('mfa-status', async () => { mfaEnabled.value = (await auth.mfaStatus()).enabled })
+  }
   if (tab === 'Backup e Dados') void loadSectionOnce('backup', loadBackup)
   if (tab === 'Integracoes') void loadSectionOnce('integrations', loadIntegrations)
   if (tab === 'Assinatura') void loadSectionOnce('billing', loadStripeBilling)
@@ -360,9 +381,10 @@ watch(() => supportDraft.category, (category) => {
     <PageHeader title="Configuracoes" subtitle="Gerencie as configuracoes da sua empresa e da plataforma" />
 
     <div class="settings-layout">
-      <ConfiguracoesConfigSettingsNav :tabs="tabs" :active="active" @select="active = $event" />
+      <ConfiguracoesConfigSettingsNav v-if="!standalone" :tabs="tabs" :active="active" @select="active = $event" />
 
       <section class="settings-panel">
+        <NuxtLink v-if="standalone" class="auth-recovery" to="/configuracoes">← Voltar para configurações</NuxtLink>
         <div v-if="active === 'Empresa'">
           <div style="display:flex;justify-content:space-between;gap:12px">
             <div><h2>Informacoes da Empresa</h2><p>Atualize os dados principais da sua empresa.</p></div>
@@ -451,6 +473,17 @@ watch(() => supportDraft.category, (category) => {
             </div>
             <button class="btn btn--primary" type="submit" :disabled="changingPassword">{{ changingPassword ? 'Alterando...' : 'Alterar senha' }}</button>
           </form>
+          <div v-if="isPrivileged" class="settings-security-card" style="margin-top:16px">
+            <div><h2>Autenticacao em dois fatores (MFA)</h2><p>Adicione um codigo do seu aplicativo autenticador para proteger perfis privilegiados.</p></div>
+            <div v-if="mfaEnabled" class="info-note" style="margin-top:16px"><UiIcon name="check" />MFA ativo neste perfil. Para desativar, confirme sua senha atual.</div>
+            <div v-else-if="mfaSetup" style="margin-top:16px">
+              <div class="info-note"><UiIcon name="shield" /><div>Cadastre esta chave no seu aplicativo autenticador: <code>{{ mfaSetup.secret }}</code><br><small>{{ mfaSetup.otpauthUri }}</small></div></div>
+              <div class="form-grid" style="margin-top:12px"><label class="field col-4"><span>Codigo de confirmacao</span><input v-model="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required></label></div>
+              <button class="btn btn--primary" :disabled="mfaLoading" @click="confirmMfaSetup">{{ mfaLoading ? 'Confirmando...' : 'Ativar MFA' }}</button>
+            </div>
+            <div v-else style="margin-top:16px"><button class="btn btn--primary" :disabled="mfaLoading" @click="startMfaSetup">{{ mfaLoading ? 'Gerando...' : 'Configurar MFA' }}</button></div>
+            <div v-if="mfaEnabled" class="form-grid" style="margin-top:12px"><label class="field col-4"><span>Senha atual</span><input v-model="mfaDisablePassword" type="password" autocomplete="current-password"></label><div><button class="btn btn--danger" :disabled="mfaLoading" @click="turnOffMfa">Desativar MFA</button></div></div>
+          </div>
           <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Sessoes ativas</h2><p>Encerre acessos que voce nao reconhece.</p></div><button class="btn" :disabled="sessionsLoading" @click="loadSessions">Atualizar</button></div>
           <div v-if="sessionsLoading" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Carregando sessoes</h3></div></div>
@@ -511,20 +544,6 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Suas preferencias sao salvas para esta empresa.</p></div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas por e-mail</span><input v-model="preferences.emailAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label><label class="field col-6"><span>Resumo diario</span><input v-model="preferences.dailySummary" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
-        <div v-else-if="active === 'Personalizacao'" class="settings-security-card">
-          <div><h2>Identidade visual</h2><p>Personalize a marca exibida para todos os membros desta empresa.</p></div>
-          <div class="branding-preview" :style="{ '--brand-preview': preferences.accentColor }">
-            <AppLogo :logo-url="preferences.logoUrl" :brand-name="previewBrandName" />
-            <span>Pre-visualizacao da barra lateral</span>
-          </div>
-          <div class="form-grid" style="margin-top:16px">
-            <label class="field col-6"><span>Nome exibido</span><input v-model="preferences.brandName" maxlength="60" placeholder="Usa o nome da empresa se ficar vazio"></label>
-            <label class="field col-6"><span>Cor de destaque</span><div class="color-field"><input v-model="preferences.accentColor" type="color" aria-label="Cor de destaque"><input v-model="preferences.accentColor" maxlength="7" pattern="^#[0-9A-Fa-f]{6}$" placeholder="#1768f2"></div></label>
-            <label class="field col-12"><span>URL publica do logotipo</span><input v-model="preferences.logoUrl" type="url" placeholder="https://..."><small>Somente URLs HTTPS sao aceitas.</small></label>
-          </div>
-          <label class="switch-row" style="margin-top:16px"><span><strong>Layout compacto</strong><small>Reduz os espacamentos das paginas para exibir mais informacoes.</small></span><button type="button" class="switch" :class="{ active: preferences.compactLayout }" :aria-pressed="preferences.compactLayout" @click="preferences.compactLayout = !preferences.compactLayout"></button></label>
-          <button class="btn btn--primary" style="margin-top:18px" :disabled="savingSettings" @click="saveSettings">{{ savingSettings ? 'Salvando...' : 'Salvar identidade visual' }}</button>
-        </div>
         <div v-else-if="active === 'Integracoes'">
           <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Integracoes</h2><p>Visao operacional das conexoes, sem expor tokens, chaves ou senhas.</p></div><button class="btn" :disabled="integrationsLoading" @click="loadIntegrations">Atualizar</button></div>
           <div v-if="integrationsLoading" class="empty-state"><div><h3>Consultando integracoes</h3></div></div>
@@ -537,7 +556,9 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Ajuda e Suporte'" class="settings-security-card">
-          <div><h2>Ajuda e Suporte</h2><p>Abra uma solicitacao e converse com o atendimento usando um protocolo auditado.</p></div>
+          <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start"><div><h2>Ajuda e Suporte</h2><p>Abra uma solicitação, acompanhe o prazo e converse com a equipe pelo protocolo.</p></div><span class="badge badge--green">Canal autenticado</span></div>
+          <div class="support-overview" style="margin-top:18px"><div class="stat-box"><small>Em andamento</small><strong>{{ supportStats.open }}</strong><span>Solicitações abertas</span></div><div class="stat-box"><small>Aguardando triagem</small><strong>{{ supportStats.waiting }}</strong><span>A equipe analisará em breve</span></div><div class="stat-box"><small>Encerradas</small><strong>{{ supportStats.closed }}</strong><span>Histórico preservado</span></div></div>
+          <div class="info-note" style="margin-top:16px"><UiIcon name="info" /><div><strong>Como funciona</strong><br>Descreva o problema com o impacto e o resultado esperado. A equipe responderá no chat deste protocolo; solicitações de privacidade e LGPD permanecem rastreáveis separadamente.</div></div>
           <form class="integration-section" @submit.prevent="submitSupportRequest">
             <div class="form-grid">
               <label class="field col-8"><span>Assunto</span><input v-model="supportDraft.subject" minlength="4" maxlength="120" required placeholder="Resuma o que voce precisa"></label>
@@ -555,9 +576,9 @@ watch(() => supportDraft.category, (category) => {
             <button class="btn btn--primary" type="submit" :disabled="submittingSupport">{{ submittingSupport ? 'Criando...' : 'Criar solicitacao' }}</button>
           </form>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:22px"><div><h2>Minhas solicitacoes</h2><p>Somente voce e a equipe de suporte acessam estas conversas.</p></div><button class="btn" @click="loadSupport">Atualizar</button></div>
-          <div v-if="!supportRequests.length" class="empty-state"><div><h3>Nenhuma solicitacao encontrada</h3><p>Use o formulario acima para iniciar um atendimento.</p></div></div>
-          <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Tipo</th><th>Status</th><th>Prazo</th><th>Responsavel</th><th>Criada em</th><th>Acao</th></tr></thead><tbody><tr v-for="request in supportRequests" :key="request.id"><td>{{ request.id }}</td><td>{{ request.subject }}<small v-if="request.requestKind === 'privacy'">{{ request.privacyRight || 'Direito do titular' }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : supportCategoryLabel(request.category) }}</td><td><span class="badge">{{ supportStatusLabel(request.status) }}</span></td><td>{{ request.dueAt ? new Date(request.dueAt).toLocaleDateString('pt-BR') : '-' }}</td><td>{{ request.responsibleName || 'Ainda nao atribuido' }}</td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-top:24px"><div><h2>Minhas solicitações</h2><p>Somente você e a equipe de suporte acessam estas conversas.</p></div><div style="display:flex;gap:8px;align-items:center"><select v-model="supportFilter" class="select-compact" aria-label="Filtrar solicitações"><option value="open">Em andamento</option><option value="closed">Encerradas</option><option value="all">Todas</option></select><button class="btn" @click="loadSupport">Atualizar</button></div></div>
+          <div v-if="!filteredSupportRequests.length" class="empty-state"><div><h3>{{ supportFilter === 'closed' ? 'Nenhuma solicitação encerrada' : 'Nenhuma solicitação em andamento' }}</h3><p>{{ supportFilter === 'closed' ? 'O histórico aparecerá aqui quando um atendimento for encerrado.' : 'Use o formulário acima para iniciar um atendimento.' }}</p></div></div>
+          <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Tipo</th><th>Status</th><th>Prazo</th><th>Responsável</th><th>Criada em</th><th>Ação</th></tr></thead><tbody><tr v-for="request in filteredSupportRequests" :key="request.id"><td><strong class="support-protocol">{{ request.id }}</strong></td><td>{{ request.subject }}<small v-if="request.requestKind === 'privacy'">{{ request.privacyRight || 'Direito do titular' }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : supportCategoryLabel(request.category) }}</td><td><span :class="supportStatusClass(request.status)">{{ supportStatusLabel(request.status) }}</span></td><td>{{ request.dueAt ? new Date(request.dueAt).toLocaleDateString('pt-BR') : '-' }}</td><td>{{ request.responsibleName || 'Ainda não atribuído' }}</td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
         </div>
       </section>
 

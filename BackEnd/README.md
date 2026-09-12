@@ -47,6 +47,7 @@ Variaveis principais:
 - `RATE_LIMIT_WINDOW_MS`: janela do rate limit.
 - `RATE_LIMIT_MAX_REQUESTS`: limite geral por janela.
 - `RATE_LIMIT_AUTH_MAX_REQUESTS`: limite para rotas de autenticacao.
+- `RATE_LIMIT_SHARED`: use `true` em ambientes com mais de uma instancia; usa a tabela `api_rate_limits` no PostgreSQL para compartilhar a janela entre processos.
 - `MAX_CONCURRENT_REQUESTS_PER_IP`: limite de concorrencia por IP.
 - `PRINT_QUEUE_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de comandos de impressao pendentes.
 - `AGENT_OFFLINE_AFTER_MS`: tempo sem heartbeat para considerar o Agent indisponivel.
@@ -62,6 +63,11 @@ Variaveis principais:
 - `MERCADO_LIVRE_CLIENT_SECRET`: Secret Key privada da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_REDIRECT_URI`: callback fixa registrada no Mercado Livre.
 - `APP_PUBLIC_URL`: URL publica do FrontEnd usada ao finalizar OAuth e retornar do checkout.
+- `CORS_ALLOWED_ORIGINS`: origens HTTPS autorizadas (FrontEnd e AdminFrontEnd), separadas por virgula; nao use `*` com cookies.
+- `RESEND_API_KEY`: chave privada do Resend para verificacao de e-mail e recuperacao de senha.
+- `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `PrintFlow <acesso@seudominio.com>`.
+- `AUTH_REQUIRE_EMAIL_VERIFICATION`: use `true` para exigir confirmacao de e-mail em novos cadastros.
+- `AUTH_REQUIRE_MFA_FOR_PRIVILEGED`: use `true` para exigir MFA em Owner e Superadmin; cada perfil configura o aplicativo autenticador em Configuracoes > Seguranca.
 
 Para Mercado Livre, cadastre a mesma callback informada em
 `MERCADO_LIVRE_REDIRECT_URI` no painel de desenvolvedores. Em producao ela deve
@@ -70,6 +76,20 @@ PKCE e tentativas OAuth de uso unico; nunca copie tokens, authorization codes ou
 secrets para o repositorio, logs ou canais de conversa.
 
 Nao publique valores reais dessas variaveis.
+
+### Ativacao da autenticacao reforcada
+
+No Render, cadastre primeiro o dominio do remetente no Resend (SPF/DKIM), crie
+uma API key somente com permissao de envio e informe `APP_PUBLIC_URL` com a URL
+real do FrontEnd. Depois defina `RESEND_API_KEY`, `EMAIL_FROM` e
+`AUTH_REQUIRE_EMAIL_VERIFICATION=true`. O cadastro passa a retornar uma tela de
+aguardo e o link de verificacao expira em 15 minutos.
+
+Para habilitar o segundo fator, defina `AUTH_REQUIRE_MFA_FOR_PRIVILEGED=true`.
+Cada Owner/Superadmin deve abrir Configuracoes > Seguranca, cadastrar a chave no
+Google Authenticator, 1Password ou aplicativo equivalente e confirmar o codigo.
+Sem essa etapa o login privilegiado ficara impedido, portanto habilite a flag
+somente depois de preparar os administradores.
 
 ## Publicacao
 

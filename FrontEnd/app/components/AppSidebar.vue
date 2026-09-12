@@ -3,9 +3,15 @@ defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const { settings } = useAppData()
 const route = useRoute()
-const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces' })
+const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Configurações: route.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
 const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
+const childIsActive = (to: string) => {
+  const [path, queryString] = to.split('?')
+  if (route.path !== path) return false
+  const section = new URLSearchParams(queryString || '').get('secao')
+  return section ? String(route.query.secao || '') === section : true
+}
 
 const sections = [
   {
@@ -47,12 +53,12 @@ const sections = [
   {
     label: 'SISTEMA',
     items: [
-      { label: 'Configurações', to: '/configuracoes', icon: 'settings' }
+      { label: 'Configurações', to: '/configuracoes', icon: 'settings', children: [{ label: 'Usuários e permissões', to: '/configuracoes/usuarios' }, { label: 'Segurança', to: '/configuracoes/seguranca' }, { label: 'Integrações', to: '/configuracoes/integracoes' }, { label: 'Backup e dados', to: '/configuracoes/backup' }, { label: 'Privacidade e LGPD', to: '/configuracoes/privacidade' }, { label: 'Ajuda e suporte', to: '/configuracoes/suporte' }] }
     ]
   }
 ]
 
-watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true })
+watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true; if (path.startsWith('/configuracoes/')) expandedItems.Configurações = true })
 </script>
 
 <template>
@@ -71,13 +77,12 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
       <div v-for="section in sections" :key="section.label" class="nav-section">
         <span class="nav-section__title">{{ section.label }}</span>
 
-        <NuxtLink
-          v-for="item in section.items"
-          :key="item.to"
-          :to="item.to"
-          v-slot="{ href, navigate, isActive, isExactActive }"
-          custom
-        >
+        <div v-for="item in section.items" :key="item.to" class="nav-item-group">
+          <NuxtLink
+            :to="item.to"
+            v-slot="{ href, navigate, isActive, isExactActive }"
+            custom
+          >
           <a
             :href="href"
             class="nav-item"
@@ -96,10 +101,11 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
             <span>{{ item.label }}</span>
             <span v-if="item.children" class="nav-item__chevron" :class="{ 'nav-item__chevron--open': expandedItems[item.label] }" aria-hidden="true">⌄</span>
           </a>
+          </NuxtLink>
           <div v-if="item.children && expandedItems[item.label]" class="nav-submenu">
-            <NuxtLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-submenu__item" @click="emit('close')">{{ child.label }}</NuxtLink>
+            <NuxtLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-submenu__item" :class="{ 'nav-submenu__item--active': childIsActive(child.to) }" @click="emit('close')">{{ child.label }}</NuxtLink>
           </div>
-        </NuxtLink>
+        </div>
       </div>
     </nav>
 

@@ -1,4 +1,5 @@
 import { env } from '../config/env.js'
+import { hasDatabase, query } from '../db/pool.js'
 
 const windows = new Map()
 const activeRequests = new Map()
@@ -12,6 +13,10 @@ const getClientIp = (req) => {
 const isAuthPath = (path) => [
   '/api/auth/login',
   '/api/auth/register',
+  '/api/auth/verify-email',
+  '/api/auth/password-reset/request',
+  '/api/auth/password-reset/confirm',
+  '/api/auth/mfa/login',
   '/api/auth/change-password',
   '/api/auth/invitations/accept'
 ].includes(path)
@@ -33,7 +38,7 @@ const pruneExpiredWindows = (now) => {
   }
 }
 
-export const enterRequest = (req, path) => {
+export const enterRequest = async (req, path) => {
   const ip = getClientIp(req)
   const now = Date.now()
   const active = activeRequests.get(ip) || 0
@@ -51,6 +56,24 @@ export const enterRequest = (req, path) => {
 
   const config = rateConfigFor(path)
   const key = `${ip}:${isAuthPath(path) ? 'auth' : isRefreshPath(path) ? 'refresh' : 'api'}`
+
+  if (env.rateLimitShared && hasDatabase) {
+    const result = await query(`
+      insert into api_rate_limits (rate_key, request_count, reset_at)
+      values ($1, 1, now() + ($2::text || ' milliseconds')::interval)
+      on conflict (rate_key) do update set
+        request_count = case when api_rate_limits.reset_at <= now() then 1 else api_rate_limits.request_count + 1 end,
+        reset_at = case when api_rate_limits.reset_at <= now() then now() + ($2::text || ' milliseconds')::interval else api_rate_limits.reset_at end,
+        updated_at = now()
+      returning request_count, reset_at
+    `, [key, config.windowMs])
+    const sharedEntry = result.rows[0]
+    if (sharedEntry.request_count > config.maxRequests) {
+      const retryAfter = Math.max(1, Math.ceil((new Date(sharedEntry.reset_at).getTime() - now) / 1000))
+      return { allowed: false, status: 429, body: { error: 'Limite de requisicoes atingido. Tente novamente em instantes.' }, headers: { 'Retry-After': String(retryAfter) } }
+    }
+  }
+
   const entry = windows.get(key) || { count: 0, resetAt: now + config.windowMs }
 
   if (entry.resetAt <= now) {
