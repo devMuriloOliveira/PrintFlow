@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const { products, orders, expenses, listFinancialHistory, exportFinancialReport } = useAppData()
 const { notify } = useUi()
+const route = useRoute()
 
 const today = new Date()
 const periodStart = ref(`${today.getFullYear()}-01-01`)
@@ -15,6 +16,10 @@ const historyLoading = ref(false)
 const historyError = ref('')
 const exportFormat = ref<'csv' | 'xlsx'>('xlsx')
 const exporting = ref(false)
+const reportSection = computed(() => {
+  const section = String(route.query.secao || 'financeiro')
+  return ['financeiro', 'produtos', 'historico'].includes(section) ? section : 'financeiro'
+})
 
 const parseDate = (value: unknown) => {
   const text = String(value || '')
@@ -102,7 +107,7 @@ const loadHistory = async () => {
   historyLoading.value = true; historyError.value = ''
   try { history.value = await listFinancialHistory() } catch (error: any) { historyError.value = error?.data?.error || 'Historico financeiro indisponivel para este perfil.' } finally { historyLoading.value = false }
 }
-onMounted(loadHistory)
+watch(reportSection, section => { if (section === 'historico' && !history.value.length) void loadHistory() }, { immediate: true })
 const exportReport = async () => {
   if (periodStart.value > periodEnd.value || exporting.value) return notify('Informe um período válido para exportar.')
   exporting.value = true
@@ -117,6 +122,8 @@ const exportReport = async () => {
 <template>
   <div>
     <PageHeader title="Relatórios completos" subtitle="Centralize análises e exporte vendas, despesas, produtos, estoque, produção, clientes e conexões em um único arquivo."><div style="display:flex;gap:8px"><select v-model="exportFormat" class="report-export-format" aria-label="Formato da exportação"><option value="xlsx">XLSX</option><option value="csv">CSV</option></select><button class="btn" @click="exportReport"><UiIcon name="download"/>Exportar todos os relatórios</button></div></PageHeader>
+    <nav class="report-tabs" aria-label="Seções de relatórios"><NuxtLink to="/relatorios?secao=financeiro" :class="{ active: reportSection === 'financeiro' }">Financeiro</NuxtLink><NuxtLink to="/relatorios?secao=produtos" :class="{ active: reportSection === 'produtos' }">Produtos e vendas</NuxtLink><NuxtLink to="/relatorios?secao=historico" :class="{ active: reportSection === 'historico' }">Histórico financeiro</NuxtLink></nav>
+    <template v-if="reportSection === 'financeiro'">
     <div class="filters">
       <div class="field"><label>Início</label><input v-model="periodStart" type="date"></div>
       <div class="field"><label>Fim</label><input v-model="periodEnd" type="date"></div>
@@ -145,8 +152,11 @@ const exportReport = async () => {
       <PanelCard title="Faturamento por marketplace"><div class="bar-list" style="padding:20px"><div v-if="!marketplaceBars.length" class="empty-state"><div><h3>Nenhuma venda no período</h3></div></div><div v-for="item in marketplaceBars" :key="item.name" class="bar-row"><span>{{item.name}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${item.percent}%`,background:'#1768f2'}"/></div><strong>{{formatCurrency(item.value)}}</strong></div></div></PanelCard>
       <PanelCard title="Indicadores"><div class="report-breakdown"><div><span>Pedidos</span><strong>{{formatNumber(filteredOrders.length)}}</strong></div><div><span>Itens vendidos</span><strong>{{formatNumber(filteredOrders.reduce((sum, item) => sum + Number(item.qty || 0), 0))}}</strong></div><div><span>Produtos ativos</span><strong>{{formatNumber(products.length)}}</strong></div><div><span>Período</span><strong>{{periodStart}} a {{periodEnd}}</strong></div></div></PanelCard>
     </div>
-    <div class="dashboard-grid"><PanelCard title="Produtos mais relevantes"><div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Qtd.</th><th>Faturamento</th><th>Lucro</th><th>Margem cadastrada</th></tr></thead><tbody><tr v-if="!productRows.length"><td colspan="5">Nenhum produto cadastrado.</td></tr><tr v-for="item in productRows.slice(0, 10)" :key="item.sku"><td><div class="table-product"><ProductThumb :type="item.thumb" :size="25"/>{{item.name}}</div></td><td>{{item.qty}}</td><td>{{formatCurrency(item.revenue)}}</td><td :class="item.profit >= 0 ? 'money-positive' : 'money-negative'">{{formatCurrency(item.profit)}}</td><td>{{Number(item.margin || 0).toFixed(1)}}%</td></tr></tbody></table></div></PanelCard></div>
+    </template>
+    <template v-else-if="reportSection === 'produtos'"><div class="dashboard-grid"><PanelCard title="Produtos mais relevantes"><div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Qtd.</th><th>Faturamento</th><th>Lucro</th><th>Margem cadastrada</th></tr></thead><tbody><tr v-if="!productRows.length"><td colspan="5">Nenhum produto cadastrado.</td></tr><tr v-for="item in productRows.slice(0, 10)" :key="item.sku"><td><div class="table-product"><ProductThumb :type="item.thumb" :size="25"/>{{item.name}}</div></td><td>{{item.qty}}</td><td>{{formatCurrency(item.revenue)}}</td><td :class="item.profit >= 0 ? 'money-positive' : 'money-negative'">{{formatCurrency(item.profit)}}</td><td>{{Number(item.margin || 0).toFixed(1)}}%</td></tr></tbody></table></div></PanelCard></div></template>
+    <template v-else>
     <PanelCard title="Histórico de alterações financeiras" subtitle="Versões registradas de custos, preços e taxas. Os valores não sobrescrevem vendas já realizadas."><div v-if="historyLoading" class="empty-state">Carregando histórico...</div><div v-else-if="historyError" class="empty-state">{{historyError}}</div><div v-else-if="!history.length" class="empty-state">Ainda não há alterações financeiras registradas.</div><div v-else class="table-scroll"><table class="data-table"><thead><tr><th>Data</th><th>Recurso</th><th>Origem</th><th>Valores registrados</th></tr></thead><tbody><tr v-for="entry in history" :key="entry.id"><td>{{new Date(entry.createdAt).toLocaleString('pt-BR')}}</td><td>{{historyTitle(entry)}}</td><td>{{entry.source}}</td><td><span v-for="(value, key) in entry.snapshot" :key="key" class="history-value">{{key}}: {{typeof value === 'number' ? formatCurrency(value) : value}}</span></td></tr></tbody></table></div></PanelCard>
+    </template>
   </div>
 </template>
 
@@ -157,4 +167,7 @@ const exportReport = async () => {
 .report-breakdown strong { color: #172033; text-align: right; }
 .history-value { display: inline-block; margin: 2px 6px 2px 0; padding: 4px 7px; border-radius: 6px; background: #f1f4f8; font-size: 12px; }
 .report-export-format { min-width: 76px; border: 1px solid #d8deea; border-radius: 8px; padding: 0 8px; background: #fff; }
+.report-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; border-bottom:1px solid #e5e9f1; padding-bottom:10px; }
+.report-tabs a { border:1px solid #d8deea; border-radius:999px; padding:8px 14px; color:#687386; font-size:13px; font-weight:700; text-decoration:none; }
+.report-tabs a:hover, .report-tabs a.active { border-color:#9ebcf8; background:#eef4ff; color:#1768f2; }
 </style>

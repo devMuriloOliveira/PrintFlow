@@ -195,7 +195,13 @@ export const useAppData = () => {
       '/filamentos': ['filaments', 'printJobs', 'products'],
       '/despesas': ['expenses', 'expenseSegments'],
       '/metas': ['goals'],
-      '/marketplaces': ['marketplaces', 'products']
+      '/marketplaces': ['marketplaces', 'products'],
+      '/relatorios': (() => {
+        const section = String(route.query.secao || 'financeiro')
+        if (section === 'historico') return []
+        if (section === 'produtos') return ['orders', 'products']
+        return ['orders', 'products', 'expenses', 'expenseSegments']
+      })()
     }
     const match = Object.entries(scopes).find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))
     return match ? match[1] : null
@@ -213,7 +219,7 @@ export const useAppData = () => {
     pending.value = true
     error.value = null
     try {
-      const nextData = await $fetch<AppData>(apiUrl(`/api/app-data${scope?.length ? `?resources=${encodeURIComponent(scope.join(','))}` : ''}`), {
+      const nextData = await $fetch<AppData>(apiUrl(`/api/app-data${scope !== null ? `?resources=${encodeURIComponent(scope.join(','))}` : ''}`), {
         headers: auth.authHeaders.value,
         signal: requestController?.signal
       })
@@ -246,7 +252,7 @@ export const useAppData = () => {
     void loadAppData()
   }
   if (process.client) {
-    watch(() => route.path, () => { void loadAppData() })
+    watch(() => route.fullPath, () => { void loadAppData() })
   }
 
   const resourceHeaders = () => auth.authHeaders.value

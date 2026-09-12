@@ -10,11 +10,12 @@ const nav = [
   { to: '/chats', label: 'Atendimentos', mark: 'A' },
   { to: '/solicitacoes', label: 'Solicitacoes LGPD', mark: 'L' },
   { to: '/empresas', label: 'Empresas', mark: 'E' },
-  { to: '/auditoria', label: 'Auditoria', mark: 'G' },
+  { to: '/auditoria', label: 'Auditoria', mark: 'G', children: [{ to: '/auditoria?secao=eventos', label: 'Eventos administrativos' }, { to: '/auditoria?secao=empresa', label: 'Acessos por empresa' }] },
+  { to: '/auditoria?secao=relatorios', label: 'Relatorios', mark: 'R', children: [{ to: '/auditoria?secao=relatorios', label: 'Exportacoes' }] },
   { to: '/exclusoes', label: 'Exclusoes', mark: 'X' }
 ]
 
-const isActive = (path: string) => route.path === path
+const isActive = (path: string) => route.path === path.split('?')[0] && (!path.includes('?') || route.fullPath === path)
 const logout = async () => {
   clearWorkspace()
   await session.logout()
@@ -32,10 +33,15 @@ onMounted(() => void loadNotifications().catch(() => {}))
         <span><strong>PrintFlow</strong><small>Superadmin</small></span>
       </NuxtLink>
       <nav aria-label="Navegacao principal">
-        <NuxtLink v-for="item in nav" :key="item.to" :to="item.to" :class="{ active: isActive(item.to) }">
-          <span class="nav-mark">{{ item.mark }}</span>{{ item.label }}
-          <span v-if="item.to === '/solicitacoes' && requestCount" class="nav-count">{{ requestCount }}</span>
-        </NuxtLink>
+        <div v-for="item in nav" :key="item.to" class="nav-group">
+          <NuxtLink :to="item.to" :class="{ active: isActive(item.to) && !item.children }">
+            <span class="nav-mark">{{ item.mark }}</span>{{ item.label }}
+            <span v-if="item.to === '/solicitacoes' && requestCount" class="nav-count">{{ requestCount }}</span>
+          </NuxtLink>
+          <div v-if="item.children && (isActive(item.to) || item.children.some(child => isActive(child.to)))" class="nav-submenu">
+            <NuxtLink v-for="child in item.children" :key="child.to" :to="child.to" :class="{ active: isActive(child.to) }">{{ child.label }}</NuxtLink>
+          </div>
+        </div>
       </nav>
       <div class="sidebar-foot"><span class="security-dot"></span><div><strong>Ambiente auditado</strong><small>Acoes monitoradas</small></div></div>
     </aside>
