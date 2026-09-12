@@ -35,7 +35,11 @@ const assigneeFilter = ref('')
 const tenantFilter = ref('')
 const fromFilter = ref('')
 const toFilter = ref('')
+const requestPage = ref(0)
+const requestPageSize = 50
+const hasNextRequestPage = computed(() => requests.value.length === requestPageSize)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const requesterName = (request: AuditRequest) => request.requesterName || 'Usuario indisponivel'
 const requesterInitials = (request: AuditRequest) => requesterName(request).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()
@@ -83,7 +87,15 @@ const openChat = async (request: AuditRequest) => {
       return
     }
     if (!request.chatAssigneeId && !collaborator) return
-    await Promise.all([loadMessages(request.id), loadSupportHistory(request.id), request.requestKind === 'support' ? loadSupportAttachments(request.id) : Promise.resolve([])])
+    await loadMessages(request.id)
+    // Mensagens são o conteúdo crítico para abrir a conversa. Histórico e anexos
+    // chegam em segundo plano para não bloquear a primeira renderização.
+    void Promise.all([
+      loadSupportHistory(request.id),
+      request.requestKind === 'support' ? loadSupportAttachments(request.id) : Promise.resolve([])
+    ]).catch((cause: any) => {
+      actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel carregar todo o contexto da conversa.'
+    })
   } catch (cause: any) {
     actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel abrir a conversa.'
   } finally {
@@ -187,10 +199,20 @@ const autoAssignSelected = async () => {
 const applyServerFilters = async () => {
   actionLoading.value = true; actionError.value = ''
   try {
-    await refreshRequests({ category: categoryFilter.value, assigneeId: assigneeFilter.value, tenantId: tenantFilter.value, from: fromFilter.value, to: toFilter.value, limit: '500' })
+    await refreshRequests({ search: search.value.trim(), category: categoryFilter.value, assigneeId: assigneeFilter.value, tenantId: tenantFilter.value, from: fromFilter.value, to: toFilter.value, limit: String(requestPageSize), offset: String(requestPage.value * requestPageSize) })
   } catch (cause: any) { actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel aplicar os filtros.' }
   finally { actionLoading.value = false }
 }
+const changeRequestPage = async (delta: number) => {
+  const nextPage = requestPage.value + delta
+  if (nextPage < 0 || (delta > 0 && !hasNextRequestPage.value)) return
+  requestPage.value = nextPage
+  await applyServerFilters()
+}
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { requestPage.value = 0; void applyServerFilters() }, 350)
+})
 
 const closeChat = async () => {
   if (!selectedRequest.value || !confirm(`Encerrar definitivamente o atendimento ${selectedRequest.value.id}?`)) return
@@ -256,21 +278,26 @@ const openAuditReport = async () => {
 
 onMounted(async () => {
   if (!await load({ tenants: true, requests: true })) return
-  chatAssignees.value = await loadChatAssignees().catch(() => [])
-  await loadSupportMacros().catch(() => [])
+  const [assigneesResult, macrosResult] = await Promise.allSettled([loadChatAssignees(), loadSupportMacros()])
+  if (assigneesResult.status === 'rejected') actionError.value = 'Nao foi possivel carregar os responsaveis do atendimento.'
+  if (macrosResult.status === 'rejected') actionError.value = 'Nao foi possivel carregar as respostas prontas.'
   const protocol = typeof route.query.protocolo === 'string' ? route.query.protocolo : ''
   const initial = requests.value.find(request => request.id === protocol) || activeRequests.value[0] || requests.value[0]
   if (initial) await openChat(initial)
-  refreshTimer = setInterval(() => { if (!actionLoading.value) void refreshSelected().catch(() => {}) }, 5000)
+  refreshTimer = setInterval(() => {
+    if (!actionLoading.value && selectedRequest.value && document.visibilityState === 'visible') void refreshSelected().catch((cause: any) => {
+      actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel atualizar a conversa.'
+    })
+  }, 10000)
 })
-onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer) })
+onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer); if (searchTimer) clearTimeout(searchTimer) })
 </script>
 
 <template>
   <AdminShell v-model:search="search" title="Atendimentos" subtitle="Fila segura de suporte e protocolos LGPD" :request-count="activeRequests.length">
     <template #actions><button class="button button--quiet" :disabled="actionLoading" @click="update">Atualizar</button></template>
     <p v-if="error || actionError" class="feedback feedback--error">{{ actionError || error }}</p>
-    <div class="request-card" style="margin:10px 0;display:flex;gap:8px;align-items:end;flex-wrap:wrap"><label>Fila<select v-model="queueFilter" aria-label="Fila de atendimento"><option value="open">Em aberto</option><option value="all">Todas em aberto</option><option value="unassigned">Nao atribuidas</option><option value="mine">Minhas</option><option value="collaborating">Colaborador</option><option value="waiting_customer">Aguardando cliente</option><option value="waiting_internal">Aguardando equipe</option><option value="overdue">Em atraso</option><option value="closed">Encerradas</option></select></label><label>Categoria<select v-model="categoryFilter"><option value="">Todas</option><option value="technical">Tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracao</option><option value="account">Conta</option><option value="data_backup">Backup</option><option value="privacy">Privacidade</option></select></label><label>Responsavel<select v-model="assigneeFilter"><option value="">Todos</option><option value="unassigned">Nao atribuidas</option><option v-for="admin in chatAssignees" :key="admin.id" :value="admin.id">{{ admin.name }}</option></select></label><label>Empresa<select v-model="tenantFilter"><option value="">Todas</option><option v-for="tenant in tenants" :key="tenant.id" :value="tenant.id">{{ tenant.name }}</option></select></label><label>De<input v-model="fromFilter" type="date"></label><label>Ate<input v-model="toFilter" type="date"></label><button class="button button--quiet" :disabled="actionLoading" @click="applyServerFilters">Filtrar servidor</button></div>
+    <div class="request-card" style="margin:10px 0;display:flex;gap:8px;align-items:end;flex-wrap:wrap"><label>Fila<select v-model="queueFilter"><option value="open">Em aberto</option><option value="all">Todas em aberto</option><option value="unassigned">Nao atribuidas</option><option value="mine">Minhas</option><option value="collaborating">Colaborador</option><option value="waiting_customer">Aguardando cliente</option><option value="waiting_internal">Aguardando equipe</option><option value="overdue">Em atraso</option><option value="closed">Encerradas</option></select></label><label>Categoria<select v-model="categoryFilter"><option value="">Todas</option><option value="technical">Tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracao</option><option value="account">Conta</option><option value="data_backup">Backup</option><option value="privacy">Privacidade</option></select></label><label>Responsavel<select v-model="assigneeFilter"><option value="">Todos</option><option value="unassigned">Nao atribuidas</option><option v-for="admin in chatAssignees" :key="admin.id" :value="admin.id">{{ admin.name }}</option></select></label><label>Empresa<select v-model="tenantFilter"><option value="">Todas</option><option v-for="tenant in tenants" :key="tenant.id" :value="tenant.id">{{ tenant.name }}</option></select></label><label>De<input v-model="fromFilter" type="date"></label><label>Ate<input v-model="toFilter" type="date"></label><button class="button button--quiet" :disabled="actionLoading" @click="requestPage = 0; applyServerFilters()">Filtrar servidor</button><button class="button button--quiet" :disabled="actionLoading || requestPage === 0" @click="changeRequestPage(-1)">Anterior</button><span style="font-size:11px;color:var(--muted)">Pagina {{ requestPage + 1 }}</span><button class="button button--quiet" :disabled="actionLoading || !hasNextRequestPage" @click="changeRequestPage(1)">Proxima</button></div>
     <div class="request-card" style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label>Atendimentos em lote<select v-model="selectedBatchIds" multiple size="3" aria-label="Selecionar atendimentos"><option v-for="request in filteredRequests" :key="request.id" :value="request.id">{{ request.id }} · {{ requesterName(request) }}</option></select></label><select v-model="bulkOperation" aria-label="Acao em lote"><option value="claim">Assumir selecionados</option><option value="status">Alterar status</option></select><select v-if="bulkOperation === 'status'" v-model="bulkStatus" aria-label="Status em lote"><option value="in_progress">Em atendimento</option><option value="waiting_customer">Aguardando cliente</option><option value="waiting_internal">Aguardando equipe</option><option value="resolved">Resolvido</option><option value="reopened">Reaberto</option></select><button class="button button--quiet" :disabled="actionLoading || !selectedBatchIds.length" @click="applyBulkOperation">Aplicar</button><button class="button button--quiet" :disabled="actionLoading || !selectedBatchIds.length" @click="autoAssignSelected">Distribuir fila</button></div>
     <div class="chat-layout">
       <aside class="chat-overview"><h2>Visao geral</h2><div><span>Em atendimento</span><strong>{{ requests.filter(request => request.status !== 'pending' && isChatOpen(request.status)).length }}</strong></div><div><span>Aguardando resposta</span><strong>{{ requests.filter(request => request.status === 'pending').length }}</strong></div><div><span>Encerrados</span><strong>{{ closedRequests.length }}</strong></div></aside>

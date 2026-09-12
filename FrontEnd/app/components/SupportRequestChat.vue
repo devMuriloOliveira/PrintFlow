@@ -30,20 +30,22 @@ const scrollToLatest = async () => {
   if (messagesElement.value) messagesElement.value.scrollTop = messagesElement.value.scrollHeight
 }
 
-const refresh = async (autoOpen = false) => {
+const refresh = async (autoOpen = false, includeAttachments = true) => {
   const requestId = props.requestId
   if (!requestId) return
   const sequence = ++refreshSequence
   loading.value = true
   try {
-    const [next, nextAttachments] = await Promise.all([listSupportMessages(requestId), supportsAttachments.value ? listSupportAttachments(requestId) : Promise.resolve([])])
+    const incremental = Boolean(latestMessageId.value)
+    const [next, nextAttachments] = await Promise.all([listSupportMessages(requestId, incremental ? latestMessageId.value : undefined), includeAttachments && supportsAttachments.value ? listSupportAttachments(requestId) : Promise.resolve(attachments.value)])
     if (sequence !== refreshSequence || requestId !== props.requestId) return
-    const latestSupportMessage = [...next].reverse().find(message => message.senderType === 'support')
-    const hasNewMessage = Boolean(next.length && next.at(-1)?.id !== latestMessageId.value)
+    const merged = incremental ? [...messages.value, ...next.filter(message => !messages.value.some(existing => existing.id === message.id))] : next
+    const latestSupportMessage = [...merged].reverse().find(message => message.senderType === 'support')
+    const hasNewMessage = Boolean(next.length)
     if (autoOpen && latestSupportMessage?.id && latestSupportMessage.id !== latestSupportMessageId.value) open.value = true
     latestSupportMessageId.value = latestSupportMessage?.id || ''
-    latestMessageId.value = next.at(-1)?.id || ''
-    messages.value = next
+    latestMessageId.value = merged.at(-1)?.id || ''
+    messages.value = merged
     attachments.value = nextAttachments
     if (hasNewMessage && open.value) await scrollToLatest()
   } finally {
@@ -62,7 +64,8 @@ watch(() => props.requestId, async () => {
 }, { immediate: true })
 
 const poll = async () => {
-  try { await Promise.all([refresh(true), refreshRequests()]) } catch { /* A proxima atualizacao tenta novamente. */ }
+  if (document.visibilityState !== 'visible') return
+  try { await Promise.all([refresh(true, false), refreshRequests()]) } catch { /* A proxima atualizacao tenta novamente. */ }
 }
 const attach = async (event: Event) => {
   const file = (event.target as HTMLInputElement).files?.[0]
@@ -72,8 +75,10 @@ const attach = async (event: Event) => {
   catch { sendError.value = 'Nao foi possivel enviar o anexo agora.' }
   finally { sending.value = false; (event.target as HTMLInputElement).value = '' }
 }
-onMounted(() => { refreshTimer = setInterval(() => void poll(), 5000) })
-onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer) })
+// Mantem o estado do widget alinhado ao painel de suporte: ao encerrar, a
+// proxima consulta remove o protocolo aberto e o componente deixa de renderizar.
+onMounted(() => { refreshTimer = setInterval(() => void poll(), 5000); document.addEventListener('visibilitychange', poll) })
+onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer); document.removeEventListener('visibilitychange', poll) })
 
 const send = async () => {
   const body = draft.value.trim()

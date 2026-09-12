@@ -472,6 +472,7 @@ export const migrate =
     await query(`alter table tenant_subscriptions add column if not exists last_provider_sync_at timestamptz`)
     await query(`alter table tenant_subscriptions add column if not exists trial_started_at timestamptz`)
     await query(`alter table tenant_subscriptions add column if not exists trial_used_at timestamptz`)
+    await query(`alter table tenant_subscriptions add column if not exists cancel_at_period_end boolean not null default false`)
     await query(`
       update tenant_subscriptions
          set trial_used_at = coalesce(trial_used_at, trial_ends_at, started_at, created_at)
@@ -2453,6 +2454,8 @@ export const migrate =
         )
       `
     )
+
+    await query(`create index if not exists agents_tenant_status_idx on agents (tenant_id, status)`)
 
         // ==================================================
     // ERROS DA IMPRESSORA

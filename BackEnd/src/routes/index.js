@@ -60,6 +60,8 @@ import {
   handleMercadoPagoWebhookProbe,
   handleStripeBillingSummary,
   handleStripeCheckoutCreate,
+  handleStripeSubscriptionCancellation,
+  handleStripeSubscriptionPlanChange,
   handleStripeWebhook
 } from './billing.js'
 
@@ -146,7 +148,7 @@ import {
   handlePlatformTenantStatusUpdate
 } from './platformAdmin.js'
 
-import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList, handleTenantSupportAttachmentCreate, handleTenantSupportAttachmentRead, handleTenantSupportAttachmentsList } from './auditRequests.js'
+import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList, handleTenantSupportAttachmentCreate, handleTenantSupportAttachmentRead, handleTenantSupportAttachmentsList, handleTenantUnreadMessages } from './auditRequests.js'
 
 import {
   handlePrintJobApprove,
@@ -193,6 +195,15 @@ export const handleRequest =
 
           `http://${req.headers.host}`
         )
+      const requestStartedAt = Date.now()
+      const acceptEncoding = String(req.headers['accept-encoding'] || '')
+      res.compressionEncoding = /\bbr\b/i.test(acceptEncoding) ? 'br' : /\bgzip\b/i.test(acceptEncoding) ? 'gzip' : ''
+      res.once('finish', () => {
+        const durationMs = Date.now() - requestStartedAt
+        if (durationMs >= 1000 && url.pathname.startsWith('/api/')) {
+          console.warn('Requisicao lenta', { method: req.method, url: url.pathname, status: res.statusCode, durationMs })
+        }
+      })
 
       if (!configureCors(req, res)) {
         return sendJson(res, 403, { error: 'Origem nao autorizada' })
@@ -597,7 +608,7 @@ export const handleRequest =
         if (!canAccessRequest(user, req.method, url.pathname)) {
           return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
         }
-        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout'
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout' || url.pathname === '/api/billing/stripe/subscription/cancel' || url.pathname === '/api/billing/stripe/subscription/resume' || url.pathname === '/api/billing/stripe/subscription/change-plan'
         if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
           try {
             await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname })
@@ -625,6 +636,9 @@ export const handleRequest =
 
       if (req.method === 'GET' && url.pathname === '/api/billing/stripe') return await handleStripeBillingSummary(req, res)
       if (req.method === 'POST' && url.pathname === '/api/billing/stripe/checkout') return await handleStripeCheckoutCreate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/cancel') return await handleStripeSubscriptionCancellation(req, res, true)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/resume') return await handleStripeSubscriptionCancellation(req, res, false)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/change-plan') return await handleStripeSubscriptionPlanChange(req, res)
 
       if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
         return await handleInvitationCreate(req, res)
@@ -951,6 +965,7 @@ export const handleRequest =
       if (req.method === 'POST' && tenantAuditMessagesMatch) return await handleTenantAuditMessageCreate(req, res, tenantAuditMessagesMatch[1])
 
       if (req.method === 'GET' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestsList(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/support/unread') return await handleTenantUnreadMessages(req, res)
       if (req.method === 'POST' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestCreate(req, res)
       const supportRequestMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)$/)
       if (req.method === 'DELETE' && supportRequestMatch) return await handleTenantAuditRequestCancel(req, res, supportRequestMatch[1])
@@ -1009,7 +1024,7 @@ export const handleRequest =
       }
 
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenants') {
-        return await handlePlatformTenantsList(req, res)
+        return await handlePlatformTenantsList(req, res, url)
       }
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/plans') return await handlePlatformPlansList(req, res)
       const platformPlanBillingConfigMatch = url.pathname.match(/^\/api\/platform-admin\/plans\/([^/]+)\/billing-configuration$/)

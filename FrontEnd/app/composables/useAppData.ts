@@ -89,7 +89,7 @@ export type StripeBillingSummary = {
   configured: boolean;
   environment: 'sandbox' | 'production';
   plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
-  subscription: null | { status: string; billingCycle: string; planCode: string; planName: string; currentPeriodEnd: string | null };
+  subscription: null | { status: string; billingCycle: string; planCode: string; planName: string; currentPeriodEnd: string | null; cancelAtPeriodEnd?: boolean };
   checkout: null | { status: string; url: string; expiresAt: string | null; createdAt: string };
 }
 
@@ -170,29 +170,66 @@ export const useAppData = () => {
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
   const auth = useAuth()
   const tenantId = useTenantId()
+  const route = useRoute()
   const data = useState<AppData>('app-data', emptyData)
   const pending = useState('app-data-pending', () => false)
   const loaded = useState('app-data-loaded', () => false)
   const loadedTenant = useState('app-data-loaded-tenant', () => '')
+  const loadedAt = useState('app-data-loaded-at', () => 0)
+  const loadedScope = useState('app-data-loaded-scope', () => '')
   const error = useState<string | null>('app-data-error', () => null)
   const goals = useState<Goal[]>('goals', () => [])
+  let appDataAbortController: AbortController | null = null
+  let appDataRequestSequence = 0
 
   const apiUrl = (path: string) => `${apiBase}${path}`
 
-  const loadAppData = async () => {
+  const resourceScopeForRoute = () => {
+    const path = String(route.path || '')
+    const scopes: Record<string, string[]> = {
+      '/configuracoes': ['settings', 'marketplaces', 'marketplaceIntegrations'],
+      '/clientes': ['clients', 'orders'],
+      '/vendas': ['orders', 'products', 'printers', 'printJobs', 'clients'],
+      '/produtos': ['products', 'printers', 'filaments'],
+      '/impressoras': ['printers', 'printJobs', 'products', 'filaments'],
+      '/filamentos': ['filaments', 'printJobs', 'products'],
+      '/despesas': ['expenses', 'expenseSegments'],
+      '/metas': ['goals'],
+      '/marketplaces': ['marketplaces', 'products']
+    }
+    const match = Object.entries(scopes).find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))
+    return match ? match[1] : null
+  }
+
+  const loadAppData = async (force = false) => {
+    const cacheTtlMs = 15_000
+    const scope = resourceScopeForRoute()
+    const scopeKey = scope?.slice().sort().join(',') || 'all'
+    if (!force && loaded.value && loadedTenant.value === tenantId.value && loadedScope.value === scopeKey && Date.now() - loadedAt.value < cacheTtlMs) return data.value
+    appDataAbortController?.abort()
+    const requestController = process.client ? new AbortController() : null
+    appDataAbortController = requestController
+    const sequence = ++appDataRequestSequence
     pending.value = true
     error.value = null
     try {
-      data.value = await $fetch<AppData>(apiUrl('/api/app-data'), {
-        headers: auth.authHeaders.value
+      const nextData = await $fetch<AppData>(apiUrl(`/api/app-data${scope?.length ? `?resources=${encodeURIComponent(scope.join(','))}` : ''}`), {
+        headers: auth.authHeaders.value,
+        signal: requestController?.signal
       })
+      if (sequence !== appDataRequestSequence) return data.value
+      data.value = nextData
       goals.value = data.value.goals || []
       loaded.value = true
       loadedTenant.value = tenantId.value
+      loadedAt.value = Date.now()
+      loadedScope.value = scopeKey
     } catch (err) {
+      if (requestController?.signal.aborted || sequence !== appDataRequestSequence) return data.value
       error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
     } finally {
-      pending.value = false
+      if (sequence === appDataRequestSequence) pending.value = false
+      if (appDataAbortController === requestController) appDataAbortController = null
     }
   }
 
@@ -201,10 +238,15 @@ export const useAppData = () => {
     goals.value = []
     loaded.value = false
     loadedTenant.value = ''
+    loadedAt.value = 0
+    loadedScope.value = ''
   }
 
   if (process.client && !loaded.value && !pending.value && !error.value) {
     void loadAppData()
+  }
+  if (process.client) {
+    watch(() => route.path, () => { void loadAppData() })
   }
 
   const resourceHeaders = () => auth.authHeaders.value
@@ -310,7 +352,7 @@ export const useAppData = () => {
     const result = await $fetch<{ order: { id: string; status: string } }>(apiUrl(`/api/orders/${encodeURIComponent(orderId)}/advance-stage`), {
       method: 'POST', body: { status, trackingCode }, headers: resourceHeaders()
     })
-    await loadAppData()
+    await loadAppData(true)
     return result.order
   }
 
@@ -343,7 +385,7 @@ export const useAppData = () => {
     }).catch((err) => {
       throw new Error(err?.data?.error || err?.message || 'Nao foi possivel desconectar a conta do marketplace.')
     })
-    await loadAppData()
+    await loadAppData(true)
   }
 
   const refreshMarketplaceOrders = async () => {
@@ -368,7 +410,7 @@ export const useAppData = () => {
     }).catch((err) => {
       throw new Error(err?.data?.error || err?.message || 'Nao foi possivel sincronizar o pedido.')
     })
-    await loadAppData()
+    await loadAppData(true)
     await refreshMarketplaceOrders()
   }
 
@@ -381,7 +423,7 @@ export const useAppData = () => {
       throw new Error(err?.data?.error || err?.message || 'Nao foi possivel vincular o pedido ao produto.')
     })
     data.value.marketplaceOrders = list
-    await loadAppData()
+    await loadAppData(true)
     return list
   }
 
@@ -405,6 +447,9 @@ export const useAppData = () => {
     $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
     })
+  const changeStripeSubscriptionPlan = (billingCycle: 'monthly' | 'yearly') => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/change-plan'), { method: 'POST', body: { billingCycle }, headers: resourceHeaders() })
+  const cancelStripeSubscription = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/cancel'), { method: 'POST', headers: resourceHeaders() })
+  const resumeStripeSubscription = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/resume'), { method: 'POST', headers: resourceHeaders() })
 
   const listSettingsExports = () => $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
     headers: resourceHeaders()
@@ -430,7 +475,8 @@ export const useAppData = () => {
   const listSupportRequests = () => $fetch<SupportRequest[]>(apiUrl('/api/support/requests'), { headers: resourceHeaders() })
   const createSupportRequest = (body: Record<string, unknown>) => $fetch<SupportRequest>(apiUrl('/api/support/requests'), { method: 'POST', body, headers: resourceHeaders() })
   const cancelSupportRequest = (id: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}`), { method: 'DELETE', headers: resourceHeaders() })
-  const listSupportMessages = (id: string) => $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { headers: resourceHeaders() })
+  const listSupportMessages = (id: string, since?: string) => $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
+  const getSupportUnread = (since?: string) => $fetch<{ total: number; byRequest: Array<{ requestId: string; total: number }> }>(apiUrl(`/api/support/unread${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
   const sendSupportMessage = (id: string, body: string) => $fetch<{ requestId: string; createdNewProtocol: boolean; previousRequestId?: string | null }>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
   const listSupportAttachments = (id: string) => $fetch<SupportAttachment[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { headers: resourceHeaders() })
   const uploadSupportAttachment = async (id: string, file: File) => {
@@ -478,7 +524,9 @@ export const useAppData = () => {
     , updateSettings
     , exportTenantData
     , getStripeBilling
-    , createStripeCheckout
+    , createStripeCheckout, changeStripeSubscriptionPlan
+    , cancelStripeSubscription
+    , resumeStripeSubscription
     , listSettingsExports
     , listFinancialHistory
     , exportFinancialReport
@@ -493,7 +541,7 @@ export const useAppData = () => {
     , listSupportAttachments
     , uploadSupportAttachment
     , downloadSupportAttachment
-    , listSupportMessages
+    , listSupportMessages, getSupportUnread
     , sendSupportMessage
     , loadIntegrationsOverview
     , enqueuePrintJob

@@ -4,7 +4,7 @@ defineProps<{ logoUrl?: string; brandName?: string }>()
 
 <template>
   <div class="brand">
-    <img v-if="logoUrl" class="brand__mark brand__mark--image" :src="logoUrl" alt="Logotipo da empresa">
+    <img v-if="logoUrl" class="brand__mark brand__mark--image" :src="logoUrl" alt="Logotipo da empresa" decoding="async">
     <svg v-else class="brand__mark" viewBox="0 0 44 44" aria-hidden="true">
       <path d="m22 2 13 7.5v15L22 32 9 24.5v-15L22 2Z" fill="#6f4df6" />
       <path d="m22 17 13-7.5v15L22 32V17Z" fill="#2348d8" />

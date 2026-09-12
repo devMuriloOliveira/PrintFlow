@@ -49,10 +49,10 @@ export const handlePlatformOverview = async (req, res) => {
   return sendJson(res, 200, overview)
 }
 
-export const handlePlatformTenantsList = async (req, res) => {
+export const handlePlatformTenantsList = async (req, res, url) => {
   const user = await requirePlatformAdmin(req, res)
   if (!user) return
-  const tenants = await listPlatformTenants()
+  const tenants = await listPlatformTenants({ limit: url?.searchParams.get('limit'), offset: url?.searchParams.get('offset') })
   await writePlatformAudit(req, user, { action: 'platform.tenants.list' })
   return sendJson(res, 200, tenants)
 }
@@ -263,7 +263,7 @@ export const handleDataAccessVerify = async (req, res, requestId) => {
   catch (error) { await writePlatformAudit(req, user, { action: 'platform.data_access.rejected', targetResource: 'data_access', targetResourceId: requestId }); throw error }
 }
 
-export const handlePlatformAuditRequestsList = async (req, res, url) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests(user, { search: url?.searchParams.get('search'), category: url?.searchParams.get('category'), status: url?.searchParams.get('status'), assigneeId: url?.searchParams.get('assigneeId'), tenantId: url?.searchParams.get('tenantId'), from: url?.searchParams.get('from'), to: url?.searchParams.get('to'), limit: url?.searchParams.get('limit') })) }
+export const handlePlatformAuditRequestsList = async (req, res, url) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAuditRequests(user, { search: url?.searchParams.get('search'), category: url?.searchParams.get('category'), status: url?.searchParams.get('status'), assigneeId: url?.searchParams.get('assigneeId'), tenantId: url?.searchParams.get('tenantId'), from: url?.searchParams.get('from'), to: url?.searchParams.get('to'), limit: url?.searchParams.get('limit'), offset: url?.searchParams.get('offset') })) }
 export const handlePlatformNotificationsList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformAdminNotifications(user)) }
 export const handlePlatformNotificationRead = async (req, res, notificationId) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await markPlatformAdminNotificationRead(user, notificationId)) }
 export const handlePlatformChatAssigneesList = async (req, res) => { const user = await requirePlatformAdmin(req, res); if (user) return sendJson(res, 200, await listPlatformChatAssignees()) }
@@ -305,7 +305,8 @@ export const handlePlatformSupportAttachmentRead = async (req, res, requestId, a
 }
 export const handlePlatformAuditMessagesList = async (req, res, requestId) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
-  const result = await platformAuditMessages(requestId, {}, user)
+  const url = new URL(req.url, 'http://localhost')
+  const result = await platformAuditMessages(requestId, { since: url.searchParams.get('since') || '' }, user)
   return sendJson(res, 200, result.messages)
 }
 export const handlePlatformAuditChatReport = async (req, res, requestId, url) => {

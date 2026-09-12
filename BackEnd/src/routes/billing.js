@@ -7,7 +7,7 @@ import {
   mercadoPagoWebhookSignatureMatches,
   processMercadoPagoWebhook
 } from '../services/mercadoPagoBilling.js'
-import { createStripeCheckout, getStripeBillingSummary, processStripeWebhook, stripeWebhookSignatureMatches } from '../services/stripeBilling.js'
+import { changeStripeSubscriptionPlan, createStripeCheckout, getStripeBillingSummary, processStripeWebhook, setStripeSubscriptionCancellation, stripeWebhookSignatureMatches } from '../services/stripeBilling.js'
 
 const owner = async (req, res) => {
   const user = await getAuthUser(req)
@@ -69,6 +69,16 @@ export const handleStripeCheckoutCreate = async (req, res) => {
   const user = await owner(req, res); if (!user) return
   const body = await readJsonBody(req)
   return sendJson(res, 201, await createStripeCheckout({ tenantId: user.tenantId, actorId: user.userId || user.id, actorEmail: user.email, planCode: String(body.planCode || ''), billingCycle: String(body.billingCycle || '') }))
+}
+
+export const handleStripeSubscriptionCancellation = async (req, res, cancelAtPeriodEnd) => {
+  const user = await owner(req, res); if (!user) return
+  return sendJson(res, 200, await setStripeSubscriptionCancellation({ tenantId: user.tenantId, actorId: user.userId || user.id, cancelAtPeriodEnd }))
+}
+export const handleStripeSubscriptionPlanChange = async (req, res) => {
+  const user = await owner(req, res); if (!user) return
+  const body = await readJsonBody(req)
+  return sendJson(res, 200, await changeStripeSubscriptionPlan({ tenantId: user.tenantId, actorId: user.userId || user.id, billingCycle: String(body.billingCycle || '') }))
 }
 
 export const handleStripeWebhook = async (req, res) => {

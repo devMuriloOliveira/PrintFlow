@@ -41,7 +41,10 @@ export const readRoutes = {
   '/api/settings': readResource('settings'),
   '/api/app-data': async (req) => {
     const tenantId = await getTenantId(req)
-    return hasDatabase ? loadAppData(tenantId) : getTenantData(tenantId)
+    if (!hasDatabase) return getTenantData(tenantId)
+    const url = new URL(req.url, 'http://localhost')
+    const requested = new Set(String(url.searchParams.get('resources') || '').split(',').map((resource) => resource.trim()).filter(Boolean))
+    return loadAppData(tenantId, requested)
   },
   '/api/financial-history': async (req) => {
     if (!hasDatabase) return []

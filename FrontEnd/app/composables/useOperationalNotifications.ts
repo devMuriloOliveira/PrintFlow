@@ -16,6 +16,7 @@ export const useOperationalNotifications = () => {
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
   const notifications = useState<OperationalNotification[]>('operational-notifications', () => [])
   const loading = useState('operational-notifications-loading', () => false)
+  let notificationsAbortController: AbortController | null = null
   const { settings } = useAppData()
   const visibleNotifications = computed(() => {
     const preferences = (settings.value?.preferences || {}) as Record<string, unknown>
@@ -28,15 +29,21 @@ export const useOperationalNotifications = () => {
 
   const refreshNotifications = async () => {
     if (!process.client || !auth.ready.value || loading.value || !auth.authHeaders.value.Authorization) return notifications.value
+    notificationsAbortController?.abort()
+    const controller = new AbortController()
+    notificationsAbortController = controller
     loading.value = true
     try {
       notifications.value = await $fetch<OperationalNotification[]>(`${apiBase}/api/operational-notifications?limit=25`, {
         headers: auth.authHeaders.value
+        , signal: controller.signal
       })
     } catch (error: any) {
+      if (controller.signal.aborted) return notifications.value
       if (error?.status === 401 || error?.status === 403) notifications.value = []
     } finally {
       loading.value = false
+      if (notificationsAbortController === controller) notificationsAbortController = null
     }
     return notifications.value
   }

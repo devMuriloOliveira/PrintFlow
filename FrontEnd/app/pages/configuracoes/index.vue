@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const { notify } = useUi()
 const auth = useAuth()
-const { settings, marketplaceIntegrations, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout } = useAppData()
+const { settings, marketplaceIntegrations, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, changeStripeSubscriptionPlan, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
@@ -25,6 +25,7 @@ const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const billingLoading = ref(false)
 const creatingBillingLink = ref(false)
+const subscriptionActionLoading = ref(false)
 const stripeBilling = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
 const billingForm = reactive<{ billingCycle: 'monthly' | 'yearly' }>({ billingCycle: 'monthly' })
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
@@ -58,6 +59,7 @@ const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.
 const isOwner = computed(() => auth.user.value?.role === 'owner')
 const selectedBillingPlan = computed(() => stripeBilling.value?.plans[0] || null)
 const billingPlanValue = computed(() => selectedBillingPlan.value?.[billingForm.billingCycle] || 0)
+const billingActionLoading = computed(() => creatingBillingLink.value || subscriptionActionLoading.value)
 const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const subscriptionStatus = (status: string) => ({ trial: 'Em teste', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carencia', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
 const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', privacy: 'Privacidade e LGPD', audit: 'Auditoria excepcional' }[category] || category)
@@ -274,6 +276,19 @@ const startStripeCheckout = async (cycle: 'monthly' | 'yearly' = billingForm.bil
   billingForm.billingCycle = cycle
   const amount = selectedBillingPlan.value?.[cycle] || 0
   if (!selectedBillingPlan.value || amount <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
+  const current = stripeBilling.value?.subscription
+  if (current && ['trial', 'active', 'past_due', 'grace'].includes(current.status)) {
+    if (current.billingCycle === cycle) return notify('Sua assinatura ja esta ativa neste ciclo de cobranca.')
+    if (!window.confirm(`Alterar para o plano ${cycle === 'yearly' ? 'anual' : 'mensal'}? A Stripe calculara a cobranca proporcional da alteracao.`)) return
+    subscriptionActionLoading.value = true
+    try {
+      stripeBilling.value = await changeStripeSubscriptionPlan(cycle)
+      notify('Plano alterado. A Stripe aplicou a cobranca proporcional, quando aplicavel.')
+    } catch (error: any) {
+      notify(error?.data?.error || error?.message || 'Nao foi possivel alterar o plano.')
+    } finally { subscriptionActionLoading.value = false }
+    return
+  }
   creatingBillingLink.value = true
   try {
     const result = await createStripeCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
@@ -281,6 +296,20 @@ const startStripeCheckout = async (cycle: 'monthly' | 'yearly' = billingForm.bil
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
   } finally { creatingBillingLink.value = false }
+}
+const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
+  if (!stripeBilling.value?.subscription || subscriptionActionLoading.value) return
+  const message = cancelAtPeriodEnd
+    ? 'A assinatura continuará ativa até o fim do período atual. Deseja programar o cancelamento?'
+    : 'Deseja continuar a assinatura e remover o cancelamento programado?'
+  if (!window.confirm(message)) return
+  subscriptionActionLoading.value = true
+  try {
+    stripeBilling.value = cancelAtPeriodEnd ? await cancelStripeSubscription() : await resumeStripeSubscription()
+    notify(cancelAtPeriodEnd ? 'Cancelamento programado para o fim do período.' : 'Assinatura retomada com sucesso.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar a assinatura.')
+  } finally { subscriptionActionLoading.value = false }
 }
 
 const integrationStatus = (status: string) => ({ connected: 'Conectado', active: 'Conectado', online: 'Online', not_configured: 'Nao configurado', offline: 'Offline', revoked: 'Revogado' }[status] || status)
@@ -348,14 +377,32 @@ watch(() => supportDraft.category, (category) => {
           <div v-if="!isOwner" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Somente o Owner pode consultar ou alterar a assinatura da empresa.</div>
           <div v-else-if="billingLoading" class="empty-state"><div><h3>Consultando assinatura</h3></div></div>
           <template v-else-if="stripeBilling">
-            <div v-if="stripeBilling.subscription" class="info-note" style="margin-top:16px"><UiIcon name="check" />Plano atual: <strong>{{ stripeBilling.subscription.planName || stripeBilling.subscription.planCode }}</strong> · {{ subscriptionStatus(stripeBilling.subscription.status) }}<span v-if="stripeBilling.subscription.currentPeriodEnd"> · vigencia ate {{ new Date(stripeBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</span>.</div>
+            <div v-if="stripeBilling.subscription" class="billing-subscription-summary">
+              <div class="billing-subscription-summary__status"><UiIcon name="check" /><div><span>Assinatura atual</span><strong>{{ stripeBilling.subscription.planName || stripeBilling.subscription.planCode }} · {{ subscriptionStatus(stripeBilling.subscription.status) }}</strong></div></div>
+              <div v-if="stripeBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ stripeBilling.subscription.status === 'trial' ? 'Teste termina em' : 'Próxima cobrança em' }}</span><strong>{{ new Date(stripeBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="stripeBilling.subscription.status !== 'trial'">{{ currency(stripeBilling.plans[0]?.[stripeBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ stripeBilling.subscription.billingCycle === 'yearly' ? 'anual' : 'mensal' }}</small></div>
+              <div class="billing-subscription-summary__actions"><span v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="badge badge--orange">Cancelamento programado</span><button v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="btn" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(false)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Continuar assinatura' }}</button><button v-else-if="['trial', 'active', 'past_due', 'grace'].includes(stripeBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(true)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div>
+            </div>
             <div v-if="stripeBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(stripeBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="stripeBilling.checkout.url" rel="noopener noreferrer">Abrir link</a>.</div>
             <div v-if="!stripeBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Stripe ainda precisa do segredo de webhook no ambiente antes de gerar um checkout.</div>
             <form v-else class="integration-section" style="margin-top:16px" @submit.prevent="startStripeCheckout">
               <div class="integration-section__head"><div><h3>Assinatura PrintFlow</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no PrintFlow.</p></div><span class="badge badge--orange">Producao</span></div>
-              <div class="form-grid"><label class="field col-12"><span>Periodo de cobranca</span><select v-model="billingForm.billingCycle" required><option value="monthly" :disabled="!selectedBillingPlan?.monthlyEnabled">Mensal — {{ currency(selectedBillingPlan?.monthly || 0) }}</option><option value="yearly" :disabled="!selectedBillingPlan?.yearlyEnabled">Anual — {{ currency(selectedBillingPlan?.yearly || 0) }}</option></select></label></div>
-              <div v-if="selectedBillingPlan" class="info-note" style="margin-top:16px"><UiIcon name="info" />{{ selectedBillingPlan.description || 'Assinatura da plataforma.' }}<br><strong>Valor: {{ currency(billingPlanValue) }} por {{ billingForm.billingCycle === 'yearly' ? 'ano' : 'mes' }}</strong></div>
-              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px"><button class="btn btn--primary" type="button" :disabled="creatingBillingLink || !selectedBillingPlan || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout('monthly')">{{ creatingBillingLink ? 'Abrindo checkout...' : 'Assinar mensal' }}</button><button class="btn btn--primary" type="button" :disabled="creatingBillingLink || !selectedBillingPlan || (selectedBillingPlan?.yearly || 0) <= 0" @click="startStripeCheckout('yearly')">{{ creatingBillingLink ? 'Abrindo checkout...' : 'Assinar anual' }}</button></div>
+              <div v-if="selectedBillingPlan" class="billing-plans">
+                <article class="billing-plan-card">
+                  <div class="billing-plan-card__title"><h3>Mensal</h3><span class="billing-plan-card__caption">Flexível, cancele quando quiser.</span></div>
+                  <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.monthly || 0).replace('R$', '').trim() }}<span>/mês</span></div>
+                  <ul class="billing-plan-card__features"><li>Calculadora 3D completa</li><li>Pedidos, clientes e produtos</li><li>Impressoras conectadas e fila de impressão</li><li>Filamentos, despesas e metas</li></ul>
+                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout('monthly')">{{ billingActionLoading ? 'Atualizando...' : (stripeBilling?.subscription?.billingCycle === 'monthly' ? 'Plano mensal atual' : 'Começar teste grátis') }}</button>
+                </article>
+                <article class="billing-plan-card billing-plan-card--featured">
+                  <span class="billing-plan-card__ribbon">Melhor custo-benefício</span>
+                  <div class="billing-plan-card__title"><h3>Anual</h3><span class="billing-plan-card__caption">Tudo do plano mensal com economia.</span></div>
+                  <div class="billing-plan-card__price"><small>12x R$</small>{{ currency((selectedBillingPlan.yearly || 0) / 12).replace('R$', '').trim() }}<span>/mês</span></div>
+                  <div class="billing-plan-card__saving">De {{ currency((selectedBillingPlan.monthly || 0) * 12) }} <strong>por {{ currency(selectedBillingPlan.yearly || 0) }}/ano</strong></div>
+                  <ul class="billing-plan-card__features"><li>Tudo do plano mensal</li><li>Marketplaces integrados e taxas por canal</li><li>Equipe com convites e permissões</li><li>Relatórios avançados e exportações</li></ul>
+                  <button class="billing-plan-card__button billing-plan-card__button--featured" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.yearly || 0) <= 0" @click="startStripeCheckout('yearly')">{{ billingActionLoading ? 'Atualizando...' : (stripeBilling?.subscription?.billingCycle === 'yearly' ? 'Plano anual atual' : 'Assinar com 7 dias grátis') }} <span aria-hidden="true">→</span></button>
+                </article>
+              </div>
+              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cartão para iniciar o teste — só cobramos se você continuar.</div>
             </form>
           </template>
         </div>

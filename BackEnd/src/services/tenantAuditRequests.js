@@ -103,10 +103,31 @@ export const mapTenantSupportMessage = (row) => ({
   body: decryptField(row.body),
   createdAt: row.created_at
 })
-export const listTenantAuditMessages = async (user, requestId) => {
+export const listTenantAuditMessages = async (user, requestId, since = '') => {
   const request = await requesterRequest(user, requestId); if (!request) throw new Error('Solicitacao nao encontrada.')
-  const result = await withTenant(user.tenantId, (client) => client.query("select id, sender_type, sender_id, body, created_at from tenant_audit_request_messages where request_id = $1 and tenant_id = $2 and visibility = 'public' order by created_at asc limit 200", [requestId, user.tenantId]))
+  const parsedSince = String(since || '').trim()
+  const hasSince = /^\d+$/.test(parsedSince)
+  const sql = `select id, sender_type, sender_id, body, created_at
+    from tenant_audit_request_messages
+   where request_id = $1 and tenant_id = $2 and visibility = 'public'
+     and ($3::bigint is null or id > $3::bigint)
+   order by id asc limit 200`
+  const result = await withTenant(user.tenantId, (client) => client.query(sql, [requestId, user.tenantId, hasSince ? parsedSince : null]))
   return result.rows.map(mapTenantSupportMessage)
+}
+export const countTenantUnreadMessages = async (user, since = '') => {
+  const parsedSince = String(since || '').trim()
+  const hasSince = /^\d+$/.test(parsedSince)
+  return withTenant(user.tenantId, async (client) => {
+    const result = await client.query(`select message.request_id, count(*)::int as total
+      from tenant_audit_request_messages message
+      join tenant_audit_requests request on request.id = message.request_id and request.tenant_id = message.tenant_id
+     where message.tenant_id = $1 and request.requested_by::text = $2
+       and message.sender_type = 'superadmin' and message.visibility = 'public'
+       and ($3::bigint is null or message.id > $3::bigint)
+     group by message.request_id order by max(message.id) desc limit 100`, [user.tenantId, String(user.id), hasSince ? parsedSince : null])
+    return { total: result.rows.reduce((sum, row) => sum + Number(row.total || 0), 0), byRequest: result.rows.map(row => ({ requestId: row.request_id, total: Number(row.total || 0) })) }
+  })
 }
 export const addTenantAuditMessage = async (user, requestId, body) => {
   const request = await requesterRequest(user, requestId); if (!request || !writable.has(request.status)) throw new Error('Conversa indisponivel para esta solicitacao.')
@@ -139,7 +160,8 @@ const supportListFilters = (filters = {}) => ({
   assigneeId: clean(filters.assigneeId, 120), tenantId: clean(filters.tenantId, 120),
   from: /^\d{4}-\d{2}-\d{2}$/.test(String(filters.from || '')) ? String(filters.from) : '',
   to: /^\d{4}-\d{2}-\d{2}$/.test(String(filters.to || '')) ? String(filters.to) : '',
-  limit: Math.min(500, Math.max(1, Number(filters.limit) || 200))
+  limit: Math.min(500, Math.max(1, Number(filters.limit) || 200)),
+  offset: Math.min(1000000, Math.max(0, Number(filters.offset) || 0))
 })
 
 export const listPlatformAuditRequests = async (user, filters = {}) => {
@@ -155,7 +177,7 @@ export const listPlatformAuditRequests = async (user, filters = {}) => {
   if (selected.tenantId) where.push(`request.tenant_id::text = ${bind(selected.tenantId)}`)
   if (selected.from) where.push(`request.created_at >= ${bind(selected.from)}::date`)
   if (selected.to) where.push(`request.created_at < (${bind(selected.to)}::date + interval '1 day')`)
-  params.push(selected.limit)
+  params.push(selected.limit, selected.offset)
   return (await query(`
   select request.*, coalesce(nullif(trim(account.name), ''), '') as requester_name,
          coalesce(nullif(trim(responsible.name), ''), '') as responsible_name,
@@ -177,7 +199,7 @@ export const listPlatformAuditRequests = async (user, filters = {}) => {
     ) collaborators on true
    where ${where.join('\n      and ')}
    order by request.created_at desc
-   limit $${params.length}
+   limit $${params.length - 1} offset $${params.length}
 `, params)).rows.map((row) => ({ ...mapAuditRequestRow(row), chatCollaborators: (row.chat_collaborators || []).map((collaborator) => ({ id: String(collaborator.id), name: clean(decryptField(collaborator.name || ''), 160) })) }))
 }
 
@@ -336,12 +358,14 @@ export const getPlatformPrivacyPortabilityExport = async (requestId) => {
 }
 export const mapPlatformAuditMessage = (row) => ({ ...row, body: decryptField(row.body), visibility: row.visibility || 'public' })
 export const platformAuditMessages = async (requestId, range = {}, user = null) => {
+  const since = /^\d+$/.test(String(range.since || '').trim()) ? String(range.since).trim() : null
   const result = await query(`select id, tenant_id, sender_type, sender_id, body, visibility, created_at
     from tenant_audit_request_messages where request_id = $1
       and ($4::text is null or exists (select 1 from tenant_audit_requests request where request.id = $1 and (request.chat_assigned_to = $4 or exists (select 1 from platform_chat_collaborators collaborator where collaborator.request_id = request.id and collaborator.user_id = $4))))
       and ($2::date is null or created_at >= $2::date)
       and ($3::date is null or created_at < $3::date + interval '1 day')
-    order by created_at asc limit 200`, [requestId, range.from || null, range.to || null, user ? String(user.id) : null])
+      and ($5::bigint is null or id > $5::bigint)
+    order by id asc limit 200`, [requestId, range.from || null, range.to || null, user ? String(user.id) : null, since])
   return {
     tenantId: result.rows[0]?.tenant_id || null,
     messages: result.rows.map(({ tenant_id, ...row }) => mapPlatformAuditMessage(row))

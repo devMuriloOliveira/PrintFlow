@@ -70,16 +70,31 @@ export const getStripeBillingSummary = async (tenantId) => {
   if (!hasDatabase) return { configured: false, environment: 'production', plans: [], subscription: null, checkout: null }
   return withTenant(tenantId, async (client) => {
     const [subscription, checkout] = await Promise.all([
-      client.query(`select subscription.status, subscription.billing_cycle, subscription.current_period_end, plan.code as plan_code, plan.name as plan_name from tenant_subscriptions subscription left join platform_plans plan on plan.id = subscription.plan_id where subscription.tenant_id = $1 limit 1`, [tenantId]),
+      client.query(`select subscription.status, subscription.billing_cycle, subscription.current_period_end, subscription.cancel_at_period_end, plan.code as plan_code, plan.name as plan_name from tenant_subscriptions subscription left join platform_plans plan on plan.id = subscription.plan_id where subscription.tenant_id = $1 limit 1`, [tenantId]),
       client.query(`select status, checkout_url, expires_at, created_at from tenant_billing_checkouts where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open') order by created_at desc limit 1`, [tenantId])
     ])
     return {
       configured: Boolean(env.stripeSecretKey && env.stripeWebhookSecret), environment: 'production',
       plans: plan ? [{ ...plan, monthlyEnabled: plan.monthly > 0, yearlyEnabled: plan.yearly > 0 }] : [],
-      subscription: subscription.rows[0] ? { status: subscription.rows[0].status, billingCycle: subscription.rows[0].billing_cycle, planCode: subscription.rows[0].plan_code || '', planName: subscription.rows[0].plan_name || '', currentPeriodEnd: subscription.rows[0].current_period_end } : null,
+      subscription: subscription.rows[0] ? { status: subscription.rows[0].status, billingCycle: subscription.rows[0].billing_cycle, planCode: subscription.rows[0].plan_code || '', planName: subscription.rows[0].plan_name || '', currentPeriodEnd: subscription.rows[0].current_period_end, cancelAtPeriodEnd: Boolean(subscription.rows[0].cancel_at_period_end) } : null,
       checkout: checkout.rows[0] ? { status: checkout.rows[0].status, url: checkout.rows[0].checkout_url, expiresAt: checkout.rows[0].expires_at, createdAt: checkout.rows[0].created_at } : null
     }
   })
+}
+
+export const setStripeSubscriptionCancellation = async ({ tenantId, actorId, cancelAtPeriodEnd }) => {
+  if (!hasDatabase || !env.stripeSecretKey) throw new Error('Stripe ainda nao esta configurado no ambiente de deploy.')
+  const current = await withTenant(tenantId, (client) => client.query(`select id, status, provider_subscription_id, cancel_at_period_end from tenant_subscriptions where tenant_id = $1 limit 1`, [tenantId]))
+  const subscription = current.rows[0]
+  if (!subscription?.provider_subscription_id) throw new Error('Nenhuma assinatura Stripe ativa foi encontrada para esta empresa.')
+  if (['cancelled', 'ended'].includes(subscription.status)) throw new Error('Esta assinatura ja foi encerrada.')
+  const providerSubscription = await stripeRequest(`/subscriptions/${encodeURIComponent(subscription.provider_subscription_id)}`, { method: 'POST', form: { cancel_at_period_end: cancelAtPeriodEnd ? 'true' : 'false' } })
+  const nextValue = Boolean(providerSubscription.cancel_at_period_end ?? cancelAtPeriodEnd)
+  await withTenant(tenantId, async (client) => {
+    await client.query(`update tenant_subscriptions set cancel_at_period_end = $2, updated_at = now() where id = $1`, [subscription.id, nextValue])
+    await client.query(`insert into tenant_subscription_events (tenant_id, subscription_id, action, previous_state, new_state, reason, actor_user_id, source, provider) values ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,'manual','stripe')`, [tenantId, subscription.id, nextValue ? 'subscription.cancel_scheduled' : 'subscription.cancel_reverted', JSON.stringify({ cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end) }), JSON.stringify({ cancelAtPeriodEnd: nextValue }), nextValue ? 'Cancelamento solicitado pelo Owner para o fim do periodo atual.' : 'Cancelamento revertido pelo Owner.', String(actorId || '')])
+  })
+  return getStripeBillingSummary(tenantId)
 }
 
 export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, planCode, billingCycle }) => {
@@ -92,12 +107,27 @@ export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, plan
   const amount = number(plan[cycle])
   const priceId = cycle === 'yearly' ? plan.stripeYearlyPriceId : plan.stripeMonthlyPriceId
   if (!priceId || amount <= 0 || !text(actorEmail, 320)) throw new Error('O plano ou o e-mail do Owner ainda nao esta valido para o checkout.')
-  const previous = await withTenant(tenantId, (client) => client.query('select trial_used_at from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId]))
+  const previous = await withTenant(tenantId, async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [String(tenantId)])
+    const current = await client.query(`select status, provider_subscription_id from tenant_subscriptions where tenant_id = $1 limit 1`, [tenantId])
+    if (current.rows[0]?.provider_subscription_id && ['trial', 'active', 'past_due', 'grace', 'paused'].includes(current.rows[0].status)) throw new Error('Esta empresa ja possui uma assinatura Stripe. Use a opcao de alterar plano.')
+    return client.query('select trial_used_at from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId])
+  })
   const trialDays = previous.rows[0]?.trial_used_at ? 0 : plan.trialDays
-  const pending = await withTenant(tenantId, (client) => client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') and checkout_url <> '' order by created_at desc limit 1`, [tenantId, cycle]))
-  if (pending.rowCount) return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
   const checkoutId = `stripe_checkout_${randomBytes(12).toString('hex')}`
-  await withTenant(tenantId, (client) => client.query(`insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days) values ($1,$2,$3,$4,$5,'${provider}','creating',$6,$7,$8)`, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), priceId, trialDays]))
+  const checkoutState = await withTenant(tenantId, async (client) => {
+    // Serializa também a leitura do checkout pendente e sua criação; duas abas
+    // simultâneas não podem abrir dois fluxos de cobrança para a mesma empresa.
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [String(tenantId)])
+    const pending = await client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') order by created_at desc limit 1`, [tenantId, cycle])
+    if (pending.rowCount) {
+      if (!pending.rows[0].checkout_url) throw new Error('Ja existe um checkout em processamento para esta empresa. Aguarde alguns instantes.')
+      return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
+    }
+    await client.query(`insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days) values ($1,$2,$3,$4,$5,'${provider}','creating',$6,$7,$8)`, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), priceId, trialDays])
+    return null
+  })
+  if (checkoutState) return checkoutState
   try {
     const session = await stripeRequest('/checkout/sessions', { method: 'POST', form: {
       mode: 'subscription', customer_email: text(actorEmail, 320), payment_method_collection: 'always',
@@ -115,6 +145,32 @@ export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, plan
     await withTenant(tenantId, (client) => client.query(`update tenant_billing_checkouts set status = 'failed', updated_at = now() where id = $1`, [checkoutId]))
     throw error
   }
+}
+
+export const changeStripeSubscriptionPlan = async ({ tenantId, actorId, billingCycle }) => {
+  if (!hasDatabase || !env.stripeSecretKey) throw new Error('Stripe ainda nao esta configurado no ambiente de deploy.')
+  const cycle = ['monthly', 'yearly'].includes(String(billingCycle)) ? String(billingCycle) : ''
+  const plan = await activePlan()
+  const ensuredPlan = plan ? await ensureStripePrices(plan) : null
+  const priceId = ensuredPlan && cycle ? (cycle === 'yearly' ? ensuredPlan.stripeYearlyPriceId : ensuredPlan.stripeMonthlyPriceId) : ''
+  if (!ensuredPlan || !priceId) throw new Error('Plano ou ciclo de cobranca invalido.')
+  const current = await withTenant(tenantId, (client) => client.query(`select id, plan_id, billing_cycle, status, provider_subscription_id from tenant_subscriptions where tenant_id = $1 limit 1`, [tenantId]))
+  const subscription = current.rows[0]
+  if (!subscription?.provider_subscription_id || !['trial', 'active', 'past_due', 'grace'].includes(subscription.status)) throw new Error('Nao existe uma assinatura Stripe elegivel para alteracao.')
+  if (subscription.billing_cycle === cycle && String(subscription.plan_id) === String(ensuredPlan.id)) return getStripeBillingSummary(tenantId)
+  const remote = await stripeRequest(`/subscriptions/${encodeURIComponent(subscription.provider_subscription_id)}`)
+  const itemId = text(remote.items?.data?.[0]?.id, 160)
+  if (!itemId) throw new Error('A assinatura Stripe nao possui item de preco para atualizar.')
+  const updated = await stripeRequest(`/subscriptions/${encodeURIComponent(subscription.provider_subscription_id)}`, { method: 'POST', form: {
+    'items[0][id]': itemId, 'items[0][price]': priceId,
+    proration_behavior: 'always_invoice', payment_behavior: 'error_if_incomplete'
+  } })
+  const nextCycle = cycle
+  await withTenant(tenantId, async (client) => {
+    await client.query(`update tenant_subscriptions set plan_id = $2, billing_cycle = $3, current_period_end = coalesce($4::timestamptz, current_period_end), updated_at = now() where id = $1`, [subscription.id, ensuredPlan.id, nextCycle, dateFromUnix(updated.current_period_end)])
+    await client.query(`insert into tenant_subscription_events (tenant_id, subscription_id, action, previous_state, new_state, reason, actor_user_id, source, provider) values ($1,$2,'subscription.plan_changed',$3::jsonb,$4::jsonb,$5,$6,'manual','stripe')`, [tenantId, subscription.id, JSON.stringify({ planId: subscription.plan_id, billingCycle: subscription.billing_cycle }), JSON.stringify({ planId: ensuredPlan.id, billingCycle: nextCycle, priceId }), 'Plano alterado com cobrança proporcional pela Stripe.', String(actorId || '')])
+  })
+  return getStripeBillingSummary(tenantId)
 }
 
 const signatureParts = (value) => Object.fromEntries(String(value || '').split(',').map((part) => part.trim().split('=').map((piece) => piece.trim())).filter(([key, item]) => key && item))
@@ -140,14 +196,26 @@ const syncSubscription = async (client, resource, eventId, eventType) => {
   if (!checkoutId || !providerSubscriptionId) return { ignored: true }
   const lookup = await client.query(`select * from tenant_billing_checkouts where id = $1 and provider = '${provider}' limit 1`, [checkoutId]); const checkout = lookup.rows[0]
   if (!checkout) return { ignored: true }
+  // Em uma troca de plano, o metadata do checkout original permanece na assinatura.
+  // Use o preço atualmente anexado ao item Stripe como fonte de verdade para não
+  // reverter a alteração quando chegar um customer.subscription.updated.
+  const remotePriceId = text(resource.items?.data?.[0]?.price?.id, 160)
+  const priceLookup = remotePriceId
+    ? await client.query(`select id, stripe_monthly_price_id, stripe_yearly_price_id from platform_plans where active = true and (stripe_monthly_price_id = $1 or stripe_yearly_price_id = $1) limit 1`, [remotePriceId])
+    : { rows: [] }
+  const providerPlan = priceLookup.rows[0]
+  const planId = providerPlan?.id || checkout.plan_id
+  const billingCycle = providerPlan
+    ? (String(providerPlan.stripe_yearly_price_id) === remotePriceId ? 'yearly' : 'monthly')
+    : checkout.billing_cycle
   const state = stripeStatus(resource.status); if (!state) return { tenantId: checkout.tenant_id, ignored: true }
   const trialEndsAt = dateFromUnix(resource.trial_end); const periodEnd = dateFromUnix(resource.current_period_end)
   const current = await client.query(`select * from tenant_subscriptions where tenant_id = $1 limit 1`, [checkout.tenant_id]); let subscription = current.rows[0]
   if (!subscription) {
-    const created = await client.query(`insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, trial_started_at, trial_ends_at, trial_used_at, current_period_end, manual_override, source, provider, provider_customer_id, provider_subscription_id, last_provider_sync_at) values ($1,$2,$3,$4,$5,now(),$6::timestamptz,$7::timestamptz,$8::timestamptz,$9::timestamptz,false,'provider','${provider}',$10,$11,now()) returning *`, [`subscription_${randomBytes(12).toString('hex')}`, checkout.tenant_id, checkout.plan_id, state, checkout.billing_cycle, state === 'trial' ? new Date().toISOString() : null, trialEndsAt, state === 'trial' ? new Date().toISOString() : null, periodEnd, text(resource.customer, 160) || null, providerSubscriptionId])
+    const created = await client.query(`insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, trial_started_at, trial_ends_at, trial_used_at, current_period_end, manual_override, source, provider, provider_customer_id, provider_subscription_id, last_provider_sync_at) values ($1,$2,$3,$4,$5,now(),$6::timestamptz,$7::timestamptz,$8::timestamptz,$9::timestamptz,false,'provider','${provider}',$10,$11,now()) returning *`, [`subscription_${randomBytes(12).toString('hex')}`, checkout.tenant_id, planId, state, billingCycle, state === 'trial' ? new Date().toISOString() : null, trialEndsAt, state === 'trial' ? new Date().toISOString() : null, periodEnd, text(resource.customer, 160) || null, providerSubscriptionId])
     subscription = created.rows[0]
   } else if (!(subscription.manual_override && subscription.status === 'courtesy')) {
-    await client.query(`update tenant_subscriptions set plan_id=$2,billing_cycle=$3,status=$4,provider='${provider}',provider_customer_id=coalesce($5,provider_customer_id),provider_subscription_id=$6,trial_started_at=case when $4='trial' then coalesce(trial_started_at,now()) else trial_started_at end,trial_ends_at=case when $4='trial' then $7::timestamptz else trial_ends_at end,trial_used_at=case when $4='trial' then coalesce(trial_used_at,now()) else trial_used_at end,current_period_end=coalesce($8::timestamptz,current_period_end),source='provider',last_provider_sync_at=now(),cancelled_at=case when $4='cancelled' then now() else cancelled_at end,updated_at=now() where id=$1`, [subscription.id, checkout.plan_id, checkout.billing_cycle, state, text(resource.customer, 160) || null, providerSubscriptionId, trialEndsAt, periodEnd])
+    await client.query(`update tenant_subscriptions set plan_id=$2,billing_cycle=$3,status=$4,provider='${provider}',provider_customer_id=coalesce($5,provider_customer_id),provider_subscription_id=$6,trial_started_at=case when $4='trial' then coalesce(trial_started_at,now()) else trial_started_at end,trial_ends_at=case when $4='trial' then $7::timestamptz else trial_ends_at end,trial_used_at=case when $4='trial' then coalesce(trial_used_at,now()) else trial_used_at end,current_period_end=coalesce($8::timestamptz,current_period_end),cancel_at_period_end=$9,source='provider',last_provider_sync_at=now(),cancelled_at=case when $4='cancelled' then now() else cancelled_at end,updated_at=now() where id=$1`, [subscription.id, planId, billingCycle, state, text(resource.customer, 160) || null, providerSubscriptionId, trialEndsAt, periodEnd, Boolean(resource.cancel_at_period_end)])
   }
   await client.query(`update tenant_billing_checkouts set provider_checkout_id=$2,status=case when $3='cancelled' then 'cancelled' else status end,updated_at=now() where id=$1`, [checkoutId, providerSubscriptionId, state])
   await client.query(`update tenants set billing_status=$2,billing_due_at=$3::timestamptz where id=$1`, [checkout.tenant_id, state === 'past_due' ? 'overdue' : state, state === 'trial' ? trialEndsAt : periodEnd])

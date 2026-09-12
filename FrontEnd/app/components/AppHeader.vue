@@ -21,8 +21,10 @@ const notificationTime = (value: string) => {
 
 onMounted(() => {
   const load = () => {
-    void refreshNotifications().catch(() => {})
-    notificationTimer = setInterval(() => void refreshNotifications().catch(() => {}), 30_000)
+    if (document.visibilityState === 'visible') void refreshNotifications().catch(() => {})
+    notificationTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshNotifications().catch(() => {})
+    }, 30_000)
   }
   if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(load, { timeout: 2000 })
   else window.setTimeout(load, 900)

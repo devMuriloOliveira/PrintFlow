@@ -78,16 +78,14 @@ const tenantRow = (row) => ({
 })
 
 export const getPlatformOverview = async () => {
-  const result = await query(`
+  const [result, agents, printers] = await Promise.all([query(`
     select
       count(*) as tenants,
       count(*) filter (where account_status = 'active') as active_tenants,
       count(*) filter (where account_status in ('suspended', 'blocked')) as suspended_tenants,
       count(*) filter (where billing_status in ('pending', 'overdue')) as payment_attention
     from tenants
-  `)
-  const agents = await query(`select count(*) as total, count(*) filter (where status = 'online') as online from agents`)
-  const printers = await query(`select count(*) as total, count(*) filter (where status in ('connected', 'printing', 'paused')) as connected from agent_printers`)
+  `), query(`select count(*) as total, count(*) filter (where status = 'online') as online from agents`), query(`select count(*) as total, count(*) filter (where status in ('connected', 'printing', 'paused')) as connected from agent_printers`)])
   return {
     tenants: Number(result.rows[0]?.tenants || 0), activeTenants: Number(result.rows[0]?.active_tenants || 0),
     suspendedTenants: Number(result.rows[0]?.suspended_tenants || 0), paymentAttention: Number(result.rows[0]?.payment_attention || 0),
@@ -96,26 +94,35 @@ export const getPlatformOverview = async () => {
   }
 }
 
-export const listPlatformTenants = async () => {
+export const listPlatformTenants = async ({ limit = 50, offset = 0 } = {}) => {
+  const selectedLimit = Math.min(100, Math.max(1, Number(limit) || 50))
+  const selectedOffset = Math.min(1000000, Math.max(0, Number(offset) || 0))
   const result = await platformQuery(`
     select t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
       sub.plan_id, plan.name as plan_name, sub.status as subscription_status, sub.billing_cycle,
       sub.current_period_end, sub.trial_ends_at, sub.grace_ends_at,
-      count(distinct u.id) as users,
-      count(distinct u.id) filter (where u.status = 'active') as active_users,
-      count(distinct a.id) as agents,
-      count(distinct a.id) filter (where a.status = 'online') as online_agents,
-      count(distinct p.id) as printers
+      coalesce(user_counts.users, 0) as users,
+      coalesce(user_counts.active_users, 0) as active_users,
+      coalesce(agent_counts.agents, 0) as agents,
+      coalesce(agent_counts.online_agents, 0) as online_agents,
+      coalesce(printer_counts.printers, 0) as printers
     from tenants t
     left join tenant_subscriptions sub on sub.tenant_id = t.id
     left join platform_plans plan on plan.id = sub.plan_id
-    left join users u on u.tenant_id = t.id
-    left join agents a on a.tenant_id = t.id
-    left join agent_printers p on p.tenant_id = t.id
-    group by t.id, t.name, t.document, t.account_status, t.billing_status, t.billing_due_at, t.created_at,
-      sub.plan_id, plan.name, sub.status, sub.billing_cycle, sub.current_period_end, sub.trial_ends_at, sub.grace_ends_at
+    left join lateral (
+      select count(*)::int as users, count(*) filter (where status = 'active')::int as active_users
+        from users where tenant_id = t.id
+    ) user_counts on true
+    left join lateral (
+      select count(*)::int as agents, count(*) filter (where status = 'online')::int as online_agents
+        from agents where tenant_id = t.id
+    ) agent_counts on true
+    left join lateral (
+      select count(*)::int as printers from agent_printers where tenant_id = t.id
+    ) printer_counts on true
     order by t.created_at desc
-  `)
+    limit $1 offset $2
+  `, [selectedLimit, selectedOffset])
   return result.rows.map(tenantRow)
 }
 

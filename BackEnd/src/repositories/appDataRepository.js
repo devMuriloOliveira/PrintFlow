@@ -336,16 +336,35 @@ const readMarketplaceIntegrations = async (client, tenantId) => {
   }))
 }
 
-export const loadAppData = async (tenantId) => withTenant(tenantId, async (client) => {
+export const loadAppData = async (tenantId, requestedResources = null) => withTenant(tenantId, async (client) => {
+  const selected = requestedResources instanceof Set && requestedResources.size ? requestedResources : new Set(Object.keys(resourceReaders))
+  const read = (resource) => selected.has(resource) ? resourceReaders[resource](client, tenantId) : Promise.resolve([])
   const [products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations] = await Promise.all([
-    readProducts(client, tenantId), readOrders(client, tenantId), readPrintJobs(client, tenantId), readExpenses(client, tenantId), readFilaments(client, tenantId),
-    readPrinters(client, tenantId), readMarketplaces(client, tenantId), readClients(client, tenantId), readExpenseSegments(client, tenantId),
-    readGoals(client, tenantId), readSettings(client, tenantId), readMarketplaceIntegrations(client, tenantId)
+    read('products'), read('orders'), read('printJobs'), read('expenses'), read('filaments'), read('printers'),
+    read('marketplaces'), read('clients'), read('expenseSegments'), read('goals'),
+    selected.has('settings') ? readSettings(client, tenantId) : Promise.resolve(null),
+    read('marketplaceIntegrations')
   ])
   return { products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations }
 })
 
+const resourceReaders = {
+  products: readProducts,
+  orders: readOrders,
+  printJobs: readPrintJobs,
+  expenses: readExpenses,
+  filaments: readFilaments,
+  printers: readPrinters,
+  marketplaces: readMarketplaces,
+  clients: readClients,
+  expenseSegments: readExpenseSegments,
+  goals: readGoals,
+  settings: readSettings,
+  marketplaceIntegrations: readMarketplaceIntegrations
+}
+
 export const listResource = async (tenantId, resource) => {
-  const data = await loadAppData(tenantId)
-  return data[resource]
+  const reader = resourceReaders[resource]
+  if (!reader) return undefined
+  return withTenant(tenantId, (client) => reader(client, tenantId))
 }

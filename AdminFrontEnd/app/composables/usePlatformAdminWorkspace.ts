@@ -10,6 +10,8 @@ export const usePlatformAdminWorkspace = () => {
   const session = useAdminSession()
   const overview = useState<Overview | null>('platform-admin-overview', () => null)
   const tenants = useState<Tenant[]>('platform-admin-tenants', () => [])
+  const tenantPage = useState('platform-admin-tenant-page', () => 0)
+  const tenantPageSize = 50
   const requests = useState<AuditRequest[]>('platform-admin-requests', () => [])
   const messagesByRequest = useState<Record<string, Message[]>>('platform-admin-request-messages', () => ({}))
   const resourceUpdatedAt = useState<Record<Resource, number>>('platform-admin-resource-updated-at', () => ({ overview: 0, tenants: 0, requests: 0 }))
@@ -44,6 +46,7 @@ export const usePlatformAdminWorkspace = () => {
   const clearWorkspace = () => {
     overview.value = null
     tenants.value = []
+    tenantPage.value = 0
     requests.value = []
     messagesByRequest.value = {}
     resourceUpdatedAt.value = { overview: 0, tenants: 0, requests: 0 }
@@ -109,8 +112,11 @@ export const usePlatformAdminWorkspace = () => {
   }
 
   const loadOverview = (force = false) => fetchResource<Overview>('overview', '/api/platform-admin/overview', value => { overview.value = value }, force)
-  const loadTenants = (force = false) => fetchResource<Tenant[]>('tenants', '/api/platform-admin/tenants', value => { tenants.value = value }, force)
-  const loadRequests = (force = false) => fetchResource<AuditRequest[]>('requests', '/api/platform-admin/support-requests', value => { requests.value = value }, force)
+  const loadTenants = (force = false, page = tenantPage.value) => {
+    tenantPage.value = Math.max(0, page)
+    return fetchResource<Tenant[]>('tenants', `/api/platform-admin/tenants?limit=${tenantPageSize}&offset=${tenantPage.value * tenantPageSize}`, value => { tenants.value = value }, force)
+  }
+  const loadRequests = (force = false) => fetchResource<AuditRequest[]>('requests', '/api/platform-admin/support-requests?limit=50&offset=0', value => { requests.value = value }, force)
 
   const loadMessages = async (requestId: string, force = false) => {
     const userId = resetForDifferentAdmin()
@@ -118,9 +124,13 @@ export const usePlatformAdminWorkspace = () => {
     const key = `${userId}:messages:${requestId}`
     const existing = inFlight.get(key) as Promise<Message[]> | undefined
     if (existing) return existing
-    const request = session.request<Message[]>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/messages`).then((value) => {
+    const existingMessages = messagesByRequest.value[requestId] || []
+    const since = force ? existingMessages.at(-1)?.id : undefined
+    const query = since ? `?since=${encodeURIComponent(String(since))}` : ''
+    const request = session.request<Message[]>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/messages${query}`).then((value) => {
       if ((session.user.value?.id || '') === userId) {
-        messagesByRequest.value = { ...messagesByRequest.value, [requestId]: value }
+        const merged = since ? [...existingMessages, ...value.filter(message => !existingMessages.some(existing => existing.id === message.id))] : value
+        messagesByRequest.value = { ...messagesByRequest.value, [requestId]: merged }
         messagesUpdatedAt.value = { ...messagesUpdatedAt.value, [requestId]: Date.now() }
       }
       return value
@@ -258,13 +268,13 @@ export const usePlatformAdminWorkspace = () => {
     return updated
   }
   const exportPrivacyPortability = (requestId: string) => session.download(`/api/platform-admin/privacy-requests/${encodeURIComponent(requestId)}/export`, `PrintFlow_Portabilidade_${requestId}.csv`)
-  const refreshTenants = () => loadTenants(true)
+  const refreshTenants = () => loadTenants(true, tenantPage.value)
 
   const activeRequests = computed(() => requests.value.filter(request => isChatOpen(request.status) && request.supportStatus !== 'resolved'))
   const closedRequests = computed(() => requests.value.filter(request => ['closed', 'cancelled', 'expired'].includes(request.status) || request.supportStatus === 'resolved'))
 
   return {
-    session, overview, tenants, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
+    session, overview, tenants, tenantPage, tenantPageSize, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
     formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, updatePlatformPlanBillingConfiguration, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

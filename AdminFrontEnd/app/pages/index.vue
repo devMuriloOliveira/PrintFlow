@@ -29,7 +29,12 @@ const saveSlaRule = async (rule: any) => {
   catch (cause: any) { slaError.value = cause?.data?.error || cause?.message || 'Nao foi possivel salvar a regra de SLA.' }
   finally { slaSaving.value = '' }
 }
-onMounted(async () => { await load({ overview: true, tenants: true, requests: true }); await Promise.all([loadSupportMetrics().catch(() => null), loadSupportSlaRules().catch(() => [])]) })
+onMounted(async () => {
+  await load({ overview: true, tenants: true, requests: true })
+  const [metricsResult, slaResult] = await Promise.allSettled([loadSupportMetrics(), loadSupportSlaRules()])
+  if (metricsResult.status === 'rejected' && !error.value) error.value = 'Nao foi possivel carregar as metricas do suporte.'
+  if (slaResult.status === 'rejected') slaError.value = 'Nao foi possivel carregar as regras de SLA.'
+})
 </script>
 
 <template>
