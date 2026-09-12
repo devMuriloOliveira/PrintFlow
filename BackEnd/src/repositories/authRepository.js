@@ -4,6 +4,7 @@ import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, validatePasswordPolicy, verifyPassword } from '../auth/password.js'
 import { hasDatabase, query, tenantQuery, withTenant } from '../db/pool.js'
 import { blindIndex, blindIndexesForLookup, decryptField, encryptField } from '../security/crypto.js'
+import { validCompanyDocument } from '../services/companyDocument.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { generateMfaSecret, verifyTotpCode } from '../services/mfa.js'
 
@@ -222,13 +223,15 @@ export const revokeRefreshSession = async (refreshToken) => {
   await query('update users set token_version = token_version + 1, updated_at = now() where id = $1', [current.user_id])
 }
 
-export const registerUser = async ({ name, email, password, company }) => {
+export const registerUser = async ({ name, email, password, company, document }) => {
   const normalizedEmail = normalizeEmail(email)
   const cleanName = String(name || '').trim()
   const companyName = String(company || cleanName || 'PrintFlow 3D').trim()
+  const companyDocument = validCompanyDocument(document)
 
   if (!cleanName) throw new Error('Informe o nome.')
   if (!normalizedEmail.includes('@')) throw new Error('Informe um e-mail valido.')
+  if (!companyDocument) throw new Error('Informe um CPF ou CNPJ valido.')
   const passwordPolicyError = validatePasswordPolicy(password)
   if (passwordPolicyError) throw new Error(passwordPolicyError)
 
@@ -247,12 +250,17 @@ export const registerUser = async ({ name, email, password, company }) => {
   const existing = await query('select id from users where email_hash = any($1::text[]) or email = $2 limit 1', [blindIndexesForLookup(normalizedEmail), normalizedEmail])
   if (existing.rowCount) throw new Error('Este e-mail ja esta cadastrado.')
 
-  await query(
-    `insert into tenants (id, name, email, is_initialized, billing_enforcement_exempt)
-     values ($1, $2, $3, false, false)
-     on conflict (id) do nothing`,
-    [tenantId, encryptField(companyName), encryptField(normalizedEmail)]
-  )
+  try {
+    await query(
+      `insert into tenants (id, name, document, document_hash, document_type, document_locked_at, email, is_initialized, billing_enforcement_exempt)
+       values ($1, $2, $3, $4, $5, now(), $6, false, false)
+       on conflict (id) do nothing`,
+      [tenantId, encryptField(companyName), encryptField(companyDocument.digits), companyDocument.hash, companyDocument.type, encryptField(normalizedEmail)]
+    )
+  } catch (error) {
+    if (error?.code === '23505') throw new Error('Nao foi possivel concluir o cadastro com este CPF ou CNPJ.')
+    throw error
+  }
 
   let result
   try {

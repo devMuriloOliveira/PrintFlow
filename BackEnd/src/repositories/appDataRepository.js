@@ -366,8 +366,9 @@ const readGoals = async (client, tenantId) => {
 }
 
 const readSettings = async (client, tenantId) => {
-  const result = await client.query(`select name, document, phone, email, address, district, city, state, zip, country,
-    currency, timezone, kwh, preferences from company_settings where tenant_id = $1`, [tenantId])
+  const result = await client.query(`select coalesce(nullif(settings.name, ''), tenant.name) as name, coalesce(nullif(settings.document, ''), tenant.document) as document, settings.phone, coalesce(nullif(settings.email, ''), tenant.email) as email, settings.address, settings.district, settings.city, settings.state, settings.zip, settings.country,
+    settings.currency, settings.timezone, settings.kwh, settings.preferences, tenant.document_locked_at, tenant.document_type
+    from company_settings settings join tenants tenant on tenant.id = settings.tenant_id where settings.tenant_id = $1`, [tenantId])
   const row = result.rows[0]
   if (!row) return null
   return {
@@ -381,7 +382,7 @@ const readSettings = async (client, tenantId) => {
     city: decryptField(row.city),
     state: decryptField(row.state),
     zip: decryptField(row.zip),
-    preferences: row.preferences || {}
+    preferences: row.preferences || {}, documentLocked: Boolean(row.document_locked_at), documentType: row.document_type || ''
   }
 }
 

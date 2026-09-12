@@ -78,7 +78,8 @@ const registerSession = async (label, ip) => {
       name: `Usuario ${label}`,
       email: `auth-${label}-${Date.now()}@example.com`,
       password: 'SenhaForte1!',
-      company: `Tenant ${label}`
+      company: `Tenant ${label}`,
+      document: '52998224725'
     }
   })
 
@@ -433,7 +434,8 @@ test('papel global da plataforma permanece separado do papel owner do tenant', a
       name: 'Administrador da Plataforma',
       email: 'platform-admin@example.com',
       password: 'SenhaForte1!',
-      company: 'Tenant da Plataforma'
+      company: 'Tenant da Plataforma',
+      document: '52998224725'
     }
   })
 

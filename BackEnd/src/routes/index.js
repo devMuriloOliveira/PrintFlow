@@ -56,7 +56,8 @@ import {
   handleSettingsExport,
   handleSettingsExportHistory,
   handleSettingsBackupStatus,
-  handleSettingsUpdate
+  handleSettingsUpdate,
+  handleCompanyCnpjLookup
 } from './settings.js'
 
 import { handleFinancialReportExport } from './reports.js'
@@ -969,6 +970,10 @@ export const handleRequest =
         return await handleSettingsUpdate(req, res)
       }
 
+      if (req.method === 'GET' && url.pathname === '/api/settings/company-lookup') {
+        return await handleCompanyCnpjLookup(req, res, url)
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/settings/backup-status') {
         return await handleSettingsBackupStatus(req, res)
       }
@@ -996,7 +1001,7 @@ export const handleRequest =
       if (req.method === 'POST' && supportMessagesMatch) return await handleTenantAuditMessageCreate(req, res, supportMessagesMatch[1])
 
       if (req.method === 'GET' && url.pathname === '/api/settings/export') {
-        return await handleSettingsExport(req, res)
+        return await handleSettingsExport(req, res, url)
       }
 
       if (req.method === 'GET' && url.pathname === '/api/settings/export-history') {

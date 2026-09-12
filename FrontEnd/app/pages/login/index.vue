@@ -12,10 +12,27 @@ const mfaCode = ref('')
 const form = reactive({
   name: '',
   company: '',
+  document: '',
   email: '',
   password: '',
   passwordConfirmation: ''
 })
+const documentKind = ref<'cpf' | 'cnpj'>('cnpj')
+const documentLabel = computed(() => documentKind.value === 'cpf' ? 'CPF' : 'CNPJ')
+const documentPlaceholder = computed(() => documentKind.value === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00')
+const documentMaxLength = computed(() => documentKind.value === 'cpf' ? 14 : 18)
+
+const formatDocument = (value: string, kind = documentKind.value) => {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, kind === 'cpf' ? 11 : 14)
+  if (kind === 'cpf') return digits.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2')
+  return digits.replace(/(\d{2})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1/$2').replace(/(\d{4})(\d{1,2})$/, '$1-$2')
+}
+
+const selectDocumentKind = (kind: 'cpf' | 'cnpj') => {
+  if (documentKind.value === kind) return
+  documentKind.value = kind
+  form.document = ''
+}
 
 const title = computed(() => mode.value === 'login' ? 'Entrar no PrintFlow' : 'Criar conta')
 const actionLabel = computed(() => mode.value === 'login' ? 'Entrar' : 'Criar conta e entrar')
@@ -43,6 +60,7 @@ const submit = async () => {
       const result = await auth.register({
         name: form.name,
         company: form.company,
+        document: form.document,
         email: form.email,
         password: form.password
       })
@@ -91,6 +109,20 @@ const submit = async () => {
         <label v-if="mode === 'register'" class="field">
           <span>Empresa</span>
           <input v-model="form.company" autocomplete="organization" required placeholder="Nome da empresa">
+        </label>
+
+        <label v-if="mode === 'register'" class="field">
+          <span>Tipo de cadastro</span>
+          <span class="auth-document-kind" role="group" aria-label="Tipo de documento">
+            <button type="button" :class="{ 'auth-document-kind__item--active': documentKind === 'cpf' }" class="auth-document-kind__item" @click="selectDocumentKind('cpf')">Pessoa física · CPF</button>
+            <button type="button" :class="{ 'auth-document-kind__item--active': documentKind === 'cnpj' }" class="auth-document-kind__item" @click="selectDocumentKind('cnpj')">Pessoa jurídica · CNPJ</button>
+          </span>
+        </label>
+
+        <label v-if="mode === 'register'" class="field">
+          <span>{{ documentLabel }}</span>
+          <input v-model="form.document" inputmode="numeric" autocomplete="off" required :maxlength="documentMaxLength" :placeholder="documentPlaceholder" @input="form.document = formatDocument(form.document)">
+          <small class="auth-hint">O documento identifica a conta e fica bloqueado após o cadastro.</small>
         </label>
 
         <label class="field">

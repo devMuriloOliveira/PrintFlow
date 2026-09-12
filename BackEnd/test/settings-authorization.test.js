@@ -1,11 +1,12 @@
 import test from 'node:test'
-import { backupStatus, formatTenantDataCsv, normalizedSettings } from '../src/routes/settings.js'
+import { backupStatus, formatTenantDataCsv, normalizedSettings, selectTenantExportResources } from '../src/routes/settings.js'
 import assert from 'node:assert/strict'
 import { canAccessRequest, requiredPermissionForRequest } from '../src/auth/authorization.js'
 
 test('exportacao de configuracoes usa a permissao settings.manage', () => {
   assert.equal(requiredPermissionForRequest('GET', '/api/settings/export'), 'settings.manage')
   assert.equal(requiredPermissionForRequest('GET', '/api/settings/backup-status'), 'settings.manage')
+  assert.equal(requiredPermissionForRequest('GET', '/api/settings/company-lookup'), 'settings.manage')
   assert.equal(canAccessRequest({ role: 'owner' }, 'GET', '/api/settings/backup-status'), true)
   assert.equal(canAccessRequest({ role: 'admin' }, 'GET', '/api/settings/export'), true)
   assert.equal(canAccessRequest({ role: 'financeiro' }, 'GET', '/api/settings/export'), false)
@@ -23,7 +24,7 @@ test('suporte fica disponivel para todos os perfis sem liberar configuracoes', (
 test('status de backup nao expoe dados ou credenciais', () => {
   const status = backupStatus()
   assert.equal(status.restore.enabled, false)
-  assert.equal(status.export.format, 'json')
+  assert.equal(status.export.format, 'csv')
   assert.deepEqual(status.export.excludes, ['tokens de integracoes', 'credenciais', 'sessoes de autenticacao'])
 })
 
@@ -45,4 +46,11 @@ test('portabilidade organiza todos os dados em CSV sem perder campos aninhados',
   assert.match(csv, /Colecao.*Registro.*Campo.*Valor/)
   assert.match(csv, /settings.*name.*Oficina; 3D/)
   assert.match(csv, /orders.*totals.*\{\"\"net\"\":42\}/)
+})
+
+test('exportacao selecionada aceita somente grupos previstos e retorna CSV', () => {
+  const selected = selectTenantExportResources('company,customers,desconhecido')
+  assert.deepEqual(selected.groups, ['company', 'customers'])
+  assert.deepEqual([...selected.resources].sort(), ['clients', 'orders', 'settings'])
+  assert.equal(backupStatus().export.format, 'csv')
 })

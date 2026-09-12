@@ -209,6 +209,12 @@ export const migrate =
     // Empresas existentes permanecem no acesso historico. Cadastros novos entram
     // no fluxo comercial e so ganham escrita apos checkout autorizado.
     await query(`alter table tenants add column if not exists billing_enforcement_exempt boolean not null default true`)
+    await query(`alter table tenants add column if not exists document_hash text`)
+    await query(`alter table tenants add column if not exists document_type text`)
+    await query(`alter table tenants add column if not exists document_locked_at timestamptz`)
+    await query(`alter table tenants drop constraint if exists tenants_document_type_check`)
+    await query(`alter table tenants add constraint tenants_document_type_check check (document_type is null or document_type in ('cpf', 'cnpj'))`)
+    await query(`create unique index if not exists tenants_document_hash_unique on tenants (document_hash) where document_hash is not null and document_hash <> ''`)
 
     // ==================================================
     // USERS

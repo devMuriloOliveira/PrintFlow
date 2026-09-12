@@ -2,7 +2,8 @@
 const props = withDefaults(defineProps<{ initialActive?: string; standalone?: boolean }>(), { initialActive: 'Empresa', standalone: false })
 const { notify } = useUi()
 const auth = useAuth()
-const { settings, updateSettings, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, changeStripeSubscriptionPlan, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
+const route = useRoute()
+const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, changeStripeSubscriptionPlan, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
@@ -21,12 +22,18 @@ const mfaDisablePassword = ref('')
 const mfaEnabled = ref(false)
 const deletingTenant = ref(false)
 const savingSettings = ref(false)
+const companyLookupLoading = ref(false)
 const exportingData = ref(false)
 const exportHistory = ref<Array<{ id: string; fileName: string; format: string; recordCount: number; status: string; createdAt: string }>>([])
 const backupLoading = ref(false)
 const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
 const submittingSupport = ref(false)
-const supportDraft = reactive({ subject: '', category: 'technical', privacyRight: '', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
+const supportDraft = reactive({
+  subject: props.initialActive === 'Ajuda e Suporte' ? String(route.query.assunto || '') : '',
+  category: props.initialActive === 'Ajuda e Suporte' && ['privacy', 'account'].includes(String(route.query.categoria || '')) ? String(route.query.categoria) : 'technical',
+  privacyRight: props.initialActive === 'Ajuda e Suporte' ? String(route.query.direito || '') : '',
+  priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: ''
+})
 const supportFilter = ref<'open' | 'closed' | 'all'>('open')
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
@@ -44,7 +51,52 @@ const tabs = [
   ['Assinatura', 'money', 'Plano e pagamento da plataforma'],
   ['Notificacoes', 'bell', 'E-mails e alertas do sistema']
 ]
-const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0 })
+const sectionPresentation: Record<string, { title: string; subtitle: string; asideTitle: string; asideDescription: string; checks: string[] }> = {
+  'Usuarios e Permissoes': { title: 'Usuários e permissões', subtitle: 'Gerencie a equipe, os perfis de acesso e os convites da empresa.', asideTitle: 'Governança de acesso', asideDescription: 'Cada pessoa recebe apenas as permissões necessárias para sua função.', checks: ['Papéis separados por responsabilidade.', 'Mudanças de acesso encerram sessões anteriores.', 'Convites possuem prazo de validade.'] },
+  Seguranca: { title: 'Segurança da conta', subtitle: 'Proteja sua senha, segundo fator e sessões conectadas.', asideTitle: 'Proteção da conta', asideDescription: 'Controles para reduzir acessos indevidos e recuperar o controle da conta.', checks: ['Senhas protegidas e sessões revogáveis.', 'MFA disponível para perfis privilegiados.', 'Dispositivos podem ser encerrados individualmente.'] },
+  Integracoes: { title: 'Integrações', subtitle: 'Acompanhe marketplaces, agentes e serviços conectados.', asideTitle: 'Conexões protegidas', asideDescription: 'A tela mostra o estado das integrações sem revelar credenciais.', checks: ['Tokens e segredos não são exibidos.', 'Conexões permanecem isoladas por empresa.', 'Última sincronização visível para diagnóstico.'] },
+  'Backup e Dados': { title: 'Backup e dados', subtitle: 'Exporte os dados da empresa e acompanhe o histórico de arquivos.', asideTitle: 'Portabilidade e segurança', asideDescription: 'As exportações preservam a rastreabilidade sem incluir credenciais.', checks: ['Arquivos gerados ficam registrados.', 'Credenciais e sessões são excluídas.', 'Restauração permanece controlada.'] },
+  'Privacidade e LGPD': { title: 'Privacidade e LGPD', subtitle: 'Acompanhe direitos dos titulares, exportações e solicitações.', asideTitle: 'Privacidade por padrão', asideDescription: 'Os controles preservam protocolo, finalidade e isolamento da empresa.', checks: ['Solicitações possuem protocolo e prazo.', 'Ações sensíveis exigem confirmação.', 'Histórico mínimo é preservado para auditoria.'] },
+  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Abra solicitações e acompanhe cada atendimento pelo protocolo.', asideTitle: 'Atendimento seguro', asideDescription: 'O suporte funciona dentro da conta autenticada e mantém o histórico da conversa.', checks: ['Conversas vinculadas ao solicitante.', 'Status e responsável ficam visíveis.', 'Atendimentos encerrados permanecem separados.'] }
+}
+const currentPresentation = computed(() => sectionPresentation[active.value])
+const pageTitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.title : 'Configurações')
+const pageSubtitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.subtitle : 'Gerencie os dados essenciais da empresa e da plataforma.')
+const showContextExport = computed(() => ['Backup e Dados', 'Privacidade e LGPD'].includes(active.value))
+const privacyExportGroups = ref<string[]>(['company', 'customers', 'catalog', 'production', 'financial', 'marketplaces'])
+const privacyExportOptions = [
+  { value: 'company', label: 'Cadastro e configurações da empresa', description: 'Dados cadastrais e preferências.' },
+  { value: 'customers', label: 'Clientes e pedidos', description: 'Cadastros de clientes e pedidos vinculados.' },
+  { value: 'catalog', label: 'Produtos e materiais', description: 'Produtos e filamentos.' },
+  { value: 'production', label: 'Produção e impressoras', description: 'Fila de produção e equipamentos.' },
+  { value: 'financial', label: 'Financeiro', description: 'Despesas, metas e divisões financeiras.' },
+  { value: 'marketplaces', label: 'Marketplaces', description: 'Canais e conexões autorizadas, sem credenciais.' }
+]
+const privacyRequestRight = ref('correction')
+const privacyRequestOptions = [
+  { value: 'correction', label: 'Corrigir dados', subject: 'Solicitação de correção de dados' },
+  { value: 'deletion', label: 'Solicitar eliminação', subject: 'Solicitação de eliminação de dados' },
+  { value: 'opposition', label: 'Registrar oposição', subject: 'Solicitação de oposição ao tratamento' },
+  { value: 'sharing', label: 'Consultar compartilhamentos', subject: 'Informações sobre compartilhamento de dados' }
+]
+const selectedPrivacyRequest = computed(() => privacyRequestOptions.find((option) => option.value === privacyRequestRight.value) || privacyRequestOptions[0])
+const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0, documentLocked: false, documentType: '' })
+const companyDocumentKind = ref<'cpf' | 'cnpj'>('cnpj')
+const companyDocumentLabel = computed(() => companyDocumentKind.value === 'cpf' ? 'CPF' : 'CNPJ')
+const companyDocumentPlaceholder = computed(() => companyDocumentKind.value === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00')
+const companyDocumentMaxLength = computed(() => companyDocumentKind.value === 'cpf' ? 14 : 18)
+const companyDocumentKindFrom = (value: string, stored = ''): 'cpf' | 'cnpj' => stored === 'cpf' || String(value || '').replace(/\D/g, '').length === 11 ? 'cpf' : 'cnpj'
+const formatCompanyDocument = () => {
+  const digits = String(company.cnpj || '').replace(/\D/g, '').slice(0, companyDocumentKind.value === 'cpf' ? 11 : 14)
+  company.cnpj = companyDocumentKind.value === 'cpf'
+    ? digits.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2')
+    : digits.replace(/(\d{2})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1/$2').replace(/(\d{4})(\d{1,2})$/, '$1-$2')
+}
+const selectCompanyDocumentKind = (kind: 'cpf' | 'cnpj') => {
+  if (company.documentLocked || companyDocumentKind.value === kind) return
+  companyDocumentKind.value = kind
+  company.cnpj = ''
+}
 const preferences = reactive({ emailAlerts: true, productionAlerts: true, marketplaceAlerts: true, dailySummary: false, compactLayout: false, logoUrl: '', brandName: '', accentColor: '#1768f2', defaultMargin: 40, monthlyFixedCost: 0, plannedMonthlyUnits: 0 })
 const previewBrandName = computed(() => preferences.brandName.trim() || company.name.trim() || 'PrintFlow 3D')
 const roles = [
@@ -187,8 +239,9 @@ const syncSettings = () => {
   Object.assign(company, {
     name: String(value.name || ''), cnpj: String(value.document || ''), phone: String(value.phone || ''), email: String(value.email || ''),
     address: String(value.address || ''), district: String(value.district || ''), city: String(value.city || ''), state: String(value.state || ''), zip: String(value.zip || ''),
-    country: String(value.country || 'Brasil'), currency: String(value.currency || 'Real (R$)'), timezone: String(value.timezone || '(GMT-03:00) Brasilia'), kwh: Number(value.kwh || 0)
+    country: String(value.country || 'Brasil'), currency: String(value.currency || 'Real (R$)'), timezone: String(value.timezone || '(GMT-03:00) Brasilia'), kwh: Number(value.kwh || 0), documentLocked: Boolean(value.documentLocked), documentType: String(value.documentType || '')
   })
+  companyDocumentKind.value = companyDocumentKindFrom(company.cnpj, company.documentType)
   Object.assign(preferences, (value.preferences && typeof value.preferences === 'object' ? value.preferences : {}))
 }
 
@@ -203,18 +256,18 @@ const saveSettings = async () => {
   } finally { savingSettings.value = false }
 }
 
-const downloadTenantData = async () => {
+const downloadTenantData = async (groups: string[] = ['all']) => {
+  if (!groups.length) return notify('Selecione pelo menos um grupo de dados para exportar.')
   exportingData.value = true
   try {
-    const result = await exportTenantData()
-    const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' })
+    const blob = await exportTenantData(groups)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = result.fileName
+    link.download = `printflow-dados-${new Date().toISOString().slice(0, 10)}.csv`
     link.click()
     URL.revokeObjectURL(url)
-    notify('Arquivo de dados gerado e registrado na auditoria.')
+    notify('Arquivo CSV gerado e registrado na auditoria.')
     await loadExportHistory()
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel exportar seus dados.')
@@ -301,6 +354,29 @@ const startStripeCheckout = async (cycle: 'monthly' | 'yearly' = billingForm.bil
     notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
   } finally { creatingBillingLink.value = false }
 }
+
+const lookupCompany = async () => {
+  if (company.documentLocked || companyDocumentKind.value !== 'cnpj') return
+  companyLookupLoading.value = true
+  try {
+    const result = await lookupCompanyByCnpj(company.cnpj)
+    Object.assign(company, {
+      name: result.name || company.name,
+      phone: result.phone || company.phone,
+      email: result.email || company.email,
+      address: result.address || company.address,
+      district: result.district || company.district,
+      city: result.city || company.city,
+      state: result.state || company.state,
+      zip: result.zip || company.zip
+    })
+    notify(`Dados de ${result.legalName || result.name || 'empresa'} preenchidos. Revise antes de salvar.`)
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel consultar o CNPJ.')
+  } finally {
+    companyLookupLoading.value = false
+  }
+}
 const startMfaSetup = async () => {
   mfaLoading.value = true
   try { mfaSetup.value = await auth.setupMfa(); mfaCode.value = ''; notify('Escaneie o QR Code ou use a chave no seu aplicativo autenticador.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel iniciar o MFA.') } finally { mfaLoading.value = false }
@@ -333,6 +409,10 @@ const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
 const integrationStatus = (status: string) => ({ connected: 'Conectado', active: 'Conectado', online: 'Online', not_configured: 'Nao configurado', offline: 'Offline', revoked: 'Revogado' }[status] || status)
 const integrationBadge = (status: string) => ['connected', 'active', 'online'].includes(status) ? 'badge badge--green' : status === 'not_configured' || status === 'revoked' ? 'badge badge--orange' : 'badge badge--gray'
 const openPrivacySupport = (subject = 'Solicitacao de privacidade e LGPD', privacyRight = 'access') => {
+  if (props.standalone) {
+    void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'privacy', direito: privacyRight, assunto: subject } })
+    return
+  }
   supportDraft.category = 'privacy'
   supportDraft.privacyRight = privacyRight
   supportDraft.priority = 'normal'
@@ -354,6 +434,7 @@ const loadSectionOnce = (key: string, loader: () => Promise<unknown>, force = fa
   sectionRequests[key] = request
   return request
 }
+const openDocumentChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: 'Solicitação de troca de CPF para CNPJ' } })
 
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes') void loadSectionOnce('members', loadMembers)
@@ -365,7 +446,7 @@ watch(active, (tab) => {
   if (tab === 'Integracoes') void loadSectionOnce('integrations', loadIntegrations)
   if (tab === 'Assinatura') void loadSectionOnce('billing', loadStripeBilling)
   if (tab === 'Ajuda e Suporte') void loadSectionOnce('support', loadSupport)
-})
+}, { immediate: true })
 
 watch(members, syncMemberDrafts, { immediate: true })
 watch(settings, syncSettings, { immediate: true })
@@ -378,26 +459,26 @@ watch(() => supportDraft.category, (category) => {
 
 <template>
   <div>
-    <PageHeader title="Configuracoes" subtitle="Gerencie as configuracoes da sua empresa e da plataforma" />
+    <PageHeader :title="pageTitle" :subtitle="pageSubtitle" />
 
-    <div class="settings-layout">
+    <div class="settings-layout" :class="{ 'settings-layout--standalone': standalone }">
       <ConfiguracoesConfigSettingsNav v-if="!standalone" :tabs="tabs" :active="active" @select="active = $event" />
 
-      <section class="settings-panel">
-        <NuxtLink v-if="standalone" class="auth-recovery" to="/configuracoes">← Voltar para configurações</NuxtLink>
+      <section class="settings-panel settings-panel--content">
+        <NuxtLink v-if="standalone" class="settings-page-back" to="/configuracoes"><UiIcon name="chevron" :size="14" />Central de configurações</NuxtLink>
         <div v-if="active === 'Empresa'">
           <div style="display:flex;justify-content:space-between;gap:12px">
             <div><h2>Informacoes da Empresa</h2><p>Atualize os dados principais da sua empresa.</p></div>
             <button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">{{ savingSettings ? 'Salvando...' : 'Salvar alteracoes' }}</button>
           </div>
           <div class="form-grid">
-            <div class="field col-7"><label>Nome da Empresa *</label><input v-model="company.name"></div><div class="field col-5"><label>CNPJ</label><input v-model="company.cnpj"></div><div class="field col-6"><label>Telefone</label><input v-model="company.phone"></div><div class="field col-6"><label>E-mail *</label><input v-model="company.email" type="email"></div><div class="field col-8"><label>Endereco</label><input v-model="company.address"></div><div class="field col-4"><label>Bairro</label><input v-model="company.district"></div><div class="field col-4"><label>Cidade</label><input v-model="company.city"></div><div class="field col-2"><label>Estado</label><input v-model="company.state"></div><div class="field col-3"><label>CEP</label><input v-model="company.zip"></div><div class="field col-3"><label>Pais</label><input v-model="company.country"></div><div class="field col-4"><label>Moeda</label><input v-model="company.currency"></div><div class="field col-4"><label>Fuso Horario</label><input v-model="company.timezone"></div><div class="field col-4"><label>Custo medio do kWh</label><input v-model.number="company.kwh" type="number" min="0" step=".01"></div>
+            <div class="field col-7"><label>Nome da Empresa *</label><input v-model="company.name"></div><div class="field col-5"><label>{{ companyDocumentLabel }} <small v-if="company.documentLocked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Contas existentes podem permanecer sem documento. Ao salvar um CPF ou CNPJ, ele ficará bloqueado.</small><small v-if="company.documentLocked && company.documentType === 'cpf'">Para substituir o CPF por CNPJ, <button class="link-button" type="button" @click="openDocumentChangeRequest">abra uma solicitação</button>.</small></div><div class="field col-6"><label>Telefone</label><input v-model="company.phone"></div><div class="field col-6"><label>E-mail *</label><input v-model="company.email" type="email"></div><div class="field col-8"><label>Endereco</label><input v-model="company.address"></div><div class="field col-4"><label>Bairro</label><input v-model="company.district"></div><div class="field col-4"><label>Cidade</label><input v-model="company.city"></div><div class="field col-2"><label>Estado</label><input v-model="company.state"></div><div class="field col-3"><label>CEP</label><input v-model="company.zip"></div><div class="field col-3"><label>Pais</label><input v-model="company.country"></div><div class="field col-12"><label>Fuso Horario</label><input v-model="company.timezone"></div>
           </div>
         </div>
 
         <div v-else-if="active === 'Financeiro'">
           <h2>Parametros Financeiros</h2><p>Esses valores sao usados como padrao em novos calculos de produto.</p>
-          <div class="form-grid"><label class="field col-4"><span>Moeda</span><select v-model="company.currency"><option value="Real (R$)">Real (R$)</option><option value="Dolar (US$)">Dolar (US$)</option><option value="Euro (EUR)">Euro (EUR)</option></select></label><label class="field col-4"><span>Fuso horario</span><input v-model="company.timezone"></label><label class="field col-4"><span>Custo do kWh</span><input v-model.number="company.kwh" type="number" min="0" step=".01"></label><label class="field col-4"><span>Margem padrao (%)</span><input v-model.number="preferences.defaultMargin" type="number" min="0" step=".1"></label><label class="field col-4"><span>Custos fixos mensais</span><input v-model.number="preferences.monthlyFixedCost" type="number" min="0" step=".01"></label><label class="field col-4"><span>Unidades planejadas por mes</span><input v-model.number="preferences.plannedMonthlyUnits" type="number" min="0" step="1"></label></div>
+          <div class="form-grid"><label class="field col-4"><span>Moeda</span><select v-model="company.currency"><option value="Real (R$)">Real (R$)</option><option value="Dolar (US$)">Dolar (US$)</option><option value="Euro (EUR)">Euro (EUR)</option></select></label><label class="field col-4"><span>Custo do kWh</span><input v-model.number="company.kwh" type="number" min="0" step=".01"></label><label class="field col-4"><span>Margem padrao (%)</span><input v-model.number="preferences.defaultMargin" type="number" min="0" step=".1"></label><label class="field col-6"><span>Custos fixos mensais</span><input v-model.number="preferences.monthlyFixedCost" type="number" min="0" step=".01"></label><label class="field col-6"><span>Unidades planejadas por mes</span><input v-model.number="preferences.plannedMonthlyUnits" type="number" min="0" step="1"></label></div>
           <div class="info-note" style="margin:16px 0"><UiIcon name="info" />O custo fixo e rateado por unidade somente em novos calculos. Produtos ja salvos preservam a composicao financeira original.</div>
           <button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">{{ savingSettings ? 'Salvando...' : 'Salvar parametros' }}</button>
         </div>
@@ -438,7 +519,7 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Usuarios e Permissoes'">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+          <div class="settings-section-heading">
             <div><h2>Usuarios e Permissoes</h2><p>Altere o acesso de membros ja cadastrados nesta empresa.</p></div>
             <button class="btn" :disabled="membersLoading" @click="loadMembers">Atualizar</button>
           </div>
@@ -461,6 +542,9 @@ watch(() => supportDraft.category, (category) => {
             </table>
           </div>
           <div v-if="canManageMembers" style="margin-top:20px"><h3 style="font-size:12px;margin:0 0 6px">Convites pendentes</h3><p style="color:var(--muted);font-size:10px;margin:0 0 10px">Cada link expira em 48 horas. Reenviar cancela o link anterior.</p><div v-if="!invitations.length" class="info-note"><UiIcon name="check" />Nenhum convite pendente.</div><div v-else class="table-scroll"><table class="data-table"><thead><tr><th>E-mail</th><th>Perfil</th><th>Expira em</th><th>Acoes</th></tr></thead><tbody><tr v-for="invitation in invitations" :key="invitation.id"><td>{{ invitation.email }}</td><td>{{ roles.find((role) => role.value === invitation.role)?.label || invitation.role }}</td><td>{{ new Date(invitation.expiresAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" :disabled="Boolean(invitationActionId)" @click="resendPendingInvitation(invitation.id)">{{ invitationActionId === invitation.id ? 'Aguarde...' : 'Reenviar' }}</button><button class="btn btn--danger" :disabled="Boolean(invitationActionId)" @click="cancelPendingInvitation(invitation.id, invitation.email)">Cancelar</button></td></tr></tbody></table></div></div>
+          <PanelCard title="Funcoes de Usuario" subtitle="Os acessos sao protegidos e registrados no historico de seguranca." style="margin-top:20px">
+            <LazyConfigRoleGrid :roles="roles" :members="members" />
+          </PanelCard>
         </div>
 
         <div v-else-if="active === 'Seguranca'">
@@ -485,14 +569,14 @@ watch(() => supportDraft.category, (category) => {
             <div v-if="mfaEnabled" class="form-grid" style="margin-top:12px"><label class="field col-4"><span>Senha atual</span><input v-model="mfaDisablePassword" type="password" autocomplete="current-password"></label><div><button class="btn btn--danger" :disabled="mfaLoading" @click="turnOffMfa">Desativar MFA</button></div></div>
           </div>
           <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Sessoes ativas</h2><p>Encerre acessos que voce nao reconhece.</p></div><button class="btn" :disabled="sessionsLoading" @click="loadSessions">Atualizar</button></div>
+          <div class="settings-section-heading"><div><h2>Sessoes ativas</h2><p>Encerre acessos que voce nao reconhece.</p></div><button class="btn" :disabled="sessionsLoading" @click="loadSessions">Atualizar</button></div>
           <div v-if="sessionsLoading" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Carregando sessoes</h3></div></div>
           <div v-else-if="!sessions.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Nenhuma sessao ativa</h3><p>Entre novamente para continuar usando o PrintFlow.</p></div></div>
           <div v-else><div class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Dispositivo</th><th>IP</th><th>Inicio</th><th>Ultima atividade</th><th>Expira em</th><th>Acao</th></tr></thead><tbody><tr v-for="session in sessions" :key="session.sessionId"><td>{{ session.deviceLabel || 'Dispositivo nao identificado' }}</td><td>{{ session.ipMasked || '-' }}</td><td>{{ new Date(session.createdAt).toLocaleString('pt-BR') }}</td><td>{{ session.lastSeenAt ? new Date(session.lastSeenAt).toLocaleString('pt-BR') : '-' }}</td><td>{{ new Date(session.expiresAt).toLocaleString('pt-BR') }}</td><td><button class="btn btn--danger" @click="endSession(session.sessionId)">Encerrar</button></td></tr></tbody></table></div><button class="btn btn--danger" style="margin-top:16px" @click="endAllSessions">Encerrar todas as sessoes</button></div>
         </div>
 
         <div v-else-if="active === 'Backup e Dados'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Backup e dados</h2><p>Exporte uma copia dos dados da sua empresa. Credenciais, integracoes e sessoes nao entram no arquivo.</p></div><button class="btn" :disabled="backupLoading" @click="loadBackup">Atualizar</button></div>
+          <div class="settings-section-heading"><div><h2>Backup e dados</h2><p>Exporte uma copia dos dados da sua empresa. Credenciais, integracoes e sessoes nao entram no arquivo.</p></div><button class="btn" :disabled="backupLoading" @click="loadBackup">Atualizar</button></div>
           <div v-if="backupLoading" class="empty-state"><div><h3>Verificando disponibilidade</h3></div></div>
           <template v-else>
             <div v-if="!backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Exportacao indisponivel no momento. Tente novamente mais tarde ou entre em contato com a equipe de suporte.</div>
@@ -514,27 +598,27 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Privacidade e LGPD'" class="settings-security-card">
-          <div><h2>Privacidade e LGPD</h2><p>Consulte os controles da sua empresa e abra uma solicitação quando precisar exercer um direito.</p></div>
-          <div class="info-note" style="margin-top:16px"><UiIcon name="info" />Este é o centro interno da empresa. A plataforma PrintFlow atua como controladora dos dados tratados no produto. O canal atende somente usuários autenticados.</div>
+          <div><h2>Privacidade e LGPD</h2><p>Escolha os dados que deseja exportar ou o direito que deseja exercer.</p></div>
+          <div class="info-note" style="margin-top:16px"><UiIcon name="info" />As exportações são geradas em CSV, sem credenciais, tokens ou sessões. A seleção limita o arquivo aos grupos escolhidos.</div>
+
+          <form class="integration-section" @submit.prevent="downloadTenantData(privacyExportGroups)">
+            <div class="integration-section__head"><div><h3>Exportar dados da empresa</h3><p>Selecione exatamente quais grupos devem entrar no arquivo CSV.</p></div><UiIcon name="download" /></div>
+            <div class="privacy-export-options">
+              <label v-for="option in privacyExportOptions" :key="option.value" class="privacy-export-option">
+                <input v-model="privacyExportGroups" type="checkbox" :value="option.value">
+                <span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span>
+              </label>
+            </div>
+            <div class="privacy-export-actions"><span>{{ privacyExportGroups.length }} grupo(s) selecionado(s)</span><button class="btn btn--primary" type="submit" :disabled="exportingData || !privacyExportGroups.length"><UiIcon name="download" />{{ exportingData ? 'Gerando CSV...' : 'Exportar seleção em CSV' }}</button></div>
+          </form>
 
           <div class="integration-section">
-            <div class="integration-section__head"><div><h3>Seus dados</h3><p>Baixe uma cópia ou peça uma alteração nos dados tratados pela empresa.</p></div><UiIcon name="users" /></div>
-            <div class="form-grid">
-              <div class="info-note col-6"><UiIcon name="download" /><div><strong>Exportar dados da empresa</strong><br>Gera o arquivo disponível no fluxo de Backup e Dados, sem credenciais ou sessões.<br><button class="btn" style="margin-top:8px" :disabled="exportingData" @click="downloadTenantData">{{ exportingData ? 'Gerando...' : 'Exportar agora' }}</button></div></div>
-              <div class="info-note col-6"><UiIcon name="edit" /><div><strong>Consultar ou corrigir dados</strong><br>Abra uma solicitação com o escopo necessário e acompanhe o protocolo.<br><button class="btn" style="margin-top:8px" @click="openPrivacySupport('Consulta e acesso aos dados', 'access')">Solicitar acesso</button><button class="btn" style="margin:8px 0 0 6px" @click="openPrivacySupport('Solicitacao de correcao de dados', 'correction')">Pedir correção</button></div></div>
-            </div>
+            <div class="integration-section__head"><div><h3>Solicitar outro direito</h3><p>Correção, eliminação, oposição e informações de compartilhamento continuam rastreáveis por protocolo.</p></div><UiIcon name="shield" /></div>
+            <div class="form-grid"><label class="field col-8"><span>O que você precisa?</span><select v-model="privacyRequestRight"><option v-for="option in privacyRequestOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><div class="privacy-request-action col-4"><button class="btn" @click="openPrivacySupport(selectedPrivacyRequest.subject, selectedPrivacyRequest.value)">Continuar solicitação</button></div></div>
           </div>
 
           <div class="integration-section">
-            <div class="integration-section__head"><div><h3>Direitos dos titulares</h3><p>Solicitações são registradas e avaliadas conforme a base legal aplicável.</p></div><UiIcon name="shield" /></div>
-            <div class="form-grid">
-              <div class="info-note col-6"><UiIcon name="close" /><div><strong>Eliminação ou oposição</strong><br>Solicite a exclusão ou questione um tratamento específico.<br><button class="btn" style="margin-top:8px" @click="openPrivacySupport('Solicitacao de eliminacao de dados', 'deletion')">Solicitar exclusão</button><button class="btn" style="margin:8px 0 0 6px" @click="openPrivacySupport('Solicitacao de oposicao ao tratamento', 'opposition')">Registrar oposição</button></div></div>
-              <div class="info-note col-6"><UiIcon name="box" /><div><strong>Compartilhamento e portabilidade</strong><br>Peça informações sobre compartilhamentos ou a portabilidade quando aplicável.<br><button class="btn" style="margin-top:8px" @click="openPrivacySupport('Informacoes sobre compartilhamento', 'sharing')">Solicitar informações</button><button class="btn" style="margin:8px 0 0 6px" @click="openPrivacySupport('Solicitacao de portabilidade', 'portability')">Pedir portabilidade</button></div></div>
-            </div>
-          </div>
-
-          <div class="integration-section">
-            <div class="integration-section__head"><div><h3>Acompanhar solicitações</h3><p>Veja protocolos, status e converse com a equipe responsável.</p></div><button class="btn" @click="active = 'Ajuda e Suporte'">Abrir solicitações</button></div>
+            <div class="integration-section__head"><div><h3>Acompanhar solicitações</h3><p>Veja protocolos, status, prazo e converse com a equipe responsável.</p></div><button class="btn" @click="openPrivacySupport()">Abrir solicitações</button></div>
           </div>
 
           <div class="integration-section">
@@ -543,9 +627,9 @@ watch(() => supportDraft.category, (category) => {
           </div>
         </div>
 
-        <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Suas preferencias sao salvas para esta empresa.</p></div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas por e-mail</span><input v-model="preferences.emailAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label><label class="field col-6"><span>Resumo diario</span><input v-model="preferences.dailySummary" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
+        <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Defina quais alertas operacionais devem aparecer para a sua equipe no sistema.</p></div><div class="info-note" style="margin-top:16px"><UiIcon name="info" />O envio automático de resumo diário por e-mail ainda não está disponível; por isso ele não é oferecido como preferência.</div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
         <div v-else-if="active === 'Integracoes'">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Integracoes</h2><p>Visao operacional das conexoes, sem expor tokens, chaves ou senhas.</p></div><button class="btn" :disabled="integrationsLoading" @click="loadIntegrations">Atualizar</button></div>
+          <div class="settings-section-heading"><div><h2>Integracoes</h2><p>Visao operacional das conexoes, sem expor tokens, chaves ou senhas.</p></div><button class="btn" :disabled="integrationsLoading" @click="loadIntegrations">Atualizar</button></div>
           <div v-if="integrationsLoading" class="empty-state"><div><h3>Consultando integracoes</h3></div></div>
           <template v-else>
             <div class="integration-summary"><div class="stat-box"><small>Marketplaces</small><strong>{{ integrationsOverview.marketplaces.length }}</strong></div><div class="stat-box"><small>Agents</small><strong>{{ integrationsOverview.agents.length }}</strong></div><div class="stat-box"><small>E-mail</small><strong><span :class="integrationBadge(integrationsOverview.email.status)">{{ integrationStatus(integrationsOverview.email.status) }}</span></strong></div></div>
@@ -556,7 +640,7 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Ajuda e Suporte'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start"><div><h2>Ajuda e Suporte</h2><p>Abra uma solicitação, acompanhe o prazo e converse com a equipe pelo protocolo.</p></div><span class="badge badge--green">Canal autenticado</span></div>
+          <div class="settings-section-heading"><div><h2>Ajuda e Suporte</h2><p>Abra uma solicitação, acompanhe o prazo e converse com a equipe pelo protocolo.</p></div><span class="badge badge--green">Canal autenticado</span></div>
           <div class="support-overview" style="margin-top:18px"><div class="stat-box"><small>Em andamento</small><strong>{{ supportStats.open }}</strong><span>Solicitações abertas</span></div><div class="stat-box"><small>Aguardando triagem</small><strong>{{ supportStats.waiting }}</strong><span>A equipe analisará em breve</span></div><div class="stat-box"><small>Encerradas</small><strong>{{ supportStats.closed }}</strong><span>Histórico preservado</span></div></div>
           <div class="info-note" style="margin-top:16px"><UiIcon name="info" /><div><strong>Como funciona</strong><br>Descreva o problema com o impacto e o resultado esperado. A equipe responderá no chat deste protocolo; solicitações de privacidade e LGPD permanecem rastreáveis separadamente.</div></div>
           <form class="integration-section" @submit.prevent="submitSupportRequest">
@@ -576,17 +660,32 @@ watch(() => supportDraft.category, (category) => {
             <button class="btn btn--primary" type="submit" :disabled="submittingSupport">{{ submittingSupport ? 'Criando...' : 'Criar solicitacao' }}</button>
           </form>
 
-          <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-top:24px"><div><h2>Minhas solicitações</h2><p>Somente você e a equipe de suporte acessam estas conversas.</p></div><div style="display:flex;gap:8px;align-items:center"><select v-model="supportFilter" class="select-compact" aria-label="Filtrar solicitações"><option value="open">Em andamento</option><option value="closed">Encerradas</option><option value="all">Todas</option></select><button class="btn" @click="loadSupport">Atualizar</button></div></div>
+          <div class="settings-section-heading settings-section-heading--spaced"><div><h2>Minhas solicitações</h2><p>Somente você e a equipe de suporte acessam estas conversas.</p></div><div class="settings-section-heading__actions"><select v-model="supportFilter" class="select-compact" aria-label="Filtrar solicitações"><option value="open">Em andamento</option><option value="closed">Encerradas</option><option value="all">Todas</option></select><button class="btn" @click="loadSupport">Atualizar</button></div></div>
           <div v-if="!filteredSupportRequests.length" class="empty-state"><div><h3>{{ supportFilter === 'closed' ? 'Nenhuma solicitação encerrada' : 'Nenhuma solicitação em andamento' }}</h3><p>{{ supportFilter === 'closed' ? 'O histórico aparecerá aqui quando um atendimento for encerrado.' : 'Use o formulário acima para iniciar um atendimento.' }}</p></div></div>
           <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Tipo</th><th>Status</th><th>Prazo</th><th>Responsável</th><th>Criada em</th><th>Ação</th></tr></thead><tbody><tr v-for="request in filteredSupportRequests" :key="request.id"><td><strong class="support-protocol">{{ request.id }}</strong></td><td>{{ request.subject }}<small v-if="request.requestKind === 'privacy'">{{ request.privacyRight || 'Direito do titular' }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : supportCategoryLabel(request.category) }}</td><td><span :class="supportStatusClass(request.status)">{{ supportStatusLabel(request.status) }}</span></td><td>{{ request.dueAt ? new Date(request.dueAt).toLocaleDateString('pt-BR') : '-' }}</td><td>{{ request.responsibleName || 'Ainda não atribuído' }}</td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
         </div>
       </section>
 
-      <aside class="settings-panel"><h2>Dados e Seguranca</h2><p>Os dados da sua empresa sao protegidos e mantidos separados de outras empresas.</p><ul class="check-list"><li><span><UiIcon name="check" :size="15" /></span>Permissoes aplicadas com seguranca.</li><li><span><UiIcon name="check" :size="15" /></span>Exportacao registrada no historico de seguranca.</li><li><span><UiIcon name="check" :size="15" /></span>Credenciais de integracoes nao sao exibidas.</li></ul><button class="btn btn--wide" :disabled="exportingData" @click="downloadTenantData"><UiIcon name="download" />Exportar dados</button></aside>
+      <aside class="settings-panel settings-context-panel">
+        <template v-if="standalone && currentPresentation">
+          <span class="settings-context-panel__eyebrow"><UiIcon name="shield" :size="14" /> Controle da empresa</span>
+          <h2>{{ currentPresentation.asideTitle }}</h2>
+          <p>{{ currentPresentation.asideDescription }}</p>
+          <ul class="check-list settings-context-panel__checks">
+            <li v-for="check in currentPresentation.checks" :key="check"><span><UiIcon name="check" :size="15" /></span>{{ check }}</li>
+          </ul>
+          <button v-if="showContextExport" class="btn btn--wide" :disabled="exportingData" @click="downloadTenantData"><UiIcon name="download" />{{ exportingData ? 'Gerando arquivo...' : 'Exportar dados' }}</button>
+        </template>
+        <template v-else>
+          <span class="settings-context-panel__eyebrow"><UiIcon name="shield" :size="14" /> Proteção ativa</span>
+          <h2>Dados e segurança</h2>
+          <p>Os dados da sua empresa são protegidos e mantidos separados de outras empresas.</p>
+          <ul class="check-list settings-context-panel__checks"><li><span><UiIcon name="check" :size="15" /></span>Permissões aplicadas com segurança.</li><li><span><UiIcon name="check" :size="15" /></span>Exportações registradas no histórico.</li><li><span><UiIcon name="check" :size="15" /></span>Credenciais de integrações não são exibidas.</li></ul>
+          <NuxtLink class="btn btn--wide" to="/configuracoes/backup"><UiIcon name="download" />Backup e dados</NuxtLink>
+          <NuxtLink class="btn btn--wide" to="/configuracoes/privacidade"><UiIcon name="shield" />Privacidade e LGPD</NuxtLink>
+        </template>
+      </aside>
     </div>
 
-    <PanelCard v-if="active === 'Usuarios e Permissoes'" title="Funcoes de Usuario" subtitle="Os acessos sao protegidos e registrados no historico de seguranca." style="margin-top:12px">
-      <LazyConfigRoleGrid :roles="roles" :members="members" />
-    </PanelCard>
   </div>
 </template>

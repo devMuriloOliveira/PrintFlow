@@ -483,8 +483,12 @@ export const useAppData = () => {
     return saved
   }
 
-  const exportTenantData = () => $fetch<{ fileName: string; exportedAt: string; data: AppData }>(apiUrl('/api/settings/export'), {
-    headers: resourceHeaders()
+  const lookupCompanyByCnpj = (cnpj: string) => $fetch<{
+    name: string; legalName: string; phone: string; email: string; address: string; district: string; city: string; state: string; zip: string; status: string
+  }>(apiUrl('/api/settings/company-lookup'), { query: { cnpj }, headers: resourceHeaders() })
+
+  const exportTenantData = (groups: string[] = ['all']) => $fetch<Blob>(apiUrl('/api/settings/export'), {
+    query: { groups: groups.join(',') }, responseType: 'blob', headers: resourceHeaders()
   })
 
   const getStripeBilling = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
@@ -570,6 +574,7 @@ export const useAppData = () => {
     , syncMarketplaceOrder
     , linkMarketplaceOrderProduct
     , updateSettings
+    , lookupCompanyByCnpj
     , exportTenantData
     , getStripeBilling
     , createStripeCheckout, changeStripeSubscriptionPlan

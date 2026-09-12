@@ -11,7 +11,7 @@ const { createAuthEmailToken, consumeAuthEmailToken, registerUser, resetUserPass
 const { generateMfaSecret, createTotpCode, verifyTotpCode } = await import('../src/services/mfa.js')
 
 test('tokens de autenticacao sao de uso unico e separados por finalidade', async () => {
-  const user = await registerUser({ name: 'Token Teste', email: `token-${Date.now()}@example.com`, password: 'SenhaForte1!', company: 'Empresa Token' })
+  const user = await registerUser({ name: 'Token Teste', email: `token-${Date.now()}@example.com`, password: 'SenhaForte1!', company: 'Empresa Token', document: '52998224725' })
   const created = await createAuthEmailToken(user.id, 'verify_email')
   assert.equal(await consumeAuthEmailToken(created.token, 'verify_email'), user.id)
   await assert.rejects(() => consumeAuthEmailToken(created.token, 'verify_email'), /Token invalido ou expirado/)
@@ -19,7 +19,7 @@ test('tokens de autenticacao sao de uso unico e separados por finalidade', async
 
 test('reset de senha invalida a senha anterior', async () => {
   const email = `reset-${Date.now()}@example.com`
-  const user = await registerUser({ name: 'Reset Teste', email, password: 'SenhaForte1!', company: 'Empresa Reset' })
+  const user = await registerUser({ name: 'Reset Teste', email, password: 'SenhaForte1!', company: 'Empresa Reset', document: '52998224725' })
   const created = await createAuthEmailToken(user.id, 'reset_password')
   const userAfterReset = await resetUserPassword(await consumeAuthEmailToken(created.token, 'reset_password'), 'NovaSenhaForte1!')
   assert.equal(userAfterReset.id, user.id)

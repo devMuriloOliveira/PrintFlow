@@ -138,7 +138,7 @@ export const useAuth = () => {
     return session.user
   }
 
-  const register = async (payload: { name: string; email: string; password: string; company: string }) => {
+  const register = async (payload: { name: string; email: string; password: string; company: string; document: string }) => {
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/register'), {
       method: 'POST',
       body: payload,
