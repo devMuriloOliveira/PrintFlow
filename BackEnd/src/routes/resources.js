@@ -5,7 +5,7 @@ import { getAuthUser } from './auth.js'
 import { readJsonBody } from '../http/body.js'
 import { sendBuffer, sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
-import { listResource, loadAppData } from '../repositories/appDataRepository.js'
+import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
 import { createFilamentMovement, listFilamentMovements } from '../repositories/inventoryRepository.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
@@ -26,11 +26,38 @@ const readResource = (resource) => async (req) => {
 }
 
 export const readRoutes = {
+  '/api/orders/summary': async (req) => {
+    const tenantId = await getTenantId(req)
+    if (hasDatabase) return getOrdersSummary(tenantId)
+    const orders = getTenantData(tenantId).orders || []
+    const byStatus = new Map()
+    const totals = orders.reduce((acc, order) => {
+      const status = order.status || 'Sem status'; byStatus.set(status, (byStatus.get(status) || 0) + 1)
+      acc.orderCount += 1; acc.gross += Number(order.gross || 0); acc.net += Number(order.net || 0); acc.profit += Number(order.profit || 0); acc.fees += Number(order.fee || 0); acc.shipping += Number(order.shipping || 0)
+      return acc
+    }, { orderCount: 0, gross: 0, net: 0, profit: 0, fees: 0, shipping: 0 })
+    return { ...totals, ticket: totals.orderCount ? totals.gross / totals.orderCount : 0, byStatus: [...byStatus.entries()].map(([status, count]) => ({ status, count })) }
+  },
   '/api/products': async (req) => {
     const tenantId = await getTenantId(req)
     return hasDatabase ? listProducts(tenantId) : getTenantData(tenantId).products
   },
-  '/api/orders': readResource('orders'),
+  '/api/orders': async (req) => {
+    const url = new URL(req.url, 'http://localhost')
+    const hasPaging = ['limit', 'offset', 'status', 'salesChannel', 'search', 'from', 'to', 'clientId'].some((key) => url.searchParams.has(key))
+    const tenantId = await getTenantId(req)
+    if (!hasPaging) return hasDatabase ? listResource(tenantId, 'orders') : getTenantData(tenantId).orders
+    if (hasDatabase) return listOrdersPage(tenantId, {
+      limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset'), status: url.searchParams.get('status'),
+      salesChannel: url.searchParams.get('salesChannel'), search: url.searchParams.get('search'), from: url.searchParams.get('from'), to: url.searchParams.get('to')
+      , clientId: url.searchParams.get('clientId')
+    })
+    const all = getTenantData(tenantId).orders || []
+    const search = String(url.searchParams.get('search') || '').toLowerCase()
+    const filtered = all.filter((order) => (!url.searchParams.get('status') || String(order.status) === url.searchParams.get('status')) && (!url.searchParams.get('salesChannel') || String(order.salesChannel) === url.searchParams.get('salesChannel')) && (!search || Object.values(order).join(' ').toLowerCase().includes(search)))
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 25)); const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0)
+    return { items: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset }
+  },
   '/api/expenses': readResource('expenses'),
   '/api/filaments': readResource('filaments'),
   '/api/printers': readResource('printers'),

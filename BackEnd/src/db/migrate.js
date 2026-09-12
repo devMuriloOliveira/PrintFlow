@@ -2965,6 +2965,14 @@ export const migrate =
     `)
     await query(`create index if not exists inventory_movements_lookup_idx on inventory_movements (tenant_id, resource, resource_id, created_at desc)`)
 
+    // Índices usados pela listagem paginada e pelos relatórios de vendas.
+    // O tenant permanece como primeira chave para preservar a separação por empresa.
+    await query(`create index if not exists orders_tenant_order_date_idx on orders (tenant_id, order_date desc)`)
+    await query(`create index if not exists tracked_sales_tenant_sold_at_idx on tracked_sales (tenant_id, sold_at desc)`)
+    await query(`create index if not exists platform_admin_audit_created_at_idx on platform_admin_audit_events (created_at desc)`)
+    await query(`create index if not exists tenant_audit_requests_created_at_idx on tenant_audit_requests (created_at desc)`)
+    await query(`create index if not exists tenant_audit_requests_kind_status_created_idx on tenant_audit_requests (request_kind, status, created_at desc)`)
+
     await query(
       `
         create table if not exists operational_audit_events (

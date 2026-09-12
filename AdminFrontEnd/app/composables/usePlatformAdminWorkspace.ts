@@ -9,6 +9,8 @@ const inFlight = new Map<string, Promise<unknown>>()
 export const usePlatformAdminWorkspace = () => {
   const session = useAdminSession()
   const overview = useState<Overview | null>('platform-admin-overview', () => null)
+  const platformAuditEvents = useState<PlatformAudit[]>('platform-admin-audit-events', () => [])
+  const platformAuditUpdatedAt = useState<Record<string, number>>('platform-admin-audit-updated-at', () => ({}))
   const tenants = useState<Tenant[]>('platform-admin-tenants', () => [])
   const tenantPage = useState('platform-admin-tenant-page', () => 0)
   const tenantPageSize = 50
@@ -22,8 +24,11 @@ export const usePlatformAdminWorkspace = () => {
   const error = useState('platform-admin-error', () => '')
   const notifications = useState<PlatformNotification[]>('platform-admin-notifications', () => [])
   const supportMacros = useState<SupportMacro[]>('platform-admin-support-macros', () => [])
+  const supportMacrosUpdatedAt = useState('platform-admin-support-macros-updated-at', () => 0)
   const supportMetrics = useState<SupportMetrics | null>('platform-admin-support-metrics', () => null)
+  const supportMetricsUpdatedAt = useState('platform-admin-support-metrics-updated-at', () => 0)
   const supportSlaRules = useState<SupportSlaRule[]>('platform-admin-support-sla-rules', () => [])
+  const supportSlaUpdatedAt = useState('platform-admin-support-sla-updated-at', () => 0)
   const supportHistory = useState<Record<string, PlatformAudit[]>>('platform-admin-support-history', () => ({}))
   const supportAttachments = useState<Record<string, SupportAttachment[]>>('platform-admin-support-attachments', () => ({}))
   const tenantDetails = useState<TenantDetails | null>('platform-admin-tenant-details', () => null)
@@ -45,6 +50,8 @@ export const usePlatformAdminWorkspace = () => {
 
   const clearWorkspace = () => {
     overview.value = null
+    platformAuditEvents.value = []
+    platformAuditUpdatedAt.value = {}
     tenants.value = []
     tenantPage.value = 0
     requests.value = []
@@ -55,8 +62,11 @@ export const usePlatformAdminWorkspace = () => {
     error.value = ''
     notifications.value = []
     supportMacros.value = []
+    supportMacrosUpdatedAt.value = 0
     supportMetrics.value = null
+    supportMetricsUpdatedAt.value = 0
     supportSlaRules.value = []
+    supportSlaUpdatedAt.value = 0
     supportHistory.value = {}
     supportAttachments.value = {}
     tenantDetails.value = null
@@ -117,6 +127,26 @@ export const usePlatformAdminWorkspace = () => {
     return fetchResource<Tenant[]>('tenants', `/api/platform-admin/tenants?limit=${tenantPageSize}&offset=${tenantPage.value * tenantPageSize}`, value => { tenants.value = value }, force)
   }
   const loadRequests = (force = false) => fetchResource<AuditRequest[]>('requests', '/api/platform-admin/support-requests?limit=50&offset=0', value => { requests.value = value }, force)
+  const loadPlatformAudit = async (search = '', force = false) => {
+    const userId = resetForDifferentAdmin()
+    const normalized = search.trim()
+    const key = `${userId}:platform-audit:${normalized}`
+    const cacheKey = `platform-audit:${normalized}`
+    const cachedAt = platformAuditUpdatedAt.value[cacheKey] || 0
+    if (!force && platformAuditEvents.value.length && cachedAt && isFresh(cachedAt)) return platformAuditEvents.value
+    const existing = inFlight.get(key) as Promise<PlatformAudit[]> | undefined
+    if (existing) return existing
+    const query = normalized ? `&search=${encodeURIComponent(normalized)}` : ''
+    const request = session.request<PlatformAudit[]>(`/api/platform-admin/audit?limit=100${query}`).then((value) => {
+      if ((session.user.value?.id || '') === userId) {
+        platformAuditEvents.value = value
+        platformAuditUpdatedAt.value = { ...platformAuditUpdatedAt.value, [cacheKey]: Date.now() }
+      }
+      return value
+    }).finally(() => { inFlight.delete(key) })
+    inFlight.set(key, request)
+    return request
+  }
 
   const loadMessages = async (requestId: string, force = false) => {
     const userId = resetForDifferentAdmin()
@@ -179,10 +209,19 @@ export const usePlatformAdminWorkspace = () => {
     const params = new URLSearchParams()
     for (const [key, value] of Object.entries(filters)) if (value) params.set(key, value)
     const suffix = params.toString() ? `?${params.toString()}` : ''
-    const value = await session.request<AuditRequest[]>(`/api/platform-admin/support-requests${suffix}`)
-    requests.value = value
-    resourceUpdatedAt.value = { ...resourceUpdatedAt.value, requests: Date.now() }
-    return value
+    const userId = resetForDifferentAdmin()
+    const key = `${userId}:requests:${params.toString()}`
+    const existing = inFlight.get(key) as Promise<AuditRequest[]> | undefined
+    if (existing) return existing
+    const request = session.request<AuditRequest[]>(`/api/platform-admin/support-requests${suffix}`).then((value) => {
+      if ((session.user.value?.id || '') === userId) {
+        requests.value = value
+        resourceUpdatedAt.value = { ...resourceUpdatedAt.value, requests: Date.now() }
+      }
+      return value
+    }).finally(() => { inFlight.delete(key) })
+    inFlight.set(key, request)
+    return request
   }
   const updatePrivacyRequest = async (requestId: string, body: { status: string; dueAt?: string; reason: string }) => {
     const updated = await session.request<AuditRequest>(`/api/platform-admin/privacy-requests/${encodeURIComponent(requestId)}`, { method: 'POST', body })
@@ -190,22 +229,40 @@ export const usePlatformAdminWorkspace = () => {
     resourceUpdatedAt.value = { ...resourceUpdatedAt.value, requests: Date.now() }
     return updated
   }
-  const loadChatAssignees = () => session.request<Array<{ id: string; name: string }>>('/api/platform-admin/chat-assignees')
+  const loadChatAssignees = () => {
+    const userId = resetForDifferentAdmin(); const key = `${userId}:chat-assignees`
+    const existing = inFlight.get(key) as Promise<Array<{ id: string; name: string }>> | undefined
+    if (existing) return existing
+    const request = session.request<Array<{ id: string; name: string }>>('/api/platform-admin/chat-assignees').finally(() => { inFlight.delete(key) })
+    inFlight.set(key, request); return request
+  }
   const loadNotifications = async () => {
     notifications.value = await session.request<PlatformNotification[]>('/api/platform-admin/notifications')
     return notifications.value
   }
   const loadSupportMacros = async () => {
-    supportMacros.value = await session.request<SupportMacro[]>('/api/platform-admin/support-macros')
-    return supportMacros.value
+    const userId = resetForDifferentAdmin(); const key = `${userId}:support-macros`
+    if (supportMacros.value.length && Date.now() - supportMacrosUpdatedAt.value < cacheTtlMs) return supportMacros.value
+    const existing = inFlight.get(key) as Promise<SupportMacro[]> | undefined
+    if (existing) return existing
+    const request = session.request<SupportMacro[]>('/api/platform-admin/support-macros').then((value) => { if ((session.user.value?.id || '') === userId) { supportMacros.value = value; supportMacrosUpdatedAt.value = Date.now() }; return value }).finally(() => { inFlight.delete(key) })
+    inFlight.set(key, request); return request
   }
-  const loadSupportMetrics = async () => {
-    supportMetrics.value = await session.request<SupportMetrics>('/api/platform-admin/support-metrics')
-    return supportMetrics.value
+  const loadSupportMetrics = async (force = false) => {
+    const userId = resetForDifferentAdmin(); const key = `${userId}:support-metrics`
+    if (!force && supportMetrics.value && Date.now() - supportMetricsUpdatedAt.value < cacheTtlMs) return supportMetrics.value
+    const existing = inFlight.get(key) as Promise<SupportMetrics> | undefined
+    if (existing) return existing
+    const request = session.request<SupportMetrics>('/api/platform-admin/support-metrics').then((value) => { if ((session.user.value?.id || '') === userId) { supportMetrics.value = value; supportMetricsUpdatedAt.value = Date.now() }; return value }).finally(() => { inFlight.delete(key) })
+    inFlight.set(key, request); return request
   }
-  const loadSupportSlaRules = async () => {
-    supportSlaRules.value = await session.request<SupportSlaRule[]>('/api/platform-admin/support-sla-rules')
-    return supportSlaRules.value
+  const loadSupportSlaRules = async (force = false) => {
+    const userId = resetForDifferentAdmin(); const key = `${userId}:support-sla-rules`
+    if (!force && supportSlaRules.value.length && Date.now() - supportSlaUpdatedAt.value < cacheTtlMs) return supportSlaRules.value
+    const existing = inFlight.get(key) as Promise<SupportSlaRule[]> | undefined
+    if (existing) return existing
+    const request = session.request<SupportSlaRule[]>('/api/platform-admin/support-sla-rules').then((value) => { if ((session.user.value?.id || '') === userId) { supportSlaRules.value = value; supportSlaUpdatedAt.value = Date.now() }; return value }).finally(() => { inFlight.delete(key) })
+    inFlight.set(key, request); return request
   }
   const loadPlatformPlans = async () => { platformPlans.value = await session.request<PlatformPlan[]>('/api/platform-admin/plans'); return platformPlans.value }
   const updatePlatformPlanBillingConfiguration = async (planId: string, body: { monthlyReferencePrice: number; yearlyReferencePrice: number; trialDays: number; reason: string }) => {
@@ -222,6 +279,7 @@ export const usePlatformAdminWorkspace = () => {
   const updateSupportSlaRule = async (ruleId: string, body: Partial<SupportSlaRule>) => {
     const updated = await session.request<SupportSlaRule>(`/api/platform-admin/support-sla-rules/${encodeURIComponent(ruleId)}`, { method: 'POST', body })
     supportSlaRules.value = supportSlaRules.value.map(rule => rule.id === ruleId ? updated : rule)
+    supportSlaUpdatedAt.value = Date.now()
     return updated
   }
   const bulkUpdateSupport = async (requestIds: string[], operation: 'claim' | 'status', supportStatus?: string) => {
@@ -274,7 +332,7 @@ export const usePlatformAdminWorkspace = () => {
   const closedRequests = computed(() => requests.value.filter(request => ['closed', 'cancelled', 'expired'].includes(request.status) || request.supportStatus === 'resolved'))
 
   return {
-    session, overview, tenants, tenantPage, tenantPageSize, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
-    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, updatePlatformPlanBillingConfiguration, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
+    session, overview, platformAuditEvents, platformAuditUpdatedAt, tenants, tenantPage, tenantPageSize, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
+    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, loadPlatformAudit, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, updatePlatformPlanBillingConfiguration, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

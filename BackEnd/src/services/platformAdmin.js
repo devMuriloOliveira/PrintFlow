@@ -355,15 +355,16 @@ export const getTenantAuditReport = async (user, requestId, tenantId, limit = 50
   }
 }
 
-export const listPlatformAdminAudit = async (limit = 100, range = {}) => {
+export const listPlatformAdminAudit = async (limit = 100, range = {}, search = '', offset = 0) => {
   const result = await query(`
     select id, action, target_tenant_id, target_resource, target_resource_id, reason, details, created_at
       from platform_admin_audit_events
      where ($2::date is null or created_at >= $2::date)
        and ($3::date is null or created_at < $3::date + interval '1 day')
+       and ($4::text = '' or action ilike '%' || $4::text || '%' or target_resource ilike '%' || $4::text || '%' or coalesce(reason, '') ilike '%' || $4::text || '%' or coalesce(target_tenant_id::text, '') ilike '%' || $4::text || '%')
      order by created_at desc
-     limit $1
-  `, [Math.min(200, Math.max(1, Number(limit) || 100)), range.from || null, range.to || null])
+     limit $1 offset $5
+  `, [Math.min(200, Math.max(1, Number(limit) || 100)), range.from || null, range.to || null, String(search || '').trim(), Math.max(0, Number(offset) || 0)])
   return result.rows.map((row) => {
     const description = describeAuditEvent(row)
     return {

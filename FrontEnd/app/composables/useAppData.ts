@@ -148,6 +148,13 @@ export type IntegrationsOverview = {
   email: { provider: string; status: 'connected' | 'not_configured' }
 }
 
+export type OrdersPage = {
+  items: Order[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export type BackupStatus = {
   databaseAvailable: boolean
   export: { enabled: boolean; format: 'json'; excludes: string[] }
@@ -177,6 +184,7 @@ export const useAppData = () => {
   const loadedTenant = useState('app-data-loaded-tenant', () => '')
   const loadedAt = useState('app-data-loaded-at', () => 0)
   const loadedScope = useState('app-data-loaded-scope', () => '')
+  const scopeCache = useState<Record<string, { data: AppData; loadedAt: number }>>('app-data-scope-cache', () => ({}))
   const error = useState<string | null>('app-data-error', () => null)
   const goals = useState<Goal[]>('goals', () => [])
   let appDataAbortController: AbortController | null = null
@@ -187,8 +195,9 @@ export const useAppData = () => {
   const resourceScopeForRoute = () => {
     const path = String(route.path || '')
     const scopes: Record<string, string[]> = {
-      '/configuracoes': ['settings', 'marketplaces', 'marketplaceIntegrations'],
-      '/clientes': ['clients', 'orders'],
+      '/': ['products', 'orders', 'expenses', 'expenseSegments', 'filaments', 'goals', 'printers', 'printJobs'],
+      '/configuracoes': ['settings'],
+      '/clientes': ['clients'],
       '/vendas': ['orders', 'products', 'printers', 'printJobs', 'clients'],
       '/produtos': ['products', 'printers', 'filaments'],
       '/impressoras': ['printers', 'printJobs', 'products', 'filaments'],
@@ -211,6 +220,17 @@ export const useAppData = () => {
     const cacheTtlMs = 15_000
     const scope = resourceScopeForRoute()
     const scopeKey = scope?.slice().sort().join(',') || 'all'
+    const cacheKey = `${tenantId.value}:${scopeKey}`
+    const cachedScope = scopeCache.value[cacheKey]
+    if (!force && cachedScope && Date.now() - cachedScope.loadedAt < cacheTtlMs) {
+      data.value = cachedScope.data
+      loaded.value = true
+      loadedTenant.value = tenantId.value
+      loadedAt.value = cachedScope.loadedAt
+      loadedScope.value = scopeKey
+      goals.value = data.value.goals || []
+      return data.value
+    }
     if (!force && loaded.value && loadedTenant.value === tenantId.value && loadedScope.value === scopeKey && Date.now() - loadedAt.value < cacheTtlMs) return data.value
     appDataAbortController?.abort()
     const requestController = process.client ? new AbortController() : null
@@ -230,6 +250,7 @@ export const useAppData = () => {
       loadedTenant.value = tenantId.value
       loadedAt.value = Date.now()
       loadedScope.value = scopeKey
+      scopeCache.value = { ...scopeCache.value, [cacheKey]: { data: nextData, loadedAt: loadedAt.value } }
     } catch (err) {
       if (requestController?.signal.aborted || sequence !== appDataRequestSequence) return data.value
       error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
@@ -246,6 +267,7 @@ export const useAppData = () => {
     loadedTenant.value = ''
     loadedAt.value = 0
     loadedScope.value = ''
+    scopeCache.value = {}
   }
 
   if (process.client && !loaded.value && !pending.value && !error.value) {
@@ -402,6 +424,26 @@ export const useAppData = () => {
     return list
   }
 
+  const loadMarketplaceOrdersPage = async (params: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, String(value))
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return $fetch<{ items: MarketplaceOrder[]; total: number; limit: number; offset: number }>(apiUrl(`/api/marketplace-orders${suffix}`), { headers: resourceHeaders() })
+  }
+
+  const loadOrdersPage = async (params: { limit?: number; offset?: number; status?: string; salesChannel?: string; search?: string; from?: string; to?: string; clientId?: string } = {}) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') query.set(key, String(value))
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return $fetch<OrdersPage>(apiUrl(`/api/orders${suffix}`), { headers: resourceHeaders() })
+  }
+  const loadClientOrders = (clientId: string) => loadOrdersPage({ clientId, salesChannel: 'direct', limit: 100, offset: 0 })
+
+  const loadOrdersSummary = async () => $fetch<{
+    orderCount: number; gross: number; net: number; profit: number; fees: number; shipping: number; ticket: number;
+    byStatus: Array<{ status: string; count: number }>
+  }>(apiUrl('/api/orders/summary'), { headers: resourceHeaders() })
+
   const generateRecurringExpenses = async () => {
     const response = await $fetch<{ generated: number; expenses: Expense[] }>(apiUrl('/api/expenses/recurring/generate'), {
       method: 'POST', headers: resourceHeaders()
@@ -524,7 +566,7 @@ export const useAppData = () => {
     , advanceOrderStage
     , startMarketplaceOAuth
     , disconnectMarketplaceIntegration
-    , refreshMarketplaceOrders
+    , refreshMarketplaceOrders, loadMarketplaceOrdersPage, loadOrdersPage, loadClientOrders, loadOrdersSummary
     , syncMarketplaceOrder
     , linkMarketplaceOrderProduct
     , updateSettings

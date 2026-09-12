@@ -123,6 +123,7 @@ export type SupportAttachment = { id: string; requestId: string; originalName: s
 
 export type SupportMetrics = {
   total: number
+  open: number
   waitingCustomer: number
   waitingInternal: number
   overdue: number

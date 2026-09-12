@@ -10,6 +10,10 @@ const refreshing = ref(false)
 const privacyTriage = ref<{ id: string; status: string; dueAt: string; reason: string } | null>(null)
 const triageLoading = ref(false)
 const reportLoading = ref(false)
+const requestPage = ref(0)
+const requestPageSize = 50
+const requestPageLoading = ref(false)
+const hasNextRequestPage = computed(() => requests.value.length === requestPageSize)
 
 const filteredRequests = computed(() => {
   const term = search.value.trim().toLowerCase()
@@ -23,8 +27,33 @@ const filteredRequests = computed(() => {
 
 const update = async () => {
   refreshing.value = true
-  try { await refreshRequests() } finally { refreshing.value = false }
+  try { requestPage.value = 0; await loadRequestsPage() } finally { refreshing.value = false }
 }
+const loadRequestsPage = async () => {
+  requestPageLoading.value = true
+  try {
+    await refreshRequests({
+      search: search.value.trim(),
+      status: requestFilter.value === 'all' ? '' : requestFilter.value,
+      category: categoryFilter.value === 'all' ? '' : categoryFilter.value,
+      limit: String(requestPageSize),
+      offset: String(requestPage.value * requestPageSize)
+    })
+  } catch (cause: any) {
+    error.value = cause?.data?.error || cause?.message || 'Nao foi possivel carregar as solicitacoes.'
+  } finally { requestPageLoading.value = false }
+}
+const changeRequestPage = (delta: number) => {
+  const next = requestPage.value + delta
+  if (next < 0 || (delta > 0 && !hasNextRequestPage.value)) return
+  requestPage.value = next
+  void loadRequestsPage()
+}
+let requestFilterTimer: ReturnType<typeof setTimeout> | undefined
+watch([search, requestFilter, categoryFilter], () => {
+  if (requestFilterTimer) clearTimeout(requestFilterTimer)
+  requestFilterTimer = setTimeout(() => { requestPage.value = 0; void loadRequestsPage() }, 250)
+})
 const openChat = (requestId: string) => navigateTo({ path: '/chats', query: { protocolo: requestId } })
 const categoryLabel = (category: string) => ({ technical: 'Tecnico', financial: 'Financeiro', integration: 'Integracao', account: 'Conta', data_backup: 'Backup e dados', privacy: 'LGPD', audit: 'Auditoria' }[category] || category)
 const openPrivacyTriage = (request: any) => { privacyTriage.value = { id: request.id, status: request.status === 'pending' ? 'under_review' : request.status, dueAt: request.dueAt ? String(request.dueAt).slice(0, 10) : '', reason: '' } }
@@ -44,7 +73,7 @@ const exportRequestsReport = async () => {
 const exportPortability = async (request: any) => {
   try { await exportPrivacyPortability(request.id) } catch (cause: any) { error.value = cause?.message || 'Nao foi possivel gerar a portabilidade.' }
 }
-onMounted(() => void load({ tenants: true, requests: true }))
+onMounted(async () => { await load({ tenants: true }); await loadRequestsPage() })
 </script>
 
 <template>
@@ -58,7 +87,7 @@ onMounted(() => void load({ tenants: true, requests: true }))
       <button :class="{ active: requestFilter === 'under_review' }" @click="requestFilter = 'under_review'">Em atendimento <span>{{ requests.filter(request => request.status === 'under_review').length }}</span></button>
       <button :class="{ active: requestFilter === 'closed' }" @click="requestFilter = 'closed'">Encerradas <span>{{ requests.filter(request => ['closed', 'rejected', 'cancelled', 'expired'].includes(request.status)).length }}</span></button>
     </div>
-    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Protocolo</th><th>Empresa</th><th>Assunto</th><th>Tipo</th><th>Solicitante</th><th>Prazo</th><th>Responsavel</th><th>Status</th><th>Aberto em</th><th></th></tr></thead><tbody><tr v-for="request in filteredRequests" :key="request.id"><td><code>{{ request.id }}</code></td><td><strong>{{ tenantFor(request.tenantId)?.name || request.tenantId }}</strong></td><td>{{ request.subject || request.reason }}<small>{{ request.reason }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : categoryLabel(request.category) }}<small v-if="request.privacyRight">{{ request.privacyRight }}</small></td><td><strong>{{ request.requesterName || 'Usuario indisponivel' }}</strong><small>{{ request.requesterRole }}</small></td><td>{{ formatDate(request.dueAt) }}</td><td>{{ request.responsibleName || 'Nao atribuido' }}</td><td><span :class="statusClass(request.status)">{{ statusLabel(request.status) }}</span></td><td>{{ formatDate(request.createdAt) }}</td><td><button class="table-action" @click="openChat(request.id)">{{ isChatOpen(request.status) ? 'Atender' : 'Visualizar' }}</button><button v-if="request.requestKind === 'privacy' && !['closed', 'rejected', 'cancelled', 'expired'].includes(request.status)" class="table-action" @click="openPrivacyTriage(request)">Triar</button><button v-if="request.requestKind === 'privacy' && request.privacyRight === 'portability' && request.status === 'closed'" class="table-action" @click="exportPortability(request)">CSV</button></td></tr><tr v-if="!filteredRequests.length"><td colspan="10" class="empty-state">Nenhuma solicitacao encontrada.</td></tr></tbody></table></div></section>
+    <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Protocolo</th><th>Empresa</th><th>Assunto</th><th>Tipo</th><th>Solicitante</th><th>Prazo</th><th>Responsavel</th><th>Status</th><th>Aberto em</th><th></th></tr></thead><tbody><tr v-for="request in filteredRequests" :key="request.id"><td><code>{{ request.id }}</code></td><td><strong>{{ tenantFor(request.tenantId)?.name || request.tenantId }}</strong></td><td>{{ request.subject || request.reason }}<small>{{ request.reason }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : categoryLabel(request.category) }}<small v-if="request.privacyRight">{{ request.privacyRight }}</small></td><td><strong>{{ request.requesterName || 'Usuario indisponivel' }}</strong><small>{{ request.requesterRole }}</small></td><td>{{ formatDate(request.dueAt) }}</td><td>{{ request.responsibleName || 'Nao atribuido' }}</td><td><span :class="statusClass(request.status)">{{ statusLabel(request.status) }}</span></td><td>{{ formatDate(request.createdAt) }}</td><td><button class="table-action" @click="openChat(request.id)">{{ isChatOpen(request.status) ? 'Atender' : 'Visualizar' }}</button><button v-if="request.requestKind === 'privacy' && !['closed', 'rejected', 'cancelled', 'expired'].includes(request.status)" class="table-action" @click="openPrivacyTriage(request)">Triar</button><button v-if="request.requestKind === 'privacy' && request.privacyRight === 'portability' && request.status === 'closed'" class="table-action" @click="exportPortability(request)">CSV</button></td></tr><tr v-if="!filteredRequests.length"><td colspan="10" class="empty-state">Nenhuma solicitacao encontrada.</td></tr></tbody></table></div><div class="table-footer"><span>{{ requestPageLoading ? 'Carregando solicitacoes...' : `Pagina ${requestPage + 1} · ${filteredRequests.length} registros` }}</span><div class="pagination"><button class="button button--quiet" :disabled="requestPageLoading || requestPage === 0" @click="changeRequestPage(-1)">Anterior</button><button class="button button--quiet" :disabled="requestPageLoading || !hasNextRequestPage" @click="changeRequestPage(1)">Proxima</button></div></div></section>
     <section v-if="privacyTriage" class="access-modal"><div class="modal-card"><button class="modal-close" @click="privacyTriage = null">Cancelar</button><h2>Triar solicitacao LGPD</h2><p>Protocolo <code>{{ privacyTriage.id }}</code>. A alteracao sera registrada na auditoria da plataforma.</p><form @submit.prevent="savePrivacyTriage"><label>Status<select v-model="privacyTriage.status"><option value="under_review">Em atendimento</option><option value="rejected">Rejeitada</option><option value="closed">Encerrada</option></select></label><label>Prazo de resposta<input v-model="privacyTriage.dueAt" type="date"></label><label>Motivo/registro<textarea v-model="privacyTriage.reason" minlength="8" maxlength="500" required></textarea></label><button class="button button--primary" :disabled="triageLoading">{{ triageLoading ? 'Salvando...' : 'Salvar triagem' }}</button></form></div></section>
   </AdminShell>
 </template>

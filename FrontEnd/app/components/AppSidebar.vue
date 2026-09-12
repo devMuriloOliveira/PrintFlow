@@ -2,6 +2,8 @@
 defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const { settings } = useAppData()
+const route = useRoute()
+const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces' })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
 const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
 
@@ -18,7 +20,7 @@ const sections = [
   {
     label: 'CANAIS DE VENDA',
     items: [
-      { label: 'Marketplaces', to: '/marketplaces', icon: 'store' }
+      { label: 'Marketplaces', to: '/marketplaces?secao=canais', icon: 'store', children: [{ label: 'Canais e taxas', to: '/marketplaces?secao=canais' }, { label: 'Conexões', to: '/marketplaces?secao=conexoes' }, { label: 'Pedidos sincronizados', to: '/marketplaces?secao=pedidos' }] }
     ]
   },
   {
@@ -38,7 +40,7 @@ const sections = [
   {
     label: 'ANÁLISES',
     items: [
-      { label: 'Relatórios', to: '/relatorios', icon: 'chart' },
+      { label: 'Relatórios', to: '/relatorios?secao=financeiro', icon: 'chart', children: [{ label: 'Financeiro', to: '/relatorios?secao=financeiro' }, { label: 'Produtos e vendas', to: '/relatorios?secao=produtos' }, { label: 'Histórico financeiro', to: '/relatorios?secao=historico' }] },
       { label: 'Metas', to: '/metas', icon: 'target' }
     ]
   },
@@ -49,6 +51,8 @@ const sections = [
     ]
   }
 ]
+
+watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true })
 </script>
 
 <template>
@@ -83,13 +87,18 @@ const sections = [
             @click="
               event => {
                 navigate(event)
-                emit('close')
+                if (item.children) expandedItems[item.label] = !expandedItems[item.label]
+                else emit('close')
               }
             "
           >
             <UiIcon :name="item.icon" :size="20" />
             <span>{{ item.label }}</span>
+            <span v-if="item.children" class="nav-item__chevron" :class="{ 'nav-item__chevron--open': expandedItems[item.label] }" aria-hidden="true">⌄</span>
           </a>
+          <div v-if="item.children && expandedItems[item.label]" class="nav-submenu">
+            <NuxtLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-submenu__item" @click="emit('close')">{{ child.label }}</NuxtLink>
+          </div>
         </NuxtLink>
       </div>
     </nav>

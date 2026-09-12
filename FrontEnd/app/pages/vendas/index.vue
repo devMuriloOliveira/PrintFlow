@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, orders, printers, printJobs, clients, createItem, updateItem, deleteItem, advanceOrderStage: advanceOrderStageRequest } = useAppData()
+const { products, orders, printers, printJobs, clients, createItem, updateItem, deleteItem, loadOrdersPage, loadOrdersSummary, advanceOrderStage: advanceOrderStageRequest } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -17,9 +17,33 @@ const selectedOrderId = ref('')
 const orderStages = ['Novo', 'Producao', 'Impresso', 'Embalando', 'Enviado', 'Entregue']
 const trackingDraft = ref('')
 const updatingOrderStage = ref(false)
+const tableOrders = ref<any[]>([])
+const tablePage = ref(0)
+const tablePageSize = ref(25)
+const tableTotal = ref(0)
+const tableLoading = ref(false)
+const ordersSummary = ref<{ orderCount: number; gross: number; net: number; profit: number } | null>(null)
+let tableSearchTimer: ReturnType<typeof setTimeout> | null = null
 const marketplaceOptions = computed(() => ['Todos', ...new Set(orders.value.map(order => order.marketplace || 'Sem marketplace'))])
 const productOptions = computed(() => ['Todos', ...new Set(orders.value.map(order => order.product).filter(Boolean))])
-const filtered = computed(() => orders.value.filter(o => (status.value === 'Todos' || o.status === status.value) && (marketplaceFilter.value === 'Todos' || (o.marketplace || 'Sem marketplace') === marketplaceFilter.value) && (productFilter.value === 'Todos' || o.product === productFilter.value) && Object.values(o).join(' ').toLowerCase().includes(search.value.toLowerCase())))
+const filtered = computed(() => tableOrders.value.filter(o => (marketplaceFilter.value === 'Todos' || (o.marketplace || 'Sem marketplace') === marketplaceFilter.value) && (productFilter.value === 'Todos' || o.product === productFilter.value)))
+const loadTableOrders = async (reset = true) => {
+  if (reset) tablePage.value = 0
+  tableLoading.value = true
+  try {
+    const result = await loadOrdersPage({ limit: tablePageSize.value, offset: tablePage.value * tablePageSize.value, status: status.value === 'Todos' ? undefined : status.value, search: search.value.trim() || undefined })
+    tableOrders.value = result.items
+    tableTotal.value = result.total
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Nao foi possivel carregar a pagina de vendas.')
+  } finally { tableLoading.value = false }
+}
+const changeTablePage = (page: number) => { const maxPage = Math.max(0, Math.ceil(tableTotal.value / tablePageSize.value) - 1); tablePage.value = Math.min(Math.max(0, page), maxPage); void loadTableOrders(false) }
+const loadSummary = async () => {
+  try { ordersSummary.value = await loadOrdersSummary() } catch { /* fallback local permanece ativo */ }
+}
+onMounted(() => { void loadTableOrders(); void loadSummary() })
+watch([search, status], () => { if (tableSearchTimer) clearTimeout(tableSearchTimer); tableSearchTimer = setTimeout(() => void loadTableOrders(), 250) })
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const metricCards = computed(() => [
   { key: 'gross' as const, label: 'Receita Bruta', value: formatCurrency(metrics.revenue.value), icon: 'money', note: 'Dados do banco', color: 'green', points: orders.value.map(order => Number(order.gross || 0)) },
@@ -27,6 +51,15 @@ const metricCards = computed(() => [
   { key: 'profit' as const, label: 'Lucro Total', value: formatCurrency(metrics.profit.value), icon: 'money', change: `Margem ${metrics.percent(metrics.margin.value)}`, color: 'green', points: orders.value.map(order => Number(order.profit || 0)) },
   { key: 'orders' as const, label: 'Pedidos no Mês', value: formatNumber(metrics.orderCount.value), icon: 'bag', note: 'Quantidade de pedidos', color: 'purple', points: orders.value.map(order => Number(order.qty || 1)) }
 ])
+const metricCardsWithSummary = computed(() => {
+  const cards = metricCards.value.map((card) => ({ ...card }))
+  if (!ordersSummary.value) return cards
+  cards[0].value = formatCurrency(ordersSummary.value.gross)
+  cards[1].value = formatCurrency(ordersSummary.value.net)
+  cards[2].value = formatCurrency(ordersSummary.value.profit)
+  cards[3].value = formatNumber(ordersSummary.value.orderCount)
+  return cards
+})
 const metricDetails = {
   gross: { title: 'Evolução da Receita Bruta', color: '#0da566', totalLabel: 'Total no período', formatter: formatCurrency },
   net: { title: 'Evolução da Receita Líquida', color: '#1768f2', totalLabel: 'Total no período', formatter: formatCurrency },
@@ -147,6 +180,7 @@ const saveManualQuantity = async (product: any, rawQty: number) => {
     if (!qty) {
       if (existing?.dbId || existing?.id) await deleteItem('orders', existing.dbId || existing.id)
       notify('Registro de venda atualizado.')
+      await loadTableOrders(false)
       return
     }
 
@@ -175,6 +209,7 @@ const saveManualQuantity = async (product: any, rawQty: number) => {
     if (existing?.dbId) await updateItem('orders', payload)
     else await createItem('orders', payload)
     notify('Venda por produto salva.')
+    await loadTableOrders(false)
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível salvar a venda manual.', 'info')
     syncManualQuantities()
@@ -229,6 +264,7 @@ const removeOrder = async (order: any) => {
   const id = order.dbId || order.id
   if (!id || !window.confirm(`Tem certeza que deseja excluir este pedido?\n\n${order.id} - ${order.product}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('orders', id)
+  await loadTableOrders(false)
   notify('Pedido excluído com sucesso.')
 }
 const statusSegments = computed(() => {
@@ -250,7 +286,7 @@ const marketplaceBars = computed(() => {
     <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" to="/vendas/novo"><UiIcon name="plus"/>Nova Venda</NuxtLink></PageHeader>
     <div class="metrics-grid metrics-grid--4">
       <MetricCard
-        v-for="card in metricCards"
+        v-for="card in metricCardsWithSummary"
         :key="card.key"
         :label="card.label"
         :value="card.value"
@@ -312,7 +348,7 @@ const marketplaceBars = computed(() => {
           <thead><tr><th>Nº Pedido</th><th>Data</th><th>Cliente</th><th>Marketplace</th><th>Produto</th><th>Qtd.</th><th>Impressora</th><th>Valor Bruto</th><th>Taxa</th><th>Frete</th><th>Receita Líquida</th><th>Lucro</th><th>Status</th><th></th></tr></thead>
           <tbody><tr v-if="!filtered.length"><td colspan="14"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bag"/></div><h3>Nenhuma venda cadastrada</h3><p>Cadastre sua primeira venda para começar.</p><NuxtLink class="btn btn--primary" to="/vendas/novo">Nova Venda</NuxtLink></div></div></td></tr><tr v-for="o in filtered" :key="o.dbId || o.id"><td><div class="table-product table-product--editable"><strong>{{ o.id }}</strong><button v-if="!o.marketplaceOrder" class="row-action row-action--edit" title="Editar pedido" @click.stop="editOrder(o)"><UiIcon name="edit" :size="15"/></button><span v-else class="badge badge--gray" title="Pedido sincronizado automaticamente">ML</span></div></td><td>{{ o.date }}</td><td>{{ o.client }}</td><td>{{ o.marketplace }}</td><td>{{ o.product }}</td><td>{{ o.qty }}</td><td><select class="select-compact" :disabled="o.marketplaceOrder || assigningPrinter[orderKey(o)]" :value="printJobForOrder(o)?.printerId || ''" @change="assignOrderPrinter(o, ($event.target as HTMLSelectElement).value)"><option value="">{{ o.marketplaceOrder ? 'Gerenciar no canal' : 'Fila' }}</option><option v-for="printer in printers" :key="printer.id" :value="printer.id">{{ printer.name }} - {{ printerBusyLabel(printer.id || '') }}</option></select><small v-if="printJobForOrder(o)" style="display:block;margin-top:4px;color:var(--muted)">{{ printJobForOrder(o)?.status }} · {{ printJobForOrder(o)?.printerName || 'Sem impressora' }}</small></td><td>{{ formatCurrency(o.gross) }}</td><td>{{ formatCurrency(o.fee) }}</td><td>{{ formatCurrency(o.shipping) }}</td><td>{{ formatCurrency(o.net) }}</td><td>{{ formatCurrency(o.profit) }}</td><td><span class="badge" :class="badgeClass(o.status)">{{ o.status }}</span></td><td><button v-if="!o.marketplaceOrder" class="row-action" title="Excluir pedido" @click.stop="removeOrder(o)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
-        <div class="table-footer"><span>Mostrando {{ filtered.length ? 1 : 0 }} a {{ filtered.length }} de {{ orders.length }} pedidos</span><div class="pagination"><button class="page-btn active">1</button></div><select class="select-compact"><option>10 por pagina</option></select></div>
+        <div class="table-footer"><span>{{ tableLoading ? 'Carregando vendas...' : `Mostrando ${filtered.length ? tablePage * tablePageSize + 1 : 0} a ${tablePage * tablePageSize + filtered.length} de ${tableTotal} pedidos` }}</span><div class="pagination"><button class="page-btn" :disabled="tablePage === 0 || tableLoading" @click="changeTablePage(tablePage - 1)">Anterior</button><button class="page-btn" :disabled="(tablePage + 1) * tablePageSize >= tableTotal || tableLoading" @click="changeTablePage(tablePage + 1)">Próxima</button></div><select v-model.number="tablePageSize" class="select-compact" @change="loadTableOrders()"><option :value="25">25 por página</option><option :value="50">50 por página</option><option :value="100">100 por página</option></select></div>
       </PanelCard>
       <aside>
         <PanelCard v-if="selectedOrder" title="Acompanhamento do pedido" subtitle="Avance cada etapa somente quando a operação for concluída."><div class="order-tracking-head"><strong>{{selectedOrder.id}}</strong><span class="badge" :class="badgeClass(selectedOrder.status)">{{stageLabel(selectedOrder.status)}}</span></div><div class="order-timeline"><div v-for="(stage, index) in orderStages" :key="stage" class="order-step" :class="{done: index <= stageIndex(selectedOrder), current: stage === selectedOrder.status}"><span>{{index < stageIndex(selectedOrder) ? '✓' : index + 1}}</span><strong>{{stageLabel(stage)}}</strong></div></div><div class="summary-box"><div class="detail-list__row"><span>Fila</span><strong>{{printJobForOrder(selectedOrder)?.status || 'Não vinculada'}}</strong></div><div class="detail-list__row"><span>Impressora</span><strong>{{printJobForOrder(selectedOrder)?.printerName || 'Não definida'}}</strong></div><div class="detail-list__row"><span>Rastreio</span><strong>{{selectedOrder.trackingCode || 'Não informado'}}</strong></div></div><div v-if="selectedOrder.status === 'Impresso' || selectedOrder.status === 'Embalando' || selectedOrder.status === 'Enviado'" class="field" style="margin-top:12px"><label>Código de rastreio</label><input v-model="trackingDraft" placeholder="Opcional até o envio"></div><div class="tracking-actions"><button v-for="stage in orderStages.slice(stageIndex(selectedOrder) + 1, stageIndex(selectedOrder) + 2)" :key="stage" class="btn btn--primary btn--wide" :disabled="updatingOrderStage" @click="advanceOrderStage(stage)">Avançar para {{stageLabel(stage)}}</button></div></PanelCard>

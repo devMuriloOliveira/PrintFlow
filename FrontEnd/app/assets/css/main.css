@@ -63,6 +63,11 @@ input, select, textarea { color: var(--ink); }
 .nav-item--active { color: var(--blue); background: linear-gradient(90deg, #e9f2ff, #f3f7ff); }
 .nav-item--active::before { position: absolute; left: 8px; width: 3px; height: 20px; border-radius: 999px; background: var(--blue); content: ''; }
 .nav-item--active .ui-icon { stroke-width: 2.2; }
+.nav-item__chevron { margin-left:auto; color:#8490a5; font-size:18px; line-height:1; transition:transform .16s ease; }
+.nav-item__chevron--open { transform:rotate(180deg); color:var(--blue); }
+.nav-submenu { display:grid; gap:2px; margin:2px 0 8px 31px; padding-left:14px; border-left:2px solid #b8f3e9; }
+.nav-submenu__item { padding:8px 12px; border-radius:8px; color:#687386; font-size:12px; text-decoration:none; }
+.nav-submenu__item:hover, .nav-submenu__item.router-link-active { color:var(--blue); background:#f6f9ff; }
 .tip-card { display: flex; gap: 12px; border: 1px solid var(--line); border-radius: 13px; padding: 18px 14px; background: #fff; }
 .tip-card__icon { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: var(--blue); background: var(--blue-soft); }
 .tip-card strong { color: var(--blue); font-size: 12px; }

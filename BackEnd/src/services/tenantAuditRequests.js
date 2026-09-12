@@ -296,6 +296,7 @@ export const getPlatformSupportMetrics = async (filters = {}) => {
        where request.request_kind = 'support' and ${dateClause}
     )
     select count(*)::int as total,
+      count(*) filter (where support_status <> 'resolved' and status not in ('closed', 'cancelled', 'expired'))::int as open,
       count(*) filter (where support_status = 'waiting_customer')::int as waiting_customer,
       count(*) filter (where support_status = 'waiting_internal')::int as waiting_internal,
       count(*) filter (where support_status <> 'resolved' and ((support_first_response_due_at is not null and support_first_response_due_at < now() and first_response_at is null) or (support_resolution_due_at is not null and support_resolution_due_at < now())))::int as overdue,
@@ -320,7 +321,7 @@ export const getPlatformSupportMetrics = async (filters = {}) => {
   `, params)
   const row = overview.rows[0] || {}
   return {
-    total: Number(row.total || 0), waitingCustomer: Number(row.waiting_customer || 0), waitingInternal: Number(row.waiting_internal || 0),
+    total: Number(row.total || 0), open: Number(row.open || 0), waitingCustomer: Number(row.waiting_customer || 0), waitingInternal: Number(row.waiting_internal || 0),
     overdue: Number(row.overdue || 0), reopened: Number(row.reopened || 0),
     averageFirstResponseMinutes: Number(row.average_first_response_minutes || 0), averageResolutionMinutes: Number(row.average_resolution_minutes || 0),
     byCategory: categoriesResult.rows.map((item) => ({ category: item.category, total: Number(item.total || 0) })),

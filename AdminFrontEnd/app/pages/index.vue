@@ -42,7 +42,7 @@ onMounted(async () => {
     <p v-if="error" class="feedback feedback--error">{{ error }}</p>
     <section v-if="overview" class="metrics-grid">
       <article><span>Solicitacoes</span><strong>{{ requests.length }}</strong><small>{{ activeRequests.length }} aguardando acao</small></article>
-      <article><span>Em atendimento</span><strong>{{ requests.filter(request => request.status !== 'pending' && isChatOpen(request.status)).length }}</strong><small>Conversas em andamento</small></article>
+      <article><span>Em atendimento</span><strong>{{ supportMetrics?.open ?? activeRequests.length }}</strong><small>Conversas em andamento</small></article>
       <article><span>Empresas</span><strong>{{ overview.tenants }}</strong><small>{{ overview.activeTenants }} ativas</small></article>
       <article><span>Usuarios ativos</span><strong>{{ tenants.reduce((sum, tenant) => sum + tenant.activeUsers, 0) }}</strong><small>Em todos os tenants</small></article>
       <article><span>Agents online</span><strong>{{ overview.onlineAgents }}</strong><small>de {{ overview.agents }} pareados</small></article>

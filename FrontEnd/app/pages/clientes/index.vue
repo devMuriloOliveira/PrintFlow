@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { clients, orders, updateItem } = useAppData()
+const { clients, loadClientOrders, updateItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -8,6 +8,8 @@ const clientOrder = ref('name')
 const statusFilter = ref('Todos')
 const originFilter = ref('Todos')
 const selectedClientId = ref('')
+const selectedClientOrders = ref<any[]>([])
+const selectedClientOrdersLoading = ref(false)
 const filtered = computed(() => {
   const result = clients.value.filter(c => (statusFilter.value === 'Todos' || (c.status || 'active') === statusFilter.value) && (originFilter.value === 'Todos' || (c.origin || 'Outro') === originFilter.value) && Object.values(c).join(' ').toLowerCase().includes(search.value.toLowerCase()))
   return [...result].sort((a, b) => clientOrder.value === 'revenue'
@@ -18,13 +20,19 @@ const filtered = computed(() => {
 })
 const clientOrderPoints = computed(() => clients.value.map(client => Number(client.orders || 0)))
 const selectedClient = computed(() => clients.value.find(client => client.id === selectedClientId.value) || null)
-const selectedClientOrders = computed(() => orders.value.filter(order => order.salesChannel === 'direct' && order.clientId === selectedClientId.value))
 const goToNewClient = () => navigateTo('/clientes/novo')
 const editClient = (client: any) => {
   if (!client.id) return
   router.push(`/clientes/novo?id=${client.id}`)
 }
-const selectClient = (client: any) => { selectedClientId.value = selectedClientId.value === client.id ? '' : String(client.id || '') }
+const selectClient = async (client: any) => {
+  const nextId = selectedClientId.value === client.id ? '' : String(client.id || '')
+  selectedClientId.value = nextId
+  selectedClientOrders.value = []
+  if (!nextId) return
+  selectedClientOrdersLoading.value = true
+  try { selectedClientOrders.value = (await loadClientOrders(nextId)).items } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel carregar o historico do cliente.') } finally { selectedClientOrdersLoading.value = false }
+}
 const deactivateClient = async (client: any) => {
   if (!client.id || !window.confirm(`Excluir cliente?\n\n${client.name}\n\nEsta ação não poderá ser desfeita.`)) return
   await updateItem('clients', { ...client, status: 'inactive' })

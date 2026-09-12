@@ -121,7 +121,7 @@ export const handlePlatformTenantBillingRecordCreate = async (req, res, tenantId
 export const handlePlatformAdminAudit = async (req, res, url) => {
   const user = await requirePlatformAdmin(req, res)
   if (!user) return
-  const events = await listPlatformAdminAudit(url.searchParams.get('limit'))
+  const events = await listPlatformAdminAudit(url.searchParams.get('limit'), {}, url.searchParams.get('search'), url.searchParams.get('offset'))
   return sendJson(res, 200, events)
 }
 
