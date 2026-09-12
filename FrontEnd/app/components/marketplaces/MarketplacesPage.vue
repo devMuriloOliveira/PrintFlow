@@ -5,7 +5,6 @@ const { notify } = useUi()
 const router = useRouter()
 const route = useRoute()
 const activeSection = computed(() => ['canais', 'conexoes', 'pedidos'].includes(String(route.query.secao)) ? String(route.query.secao) : 'canais')
-const marketplaceSections = [{ key: 'canais', label: 'Canais e taxas' }, { key: 'conexoes', label: 'Conexões' }, { key: 'pedidos', label: 'Pedidos sincronizados' }]
 const saleValue = ref(100)
 const selectedName = ref('Shopee')
 const marketplaceFilter = ref('Todos os canais')
@@ -159,9 +158,6 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 <template>
   <div>
     <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Adicionar canal</a></PageHeader>
-    <nav class="section-tabs" aria-label="Seções de marketplaces">
-      <NuxtLink v-for="section in marketplaceSections" :key="section.key" :to="{ path: '/marketplaces', query: { secao: section.key } }" :class="{ active: activeSection === section.key }">{{ section.label }}</NuxtLink>
-    </nav>
     <div v-if="activeSection !== 'pedidos'" class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <div>
         <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" :points="marketplaces.map(marketplace => marketplace.active ? 1 : 0)" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" :points="marketplaces.map(feeRate)" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" :points="marketplaces.map(marketplace => Number(marketplace.net || 0))" /><MetricCard label="Maior Taxa" :value="metrics.percent(metrics.highestFeeMarketplace.value ? feeRate(metrics.highestFeeMarketplace.value) : 0)" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" :points="marketplaces.map(feeRate)" /></div>
@@ -244,4 +240,9 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 .connection-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
 .connection-row:last-child{border-bottom:0}
 .connection-row__actions{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.section-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;border-bottom:1px solid var(--line);padding:0 0 10px}
+.section-tabs a{flex:0 0 auto;border:1px solid var(--line);border-radius:999px;padding:8px 14px;color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
+.section-tabs a:hover,.section-tabs a.active{border-color:#9ebcf8;background:#eef4ff;color:var(--blue)}
+.section-tabs a:focus-visible{outline:3px solid rgba(23,104,242,.25);outline-offset:2px}
+@media (max-width:780px){.section-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding:4px 2px 12px;margin-bottom:14px}.section-tabs a{white-space:nowrap}.connection-row{align-items:flex-start;flex-direction:column}.connection-row__actions{width:100%;justify-content:flex-end}.table-footer{align-items:flex-start;flex-direction:column;gap:10px}.table-footer .pagination{width:100%;justify-content:space-between}}
 </style>

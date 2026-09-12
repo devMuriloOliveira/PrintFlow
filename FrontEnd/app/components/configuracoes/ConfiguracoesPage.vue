@@ -360,7 +360,7 @@ watch(() => supportDraft.category, (category) => {
     <PageHeader title="Configuracoes" subtitle="Gerencie as configuracoes da sua empresa e da plataforma" />
 
     <div class="settings-layout">
-      <ConfigSettingsNav :tabs="tabs" :active="active" @select="active = $event" />
+      <ConfiguracoesConfigSettingsNav :tabs="tabs" :active="active" @select="active = $event" />
 
       <section class="settings-panel">
         <div v-if="active === 'Empresa'">
