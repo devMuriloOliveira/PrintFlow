@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import type { SupportAttachment, SupportMessage } from '../composables/useAppData'
+import type { SupportMessage } from '../composables/useAppData'
 
 const props = defineProps<{ requestId: string; status: string; supportStatus?: string; requestKind?: string }>()
-const { listSupportMessages, sendSupportMessage, listSupportAttachments, uploadSupportAttachment, downloadSupportAttachment } = useAppData()
+const { apiBase, listSupportMessages, sendSupportMessage } = useAppData()
+const auth = useAuth()
 const { refresh: refreshRequests, selectRequest } = useSupportRequests()
 const openStatuses = ['pending', 'under_review', 'approved', 'rejected']
 const canWrite = computed(() => openStatuses.includes(props.status))
-const supportsAttachments = computed(() => props.requestKind !== 'privacy')
 const open = ref(false)
 const messages = ref<SupportMessage[]>([])
-const attachments = ref<SupportAttachment[]>([])
 const draft = ref('')
 const loading = ref(false)
 const sending = ref(false)
@@ -19,7 +18,10 @@ const latestSupportMessageId = ref('')
 const latestMessageId = ref('')
 const messagesElement = ref<HTMLElement | null>(null)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+let eventAbort: AbortController | undefined
 let refreshSequence = 0
+const realtimeConnected = ref(false)
 
 const senderLabel = (senderType: SupportMessage['senderType']) => senderType === 'support' ? 'Suporte tecnico' : 'Você'
 const messageTime = (createdAt: string) => new Date(createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
@@ -30,14 +32,14 @@ const scrollToLatest = async () => {
   if (messagesElement.value) messagesElement.value.scrollTop = messagesElement.value.scrollHeight
 }
 
-const refresh = async (autoOpen = false, includeAttachments = true) => {
+const refresh = async (autoOpen = false) => {
   const requestId = props.requestId
   if (!requestId) return
   const sequence = ++refreshSequence
   loading.value = true
   try {
     const incremental = Boolean(latestMessageId.value)
-    const [next, nextAttachments] = await Promise.all([listSupportMessages(requestId, incremental ? latestMessageId.value : undefined), includeAttachments && supportsAttachments.value ? listSupportAttachments(requestId) : Promise.resolve(attachments.value)])
+    const next = await listSupportMessages(requestId, incremental ? latestMessageId.value : undefined)
     if (sequence !== refreshSequence || requestId !== props.requestId) return
     const merged = incremental ? [...messages.value, ...next.filter(message => !messages.value.some(existing => existing.id === message.id))] : next
     const latestSupportMessage = [...merged].reverse().find(message => message.senderType === 'support')
@@ -46,7 +48,6 @@ const refresh = async (autoOpen = false, includeAttachments = true) => {
     latestSupportMessageId.value = latestSupportMessage?.id || ''
     latestMessageId.value = merged.at(-1)?.id || ''
     messages.value = merged
-    attachments.value = nextAttachments
     if (hasNewMessage && open.value) await scrollToLatest()
   } finally {
     if (sequence === refreshSequence) loading.value = false
@@ -55,7 +56,6 @@ const refresh = async (autoOpen = false, includeAttachments = true) => {
 
 watch(() => props.requestId, async () => {
   messages.value = []
-  attachments.value = []
   latestSupportMessageId.value = ''
   latestMessageId.value = ''
   sendError.value = ''
@@ -64,38 +64,74 @@ watch(() => props.requestId, async () => {
 }, { immediate: true })
 
 const poll = async () => {
-  if (document.visibilityState !== 'visible') return
-  try { await Promise.all([refresh(true, false), refreshRequests()]) } catch { /* A proxima atualizacao tenta novamente. */ }
+  if (document.visibilityState !== 'visible' || realtimeConnected.value) return
+  try { await Promise.all([refresh(true), refreshRequests()]) } catch { /* A proxima atualizacao tenta novamente. */ }
 }
-const attach = async (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file || sending.value) return
-  sending.value = true; sendError.value = ''
-  try { await uploadSupportAttachment(props.requestId, file); attachments.value = await listSupportAttachments(props.requestId) }
-  catch { sendError.value = 'Nao foi possivel enviar o anexo agora.' }
-  finally { sending.value = false; (event.target as HTMLInputElement).value = '' }
+const reconnectRealtime = () => {
+  if (reconnectTimer || eventAbort) return
+  reconnectTimer = setTimeout(() => { reconnectTimer = undefined; void connectRealtime() }, 3000)
+}
+const connectRealtime = async () => {
+  if (eventAbort || document.visibilityState !== 'visible') return
+  eventAbort = new AbortController()
+  try {
+    const response = await fetch(`${apiBase}/api/support/events`, { headers: auth.authHeaders.value, signal: eventAbort.signal })
+    if (!response.ok || !response.body) throw new Error('stream indisponivel')
+    realtimeConnected.value = true
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+      for (const raw of events) {
+        const dataLine = raw.split('\n').find((line) => line.startsWith('data: '))
+        if (!dataLine) continue
+        try {
+          const event = JSON.parse(dataLine.slice(6))
+          if (event.requestId === props.requestId) await Promise.all([refresh(true), refreshRequests()])
+        } catch { /* Evento invalido e ignorado; o polling continua como contingencia. */ }
+      }
+    }
+  } catch { /* O polling cobre indisponibilidade temporaria do stream. */ }
+  finally {
+    eventAbort = undefined
+    realtimeConnected.value = false
+    reconnectRealtime()
+  }
 }
 // Mantem o estado do widget alinhado ao painel de suporte: ao encerrar, a
 // proxima consulta remove o protocolo aberto e o componente deixa de renderizar.
-onMounted(() => { refreshTimer = setInterval(() => void poll(), 5000); document.addEventListener('visibilitychange', poll) })
-onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer); document.removeEventListener('visibilitychange', poll) })
+const onVisibilityChange = () => { if (document.visibilityState === 'visible') { void connectRealtime(); void poll() } }
+onMounted(() => { void connectRealtime(); refreshTimer = setInterval(() => void poll(), 2000); document.addEventListener('visibilitychange', onVisibilityChange) })
+onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer); if (reconnectTimer) clearTimeout(reconnectTimer); eventAbort?.abort(); document.removeEventListener('visibilitychange', onVisibilityChange) })
 
 const send = async () => {
   const body = draft.value.trim()
   if (!body || !canWrite.value || sending.value) return
   sending.value = true
   sendError.value = ''
+  const temporaryId = `local-${Date.now()}`
+  messages.value = [...messages.value, { id: temporaryId, senderType: 'requester', body, createdAt: new Date().toISOString() }]
+  draft.value = ''
+  await scrollToLatest()
   try {
     const result = await sendSupportMessage(props.requestId, body)
-    draft.value = ''
     if (result.createdNewProtocol && result.requestId !== props.requestId) {
+      messages.value = messages.value.filter((message) => message.id !== temporaryId)
       await refreshRequests()
       selectRequest(result.requestId)
       return
     }
+    messages.value = messages.value.filter((message) => message.id !== temporaryId)
     await refresh()
     await scrollToLatest()
   } catch {
+    messages.value = messages.value.filter((message) => message.id !== temporaryId)
+    draft.value = body
     sendError.value = 'Não foi possível enviar agora. Tente novamente.'
   } finally {
     sending.value = false
@@ -136,7 +172,6 @@ const copyProtocol = async () => {
         <p v-if="!messages.length && !loading" class="empty-message">Aguardando o início do atendimento.</p>
       </div>
       <form v-if="canWrite" class="audit-chat__composer" @submit.prevent="send">
-        <div v-if="supportsAttachments" class="audit-chat__attachments"><label>Adicionar anexo<input type="file" accept="application/pdf,text/plain,text/csv,image/png,image/jpeg" @change="attach"></label><button v-for="attachment in attachments" :key="attachment.id" type="button" @click="downloadSupportAttachment(props.requestId, attachment)">{{ attachment.originalName }}</button></div>
         <textarea v-model="draft" maxlength="1000" placeholder="Escreva sua mensagem" aria-label="Escreva sua mensagem" @keydown.enter.exact.prevent="send" />
         <div><small>{{ draft.length }}/1000</small><button class="btn btn--primary" :disabled="!draft.trim() || sending">{{ sending ? 'Enviando...' : 'Enviar' }}</button></div>
         <p v-if="sendError" class="audit-chat__error" role="alert">{{ sendError }}</p>

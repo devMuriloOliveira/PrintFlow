@@ -408,13 +408,18 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
                reviewed_by = $2, chat_opened_at = coalesce(chat_opened_at, now()), updated_at = now()
          where id = $1 and status = any($4::text[])
            and (chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators c where c.request_id = tenant_audit_requests.id and c.user_id = $2))
-         returning tenant_id
+         returning tenant_id, requested_by
       )
-      insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body, visibility)
-      select tenant_id, $1, 'superadmin', $2, $3, $5 from writable_request
-      returning tenant_id
+      , inserted_message as (
+        insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body, visibility)
+        select tenant_id, $1, 'superadmin', $2, $3, $5 from writable_request
+        returning id
+      )
+      select writable_request.tenant_id, writable_request.requested_by
+        from writable_request cross join inserted_message
     `, [requestId, String(user.id), cleanMessage, AUDIT_CHAT_OPEN_STATUSES, visibility])
     if (!result.rowCount) throw new Error('Solicitacao indisponivel.')
+    return result.rows[0]
   },
   close: async (user, requestId) => {
     const result = await runQuery(`
@@ -426,7 +431,7 @@ export const createPlatformAuditChatActions = (runQuery = query) => ({
              chat_opened_at = coalesce(chat_opened_at, now()), chat_closed_at = now(), updated_at = now()
        where id = $1 and status = any($3::text[])
          and (chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators c where c.request_id = tenant_audit_requests.id and c.user_id = $2))
-       returning tenant_id, chat_opened_at, chat_closed_at
+       returning tenant_id, requested_by, chat_opened_at, chat_closed_at
     `, [requestId, String(user.id), AUDIT_CHAT_OPEN_STATUSES, supportReopenWindowDays()])
     if (!result.rowCount) throw new Error('Conversa indisponivel.')
     return result.rows[0]

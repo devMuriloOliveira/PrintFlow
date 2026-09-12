@@ -3,8 +3,8 @@ import type { AuditRequest, Message } from '~/types/platform-admin'
 
 const route = useRoute()
 const {
-  session, requests, tenants, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, error, activeRequests, closedRequests, supportMacros, tenantFor, formatDate,
-  statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, loadChatAssignees, loadSupportMacros, claimChat, transferChat, addChatCollaborator, updateSupportMetadata, reopenSupportChat, snoozeSupport, bulkUpdateSupport, autoAssignSupport
+  session, requests, tenants, messagesByRequest, supportHistory, authorizedTenantAudit, error, activeRequests, closedRequests, supportMacros, tenantFor, formatDate,
+  statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, refreshRequests, loadChatAssignees, loadSupportMacros, claimChat, transferChat, addChatCollaborator, updateSupportMetadata, reopenSupportChat, snoozeSupport, bulkUpdateSupport, autoAssignSupport
 } = usePlatformAdminWorkspace()
 const search = ref('')
 const queueFilter = ref<'open' | 'all' | 'unassigned' | 'mine' | 'collaborating' | 'waiting_customer' | 'waiting_internal' | 'overdue' | 'closed'>('open')
@@ -88,12 +88,9 @@ const openChat = async (request: AuditRequest) => {
     }
     if (!request.chatAssigneeId && !collaborator) return
     await loadMessages(request.id)
-    // Mensagens são o conteúdo crítico para abrir a conversa. Histórico e anexos
-    // chegam em segundo plano para não bloquear a primeira renderização.
-    void Promise.all([
-      loadSupportHistory(request.id),
-      request.requestKind === 'support' ? loadSupportAttachments(request.id) : Promise.resolve([])
-    ]).catch((cause: any) => {
+    // Mensagens são o conteúdo crítico para abrir a conversa. O histórico
+    // chega em segundo plano para não bloquear a primeira renderização.
+    void loadSupportHistory(request.id).catch((cause: any) => {
       actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel carregar todo o contexto da conversa.'
     })
   } catch (cause: any) {
@@ -130,13 +127,20 @@ const refreshSelected = async () => {
 
 const sendMessage = async () => {
   if (!selectedRequest.value || !messageDraft.value.trim()) return
+  const requestId = selectedRequest.value.id
+  const body = messageDraft.value.trim()
+  const temporaryId = `local-${Date.now()}`
   actionLoading.value = true
   actionError.value = ''
+  messagesByRequest.value = { ...messagesByRequest.value, [requestId]: [...(messagesByRequest.value[requestId] || []), { id: temporaryId, sender_type: 'superadmin', sender_id: session.user.value?.id || '', body, visibility: messageMode.value, created_at: new Date().toISOString() }] }
+  messageDraft.value = ''
   try {
-    await session.request(`/api/platform-admin/support-requests/${encodeURIComponent(selectedRequest.value.id)}/messages`, { method: 'POST', body: { body: messageDraft.value, visibility: messageMode.value } })
-    messageDraft.value = ''
+    await session.request(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/messages`, { method: 'POST', body: { body, visibility: messageMode.value } })
+    messagesByRequest.value = { ...messagesByRequest.value, [requestId]: (messagesByRequest.value[requestId] || []).filter(message => message.id !== temporaryId) }
     await refreshSelected()
   } catch (cause: any) {
+    messagesByRequest.value = { ...messagesByRequest.value, [requestId]: (messagesByRequest.value[requestId] || []).filter(message => message.id !== temporaryId) }
+    messageDraft.value = body
     actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel enviar a mensagem.'
   } finally {
     actionLoading.value = false
@@ -148,15 +152,6 @@ const applyMacro = (macroId: string) => {
   if (macro) messageDraft.value = macro.body
 }
 const selectMacro = (event: Event) => applyMacro((event.target as HTMLSelectElement).value)
-const uploadAttachment = async (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file || !selectedRequest.value) return
-  actionLoading.value = true; actionError.value = ''
-  try { await uploadSupportAttachment(selectedRequest.value.id, file); await loadSupportAttachments(selectedRequest.value.id) }
-  catch (cause: any) { actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel enviar o anexo.' }
-  finally { actionLoading.value = false; (event.target as HTMLInputElement).value = '' }
-}
-
 const snoozeSelectedSupport = async () => {
   if (!selectedRequest.value || !snoozeUntilDraft.value || selectedRequest.value.requestKind !== 'support') return
   actionLoading.value = true; actionError.value = ''
@@ -288,7 +283,7 @@ onMounted(async () => {
     if (!actionLoading.value && selectedRequest.value && document.visibilityState === 'visible') void refreshSelected().catch((cause: any) => {
       actionError.value = cause?.data?.error || cause?.message || 'Nao foi possivel atualizar a conversa.'
     })
-  }, 10000)
+  }, 2000)
 })
 onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer); if (searchTimer) clearTimeout(searchTimer) })
 </script>
@@ -309,5 +304,4 @@ onBeforeUnmount(() => { if (refreshTimer) clearInterval(refreshTimer); if (searc
   </AdminShell>
 <div v-if="selectedRequest?.requestKind === 'support' && selectedRequest.chatAssigneeId === session.user?.id" class="request-card" style="margin:10px 14px"><label>Resposta pronta<select @change="selectMacro"><option value="">Escolher macro...</option><option v-for="macro in supportMacros" :key="macro.id" :value="macro.id">{{ macro.name }}</option></select></label><label>Soneca ate<input v-model="snoozeUntilDraft" type="datetime-local"></label><button class="button button--quiet" :disabled="actionLoading || !snoozeUntilDraft" @click="snoozeSelectedSupport">Adiar alertas</button><button v-if="selectedRequest.status === 'closed'" class="button button--quiet" :disabled="actionLoading" @click="reopenChat">Reabrir atendimento</button></div>
 <details v-if="selectedRequest" class="request-card" style="margin:10px 14px"><summary>Histórico de alterações ({{ supportHistory[selectedRequest.id]?.length || 0 }})</summary><div v-for="event in supportHistory[selectedRequest.id] || []" :key="event.id" class="activity-row"><div><strong>{{ event.summary }}</strong><small>{{ event.reason || event.context }}</small></div><time>{{ formatDate(event.createdAt) }}</time></div><p v-if="!supportHistory[selectedRequest.id]?.length" class="empty-state">Nenhuma alteração registrada.</p></details>
-<details v-if="selectedRequest?.requestKind === 'support'" class="request-card" style="margin:10px 14px"><summary>Anexos ({{ supportAttachments[selectedRequest.id]?.length || 0 }})</summary><input type="file" accept="application/pdf,text/plain,text/csv,image/png,image/jpeg" @change="uploadAttachment"><button v-for="attachment in supportAttachments[selectedRequest.id] || []" :key="attachment.id" class="activity-row" type="button" @click="downloadSupportAttachment(selectedRequest.id, attachment)"><div><strong>{{ attachment.originalName }}</strong><small>{{ Math.ceil(attachment.sizeBytes / 1024) }} KB · expira {{ formatDate(attachment.expiresAt) }}</small></div></button></details>
 </template>
