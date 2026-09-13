@@ -86,8 +86,65 @@ const submit = async () => {
   <main class="auth-page">
     <section class="auth-panel">
       <div class="auth-brand">
-        <AppLogo />
-        <p>Gestão financeira e operacional para impressão 3D.</p>
+        <div class="auth-brand__top">
+          <AppLogo />
+          <span><i></i>Workspace conectado</span>
+        </div>
+
+        <div class="auth-brand__content">
+          <template v-if="mode === 'register'">
+            <span class="auth-brand__eyebrow">PLANEJE • PRODUZA • GERENCIE</span>
+            <h2>Crie sua conta<br>e comece a levar<br>suas <strong>ideias ao real.</strong></h2>
+            <p>Tenha controle das suas impressões,<br>acompanhe pedidos, gerencie custos<br>e aumente a produtividade do seu<br>negócio, tudo em um só lugar.</p>
+          </template>
+          <template v-else>
+            <h2>Gestão financeira<br>e operacional para<br><strong>impressão 3D.</strong></h2>
+            <p>Tenha controle das suas filas, acompanhe<br>pedidos, gerencie custos e aumente a<br>produtividade, tudo em um só lugar.</p>
+          </template>
+        </div>
+
+        <div v-if="mode === 'register'" class="auth-brand__cards" aria-hidden="true">
+          <div>
+            <span><UiIcon name="box" :size="23" /></span>
+            <strong>Gestão completa</strong>
+            <small>Controle, organize e acompanhe</small>
+          </div>
+          <div>
+            <span><UiIcon name="chart" :size="23" /></span>
+            <strong>Mais produtividade</strong>
+            <small>Otimze seu tempo e resultados</small>
+          </div>
+          <div>
+            <span><UiIcon name="bolt" :size="23" /></span>
+            <strong>Do digital ao real</strong>
+            <small>Suas ideias ganham forma</small>
+          </div>
+        </div>
+
+        <div v-else class="auth-brand__login-details" aria-hidden="true">
+          <div class="auth-brand__checks">
+            <span><UiIcon name="check" :size="15" /> Custos precisos</span>
+            <span><UiIcon name="check" :size="15" /> Produção organizada</span>
+          </div>
+          <div class="auth-brand__stats">
+            <div>
+              <span><UiIcon name="money" :size="23" /></span>
+              <strong>R$ 8,4k</strong>
+              <small>Receita</small>
+            </div>
+            <div>
+              <span><UiIcon name="box" :size="23" /></span>
+              <strong>12</strong>
+              <small>Pedidos</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="auth-brand__quote">
+          <p v-if="mode === 'register'">“Impressões que<br>impulsionam grandes ideias.”</p>
+          <p v-else>“Da ideia à realidade,<br>com mais controle.”</p>
+          <span></span>
+        </div>
       </div>
 
       <form class="auth-form" @submit.prevent="submit">
