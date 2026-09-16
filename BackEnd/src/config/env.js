@@ -4,10 +4,13 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const envPath = resolve(currentDir, '../../.env')
+const localEnvPath = resolve(currentDir, '../../.env.local')
+const externallyConfiguredProduction = process.env.NODE_ENV === 'production'
+const runningTests = Boolean(process.env.NODE_TEST_CONTEXT)
 
-if (existsSync(envPath)) {
-  const envFile = readFileSync(envPath, 'utf8')
+const loadEnvFile = (filePath, overrideLocalValues = false) => {
+  if (!existsSync(filePath)) return
+  const envFile = readFileSync(filePath, 'utf8')
 
   for (const line of envFile.split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
@@ -15,9 +18,12 @@ if (existsSync(envPath)) {
 
     const [, key, rawValue] = match
     const value = rawValue.replace(/^["']|["']$/g, '')
-    process.env[key] ??= value
+    if (overrideLocalValues) process.env[key] = value
+    else process.env[key] ??= value
   }
 }
+
+if (!externallyConfiguredProduction && !runningTests) loadEnvFile(localEnvPath, true)
 
 const databaseUrl = process.env.DATABASE_URL || ''
 const isProduction = process.env.NODE_ENV === 'production'

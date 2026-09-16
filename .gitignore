@@ -16,6 +16,7 @@ FrontEnd/.output
 FrontEnd/dist
 BackEnd/node_modules
 BackEnd/.env
+BackEnd/.env.local
 BackEnd/backups
 Agent/data/
 Agent/.env

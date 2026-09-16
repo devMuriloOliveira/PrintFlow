@@ -128,14 +128,14 @@ const initials = computed(() =>
         </Transition>
       </div>
 
-      <button class="profile-control" @click="auth.logout">
+      <NuxtLink class="profile-control" to="/perfil" aria-label="Abrir meu perfil">
         <span class="avatar">{{ initials }}</span>
         <span class="profile-copy">
           <strong>{{ auth.user.value?.name || 'Usuário' }}</strong>
-          <small>Sair da conta</small>
+          <small>Meu perfil</small>
         </span>
-        <UiIcon name="logout" :size="14" />
-      </button>
+        <UiIcon name="chevron" :size="14" />
+      </NuxtLink>
     </div>
   </header>
 </template>

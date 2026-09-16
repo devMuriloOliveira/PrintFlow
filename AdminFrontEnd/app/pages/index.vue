@@ -22,7 +22,7 @@ const operationalSummary = computed(() => {
   ].map(item => ({ ...item, percentage: item.total > 0 ? Math.round((item.value / item.total) * 100) : 0 }))
 })
 
-const openChat = (requestId: string) => navigateTo({ path: '/chats', query: { protocolo: requestId } })
+const openChat = (requestId: string) => navigateTo({ path: '/solicitacoes', query: { protocolo: requestId } })
 const saveSlaRule = async (rule: any) => {
   slaSaving.value = rule.id; slaError.value = ''
   try { await updateSupportSlaRule(rule.id, { category: rule.category, priority: rule.priority, firstResponseMinutes: Number(rule.firstResponseMinutes), resolutionMinutes: Number(rule.resolutionMinutes), active: rule.active }) }

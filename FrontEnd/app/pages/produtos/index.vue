@@ -166,7 +166,7 @@ const removeProduct = async (product: any) => {
       <div class="field"><label>Status</label><select v-model="productStatus"><option>Todos</option><option>Ativo</option><option>Rascunho</option></select></div>
       <button class="btn" @click="search='';category='Todas';printerFilter='Todas';materialFilter='Todos';productStatus='Todos'"><UiIcon name="close" :size="15"/> Limpar</button>
     </div>
-    <div class="split-layout">
+    <div class="split-layout" :class="{ 'split-layout--full': !selected }">
       <PanelCard>
         <div class="table-scroll"><table class="data-table">
           <thead><tr><th></th><th>Produto</th><th>SKU</th><th>Categoria</th><th>Preço de Venda</th><th>Peso</th><th>Tempo de Impressão</th><th>Filamento</th><th>Custo Total</th><th>Lucro</th><th>Margem</th><th>Status</th><th></th></tr></thead>

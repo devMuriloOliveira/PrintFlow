@@ -222,11 +222,7 @@ const adjustManualQuantity = (product: any, delta: number) => {
   void saveManualQuantity(product, current + delta)
 }
 const dateKey = (date: Date) => {
-  if (chartPeriod.value === 'week') {
-    const start = new Date(date)
-    start.setDate(date.getDate() - date.getDay())
-    return start.toISOString().slice(0, 10)
-  }
+  if (chartPeriod.value === 'week') return date.toISOString().slice(0, 10)
   if (chartPeriod.value === 'year') return String(date.getFullYear())
   return date.toISOString().slice(0, 7)
 }
@@ -284,7 +280,7 @@ const marketplaceBars = computed(() => {
 <template>
   <div>
     <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" to="/vendas/novo"><UiIcon name="plus"/>Nova Venda</NuxtLink></PageHeader>
-    <div class="metrics-grid metrics-grid--4">
+    <div class="metrics-grid metrics-grid--4 sales-metrics">
       <MetricCard
         v-for="card in metricCardsWithSummary"
         :key="card.key"
@@ -300,7 +296,7 @@ const marketplaceBars = computed(() => {
         @click="selectedMetric = card.key"
       />
     </div>
-    <PanelCard :title="selectedDetail.title" :subtitle="`${selectedDetail.totalLabel}: ${selectedDetail.formatter(detailedChart.total)}`">
+    <PanelCard class="sales-chart-panel" :title="selectedDetail.title" :subtitle="`${selectedDetail.totalLabel}: ${selectedDetail.formatter(detailedChart.total)}`">
       <template #actions>
         <div class="segmented-control" aria-label="Período do gráfico">
           <button type="button" :class="{ active: chartPeriod === 'week' }" @click="chartPeriod = 'week'">Semana</button>

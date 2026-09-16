@@ -7,7 +7,6 @@ const route = useRoute()
 
 const nav = [
   { to: '/', label: 'Central', mark: 'C' },
-  { to: '/chats', label: 'Atendimentos', mark: 'A' },
   { to: '/solicitacoes', label: 'Solicitacoes LGPD', mark: 'L' },
   { to: '/empresas', label: 'Empresas', mark: 'E' },
   { to: '/auditoria', label: 'Auditoria', mark: 'G', children: [{ to: '/auditoria?secao=eventos', label: 'Eventos administrativos' }, { to: '/auditoria?secao=empresa', label: 'Acessos por empresa' }] },

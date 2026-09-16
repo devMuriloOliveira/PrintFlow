@@ -1655,14 +1655,10 @@ export const migrate =
             on delete set null,
 
           printer_id
-            bigint
-            references printers(id)
-            on delete set null,
+            bigint,
 
           agent_printer_id
-            bigint
-            references agent_printers(id)
-            on delete set null,
+            bigint,
 
           source
             text

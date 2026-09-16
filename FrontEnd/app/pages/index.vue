@@ -30,23 +30,6 @@ const monthlyOrders = computed(() => {
   }
   return values
 })
-const monthlyFees = computed(() => {
-  const values = Array.from({ length: 12 }, () => 0)
-  for (const order of orders.value) {
-    const parts = String(order.date).split('/').map(Number)
-    const month = parts.length >= 2 ? parts[1] : Number(String(order.date).slice(5, 7))
-    if (month >= 1 && month <= 12) values[month - 1] += Number(order.fee || 0)
-  }
-  return values
-})
-const marketplaceBars = computed(() => {
-  const colors = ['#1768f2', '#0da566', '#f59e0b', '#c83bb7', '#29b6c8', '#7d8799']
-  const totals = new Map<string, number>()
-  for (const order of orders.value) totals.set(order.marketplace || 'Sem marketplace', (totals.get(order.marketplace || 'Sem marketplace') || 0) + order.gross)
-  const rows = [...totals.entries()].sort((a, b) => b[1] - a[1])
-  const max = rows[0]?.[1] || 0
-  return rows.map(([label, value], index) => ({ label, value, percent: max ? value / max * 100 : 0, color: colors[index % colors.length] }))
-})
 const productPerformance = computed(() => {
   const totals = new Map<string, { sales: number, profit: number }>()
   for (const order of orders.value) {
@@ -94,13 +77,12 @@ const operationalAlerts = computed(() => [
     <PageHeader title="Dashboard" subtitle="Resumo geral do seu negócio de impressão 3D" />
     <div v-if="pending" class="page-loading-hint" role="status">Carregando seus dados...</div>
 
-    <div class="metrics-grid">
+    <div class="metrics-grid metrics-grid--5">
       <MetricCard label="Faturamento Total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Dados do banco" color="blue" :points="monthlyRevenue" />
       <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative :points="monthlyExpenses" />
-      <MetricCard label="Lucro Líquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" selected :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
+      <MetricCard label="Lucro Líquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
       <MetricCard label="Pedidos" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Quantidade vendida por mês" color="purple" :points="monthlyOrders" />
       <MetricCard label="Ticket Médio" :value="formatCurrency(metrics.ticket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="monthlyRevenue.map((value, index) => monthlyOrders[index] ? value / monthlyOrders[index] : 0)" />
-      <MetricCard label="Taxas de Marketplaces" :value="formatCurrency(metrics.fees.value)" icon="percent" note="Taxas registradas por mês" color="cyan" :points="monthlyFees" />
     </div>
 
     <div class="operational-board">
@@ -138,12 +120,6 @@ const operationalAlerts = computed(() => [
     </div>
 
     <div class="dashboard-grid dashboard-grid--bottom">
-      <PanelCard title="Faturamento por Marketplace">
-        <div class="bar-list" style="padding-top:12px">
-          <div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este gráfico.</p></div></div>
-          <div v-for="bar in marketplaceBars" :key="bar.label" class="bar-row"><span>{{ bar.label }}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{ width: `${bar.percent}%`, background: bar.color }"/></div><strong>{{ formatCurrency(bar.value) }}</strong></div>
-        </div>
-      </PanelCard>
       <PanelCard title="Produtos mais Lucrativos">
         <div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Vendas</th><th>Lucro</th><th>Margem</th></tr></thead><tbody><tr v-if="!productPerformance.length"><td colspan="4"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado</h3><p>Cadastre produtos e vendas para ver o desempenho.</p></div></div></td></tr><tr v-for="p in productPerformance" :key="p.sku"><td><div class="table-product"><ProductThumb :type="p.thumb" :size="28"/><strong>{{ p.name }}</strong></div></td><td>{{ p.sales }}</td><td class="money-positive">{{ formatCurrency(p.orderProfit) }}</td><td><span class="badge badge--green">{{ metrics.percent(p.margin || 0) }}</span></td></tr></tbody></table></div>
       </PanelCard>

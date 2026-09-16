@@ -157,7 +157,7 @@ import {
   handlePlatformTenantStatusUpdate
 } from './platformAdmin.js'
 
-import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList, handleTenantSupportAttachmentCreate, handleTenantSupportAttachmentRead, handleTenantSupportAttachmentsList, handleTenantSupportEvents, handleTenantUnreadMessages } from './auditRequests.js'
+import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList, handleTenantSupportAttachmentCreate, handleTenantSupportAttachmentRead, handleTenantSupportAttachmentsList } from './auditRequests.js'
 
 import {
   handlePrintJobApprove,
@@ -987,8 +987,6 @@ export const handleRequest =
       if (req.method === 'POST' && tenantAuditMessagesMatch) return await handleTenantAuditMessageCreate(req, res, tenantAuditMessagesMatch[1])
 
       if (req.method === 'GET' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestsList(req, res)
-      if (req.method === 'GET' && url.pathname === '/api/support/events') return await handleTenantSupportEvents(req, res)
-      if (req.method === 'GET' && url.pathname === '/api/support/unread') return await handleTenantUnreadMessages(req, res)
       if (req.method === 'POST' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestCreate(req, res)
       const supportRequestMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)$/)
       if (req.method === 'DELETE' && supportRequestMatch) return await handleTenantAuditRequestCancel(req, res, supportRequestMatch[1])

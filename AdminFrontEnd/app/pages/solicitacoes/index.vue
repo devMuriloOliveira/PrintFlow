@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const {
   requests, error, activeRequests, tenantFor, formatDate, statusLabel, statusClass,
-  isChatOpen, load, refreshRequests, updatePrivacyRequest, exportPrivacyPortability, exportSupportRequestsReport
+  load, refreshRequests, updatePrivacyRequest, exportPrivacyPortability, exportSupportRequestsReport
 } = usePlatformAdminWorkspace()
 const search = ref('')
 const requestFilter = ref('all')
@@ -13,6 +13,8 @@ const reportLoading = ref(false)
 const requestPage = ref(0)
 const requestPageSize = 50
 const requestPageLoading = ref(false)
+const openChat = () => { error.value = 'O atendimento por e-mail será conectado a este protocolo.' }
+const isChatOpen = () => false
 const hasNextRequestPage = computed(() => requests.value.length === requestPageSize)
 
 const filteredRequests = computed(() => {
@@ -54,7 +56,6 @@ watch([search, requestFilter, categoryFilter], () => {
   if (requestFilterTimer) clearTimeout(requestFilterTimer)
   requestFilterTimer = setTimeout(() => { requestPage.value = 0; void loadRequestsPage() }, 250)
 })
-const openChat = (requestId: string) => navigateTo({ path: '/chats', query: { protocolo: requestId } })
 const categoryLabel = (category: string) => ({ technical: 'Tecnico', financial: 'Financeiro', integration: 'Integracao', account: 'Conta', data_backup: 'Backup e dados', privacy: 'LGPD', audit: 'Auditoria' }[category] || category)
 const openPrivacyTriage = (request: any) => { privacyTriage.value = { id: request.id, status: request.status === 'pending' ? 'under_review' : request.status, dueAt: request.dueAt ? String(request.dueAt).slice(0, 10) : '', reason: '' } }
 const savePrivacyTriage = async () => {
@@ -80,7 +81,7 @@ onMounted(async () => { await load({ tenants: true }); await loadRequestsPage() 
   <AdminShell v-model:search="search" title="Solicitacoes" subtitle="Gerencie suporte, LGPD e auditorias em um unico fluxo" :request-count="activeRequests.length">
     <template #actions><select v-model="categoryFilter" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option><option value="technical">Tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracoes</option><option value="account">Conta</option><option value="data_backup">Backup e dados</option><option value="privacy">LGPD</option><option value="audit">Auditoria</option></select><button class="button button--quiet" :disabled="reportLoading" @click="exportRequestsReport">Exportar CSV</button><button class="button button--quiet" :disabled="refreshing" @click="update">Atualizar</button></template>
     <p v-if="error" class="feedback feedback--error">{{ error }}</p>
-    <div class="lgpd-scope-note"><strong>Leitura rapida</strong><span>Use a coluna Tipo para distinguir suporte, LGPD e auditoria. Para conversar em tempo real, abra o protocolo em Atendimentos.</span></div>
+    <div class="lgpd-scope-note"><strong>Leitura rapida</strong><span>Use a coluna Tipo para distinguir suporte, LGPD e auditoria. O atendimento por e-mail será conectado a este protocolo.</span></div>
     <div class="request-tabs">
       <button :class="{ active: requestFilter === 'all' }" @click="requestFilter = 'all'">Todas <span>{{ requests.length }}</span></button>
       <button :class="{ active: requestFilter === 'pending' }" @click="requestFilter = 'pending'">Abertas <span>{{ requests.filter(request => request.status === 'pending').length }}</span></button>
