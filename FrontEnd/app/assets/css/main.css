@@ -101,8 +101,11 @@ input, select, textarea { color: var(--ink); }
 .profile-overview-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(240px, .7fr); gap: 14px; margin-bottom: 18px; }
 .profile-summary { display: flex; align-items: center; gap: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; padding: 20px; box-shadow: var(--shadow); }
 .profile-summary__avatar { width: 58px; height: 58px; font-size: 17px; }
-.profile-summary h2,.profile-logout h2 { margin: 0; font-size: 16px; }
-.profile-summary p,.profile-logout p { margin: 4px 0 9px; color: var(--muted); font-size: 12px; }
+.profile-summary__content { display: grid; justify-items: start; }
+.profile-summary h2 { margin: 0; font-size: 16px; }
+.profile-summary p { margin: 4px 0 9px; color: var(--muted); font-size: 12px; }
+.profile-signout { display: inline-flex; align-items: center; gap: 5px; margin-top: 9px; border: 0; padding: 0; color: var(--red); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.profile-signout:hover { text-decoration: underline; }
 .profile-plan-highlight { display: grid; align-content: center; justify-items: center; gap: 5px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; padding: 16px; box-shadow: var(--shadow); text-align: center; }
 .profile-plan-highlight__icon { display: grid; width: 54px; height: 54px; place-items: center; border-radius: 16px; color: #fff; background: #8a96aa; }
 .profile-plan-highlight--active .profile-plan-highlight__icon { color: #07824f; background: #dff9ed; }
@@ -138,7 +141,6 @@ input, select, textarea { color: var(--ink); }
 .profile-section-card__content { display: grid; flex: 1; gap: 5px; }
 .profile-section-card__content strong { font-size: 13px; }
 .profile-section-card__content small { color: var(--muted); font-size: 11px; line-height: 1.45; }
-.profile-logout { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; border: 1px solid #f4cccc; border-radius: var(--radius); background: #fffafa; padding: 18px 20px; }
 .mobile-menu { display: none; }
 .dropdown-card { position: absolute; top: calc(100% + 14px); right: 0; width: 330px; border: 1px solid var(--line); border-radius: 13px; background: #fff; box-shadow: 0 16px 48px rgba(25,44,84,.16); }
 .dropdown-card__head { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 15px; }
@@ -554,7 +556,6 @@ input, select, textarea { color: var(--ink); }
   .profile-overview-grid,.profile-billing-card__details,.profile-plans { grid-template-columns: 1fr; }
   .profile-billing-card__head { align-items: flex-start; flex-wrap: wrap; }
   .profile-billing-card__actions { align-items: stretch; flex-direction: column; }
-  .profile-logout { align-items: flex-start; flex-direction: column; }
   .metrics-grid,.metrics-grid--5,.metrics-grid--4 { grid-template-columns: 1fr 1fr; }
   .expense-status-summary { grid-template-columns: 1fr; }
   .metric-card { min-height: 132px; padding: 13px; }

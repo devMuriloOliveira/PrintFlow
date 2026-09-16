@@ -27,13 +27,21 @@ const startCheckout = async (billingCycle: 'monthly' | 'yearly') => {
     window.location.assign(result.url)
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Não foi possível abrir o checkout.')
-  } finally { checkoutLoading.value = '' }
+  } finally {
+    checkoutLoading.value = ''
+  }
 }
 
 onMounted(async () => {
   if (!canManageBilling.value) return
   billingLoading.value = true
-  try { billing.value = await getStripeBilling() } catch { billing.value = null } finally { billingLoading.value = false }
+  try {
+    billing.value = await getStripeBilling()
+  } catch {
+    billing.value = null
+  } finally {
+    billingLoading.value = false
+  }
 })
 
 const profileSections = [
@@ -52,10 +60,11 @@ const profileSections = [
     <section class="profile-overview-grid">
       <div class="profile-summary">
         <span class="avatar profile-summary__avatar">{{ initials }}</span>
-        <div>
+        <div class="profile-summary__content">
           <h2>{{ auth.user.value?.name || 'Usuário' }}</h2>
           <p>{{ auth.user.value?.email || 'E-mail não informado' }}</p>
           <span class="badge">{{ auth.user.value?.role === 'owner' ? 'Owner da empresa' : 'Usuário da empresa' }}</span>
+          <button class="profile-signout" type="button" @click="auth.logout"><UiIcon name="logout" :size="15" />Sair da conta</button>
         </div>
       </div>
       <div class="profile-plan-highlight" :class="{ 'profile-plan-highlight--active': hasManagedSubscription }">
@@ -72,12 +81,12 @@ const profileSections = [
         <div><small>{{ periodLabel }}</small><strong>{{ periodDate }}</strong><span>{{ subscription.billingCycle === 'yearly' ? 'Cobrança anual' : 'Cobrança mensal' }}</span></div>
         <div><small>Benefícios incluídos</small><strong>Acesso completo ao PrintFlow</strong><ul class="profile-plan-benefits"><li v-for="benefit in planBenefits" :key="benefit">{{ benefit }}</li></ul></div>
       </div>
-      <div v-else-if="canManageBilling && !billingLoading" class="info-note"><UiIcon name="info" />Não foi possível carregar os detalhes da assinatura agora. Você pode consultar novamente na tela de cobrança.</div>
+      <div v-else-if="canManageBilling && !billingLoading && !availablePlan" class="info-note"><UiIcon name="info" />Não foi possível carregar os detalhes da assinatura agora. Você pode consultar novamente na tela de cobrança.</div>
       <div v-else-if="!canManageBilling" class="info-note"><UiIcon name="shield" />Somente o Owner pode consultar e gerenciar a assinatura da empresa.</div>
       <template v-if="canManageBilling && !hasManagedSubscription && availablePlan">
         <div class="profile-plans">
-          <article class="profile-plan-option"><div><h3>Mensal</h3><p>Flexível para começar.</p></div><strong>{{ currency(availablePlan.monthly) }}<small>/mês</small></strong><button class="btn" type="button" :disabled="!billing?.configured || !availablePlan.monthlyEnabled || !!checkoutLoading" @click="startCheckout('monthly')">{{ checkoutLoading === 'monthly' ? 'Abrindo...' : 'Assinar mensal' }}</button></article>
-          <article class="profile-plan-option profile-plan-option--featured"><span>Melhor custo-benefício</span><div><h3>Anual</h3><p>Economia no pagamento anual.</p></div><strong>{{ currency(availablePlan.yearly) }}<small>/ano</small></strong><button class="btn btn--primary" type="button" :disabled="!billing?.configured || !availablePlan.yearlyEnabled || !!checkoutLoading" @click="startCheckout('yearly')">{{ checkoutLoading === 'yearly' ? 'Abrindo...' : 'Assinar anual' }}</button></article>
+          <article class="profile-plan-option"><div><h3>Mensal</h3><p>Flexível para começar.</p></div><strong>{{ currency(availablePlan.monthly) }}<small>/mês</small></strong><ul class="profile-plan-benefits"><li v-for="benefit in planBenefits" :key="`monthly-${benefit}`">{{ benefit }}</li></ul><button class="btn" type="button" :disabled="!billing?.configured || !availablePlan.monthlyEnabled || !!checkoutLoading" @click="startCheckout('monthly')">{{ checkoutLoading === 'monthly' ? 'Abrindo...' : 'Assinar mensal' }}</button></article>
+          <article class="profile-plan-option profile-plan-option--featured"><span>Melhor custo-benefício</span><div><h3>Anual</h3><p>Economia no pagamento anual.</p></div><strong>{{ currency(availablePlan.yearly) }}<small>/ano</small></strong><ul class="profile-plan-benefits"><li v-for="benefit in planBenefits" :key="`yearly-${benefit}`">{{ benefit }}</li></ul><button class="btn btn--primary" type="button" :disabled="!billing?.configured || !availablePlan.yearlyEnabled || !!checkoutLoading" @click="startCheckout('yearly')">{{ checkoutLoading === 'yearly' ? 'Abrindo...' : 'Assinar anual' }}</button></article>
         </div>
         <div v-if="!billing?.configured" class="info-note" style="margin-top:14px"><UiIcon name="info" />Os planos estão sendo preparados. O checkout será liberado quando a cobrança estiver configurada.</div>
       </template>
@@ -90,11 +99,6 @@ const profileSections = [
         <span class="profile-section-card__content"><strong>{{ section.title }}</strong><small>{{ section.description }}</small></span>
         <UiIcon name="chevron" :size="17" />
       </NuxtLink>
-    </section>
-
-    <section class="profile-logout">
-      <div><h2>Sair da conta</h2><p>Encerra somente a sessão deste navegador.</p></div>
-      <button class="btn btn--danger" type="button" @click="auth.logout"><UiIcon name="logout" />Sair da conta</button>
     </section>
   </div>
 </template>
