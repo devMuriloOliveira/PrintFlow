@@ -283,6 +283,16 @@ export const registerUser = async ({ name, email, password, company, document })
     [tenantId, result.rows[0].id]
   )
 
+  await tenantQuery(
+    tenantId,
+    `insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, source)
+     select $1, $2, id, 'active', 'manual', now(), 'manual'
+       from platform_plans
+      where code = 'free' and active = true
+     on conflict (tenant_id) do nothing`,
+    [`subscription_free_${tenantId}`, tenantId]
+  )
+
   if (isConfiguredPlatformSuperAdmin(normalizedEmail)) {
     await query(`insert into platform_super_admins (user_id, email_hash) values ($1, $2) on conflict (user_id) do update set email_hash = excluded.email_hash, status = 'active', updated_at = now()`, [result.rows[0].id, emailHash])
   }

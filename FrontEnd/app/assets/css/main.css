@@ -125,14 +125,19 @@ input, select, textarea { color: var(--ink); }
 .profile-plan-benefits li::before { margin-right: 5px; color: #07824f; content: '✓'; }
 .profile-billing-card__actions { display: flex; gap: 10px; margin-top: 16px; }
 .profile-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.profile-plans--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .profile-plan-option { display: grid; gap: 9px; border: 1px solid #dbe4f0; border-radius: 13px; background: #f8fafd; padding: 16px; }
 .profile-plan-option--featured { border-color: #bdebd8; background: #f5fffa; }
+.profile-plan-option--free { background: #fff; }
 .profile-plan-option > span { color: #07824f; font-size: 10px; font-weight: 750; }
 .profile-plan-option h3 { margin: 0; font-size: 14px; }
 .profile-plan-option p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 .profile-plan-option strong { font-size: 19px; }
 .profile-plan-option strong small { color: var(--muted); font-size: 11px; font-weight: 500; }
 .profile-plan-option__charge { color: var(--muted); font-size: 10px; }
+.profile-plan-option__saving { display: inline-flex; width: fit-content; border-radius: 999px; padding: 4px 8px; color: #1c476f; background: #edf2f8; font-size: 10px; font-weight: 750; }
+.profile-plan-benefits__locked { color: #8b98aa; text-decoration: line-through; }
+.profile-plan-benefits__locked::before { color: #8b98aa !important; content: '×' !important; }
 .profile-section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .profile-section-card { display: flex; min-height: 108px; align-items: center; gap: 13px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--text); background: #fff; padding: 16px; text-decoration: none; box-shadow: var(--shadow); transition: border-color .16s var(--ease-out), box-shadow .16s var(--ease-out), transform .16s var(--ease-out); }
 .profile-section-card:hover { border-color: #b8c7dc; box-shadow: var(--shadow-hover); transform: translateY(-2px); }
@@ -554,7 +559,7 @@ input, select, textarea { color: var(--ink); }
   .topbar-search { width: auto; flex: 1; }.topbar-search kbd { display: none; }
   .top-control { display: none; }.profile-copy,.profile-control > .ui-icon { display: none; }.topbar-actions { gap: 3px; margin-left: 0; }
   .profile-section-grid { grid-template-columns: 1fr; }
-  .profile-overview-grid,.profile-billing-card__details,.profile-plans { grid-template-columns: 1fr; }
+  .profile-overview-grid,.profile-billing-card__details,.profile-plans,.profile-plans--three { grid-template-columns: 1fr; }
   .profile-billing-card__head { align-items: flex-start; flex-wrap: wrap; }
   .profile-billing-card__actions { align-items: stretch; flex-direction: column; }
   .metrics-grid,.metrics-grid--5,.metrics-grid--4 { grid-template-columns: 1fr 1fr; }

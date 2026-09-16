@@ -119,7 +119,7 @@ export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, plan
     if (current.rows[0]?.provider_subscription_id && ['trial', 'active', 'past_due', 'grace', 'paused'].includes(current.rows[0].status)) throw new Error('Esta empresa ja possui uma assinatura Stripe. Use a opcao de alterar plano.')
     return client.query('select trial_used_at from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId])
   })
-  const trialDays = previous.rows[0]?.trial_used_at ? 0 : plan.trialDays
+  const trialDays = !previous.rows[0]?.trial_used_at ? plan.trialDays : 0
   const checkoutId = `stripe_checkout_${randomBytes(12).toString('hex')}`
   const checkoutState = await withTenant(tenantId, async (client) => {
     // Serializa também a leitura do checkout pendente e sua criação; duas abas

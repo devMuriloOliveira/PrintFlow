@@ -209,6 +209,7 @@ export const migrate =
     // Empresas existentes permanecem no acesso historico. Cadastros novos entram
     // no fluxo comercial e so ganham escrita apos checkout autorizado.
     await query(`alter table tenants add column if not exists billing_enforcement_exempt boolean not null default true`)
+    await query(`alter table tenants add column if not exists pricing_generation integer not null default 0`)
     await query(`alter table tenants add column if not exists document_hash text`)
     await query(`alter table tenants add column if not exists document_type text`)
     await query(`alter table tenants add column if not exists document_locked_at timestamptz`)
@@ -579,13 +580,17 @@ export const migrate =
     await query(`alter table tenant_subscription_events add column if not exists provider text`)
     await query(`alter table tenant_subscription_events add column if not exists provider_event_id text`)
     await query(`create index if not exists tenant_subscription_events_lookup_idx on tenant_subscription_events (tenant_id, created_at desc)`)
+    await query(`update tenants set billing_enforcement_exempt = true, pricing_generation = 1 where pricing_generation = 0`)
+    await query(`alter table tenants alter column pricing_generation set default 1`)
     await query(`
-      insert into platform_plans (id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features)
+      insert into platform_plans (id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features, trial_days)
       values
-        ('plan_starter', 'starter', 'PrintFlow', 'Assinatura unica da plataforma', 59.90, 598.80, '{}', '{"marketplaces":true,"advancedReports":true,"prioritySupport":true}')
+        ('plan_free', 'free', 'Grátis', 'Calculadora e dashboard em modo limitado.', 0, 0, '{"calculatorSimulations":1}', '{"coreOperations":false,"marketplaces":false,"advancedReports":false,"printers":false,"team":false}', 0),
+        ('plan_starter', 'starter', 'PRO', 'Acesso completo ao PrintFlow.', 19.90, 199.90, '{"users":8}', '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"printers":true,"team":true,"prioritySupport":true}', 7)
       on conflict (code) do nothing
     `)
-    await query(`update platform_plans set name = 'PrintFlow', description = 'Assinatura unica da plataforma', monthly_reference_price = 59.90, yearly_reference_price = 598.80, limits = '{}'::jsonb, features = '{"marketplaces":true,"advancedReports":true,"prioritySupport":true}'::jsonb, active = true, updated_at = now() where code = 'starter'`)
+    await query(`update platform_plans set name = 'Grátis', description = 'Calculadora e dashboard em modo limitado.', monthly_reference_price = 0, yearly_reference_price = 0, limits = '{"calculatorSimulations":1}'::jsonb, features = '{"coreOperations":false,"marketplaces":false,"advancedReports":false,"printers":false,"team":false}'::jsonb, trial_days = 0, active = true, updated_at = now() where code = 'free'`)
+    await query(`update platform_plans set name = 'PRO', description = 'Acesso completo ao PrintFlow.', stripe_product_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_product_id end, stripe_monthly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_monthly_price_id end, stripe_yearly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_yearly_price_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"printers":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 7, active = true, updated_at = now() where code = 'starter'`)
     await query(`update platform_plans set active = false, updated_at = now() where code in ('growth', 'scale')`)
 
     await query(`

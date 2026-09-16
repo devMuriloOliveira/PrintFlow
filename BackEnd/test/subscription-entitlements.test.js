@@ -43,6 +43,21 @@ test('assinatura vencida fica somente leitura e preserva suporte', () => {
   assert.equal(supportsSubscriptionFeature(entitlement, 'advancedReports'), false)
 })
 
+test('plano gratuito mantem calculadora limitada e bloqueia recursos PRO', () => {
+  const entitlement = entitlementFromSubscription({
+    status: 'active',
+    limits: { calculatorSimulations: 1 },
+    features: { coreOperations: false, marketplaces: false, advancedReports: false, printers: false, team: false }
+  }, false)
+
+  assert.equal(entitlement.mode, 'full')
+  assert.equal(entitlement.limits.calculatorSimulations, 1)
+  assert.equal(supportsSubscriptionFeature(entitlement, 'coreOperations'), false)
+  assert.equal(supportsSubscriptionFeature(entitlement, 'printers'), false)
+  assert.equal(supportsSubscriptionFeature(entitlement, 'advancedReports'), false)
+  assert.equal(canUseSubscriptionRequest({ method: 'GET', pathname: '/api/orders', entitlement }), true)
+})
+
 test('watchdog aplica a transicao prevista para cada prazo', () => {
   const now = new Date('2026-09-10T12:00:00.000Z')
 

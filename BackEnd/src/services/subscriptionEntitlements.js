@@ -1,12 +1,13 @@
 import { hasDatabase, withTenant } from '../db/pool.js'
 
 const readOnlyStatuses = new Set(['past_due', 'paused', 'cancelled', 'ended'])
-const managedFeatures = new Set(['marketplaces', 'advancedReports'])
+const managedFeatures = new Set(['coreOperations', 'marketplaces', 'advancedReports', 'printers', 'team'])
 const resourceLimits = {
   users: { table: 'users', where: "status = 'active'" },
   printers: { table: 'printers', where: 'true' },
   agents: { table: 'agents', where: "status <> 'revoked'" },
-  products: { table: 'products', where: 'true' }
+  products: { table: 'products', where: 'true' },
+  calculatorSimulations: { table: 'calculator_simulations', where: 'true' }
 }
 
 const numberLimit = (value) => {
@@ -75,13 +76,20 @@ export const assertTenantRequestEntitlement = async ({ tenantId, method, pathnam
   const entitlement = await resolveTenantEntitlement(tenantId)
   if (!canUseSubscriptionRequest({ method, pathname, entitlement })) throw subscriptionError()
 
-  if (isAdvancedReport && entitlement.configured && entitlement.features.advancedReports !== true) {
+  if (isAdvancedReport && !supportsSubscriptionFeature(entitlement, 'advancedReports')) {
     throw new Error('O plano atual nao inclui relatorios avancados.')
   }
 
-  const marketplaceWrite = method !== 'GET' && (pathname.startsWith('/api/marketplaces') || pathname.startsWith('/api/marketplace-integrations'))
-  if (marketplaceWrite && entitlement.configured && entitlement.features.marketplaces !== true) {
-    throw new Error('O plano atual nao inclui integracoes de marketplace.')
+  if (method !== 'GET') {
+    const blockedFeature = [
+      { feature: 'coreOperations', paths: ['/api/products', '/api/orders', '/api/clients', '/api/filaments', '/api/expenses', '/api/goals'] },
+      { feature: 'marketplaces', paths: ['/api/marketplaces', '/api/marketplace-integrations'] },
+      { feature: 'printers', paths: ['/api/printers', '/api/print-jobs', '/api/agents', '/api/agent-commands'] },
+      { feature: 'team', paths: ['/api/members'] }
+    ].find((item) => item.paths.some((path) => pathname.startsWith(path)))
+    if (blockedFeature && !supportsSubscriptionFeature(entitlement, blockedFeature.feature)) {
+      throw new Error('Este recurso esta disponivel apenas no plano PRO.')
+    }
   }
 
   return entitlement

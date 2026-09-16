@@ -5,6 +5,7 @@ import { sendJson } from '../http/response.js'
 import { createCalculatorSimulation, listCalculatorSimulations } from '../repositories/calculatorSimulationsRepository.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { withTenant } from '../db/pool.js'
+import { assertTenantResourceLimit } from '../services/subscriptionEntitlements.js'
 
 export const handleCalculatorSimulationsList = async (req, res) => {
   const user = await getAuthUser(req)
@@ -21,6 +22,7 @@ export const handleCalculatorSimulationCreate = async (req, res) => {
   if (!payload || typeof payload !== 'object') return sendJson(res, 400, { error: 'Simulacao invalida' })
   if (Number(payload.weight || 0) <= 0) return sendJson(res, 400, { error: 'Peso da simulacao deve ser maior que zero' })
   if (Number(payload.suggestedPrice || 0) <= 0) return sendJson(res, 400, { error: 'Preco sugerido invalido' })
+  await withTenant(user.tenantId, (client) => assertTenantResourceLimit(client, user.tenantId, 'calculatorSimulations'))
   const created = await createCalculatorSimulation(user.tenantId, user.id, payload)
   await withTenant(user.tenantId, (client) => writeAuditEvent(user.tenantId, { action: 'calculator.simulation_created', actorType: 'user', actorId: user.id, entityType: 'calculator_simulation', entityId: created.id, details: { name: created.name, suggestedPrice: created.suggestedPrice } }, client))
   return sendJson(res, 201, created)
