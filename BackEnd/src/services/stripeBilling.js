@@ -8,6 +8,12 @@ const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0
 const billingPlanCode = 'starter'
 const dateFromUnix = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? new Date(Number(value) * 1000).toISOString() : null
 const checkoutReturnUrl = (state) => `${text(env.appPublicUrl, 800).replace(/\/$/, '')}/configuracoes?billing=${state}`
+export const stripeCheckoutExpired = ({ expiresAt = null, createdAt = null } = {}, now = Date.now()) => {
+  const expiresAtMs = Date.parse(String(expiresAt || ''))
+  if (Number.isFinite(expiresAtMs)) return expiresAtMs <= now
+  const createdAtMs = Date.parse(String(createdAt || ''))
+  return Number.isFinite(createdAtMs) && createdAtMs + 24 * 60 * 60 * 1000 <= now
+}
 
 const stripeRequest = async (path, { method = 'GET', form = null } = {}) => {
   if (!env.stripeSecretKey) throw new Error('Stripe ainda nao esta configurado no ambiente de deploy.')
@@ -71,7 +77,7 @@ export const getStripeBillingSummary = async (tenantId) => {
   return withTenant(tenantId, async (client) => {
     const [subscription, checkout] = await Promise.all([
       client.query(`select subscription.status, subscription.billing_cycle, subscription.current_period_end, subscription.cancel_at_period_end, plan.code as plan_code, plan.name as plan_name from tenant_subscriptions subscription left join platform_plans plan on plan.id = subscription.plan_id where subscription.tenant_id = $1 limit 1`, [tenantId]),
-      client.query(`select status, checkout_url, expires_at, created_at from tenant_billing_checkouts where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open') order by created_at desc limit 1`, [tenantId])
+      client.query(`select status, checkout_url, expires_at, created_at from tenant_billing_checkouts where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open') and (status = 'creating' or coalesce(expires_at, created_at + interval '24 hours') > now()) order by created_at desc limit 1`, [tenantId])
     ])
     return {
       configured: Boolean(env.stripeSecretKey && env.stripeWebhookSecret), environment: 'production',
@@ -119,7 +125,8 @@ export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, plan
     // Serializa também a leitura do checkout pendente e sua criação; duas abas
     // simultâneas não podem abrir dois fluxos de cobrança para a mesma empresa.
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [String(tenantId)])
-    const pending = await client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') order by created_at desc limit 1`, [tenantId, cycle])
+    await client.query(`update tenant_billing_checkouts set status = 'expired', updated_at = now() where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status = 'open' and coalesce(expires_at, created_at + interval '24 hours') <= now()`, [tenantId, cycle])
+    const pending = await client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') and (status = 'creating' or coalesce(expires_at, created_at + interval '24 hours') > now()) order by created_at desc limit 1`, [tenantId, cycle])
     if (pending.rowCount) {
       if (!pending.rows[0].checkout_url) throw new Error('Ja existe um checkout em processamento para esta empresa. Aguarde alguns instantes.')
       return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
@@ -269,6 +276,9 @@ export const processStripeWebhook = async ({ event = {} } = {}) => {
     if (eventType === 'checkout.session.completed' && resource.subscription) {
       const subscription = await stripeRequest(`/subscriptions/${encodeURIComponent(resource.subscription)}`)
       synced = await syncSubscription(client, subscription, eventId, eventType)
+    } else if (eventType === 'checkout.session.expired') {
+      const expired = await client.query(`update tenant_billing_checkouts set status = 'expired', updated_at = now() where provider = '${provider}' and provider_checkout_id = $1 and status in ('creating', 'open') returning tenant_id`, [text(resource.id, 160)])
+      synced = expired.rows[0] ? { tenantId: expired.rows[0].tenant_id } : { ignored: true }
     } else if (eventType === 'customer.subscription.updated' || eventType === 'customer.subscription.deleted') synced = await syncSubscription(client, resource, eventId, eventType)
     else if (['invoice.paid', 'invoice.payment_failed', 'invoice.marked_uncollectible', 'invoice.voided'].includes(eventType)) synced = await syncInvoice(client, resource, eventId, eventType)
     await client.query(`update payment_provider_events set tenant_id=$2,processed_at=now() where provider='${provider}' and provider_event_id=$1`, [eventId, synced.tenantId || null])
