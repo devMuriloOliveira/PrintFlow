@@ -61,6 +61,7 @@ const toggleMarketplace = async (marketplace: any) => {
 }
 const reconnectConnection = async (integration: any) => {
   if (!integration?.id || connectionActionId.value) return
+  if (!window.confirm('O Mercado Livre vai autorizar a conta que estiver aberta no navegador. Para conectar outra conta, troque de usuário no Mercado Livre antes de continuar.')) return
   connectionActionId.value = integration.id
   try {
     window.location.href = await startMarketplaceOAuth(integration.platform)
