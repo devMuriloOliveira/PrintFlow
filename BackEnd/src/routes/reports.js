@@ -16,7 +16,7 @@ const loadReport = async (tenantId, filters) => withTenant(tenantId, async (clie
   if (filters.product) { ordersParams.push(filters.product); orderWhere.push(`sr.product = $${ordersParams.length}`) }
   if (filters.channel) { ordersParams.push(filters.channel); orderWhere.push(`sr.channel = $${ordersParams.length}`) }
   const expensesParams = [tenantId, filters.from, filters.to]
-  const expenseWhere = ['e.tenant_id = $1', 'e.expense_date >= $2', 'e.expense_date <= $3']
+  const expenseWhere = ['e.tenant_id = $1', "coalesce(e.status, '') <> 'Cancelado'", 'e.expense_date >= $2', 'e.expense_date <= $3']
   if (filters.category) { expensesParams.push(filters.category); expenseWhere.push(`e.category = $${expensesParams.length}`) }
   const [orders, expenses, products, filaments, printers, marketplaces, clients, goals, printJobs, integrations, movements, simulations, history] = await Promise.all([
     client.query(`
@@ -26,7 +26,7 @@ const loadReport = async (tenantId, filters) => withTenant(tenantId, async (clie
           o.product_name as product, o.quantity, o.gross, o.fee, o.shipping, o.net, o.profit
         from orders o
         left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
-        where o.tenant_id = $1
+        where o.tenant_id = $1 and coalesce(o.status, '') <> 'Cancelado'
 
         union all
 
@@ -34,7 +34,7 @@ const loadReport = async (tenantId, filters) => withTenant(tenantId, async (clie
           s.product_name as product, s.quantity, s.gross, s.marketplace_fee as fee, s.shipping, s.net, s.profit
         from tracked_sales s
         left join marketplaces m on m.id = s.marketplace_id and m.tenant_id = s.tenant_id
-        where s.tenant_id = $1
+        where s.tenant_id = $1 and coalesce(s.status, '') <> 'Cancelado'
       )
       select to_char(sr.order_date, 'YYYY-MM-DD') as date, sr.marketplace, sr.channel, sr.product, sr.quantity,
         sr.gross, sr.fee, sr.shipping, sr.net, sr.profit
@@ -47,7 +47,7 @@ const loadReport = async (tenantId, filters) => withTenant(tenantId, async (clie
     client.query(`select name, maker, material, type, color, initial_weight, remaining_weight, min_stock_weight, cost, supplier, purchase_date, status from filaments where tenant_id = $1 order by name`, [tenantId]),
     client.query(`select name, code, maker, model, power_w, accumulated_hours, status, location, volume, default_filament from printers where tenant_id = $1 order by name`, [tenantId]),
     client.query(`select name, platform, commission, fixed, financial, ads, others, active, connection_status from marketplaces where tenant_id = $1 order by name`, [tenantId]),
-    client.query(`select c.name, c.email, c.phone, c.origin, c.status, count(o.id) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))::int as orders, coalesce(sum(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as revenue, coalesce(avg(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as ticket, max(o.order_date) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')) as last_order from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1 left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id where c.tenant_id = $1 group by c.id order by c.name`, [tenantId]),
+    client.query(`select c.name, c.email, c.phone, c.origin, c.status, count(o.id) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))::int as orders, coalesce(sum(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as revenue, coalesce(avg(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as ticket, max(o.order_date) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')) as last_order from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1 and coalesce(o.status, '') <> 'Cancelado' left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id where c.tenant_id = $1 group by c.id order by c.name`, [tenantId]),
     client.query(`select name, current_value, target_value, status, period_start, period_end from goals where tenant_id = $1 order by created_at`, [tenantId]),
     client.query(`select j.title, j.source, j.quantity, j.priority, j.status, j.scheduled_at, j.started_at, j.completed_at, coalesce(p.name, j.title) as product from print_jobs j left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id where j.tenant_id = $1 order by j.created_at`, [tenantId]),
     client.query(`select platform, connection_name, status, token_expires_at, last_sync_at, last_error from marketplace_integrations where tenant_id = $1 order by created_at`, [tenantId]),
@@ -109,10 +109,26 @@ const csvReport = (report, filters) => {
   return `\ufeff${lines.map((line) => line.map(csvCell).join(';')).join('\r\n')}\r\n`
 }
 
-const workbookReport = async (report, filters) => {
+export const workbookReport = async (report, filters) => {
   const workbook = new ExcelJS.Workbook(); workbook.creator = 'PrintFlow'; workbook.created = new Date()
-  const addSheet = (name, columns, rows) => { const sheet = workbook.addWorksheet(name); sheet.columns = columns.map(([header, key]) => ({ header, key, width: Math.max(14, header.length + 3) })); rows.forEach((row) => sheet.addRow(row)); sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1768F2' } }; sheet.views = [{ state: 'frozen', ySplit: 1 }] }
-  addSheet('Resumo', [['Indicador', 'Indicador'], ['Valor', 'Valor']], summaryRows(report).slice(1).map(([label, value]) => ({ Indicador: label, Valor: value })))
+  const currencyKeys = new Set(['gross', 'fee', 'shipping', 'net', 'profit', 'amount', 'price', 'cost', 'revenue', 'ticket', 'current_value', 'target_value', 'price_per_kg', 'energy_rate', 'direct_cost', 'suggested_price', 'fixed'])
+  const percentKeys = new Set(['margin', 'commission', 'financial', 'ads', 'others'])
+  const dateKeys = new Set(['date', 'next_due_date', 'purchase_date', 'last_order', 'period_start', 'period_end'])
+  const dateTimeKeys = new Set(['created_at', 'scheduled_at', 'started_at', 'completed_at', 'token_expires_at', 'last_sync_at'])
+  const asDate = (value) => { if (value instanceof Date) return value; if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(value)) return value; const date = new Date(`${value.slice(0, 10)}T${value.length > 10 ? value.slice(11) : '00:00:00'}`); return Number.isNaN(date.getTime()) ? value : date }
+  const addSheet = (name, columns, rows) => {
+    const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 4 }] })
+    sheet.mergeCells(1, 1, 1, columns.length); sheet.getCell('A1').value = `PrintFlow 3D · ${name}`; sheet.getCell('A1').font = { bold: true, size: 15, color: { argb: 'FF172033' } }
+    sheet.mergeCells(2, 1, 2, columns.length); sheet.getCell('A2').value = `Período: ${filters.from} a ${filters.to} · Gerado em ${new Date().toLocaleString('pt-BR')}`; sheet.getCell('A2').font = { size: 10, color: { argb: 'FF687386' } }
+    sheet.columns = columns.map(([header, key]) => ({ key, width: Math.min(38, Math.max(14, header.length + 3)) }))
+    const header = sheet.getRow(4); columns.forEach(([label], index) => { const cell = header.getCell(index + 1); cell.value = label; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1768F2' } }; cell.alignment = { vertical: 'middle' }; cell.border = { bottom: { style: 'medium', color: { argb: 'FF1155C5' } } } })
+    rows.forEach((source, index) => { const row = sheet.addRow(Object.fromEntries(columns.map(([, key]) => [key, asDate(source[key])]))) ; row.eachCell((cell, column) => { const key = columns[column - 1][1]; cell.alignment = { vertical: 'top', wrapText: key === 'notes' || key === 'reason' || key === 'snapshot' || key === 'last_error' }; if (index % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF6F8FC' } }; if (currencyKeys.has(key)) cell.numFmt = 'R$ #,##0.00'; if (percentKeys.has(key)) cell.numFmt = '0.00"%"'; if (dateKeys.has(key)) cell.numFmt = 'dd/mm/yyyy'; if (dateTimeKeys.has(key)) cell.numFmt = 'dd/mm/yyyy hh:mm'; if (key === 'profit' && Number(cell.value || 0) < 0) cell.font = { color: { argb: 'FFB42318' } }; if (key === 'profit' && Number(cell.value || 0) > 0) cell.font = { color: { argb: 'FF087443' } } }) })
+    sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: columns.length } }; sheet.getRow(4).height = 24
+  }
+  const summary = summaryRows(report).slice(1).map(([label, value]) => ({ Indicador: label, Valor: value }))
+  addSheet('Resumo', [['Indicador', 'Indicador'], ['Valor', 'Valor']], summary)
+  const summarySheet = workbook.getWorksheet('Resumo')
+  summary.forEach((item, index) => { if (['Faturamento bruto', 'Receita liquida', 'Taxas', 'Frete', 'Despesas operacionais', 'Lucro liquido'].includes(item.Indicador)) summarySheet.getCell(index + 5, 2).numFmt = 'R$ #,##0.00' })
   addSheet('Vendas', [['Data', 'date'], ['Canal', 'channel'], ['Marketplace', 'marketplace'], ['Produto', 'product'], ['Quantidade', 'quantity'], ['Bruto', 'gross'], ['Taxas', 'fee'], ['Frete', 'shipping'], ['Liquido', 'net'], ['Lucro', 'profit']], report.orders)
   addSheet('Despesas', [['Data', 'date'], ['Descricao', 'description'], ['Categoria', 'category'], ['Fornecedor', 'supplier'], ['Valor', 'amount'], ['Pagamento', 'payment'], ['Recorrencia', 'recurrence'], ['Status', 'status'], ['Proximo vencimento', 'next_due_date'], ['Observacoes', 'notes']], report.expenses)
   addSheet('Produtos', [['Nome', 'name'], ['SKU', 'sku'], ['Categoria', 'category'], ['Preco', 'price'], ['Custo', 'cost'], ['Lucro', 'profit'], ['Margem', 'margin']], report.products)

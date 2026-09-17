@@ -8,7 +8,7 @@ export const pool = env.databaseUrl
       connectionString: env.databaseUrl,
       ssl: { rejectUnauthorized: false },
       max: 10,
-      min: 0,
+      min: 1,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
       query_timeout: 60_000,

@@ -1,3 +1,5 @@
+const appDataInFlight = new Map<string, Promise<AppData>>()
+
 export type Order = {
   dbId?: string;
   id: string; productId?: string; clientId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
@@ -167,7 +169,8 @@ export type FinancialHistoryEntry = { id: string; resource: string; resourceId: 
 export type CalculatorSimulation = { id: string; name: string; pricePerKg: number; weight: number; durationMinutes: number; energyEnabled: boolean; energyRate: number; watts: number; margin: number; directCost: number; suggestedPrice: number; snapshot: Record<string, any>; createdAt: string }
 export type InventoryMovement = { id: string; type: 'in' | 'out' | 'adjustment'; quantity: number; previousQuantity: number; resultingQuantity: number; reason: string; createdAt: string }
 export type ProductInventory = { id: string; name: string; sku: string; price: number; cost: number; weight: number; quantity: number; reservedQuantity: number; status: string; updatedAt?: string | null }
-export type InventoryOverview = { products: ProductInventory[]; movements: Array<InventoryMovement & { resource: 'filaments' | 'products'; resourceId: string; resourceName?: string; productName?: string; sku?: string }> }
+export type InventoryOverview = { products: ProductInventory[]; movements: Array<InventoryMovement & { resource: 'filaments' | 'products'; resourceId: string; resourceName?: string; productName?: string; sku?: string }>; total: number; limit: number; offset: number }
+export type FinancialHistoryPage = { items: FinancialHistoryEntry[]; total: number; limit: number; offset: number }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
@@ -220,7 +223,7 @@ export const useAppData = () => {
   }
 
   const loadAppData = async (force = false) => {
-    const cacheTtlMs = 15_000
+    const cacheTtlMs = 60_000
     const scope = resourceScopeForRoute()
     const scopeKey = scope?.slice().sort().join(',') || 'all'
     const cacheKey = `${tenantId.value}:${scopeKey}`
@@ -235,17 +238,35 @@ export const useAppData = () => {
       return data.value
     }
     if (!force && loaded.value && loadedTenant.value === tenantId.value && loadedScope.value === scopeKey && Date.now() - loadedAt.value < cacheTtlMs) return data.value
+    const inFlight = process.client && !force ? appDataInFlight.get(cacheKey) : null
+    if (inFlight) {
+      try {
+        const nextData = await inFlight
+        data.value = nextData
+        goals.value = nextData.goals || []
+        loaded.value = true
+        loadedTenant.value = tenantId.value
+        loadedAt.value = Date.now()
+        loadedScope.value = scopeKey
+        return nextData
+      } catch (err) {
+        error.value = err instanceof Error ? err.message : 'NÃ£o foi possÃ­vel carregar os dados.'
+        return data.value
+      }
+    }
     appDataAbortController?.abort()
     const requestController = process.client ? new AbortController() : null
     appDataAbortController = requestController
     const sequence = ++appDataRequestSequence
     pending.value = true
     error.value = null
-    try {
-      const nextData = await $fetch<AppData>(apiUrl(`/api/app-data${scope !== null ? `?resources=${encodeURIComponent(scope.join(','))}` : ''}`), {
+    const request = $fetch<AppData>(apiUrl(`/api/app-data${scope !== null ? `?resources=${encodeURIComponent(scope.join(','))}` : ''}`), {
         headers: auth.authHeaders.value,
         signal: requestController?.signal
       })
+    if (process.client) appDataInFlight.set(cacheKey, request)
+    try {
+      const nextData = await request
       if (sequence !== appDataRequestSequence) return data.value
       data.value = nextData
       goals.value = data.value.goals || []
@@ -258,6 +279,7 @@ export const useAppData = () => {
       if (requestController?.signal.aborted || sequence !== appDataRequestSequence) return data.value
       error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
     } finally {
+      if (process.client && appDataInFlight.get(cacheKey) === request) appDataInFlight.delete(cacheKey)
       if (sequence === appDataRequestSequence) pending.value = false
       if (appDataAbortController === requestController) appDataAbortController = null
     }
@@ -510,9 +532,7 @@ export const useAppData = () => {
     headers: resourceHeaders()
   })
 
-  const listFinancialHistory = (resource = '', resourceId = '') => $fetch<FinancialHistoryEntry[]>(apiUrl(`/api/financial-history${resource || resourceId ? `?${new URLSearchParams({ ...(resource ? { resource } : {}), ...(resourceId ? { resourceId } : {}) }).toString()}` : ''}`), {
-    headers: resourceHeaders()
-  })
+  const listFinancialHistory = (options: { resource?: string; resourceId?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) => $fetch<FinancialHistoryPage>(apiUrl('/api/financial-history'), { query: options, headers: resourceHeaders() })
 
   const exportFinancialReport = (filters: Record<string, string>) => $fetch<Blob>(apiUrl('/api/reports/financial-export'), {
     query: filters, responseType: 'blob', headers: resourceHeaders()
@@ -523,7 +543,7 @@ export const useAppData = () => {
 
   const listFilamentMovements = (filamentId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
   const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
-  const loadInventoryOverview = () => $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { headers: resourceHeaders() })
+  const loadInventoryOverview = (options: { from?: string; to?: string; resource?: string; type?: string; search?: string; limit?: number; offset?: number } = {}) => $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { query: options, headers: resourceHeaders() })
   const listProductInventoryMovements = (productId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/inventory/products/${productId}/movements`), { headers: resourceHeaders() })
   const createProductInventoryMovement = (productId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/inventory/products/${productId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
 

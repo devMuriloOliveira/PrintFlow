@@ -37,6 +37,7 @@ const tenantTables = [
   'financial_history',
   'inventory_movements',
   'product_inventory',
+  'order_inventory_fulfillments',
   'operational_notifications',
   'operational_audit_events',
   'tenant_memberships',
@@ -3022,6 +3023,19 @@ export const migrate =
     `)
     await query(`create index if not exists product_inventory_tenant_status_idx on product_inventory (tenant_id, status, updated_at desc)`)
     await query(`create index if not exists inventory_movements_lookup_idx on inventory_movements (tenant_id, resource, resource_id, created_at desc)`)
+    await query(`
+      create table if not exists order_inventory_fulfillments (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        order_id bigint not null references orders(id) on delete cascade,
+        product_id bigint not null references products(id) on delete restrict,
+        inventory_movement_id bigint not null references inventory_movements(id) on delete restrict,
+        quantity integer not null check (quantity > 0),
+        created_at timestamptz not null default now(),
+        unique (tenant_id, order_id)
+      )
+    `)
+    await query(`create index if not exists order_inventory_fulfillments_product_idx on order_inventory_fulfillments (tenant_id, product_id, created_at desc)`)
 
     // Índices usados pela listagem paginada e pelos relatórios de vendas.
     // O tenant permanece como primeira chave para preservar a separação por empresa.

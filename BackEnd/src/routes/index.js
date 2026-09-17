@@ -631,7 +631,7 @@ export const handleRequest =
         const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout' || url.pathname === '/api/billing/stripe/subscription/cancel' || url.pathname === '/api/billing/stripe/subscription/resume' || url.pathname === '/api/billing/stripe/subscription/change-plan'
         if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
           try {
-            await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname })
+            await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname, user })
           } catch (error) {
             return sendJson(res, 403, { error: error.message || 'A assinatura nao permite esta operacao.' })
           }

@@ -2,10 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 process.env.DATABASE_URL = ''
+process.env.PLATFORM_SUPER_ADMIN_EMAILS = 'developer@example.com'
+process.env.PLATFORM_DEVELOPER_EMAILS = 'developer@example.com'
 
 const {
   canUseSubscriptionRequest,
   entitlementFromSubscription,
+  isPlatformDeveloper,
   supportsSubscriptionFeature
 } = await import('../src/services/subscriptionEntitlements.js')
 const { subscriptionTransition } = await import('../src/jobs/subscriptionWatchdog.js')
@@ -56,6 +59,12 @@ test('plano gratuito mantem calculadora limitada e bloqueia recursos PRO', () =>
   assert.equal(supportsSubscriptionFeature(entitlement, 'printers'), false)
   assert.equal(supportsSubscriptionFeature(entitlement, 'advancedReports'), false)
   assert.equal(canUseSubscriptionRequest({ method: 'GET', pathname: '/api/orders', entitlement }), true)
+})
+
+test('desenvolvedor configurado possui acesso completo sem liberar outros superadmins', () => {
+  assert.equal(isPlatformDeveloper({ platformRole: 'platform_super_admin', email: 'developer@example.com' }), true)
+  assert.equal(isPlatformDeveloper({ platformRole: 'platform_super_admin', email: 'outro@example.com' }), false)
+  assert.equal(isPlatformDeveloper({ platformRole: '', email: 'developer@example.com' }), false)
 })
 
 test('watchdog aplica a transicao prevista para cada prazo', () => {

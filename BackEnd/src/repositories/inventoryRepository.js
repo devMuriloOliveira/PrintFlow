@@ -8,7 +8,9 @@ export const createFilamentMovementWithClient = async (client, tenantId, filamen
   const quantity = Number(payload?.quantity || 0)
   const reason = String(payload?.reason || '').trim().slice(0, 240)
   if (!movementTypes.has(type)) throw new Error('Tipo de movimentacao invalido')
-  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('A quantidade deve ser maior que zero')
+  if (!Number.isFinite(quantity) || quantity < 0 || (type !== 'adjustment' && quantity === 0)) {
+    throw new Error(type === 'adjustment' ? 'O novo saldo deve ser zero ou maior' : 'A quantidade deve ser maior que zero')
+  }
   if (!reason) throw new Error('Informe o motivo da movimentacao')
 
   const current = await client.query('select id, remaining_weight, min_stock_weight from filaments where tenant_id = $1 and id = $2 for update', [tenantId, filamentId])
@@ -53,12 +55,14 @@ export const listFilamentMovements = async (tenantId, filamentId) => withTenant(
 
 const productMovementTypes = new Set(['in', 'out', 'adjustment'])
 
-export const createProductMovement = async (tenantId, productId, payload, audit = null) => withTenant(tenantId, async (client) => {
+export const createProductMovementWithClient = async (client, tenantId, productId, payload, audit = null) => {
   const type = String(payload?.type || '')
   const quantity = Number(payload?.quantity || 0)
   const reason = String(payload?.reason || '').trim().slice(0, 240)
   if (!productMovementTypes.has(type)) throw new Error('Tipo de movimentacao invalido')
-  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('A quantidade deve ser maior que zero')
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity < 0 || (type !== 'adjustment' && quantity === 0)) {
+    throw new Error(!Number.isInteger(quantity) ? 'A quantidade de produtos deve ser um numero inteiro' : type === 'adjustment' ? 'O novo saldo deve ser zero ou maior' : 'A quantidade deve ser maior que zero')
+  }
   if (!reason) throw new Error('Informe o motivo da movimentacao')
 
   const current = await client.query(
@@ -71,6 +75,7 @@ export const createProductMovement = async (tenantId, productId, payload, audit 
   const previousQuantity = Number(current.rows[0].quantity || 0)
   const reservedQuantity = Number(current.rows[0].reserved_quantity || 0)
   const resultingQuantity = type === 'in' ? previousQuantity + quantity : type === 'out' ? previousQuantity - quantity : quantity
+  if (resultingQuantity < 0) throw new Error('Estoque insuficiente. Registre a producao antes de enviar o pedido.')
   if (resultingQuantity < reservedQuantity) throw new Error('O saldo nao pode ficar abaixo da quantidade reservada')
 
   const status = resultingQuantity === 0 ? 'Esgotado' : reservedQuantity >= resultingQuantity ? 'Reservado' : 'Disponivel'
@@ -92,7 +97,11 @@ export const createProductMovement = async (tenantId, productId, payload, audit 
     details: { movementType: type, quantity, previousQuantity, resultingQuantity, reason }
   }, client)
   return { ...movement.rows[0], id: String(movement.rows[0].id), resourceId: String(productId), quantity, previousQuantity, resultingQuantity, type, status }
-})
+}
+
+export const createProductMovement = async (tenantId, productId, payload, audit = null) => withTenant(tenantId, async (client) =>
+  createProductMovementWithClient(client, tenantId, productId, payload, audit)
+)
 
 export const listProductMovements = async (tenantId, productId = '') => withTenant(tenantId, async (client) => {
   const result = await client.query(
@@ -106,13 +115,29 @@ export const listProductMovements = async (tenantId, productId = '') => withTena
   return result.rows.map((row) => ({ id: String(row.id), resource: row.resource, resourceId: String(row.resource_id), type: row.movement_type, quantity: Number(row.quantity), previousQuantity: Number(row.previous_quantity), resultingQuantity: Number(row.resulting_quantity), reason: row.reason, productName: row.product_name || '', sku: row.sku || '', createdAt: row.created_at }))
 })
 
-export const listInventoryOverview = async (tenantId) => withTenant(tenantId, async (client) => {
-  const [products, movements] = await Promise.all([
+export const listInventoryOverview = async (tenantId, options = {}) => withTenant(tenantId, async (client) => {
+  const from = String(options.from || '').trim()
+  const to = String(options.to || '').trim()
+  const resource = ['filaments', 'products'].includes(String(options.resource || '')) ? String(options.resource) : ''
+  const type = ['in', 'out', 'adjustment'].includes(String(options.type || '')) ? String(options.type) : ''
+  const search = String(options.search || '').trim().slice(0, 80)
+  const limit = Math.min(100, Math.max(1, Number(options.limit) || 300))
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const params = [tenantId, from || null, to || null, resource || null, type || null, search ? `%${search}%` : null, limit, offset]
+  const movementWhere = `im.tenant_id = $1
+      and ($2::date is null or im.created_at >= $2::date)
+      and ($3::date is null or im.created_at < ($3::date + interval '1 day'))
+      and ($4::text is null or im.resource = $4::text)
+      and ($5::text is null or im.movement_type = $5::text)
+      and ($6::text is null or coalesce(p.name, f.name, '') ilike $6::text or coalesce(im.reason, '') ilike $6::text)`
+  const [products, movements, movementCount] = await Promise.all([
     client.query(`select p.id, p.name, p.sku, p.price, p.cost, p.weight, coalesce(pi.quantity, 0) as quantity, coalesce(pi.reserved_quantity, 0) as reserved_quantity, coalesce(pi.status, 'Esgotado') as status, pi.updated_at from products p left join product_inventory pi on pi.product_id = p.id and pi.tenant_id = p.tenant_id where p.tenant_id = $1 order by p.name`, [tenantId]),
-    client.query(`select im.id, im.resource, im.resource_id, im.movement_type, im.quantity, im.previous_quantity, im.resulting_quantity, im.reason, im.created_at, coalesce(p.name, f.name, '') as resource_name from inventory_movements im left join products p on im.resource = 'products' and p.id = im.resource_id and p.tenant_id = im.tenant_id left join filaments f on im.resource = 'filaments' and f.id = im.resource_id and f.tenant_id = im.tenant_id where im.tenant_id = $1 order by im.created_at desc, im.id desc limit 300`, [tenantId])
+    client.query(`select im.id, im.resource, im.resource_id, im.movement_type, im.quantity, im.previous_quantity, im.resulting_quantity, im.reason, im.created_at, coalesce(p.name, f.name, '') as resource_name from inventory_movements im left join products p on im.resource = 'products' and p.id = im.resource_id and p.tenant_id = im.tenant_id left join filaments f on im.resource = 'filaments' and f.id = im.resource_id and f.tenant_id = im.tenant_id where ${movementWhere} order by im.created_at desc, im.id desc limit $7 offset $8`, params),
+    client.query(`select count(*)::int as total from inventory_movements im left join products p on im.resource = 'products' and p.id = im.resource_id and p.tenant_id = im.tenant_id left join filaments f on im.resource = 'filaments' and f.id = im.resource_id and f.tenant_id = im.tenant_id where ${movementWhere}`, params.slice(0, 6))
   ])
   return {
     products: products.rows.map((row) => ({ id: String(row.id), name: row.name, sku: row.sku || '', price: Number(row.price || 0), cost: Number(row.cost || 0), weight: Number(row.weight || 0), quantity: Number(row.quantity || 0), reservedQuantity: Number(row.reserved_quantity || 0), status: row.status, updatedAt: row.updated_at })),
-    movements: movements.rows.map((row) => ({ id: String(row.id), resource: row.resource, resourceId: String(row.resource_id), type: row.movement_type, quantity: Number(row.quantity), previousQuantity: Number(row.previous_quantity), resultingQuantity: Number(row.resulting_quantity), reason: row.reason, resourceName: row.resource_name, createdAt: row.created_at }))
+    movements: movements.rows.map((row) => ({ id: String(row.id), resource: row.resource, resourceId: String(row.resource_id), type: row.movement_type, quantity: Number(row.quantity), previousQuantity: Number(row.previous_quantity), resultingQuantity: Number(row.resulting_quantity), reason: row.reason, resourceName: row.resource_name, createdAt: row.created_at })),
+    total: Number(movementCount.rows[0]?.total || 0), limit, offset
   }
 })

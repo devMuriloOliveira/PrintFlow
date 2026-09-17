@@ -25,7 +25,7 @@ export const createInvitation = async ({ actor, email, role }) => {
 
   const token = `invite_${randomBytes(32).toString('base64url')}`
   const invitation = await withTenant(actor.tenantId, async (client) => {
-    await assertTenantResourceLimit(client, actor.tenantId, 'users', { includePendingInvitations: true })
+    await assertTenantResourceLimit(client, actor.tenantId, 'users', { includePendingInvitations: true, actor })
     const result = await client.query(`
       insert into tenant_invitations (id, tenant_id, email, email_hash, role, token_hash, invited_by, expires_at)
       values ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(hours => $8::int))

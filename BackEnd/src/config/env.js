@@ -83,6 +83,10 @@ export const env = {
     .split(',')
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean),
+  platformDeveloperEmails: String(process.env.PLATFORM_DEVELOPER_EMAILS || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean),
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || defaultAuthTokenTtlSeconds),
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS || defaultRefreshTokenTtlSeconds),
   authCookieSameSite: String(process.env.AUTH_COOKIE_SAME_SITE || (productionLike ? 'none' : 'lax')).toLowerCase(),

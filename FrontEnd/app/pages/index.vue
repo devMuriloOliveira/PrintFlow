@@ -90,7 +90,7 @@ const operationalAlerts = computed(() => [
         <div class="operational-summary">
           <NuxtLink class="operational-summary__item" to="/vendas?status=Acompanhar%20pedido"><span class="operational-summary__icon operational-summary__icon--blue"><UiIcon name="bag" :size="18" /></span><div><strong>{{ activePrintJobs.length + queuedPrintJobs.length }}</strong><small>Itens na produção</small></div></NuxtLink>
           <NuxtLink class="operational-summary__item" to="/impressoras"><span class="operational-summary__icon operational-summary__icon--green"><UiIcon name="printer" :size="18" /></span><div><strong>{{ activePrinterIds.size }}/{{ printers.length }}</strong><small>Impressoras ocupadas</small></div></NuxtLink>
-          <NuxtLink class="operational-summary__item" to="/filamentos"><span class="operational-summary__icon operational-summary__icon--orange"><UiIcon name="spool" :size="18" /></span><div><strong>{{ lowStockItems.length }}</strong><small>Alertas de estoque</small></div></NuxtLink>
+          <NuxtLink class="operational-summary__item" to="/estoque?secao=filamentos"><span class="operational-summary__icon operational-summary__icon--orange"><UiIcon name="spool" :size="18" /></span><div><strong>{{ lowStockItems.length }}</strong><small>Alertas de estoque</small></div></NuxtLink>
         </div>
         <div class="stage-list">
           <div v-for="stage in orderStageSummary" :key="stage.label" class="stage-row"><span class="stage-row__dot" :style="{ background: stage.color }"/><span>{{ stage.label }}</span><strong>{{ stage.count }}</strong></div>
@@ -108,7 +108,7 @@ const operationalAlerts = computed(() => [
         <div v-if="!operationalAlerts.length && !lowStockItems.length" class="empty-state empty-state--compact"><div><div class="empty-state__icon"><UiIcon name="check" /></div><h3>Operação em dia</h3><p>Nenhuma ação crítica identificada.</p></div></div>
         <div v-else class="alerts-list">
           <NuxtLink v-for="alert in operationalAlerts" :key="alert.title" class="alert-row" to="/vendas"><span class="alert-row__icon"><UiIcon :name="alert.icon" :size="17" /></span><div><strong>{{ alert.title }}</strong><small>{{ alert.text }}</small></div><span class="badge" :class="alert.cls">{{ alert.badge }}</span></NuxtLink>
-          <NuxtLink v-for="filament in lowStockItems" :key="filament.id || filament.name" class="alert-row" to="/filamentos"><span class="alert-row__icon"><UiIcon name="spool" :size="17" /></span><div><strong>{{ filament.name }} próximo do fim</strong><small>Restam {{ formatNumber(filament.remaining) }} g em estoque</small></div><span class="badge badge--orange">Repor</span></NuxtLink>
+          <NuxtLink v-for="filament in lowStockItems" :key="filament.id || filament.name" class="alert-row" to="/estoque?secao=filamentos"><span class="alert-row__icon"><UiIcon name="spool" :size="17" /></span><div><strong>{{ filament.name }} próximo do fim</strong><small>Restam {{ formatNumber(filament.remaining) }} g em estoque</small></div><span class="badge badge--orange">Repor</span></NuxtLink>
         </div>
       </PanelCard>
     </div>

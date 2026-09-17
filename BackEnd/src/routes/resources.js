@@ -7,7 +7,7 @@ import { sendBuffer, sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
-import { createFilamentMovement, listFilamentMovements, createProductMovement, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
+import { createFilamentMovement, listFilamentMovements, createProductMovement, createProductMovementWithClient, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
 import {
   resolvePrintFilePath,
@@ -77,7 +77,9 @@ export const readRoutes = {
     if (!hasDatabase) return []
     const tenantId = await getTenantId(req)
     const url = new URL(req.url, 'http://localhost')
-    return listFinancialHistory(tenantId, url.searchParams.get('resource'), url.searchParams.get('resourceId'))
+    return listFinancialHistory(tenantId, url.searchParams.get('resource'), url.searchParams.get('resourceId'), {
+      from: url.searchParams.get('from'), to: url.searchParams.get('to'), limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset')
+    })
   }
 }
 
@@ -320,7 +322,11 @@ export const handleFilamentMovements = async (req, res, filamentId) => {
 
 export const handleInventoryOverview = async (req, res) => {
   if (req.method !== 'GET') return sendJson(res, 405, { error: 'Metodo nao permitido' })
-  return sendJson(res, 200, await listInventoryOverview(await getTenantId(req)))
+  const url = new URL(req.url, 'http://localhost')
+  return sendJson(res, 200, await listInventoryOverview(await getTenantId(req), {
+    from: url.searchParams.get('from'), to: url.searchParams.get('to'), resource: url.searchParams.get('resource'),
+    type: url.searchParams.get('type'), search: url.searchParams.get('search'), limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset')
+  }))
 }
 
 export const handleProductInventoryMovements = async (req, res, productId) => {
@@ -342,13 +348,43 @@ const orderStageError = (currentStatus, nextStatus, trackingCode) => {
   return ''
 }
 
+export const fulfillShippedOrderInventory = async (client, tenantId, order, audit) => {
+  if (!order.product_id) return { skipped: true, reason: 'missing_product' }
+
+  const existing = await client.query(
+    `select id, inventory_movement_id
+       from order_inventory_fulfillments
+      where tenant_id = $1 and order_id = $2
+      for update`,
+    [tenantId, order.id]
+  )
+  if (existing.rowCount) return { alreadyFulfilled: true, movementId: String(existing.rows[0].inventory_movement_id) }
+
+  const quantity = Number(order.quantity || 0)
+  if (!Number.isInteger(quantity) || quantity <= 0) throw new Error('O pedido possui uma quantidade invalida para baixa de estoque.')
+
+  const movement = await createProductMovementWithClient(client, tenantId, order.product_id, {
+    type: 'out',
+    quantity,
+    reason: `Expedicao automatica do pedido #${order.id}`
+  }, audit)
+
+  await client.query(
+    `insert into order_inventory_fulfillments (tenant_id, order_id, product_id, inventory_movement_id, quantity)
+     values ($1, $2, $3, $4, $5)`,
+    [tenantId, order.id, order.product_id, movement.id, quantity]
+  )
+
+  return { movementId: movement.id, quantity }
+}
+
 const stageOrder = async (tenantId, orderId, payload, audit) => {
   const nextStatus = String(payload?.status || '').trim()
   const trackingCode = String(payload?.trackingCode || '').trim().slice(0, 180)
 
   return withTenant(tenantId, async (client) => {
     const current = await client.query(
-      `select id, status, delivery_tracking_code, product_name
+      `select id, status, delivery_tracking_code, product_name, product_id, quantity
          from orders where tenant_id = $1 and id = $2 for update`,
       [tenantId, orderId]
     )
@@ -357,6 +393,10 @@ const stageOrder = async (tenantId, orderId, payload, audit) => {
     const order = current.rows[0]
     const error = orderStageError(order.status, nextStatus, trackingCode || order.delivery_tracking_code)
     if (error) return { error, status: 400 }
+
+    const inventoryFulfillment = nextStatus === 'Enviado'
+      ? await fulfillShippedOrderInventory(client, tenantId, order, audit)
+      : null
 
     const updated = await client.query(
       `update orders
@@ -388,7 +428,20 @@ const stageOrder = async (tenantId, orderId, payload, audit) => {
       }, client)
     }
 
-    return { order: { id: String(saved.id), status: saved.status, trackingCode: saved.delivery_tracking_code, packedAt: saved.packed_at, shippedAt: saved.shipped_at, deliveredAt: saved.delivered_at } }
+    if (nextStatus === 'Enviado' && inventoryFulfillment?.skipped) {
+      await writeOperationalNotification(tenantId, {
+        type: 'inventory.order_without_product',
+        severity: 'warning',
+        title: 'Pedido enviado sem baixa de estoque',
+        message: order.product_name
+          ? `O pedido de ${order.product_name} nao possui um produto interno vinculado. Vincule-o para automatizar as proximas baixas.`
+          : 'Este pedido nao possui um produto interno vinculado. Vincule-o para automatizar as proximas baixas.',
+        entityType: 'orders', entityId: String(orderId),
+        dedupeKey: `inventory-order-without-product:${orderId}`
+      }, client)
+    }
+
+    return { order: { id: String(saved.id), status: saved.status, trackingCode: saved.delivery_tracking_code, packedAt: saved.packed_at, shippedAt: saved.shipped_at, deliveredAt: saved.delivered_at }, inventoryFulfillment }
   })
 }
 

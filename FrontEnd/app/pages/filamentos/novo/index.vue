@@ -31,7 +31,7 @@ const validate = () => {
   if (!form.type) errors.type = 'Selecione o diametro.'
   if (!form.color.trim()) errors.color = 'Informe a cor.'
   if (!form.initial || form.initial <= 0) errors.initial = 'Informe o peso inicial.'
-  if (form.remaining < 0 || form.remaining > form.initial) errors.remaining = 'O peso restante deve estar entre zero e o peso inicial.'
+  if (form.remaining < 0 || (!isEditing.value && form.remaining > form.initial)) errors.remaining = 'O peso disponível deve estar entre zero e o peso inicial.'
   if (form.minStock < 0) errors.minStock = 'O estoque mínimo não pode ser negativo.'
   if (!form.cost || form.cost <= 0) errors.cost = 'Informe o custo do rolo.'
   const first = Object.keys(errors)[0]
@@ -49,7 +49,7 @@ const save = async (again = false) => {
     else await createItem('filaments', payload)
     notify(isEditing.value ? 'Filamento atualizado com sucesso.' : 'Filamento cadastrado com sucesso.')
     if (again) return reset()
-    navigateTo('/filamentos')
+    navigateTo('/estoque?secao=filamentos')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Não foi possível salvar o filamento.')
   } finally {
@@ -57,7 +57,7 @@ const save = async (again = false) => {
   }
 }
 const cancel = () => {
-  if (!touched.value || window.confirm('Descartar alterações?\n\nAs informações preenchidas ainda não foram salvas.')) navigateTo('/filamentos')
+  if (!touched.value || window.confirm('Descartar alterações?\n\nAs informações preenchidas ainda não foram salvas.')) navigateTo('/estoque?secao=filamentos')
 }
 </script>
 
@@ -82,7 +82,7 @@ const cancel = () => {
           <h2 class="form-card__title"><UiIcon name="calculator" />2. Informações do Rolo</h2>
           <div class="form-grid">
             <div class="field col-3" data-field="initial" :class="{'field--error':errors.initial}"><label>Peso inicial *</label><input v-model.number="form.initial" type="number"><small v-if="errors.initial" class="field__error">{{errors.initial}}</small></div>
-            <div class="field col-3" data-field="remaining" :class="{'field--error':errors.remaining}"><label>Peso restante *</label><input v-model.number="form.remaining" type="number"><small v-if="errors.remaining" class="field__error">{{errors.remaining}}</small></div>
+            <div class="field col-3" data-field="remaining" :class="{'field--error':errors.remaining}"><label>{{ isEditing ? 'Saldo atual' : 'Peso inicial disponível' }} *</label><input v-model.number="form.remaining" type="number" :disabled="isEditing"><small v-if="errors.remaining" class="field__error">{{errors.remaining}}</small><small v-else-if="isEditing">Altere o saldo por uma movimentação no Estoque.</small></div>
             <div class="field col-3" data-field="cost" :class="{'field--error':errors.cost}"><label>Custo do rolo *</label><input v-model.number="form.cost" type="number" step=".01"><small v-if="errors.cost" class="field__error">{{errors.cost}}</small></div>
             <div class="field col-3"><label>Data da compra</label><input v-model="form.date" type="date"></div>
             <div class="field col-6"><label>Fornecedor</label><input v-model="form.supplier" placeholder="3D Fila"></div>

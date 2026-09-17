@@ -2,6 +2,7 @@
 defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const { settings } = useAppData()
+const subscriptionAccess = useSubscriptionAccess()
 const route = useRoute()
 const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Estoque: route.path === '/estoque', Configurações: route.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
@@ -12,6 +13,8 @@ const childIsActive = (to: string) => {
   const section = new URLSearchParams(queryString || '').get('secao')
   return section ? String(route.query.secao || '') === section : true
 }
+const isLocked = (to: string) => subscriptionAccess.isLocked(to)
+const targetFor = (to: string) => isLocked(to) ? subscriptionAccess.upgradePath : to
 
 const sections = [
   {
@@ -33,14 +36,13 @@ const sections = [
     label: 'PRODUÇÃO',
     items: [
       { label: 'Calculadora 3D', to: '/calculadora-3d', icon: 'calculator' },
-      { label: 'Filamentos', to: '/filamentos', icon: 'spool' },
       { label: 'Impressoras', to: '/impressoras', icon: 'printer' }
     ]
   },
   {
     label: 'ESTOQUE',
     items: [
-      { label: 'Estoque', to: '/estoque?secao=visao', icon: 'box', children: [{ label: 'Visão geral', to: '/estoque?secao=visao' }, { label: 'Filamentos', to: '/estoque?secao=filamentos' }, { label: 'Produtos fabricados', to: '/estoque?secao=produtos' }, { label: 'Movimentações', to: '/estoque?secao=movimentacoes' }] }
+      { label: 'Estoque', to: '/estoque?secao=visao', icon: 'box', children: [{ label: 'Visão geral', to: '/estoque?secao=visao' }, { label: 'Filamentos', to: '/estoque?secao=filamentos' }, { label: 'Produtos fabricados', to: '/estoque?secao=produtos' }, { label: 'Registrar produção', to: '/estoque/registrar-producao' }] }
     ]
   },
   {
@@ -52,7 +54,7 @@ const sections = [
   {
     label: 'ANÁLISES',
     items: [
-      { label: 'Relatórios', to: '/relatorios?secao=financeiro', icon: 'chart', children: [{ label: 'Financeiro', to: '/relatorios?secao=financeiro' }, { label: 'Produtos e vendas', to: '/relatorios?secao=produtos' }, { label: 'Histórico financeiro', to: '/relatorios?secao=historico' }] },
+      { label: 'Relatórios', to: '/relatorios?secao=financeiro', icon: 'chart', children: [{ label: 'Financeiro', to: '/relatorios?secao=financeiro' }, { label: 'Produtos e vendas', to: '/relatorios?secao=produtos' }, { label: 'Movimentações de estoque', to: '/relatorios?secao=estoque' }, { label: 'Histórico financeiro', to: '/relatorios?secao=historico' }] },
       { label: 'Metas', to: '/metas', icon: 'target' }
     ]
   },
@@ -85,7 +87,7 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
 
         <div v-for="item in section.items" :key="item.to" class="nav-item-group">
           <NuxtLink
-            :to="item.to"
+            :to="targetFor(item.to)"
             v-slot="{ href, navigate, isActive, isExactActive }"
             custom
           >
@@ -93,8 +95,10 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
             :href="href"
             class="nav-item"
             :class="{
-              'nav-item--active': item.to === '/' ? isExactActive : isActive
+              'nav-item--active': item.to === '/' ? isExactActive : isActive,
+              'nav-item--locked': isLocked(item.to)
             }"
+            :title="isLocked(item.to) ? 'Disponível nos planos pagos — ver planos' : undefined"
             @click="
               event => {
                 navigate(event)
@@ -105,11 +109,12 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
           >
             <UiIcon :name="item.icon" :size="20" />
             <span>{{ item.label }}</span>
+            <UiIcon v-if="isLocked(item.to)" class="nav-item__lock" name="lock" :size="14" />
             <span v-if="item.children" class="nav-item__chevron" :class="{ 'nav-item__chevron--open': expandedItems[item.label] }" aria-hidden="true">⌄</span>
           </a>
           </NuxtLink>
           <div v-if="item.children && expandedItems[item.label]" class="nav-submenu">
-            <NuxtLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-submenu__item" :class="{ 'nav-submenu__item--active': childIsActive(child.to) }" @click="emit('close')">{{ child.label }}</NuxtLink>
+            <NuxtLink v-for="child in item.children" :key="child.to" :to="targetFor(child.to)" class="nav-submenu__item" :class="{ 'nav-submenu__item--active': childIsActive(child.to), 'nav-submenu__item--locked': isLocked(child.to) }" @click="emit('close')"><span>{{ child.label }}</span><UiIcon v-if="isLocked(child.to)" name="lock" :size="12" /></NuxtLink>
           </div>
         </div>
       </div>

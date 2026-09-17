@@ -1,3 +1,4 @@
+import { env } from '../config/env.js'
 import { hasDatabase, withTenant } from '../db/pool.js'
 
 const readOnlyStatuses = new Set(['past_due', 'paused', 'cancelled', 'ended'])
@@ -9,6 +10,17 @@ const resourceLimits = {
   products: { table: 'products', where: 'true' },
   calculatorSimulations: { table: 'calculator_simulations', where: 'true' }
 }
+
+const developerEntitlement = () => ({
+  configured: true,
+  status: 'developer',
+  mode: 'full',
+  limits: {},
+  features: Object.fromEntries([...managedFeatures].map((feature) => [feature, true]))
+})
+
+export const isPlatformDeveloper = (user) =>
+  Boolean(user?.platformRole === 'platform_super_admin' && env.platformDeveloperEmails.includes(String(user.email || '').trim().toLowerCase()))
 
 const numberLimit = (value) => {
   const parsed = Number(value)
@@ -50,7 +62,8 @@ const subscriptionError = () => {
   return error
 }
 
-export const resolveTenantEntitlement = async (tenantId, client = null) => {
+export const resolveTenantEntitlement = async (tenantId, client = null, user = null) => {
+  if (isPlatformDeveloper(user)) return developerEntitlement()
   if (!hasDatabase) return entitlementFromSubscription()
 
   const read = async (queryClient) => {
@@ -69,11 +82,12 @@ export const resolveTenantEntitlement = async (tenantId, client = null) => {
   return client ? read(client) : withTenant(tenantId, read)
 }
 
-export const assertTenantRequestEntitlement = async ({ tenantId, method, pathname }) => {
+export const assertTenantRequestEntitlement = async ({ tenantId, method, pathname, user = null }) => {
+  if (isPlatformDeveloper(user)) return developerEntitlement()
   const isAdvancedReport = pathname === '/api/reports/financial-export'
   if (method === 'GET' && !isAdvancedReport) return null
 
-  const entitlement = await resolveTenantEntitlement(tenantId)
+  const entitlement = await resolveTenantEntitlement(tenantId, null, user)
   if (!canUseSubscriptionRequest({ method, pathname, entitlement })) throw subscriptionError()
 
   if (isAdvancedReport && !supportsSubscriptionFeature(entitlement, 'advancedReports')) {
@@ -95,7 +109,8 @@ export const assertTenantRequestEntitlement = async ({ tenantId, method, pathnam
   return entitlement
 }
 
-export const assertTenantResourceLimit = async (client, tenantId, resource, { includePendingInvitations = false } = {}) => {
+export const assertTenantResourceLimit = async (client, tenantId, resource, { includePendingInvitations = false, actor = null } = {}) => {
+  if (isPlatformDeveloper(actor)) return
   const config = resourceLimits[resource]
   if (!config || !hasDatabase) return
 

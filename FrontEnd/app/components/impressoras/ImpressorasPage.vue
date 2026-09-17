@@ -3,6 +3,7 @@ const { products, printers, printJobs, filaments, deleteItem, refreshAppData, en
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
+const subscriptionAccess = useSubscriptionAccess()
 const config = useRuntimeConfig()
 const selectedIndex = ref(0)
 const printerStatusFilter = ref('Todos')
@@ -157,8 +158,13 @@ const printJobStatusLabel = (status: string) => ({ awaiting_confirmation: 'Aguar
 const printJobBadgeClass = (status: string) => ({ awaiting_confirmation: 'badge--orange', queued: '', starting: 'badge--orange', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', cancelled: 'badge--red' }[status] || '')
 const editPrinter = (printer: any) => {
   if (!printer.id) return
+  if (subscriptionAccess.isLocked('/impressoras/nova')) {
+    void router.push(subscriptionAccess.upgradePath)
+    return
+  }
   router.push(`/impressoras/nova?id=${printer.id}`)
 }
+const newPrinterPath = computed(() => subscriptionAccess.isLocked('/impressoras/nova') ? subscriptionAccess.upgradePath : '/impressoras/nova')
 const removePrinter = async (printer: any) => {
   if (!printer.id || !window.confirm(`Excluir impressora?\n\n${printer.name}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('printers', printer.id)
@@ -485,7 +491,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <PageHeader title="Impressoras" subtitle="Gerencie suas impressoras 3D, acompanhe o status e o desempenho operacional."><NuxtLink class="btn btn--primary" to="/impressoras/nova"><UiIcon name="plus" />Nova Impressora</NuxtLink></PageHeader>
+    <PageHeader title="Impressoras" subtitle="Gerencie suas impressoras 3D, acompanhe o status e o desempenho operacional."><NuxtLink class="btn btn--primary" :to="newPrinterPath"><UiIcon :name="subscriptionAccess.isLocked('/impressoras/nova') ? 'lock' : 'plus'" />{{ subscriptionAccess.isLocked('/impressoras/nova') ? 'Desbloquear impressoras' : 'Nova Impressora' }}</NuxtLink></PageHeader>
     <div class="metrics-grid metrics-grid--5"><MetricCard label="Impressoras Ativas" :value="formatNumber(metrics.activePrinters.value)" icon="printer" note="Dados do banco" color="green" :points="printerCountPoints" /><MetricCard label="Em Impressão" :value="formatNumber(metrics.printingPrinters.value)" icon="play" note="Filas ativas" :points="printingPoints" /><MetricCard label="Em Manutenção" :value="formatNumber(metrics.maintenancePrinters.value)" icon="wrench" note="Dados do banco" color="orange" negative :points="maintenancePoints" /><MetricCard label="Horas Acumuladas" :value="`${formatNumber(metrics.printerHours.value)} h`" icon="clock" note="Horas registradas" color="purple" :points="printerHoursPoints" /><MetricCard label="Custo do kWh" :value="formatCurrency(0.68)" icon="bolt" note="Config. do sistema" color="cyan" negative :points="[0.68]" /></div>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 390px">
       <div>

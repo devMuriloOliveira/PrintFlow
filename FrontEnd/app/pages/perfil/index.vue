@@ -2,6 +2,7 @@
 definePageMeta({ layout: 'default' })
 
 const auth = useAuth()
+const route = useRoute()
 const { getStripeBilling, createStripeCheckout } = useAppData()
 const { notify } = useUi()
 const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'PF')
@@ -34,6 +35,8 @@ const startCheckout = async (billingCycle: 'monthly' | 'yearly') => {
   }
 }
 
+const upgradeRequested = computed(() => String(route.query.upgrade || '') === '1')
+
 onMounted(async () => {
   if (!canManageBilling.value) return
   billingLoading.value = true
@@ -58,6 +61,7 @@ const profileSections = [
     </section>
 
     <section class="profile-billing-card">
+      <div v-if="upgradeRequested && !hasManagedSubscription" class="profile-upgrade-banner"><UiIcon name="lock" :size="18" /><div><strong>Desbloqueie mais do PrintFlow</strong><span>Escolha um plano para liberar vendas, estoque, impressoras e relatórios.</span></div></div>
       <div class="profile-billing-card__head"><span class="profile-section-card__icon"><UiIcon name="wallet" /></span><div><h2>Planos PrintFlow</h2><p>Escolha o nível ideal para a sua operação.</p></div></div>
       <div v-if="canManageBilling && hasManagedSubscription" class="profile-billing-card__details"><div><small>{{ periodLabel }}</small><strong>{{ periodDate }}</strong><span>{{ subscription?.billingCycle === 'yearly' ? 'Cobrança anual recorrente' : 'Cobrança mensal' }}</span></div><div><small>Benefícios incluídos</small><strong>PRO completo</strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul></div></div>
       <div v-else-if="canManageBilling && !billingLoading && !availablePlan" class="info-note"><UiIcon name="info" />Não foi possível carregar os planos agora.</div>

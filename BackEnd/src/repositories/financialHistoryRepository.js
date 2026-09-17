@@ -37,7 +37,7 @@ export const recordFinancialSnapshot = async (client, tenantId, resource, resour
   )
 }
 
-export const listFinancialHistory = async (tenantId, resource, resourceId) => withTenant(tenantId, async (client) => {
+export const listFinancialHistory = async (tenantId, resource, resourceId, options = {}) => withTenant(tenantId, async (client) => {
   const params = [tenantId]
   const filters = ['tenant_id = $1']
   if (resource) {
@@ -48,21 +48,38 @@ export const listFinancialHistory = async (tenantId, resource, resourceId) => wi
     params.push(String(resourceId))
     filters.push(`resource_id = $${params.length}`)
   }
+  if (options.from) {
+    params.push(String(options.from))
+    filters.push(`created_at >= $${params.length}::date`)
+  }
+  if (options.to) {
+    params.push(String(options.to))
+    filters.push(`created_at < ($${params.length}::date + interval '1 day')`)
+  }
+  const limit = Math.min(100, Math.max(1, Number(options.limit) || 100))
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const dataParams = [...params, limit, offset]
 
-  const result = await client.query(
+  const [result, count] = await Promise.all([
+    client.query(
     `select id, resource, resource_id, snapshot, source, created_at
        from financial_history
       where ${filters.join(' and ')}
       order by created_at desc, id desc
-      limit 200`,
-    params
-  )
-  return result.rows.map((row) => ({
+      limit $${dataParams.length - 1} offset $${dataParams.length}`,
+    dataParams
+    ),
+    client.query(`select count(*)::int as total from financial_history where ${filters.join(' and ')}`, params)
+  ])
+  return {
+    items: result.rows.map((row) => ({
     id: String(row.id),
     resource: row.resource,
     resourceId: row.resource_id,
     snapshot: row.snapshot || {},
     source: row.source,
     createdAt: row.created_at
-  }))
+    })),
+    total: Number(count.rows[0]?.total || 0), limit, offset
+  }
 })

@@ -5,6 +5,7 @@ type AuthUser = {
   email: string
   role: string
   status: string
+  platformRole?: string
 }
 
 type AuthResponse = {
