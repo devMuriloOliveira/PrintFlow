@@ -166,6 +166,8 @@ export type SupportAttachment = { id: string; requestId: string; originalName: s
 export type FinancialHistoryEntry = { id: string; resource: string; resourceId: string; snapshot: Record<string, any>; source: string; createdAt: string }
 export type CalculatorSimulation = { id: string; name: string; pricePerKg: number; weight: number; durationMinutes: number; energyEnabled: boolean; energyRate: number; watts: number; margin: number; directCost: number; suggestedPrice: number; snapshot: Record<string, any>; createdAt: string }
 export type InventoryMovement = { id: string; type: 'in' | 'out' | 'adjustment'; quantity: number; previousQuantity: number; resultingQuantity: number; reason: string; createdAt: string }
+export type ProductInventory = { id: string; name: string; sku: string; price: number; cost: number; weight: number; quantity: number; reservedQuantity: number; status: string; updatedAt?: string | null }
+export type InventoryOverview = { products: ProductInventory[]; movements: Array<InventoryMovement & { resource: 'filaments' | 'products'; resourceId: string; resourceName?: string; productName?: string; sku?: string }> }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
@@ -202,6 +204,7 @@ export const useAppData = () => {
       '/produtos': ['products', 'printers', 'filaments'],
       '/impressoras': ['printers', 'printJobs', 'products', 'filaments'],
       '/filamentos': ['filaments', 'printJobs', 'products'],
+      '/estoque': ['filaments', 'products'],
       '/despesas': ['expenses', 'expenseSegments'],
       '/metas': ['goals'],
       '/marketplaces': ['marketplaces', 'products'],
@@ -520,6 +523,9 @@ export const useAppData = () => {
 
   const listFilamentMovements = (filamentId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
   const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
+  const loadInventoryOverview = () => $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { headers: resourceHeaders() })
+  const listProductInventoryMovements = (productId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/inventory/products/${productId}/movements`), { headers: resourceHeaders() })
+  const createProductInventoryMovement = (productId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/inventory/products/${productId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
 
   const loadBackupStatus = () => $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
     headers: resourceHeaders()
@@ -567,6 +573,7 @@ export const useAppData = () => {
     createProduct
     , uploadProductPrintFile, generateRecurringExpenses
     , createMarketplaceIntegration
+    , loadInventoryOverview, listProductInventoryMovements, createProductInventoryMovement
     , advanceOrderStage
     , startMarketplaceOAuth
     , disconnectMarketplaceIntegration

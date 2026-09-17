@@ -3,7 +3,7 @@ defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const { settings } = useAppData()
 const route = useRoute()
-const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Configurações: route.path.startsWith('/configuracoes/') })
+const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Estoque: route.path === '/estoque', Configurações: route.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
 const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
 const childIsActive = (to: string) => {
@@ -38,6 +38,12 @@ const sections = [
     ]
   },
   {
+    label: 'ESTOQUE',
+    items: [
+      { label: 'Estoque', to: '/estoque?secao=visao', icon: 'box', children: [{ label: 'Visão geral', to: '/estoque?secao=visao' }, { label: 'Filamentos', to: '/estoque?secao=filamentos' }, { label: 'Produtos fabricados', to: '/estoque?secao=produtos' }, { label: 'Movimentações', to: '/estoque?secao=movimentacoes' }] }
+    ]
+  },
+  {
     label: 'FINANCEIRO',
     items: [
       { label: 'Despesas', to: '/despesas', icon: 'receipt' }
@@ -58,7 +64,7 @@ const sections = [
   }
 ]
 
-watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true; if (path.startsWith('/configuracoes/')) expandedItems.Configurações = true })
+watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true; if (path === '/estoque') expandedItems.Estoque = true; if (path.startsWith('/configuracoes/')) expandedItems.Configurações = true })
 </script>
 
 <template>
@@ -73,7 +79,7 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
       </button>
     </div>
 
-    <nav class="sidebar__nav">
+    <nav class="sidebar__nav" aria-label="Navegação principal">
       <div v-for="section in sections" :key="section.label" class="nav-section">
         <span class="nav-section__title">{{ section.label }}</span>
 
@@ -109,16 +115,8 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
       </div>
     </nav>
 
-    <div class="tip-card">
-      <div class="tip-card__icon">
-        <UiIcon name="box" :size="21" />
-      </div>
-
-      <div>
-        <strong>Dica PrintFlow</strong>
-        <p>Transforme seus números em decisões mais seguras.</p>
-        <NuxtLink to="/calculadora-3d">Saiba mais <span>→</span></NuxtLink>
-      </div>
-    </div>
+    <NuxtLink class="sidebar-support" to="/configuracoes/suporte" @click="emit('close')">
+      <UiIcon name="info" :size="18" /><span>Ajuda e suporte</span><UiIcon name="chevron" :size="14" />
+    </NuxtLink>
   </aside>
 </template>

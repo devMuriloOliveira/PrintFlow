@@ -73,13 +73,13 @@ const operationalAlerts = computed(() => [
 </script>
 
 <template>
-  <div>
-    <PageHeader title="Dashboard" subtitle="Resumo geral do seu negócio de impressão 3D" />
+  <div class="dashboard-page">
+    <PageHeader title="Dashboard" subtitle="Vendas, custos e produção da sua empresa." />
     <div v-if="pending" class="page-loading-hint" role="status">Carregando seus dados...</div>
 
     <div class="metrics-grid metrics-grid--5">
-      <MetricCard label="Faturamento Total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Dados do banco" color="blue" :points="monthlyRevenue" />
-      <MetricCard label="Despesas Totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Dados do banco" color="red" negative :points="monthlyExpenses" />
+      <MetricCard label="Faturamento total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Vendas registradas" color="blue" :points="monthlyRevenue" />
+      <MetricCard label="Despesas totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Despesas registradas" color="red" negative :points="monthlyExpenses" />
       <MetricCard label="Lucro Líquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
       <MetricCard label="Pedidos" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Quantidade vendida por mês" color="purple" :points="monthlyOrders" />
       <MetricCard label="Ticket Médio" :value="formatCurrency(metrics.ticket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="monthlyRevenue.map((value, index) => monthlyOrders[index] ? value / monthlyOrders[index] : 0)" />
@@ -135,16 +135,24 @@ const operationalAlerts = computed(() => [
 </template>
 
 <style scoped>
-.operational-board { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.operational-board { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
 .operational-board > :deep(.panel) { min-height: 254px; }
-.operational-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.operational-summary__item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px; border: 1px solid #e8edf4; border-radius: 9px; color: inherit; text-decoration: none; }
+.operational-summary { display: grid; grid-template-columns: 1fr; gap: 0; }
+.operational-summary__item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 0; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+.operational-summary__item > div { display: flex; flex: 1; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 12px; }
+.operational-summary__item:hover { color: var(--blue); }
 .operational-summary__item strong { display: block; font-size: 15px; }
-.operational-summary__item small { display: block; color: var(--muted); font-size: 8px; white-space: nowrap; }
+.operational-summary__item small { display: block; color: var(--muted); font-size: 12px; }
 .operational-summary__icon, .printer-queue-row__icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; }
 .operational-summary__icon--blue { color: var(--blue); background: var(--blue-soft); }.operational-summary__icon--green { color: var(--green); background: #e6f8ef; }.operational-summary__icon--orange { color: var(--orange); background: #fff2e5; }
 .stage-list { display: grid; gap: 2px; margin-top: 14px; }.stage-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #edf1f6; font-size: 10px; }.stage-row__dot { width: 7px; height: 7px; border-radius: 50%; }.stage-row strong { font-size: 11px; }
 .printer-queue-list { display: grid; gap: 5px; }.printer-queue-row { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid #edf1f6; color: inherit; text-decoration: none; }.printer-queue-row__icon { color: var(--blue); background: var(--blue-soft); }.printer-queue-row__body { flex: 1; min-width: 0; }.printer-queue-row__body > div:first-child { display: flex; justify-content: space-between; gap: 8px; }.printer-queue-row strong, .printer-queue-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.printer-queue-row small { margin-top: 2px; color: var(--muted); font-size: 8px; }.printer-queue-row .progress { margin-top: 6px; height: 5px; }.empty-state--compact { min-height: 185px; }.alert-row { color: inherit; text-decoration: none; }
 @media (max-width: 1150px) { .operational-board { grid-template-columns: 1fr 1fr; }.operational-board > :last-child { grid-column: span 2; } }
+.stage-row { font-size: 12px; }
+.stage-row strong { font-size: 12px; font-variant-numeric: tabular-nums; }
+.printer-queue-row strong { font-size: 12px; }
+.printer-queue-row small { font-size: 11px; }
+.alert-row strong { font-size: 12px; }
+.alert-row small { font-size: 11px; line-height: 1.5; }
 @media (max-width: 700px) { .operational-board { grid-template-columns: 1fr; }.operational-board > :last-child { grid-column: auto; }.operational-summary { grid-template-columns: 1fr; } }
 </style>

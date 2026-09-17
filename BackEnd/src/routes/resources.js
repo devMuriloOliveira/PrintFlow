@@ -7,7 +7,7 @@ import { sendBuffer, sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
-import { createFilamentMovement, listFilamentMovements } from '../repositories/inventoryRepository.js'
+import { createFilamentMovement, listFilamentMovements, createProductMovement, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
 import {
   resolvePrintFilePath,
@@ -315,6 +315,18 @@ export const handleFilamentMovements = async (req, res, filamentId) => {
   const tenantId = await getTenantId(req)
   if (req.method === 'GET') return sendJson(res, 200, await listFilamentMovements(tenantId, filamentId))
   if (req.method === 'POST') return sendJson(res, 201, await createFilamentMovement(tenantId, filamentId, await readJsonBody(req), await auditActor(req)))
+  return sendJson(res, 405, { error: 'Metodo nao permitido' })
+}
+
+export const handleInventoryOverview = async (req, res) => {
+  if (req.method !== 'GET') return sendJson(res, 405, { error: 'Metodo nao permitido' })
+  return sendJson(res, 200, await listInventoryOverview(await getTenantId(req)))
+}
+
+export const handleProductInventoryMovements = async (req, res, productId) => {
+  const tenantId = await getTenantId(req)
+  if (req.method === 'GET') return sendJson(res, 200, await listProductMovements(tenantId, productId))
+  if (req.method === 'POST') return sendJson(res, 201, await createProductMovement(tenantId, productId, await readJsonBody(req), await auditActor(req)))
   return sendJson(res, 405, { error: 'Metodo nao permitido' })
 }
 

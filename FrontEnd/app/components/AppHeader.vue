@@ -1,7 +1,8 @@
 <script setup lang="ts">
 defineEmits<{ menu: [] }>()
 
-const searchOpen = ref(false)
+const { settings } = useAppData()
+const workspaceName = computed(() => settings.value?.name || 'PrintFlow 3D')
 const notificationsOpen = ref(false)
 const auth = useAuth()
 const { notifications, unreadCount, refreshNotifications, markNotificationRead } = useOperationalNotifications()
@@ -51,30 +52,12 @@ const initials = computed(() =>
       <UiIcon name="menu" />
     </button>
 
-    <div class="topbar-search" :class="{ 'topbar-search--open': searchOpen }">
-      <UiIcon name="search" :size="18" />
-      <input
-        aria-label="Busca global"
-        placeholder="Buscar pedidos, clientes, produtos..."
-        @focus="searchOpen = true"
-        @blur="searchOpen = false"
-      >
-      <kbd>Ctrl K</kbd>
+    <div class="workspace-context">
+      <UiIcon name="building" :size="18" />
+      <div><small>Área de trabalho</small><strong>{{ workspaceName }}</strong></div>
     </div>
 
     <div class="topbar-actions">
-      <button class="top-control top-control--date">
-        <UiIcon name="calendar" :size="18" />
-        <span>01/05/2024 - 31/05/2024</span>
-        <UiIcon name="down" :size="15" />
-      </button>
-
-      <button class="top-control top-control--company">
-        <UiIcon name="building" :size="18" />
-        <span>PrintFlow 3D LTDA</span>
-        <UiIcon name="down" :size="15" />
-      </button>
-
       <div class="notification-wrap">
         <button
           class="icon-btn notification"

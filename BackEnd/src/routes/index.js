@@ -48,6 +48,8 @@ import {
   handleResourceRead,
   handleResourceUpdate,
   handleFilamentMovements,
+  handleInventoryOverview,
+  handleProductInventoryMovements,
   handleOrderStageAdvance,
   readRoutes
 } from './resources.js'
@@ -1438,6 +1440,10 @@ export const handleRequest =
       if (filamentMovementsMatch && ['GET', 'POST'].includes(req.method)) {
         return await handleFilamentMovements(req, res, filamentMovementsMatch[1])
       }
+
+      if (url.pathname === '/api/inventory/overview' && req.method === 'GET') return await handleInventoryOverview(req, res)
+      const productInventoryMovementsMatch = url.pathname.match(/^\/api\/inventory\/products\/([^/]+)\/movements$/)
+      if (productInventoryMovementsMatch && ['GET', 'POST'].includes(req.method)) return await handleProductInventoryMovements(req, res, productInventoryMovementsMatch[1])
 
       const orderStageMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/advance-stage$/)
       if (req.method === 'POST' && orderStageMatch) return await handleOrderStageAdvance(req, res, orderStageMatch[1])

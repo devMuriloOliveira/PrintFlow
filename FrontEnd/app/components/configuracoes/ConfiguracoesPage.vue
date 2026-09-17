@@ -507,8 +507,8 @@ watch(() => supportDraft.category, (category) => {
                 <article class="billing-plan-card billing-plan-card--featured">
                   <span class="billing-plan-card__ribbon">Melhor custo-benefício</span>
                   <div class="billing-plan-card__title"><h3>Anual</h3><span class="billing-plan-card__caption">Tudo do plano mensal com economia.</span></div>
-                  <div class="billing-plan-card__price"><small>R$</small>{{ currency((selectedBillingPlan.yearly || 0) / 12).replace('R$', '').trim() }}<span>/mês</span></div>
-                  <div class="billing-plan-card__saving">7 dias grátis; depois, cobrança anual recorrente de <strong>{{ currency(selectedBillingPlan.yearly || 0) }}</strong></div>
+                  <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.yearly || 0).replace('R$', '').trim() }}<span>/ano</span></div>
+                  <div class="billing-plan-card__saving">Equivale a {{ currency((selectedBillingPlan.yearly || 0) / 12) }}/mês; 7 dias grátis.</div>
                   <ul class="billing-plan-card__features"><li>Tudo do plano mensal</li><li>Marketplaces integrados e taxas por canal</li><li>Equipe com convites e permissões</li><li>Relatórios avançados e exportações</li></ul>
                   <button class="billing-plan-card__button billing-plan-card__button--featured" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.yearly || 0) <= 0" @click="startStripeCheckout('yearly')">{{ billingActionLoading ? 'Atualizando...' : (stripeBilling?.subscription?.billingCycle === 'yearly' ? 'Plano anual atual' : 'Começar 7 dias grátis') }} <span aria-hidden="true">→</span></button>
                 </article>

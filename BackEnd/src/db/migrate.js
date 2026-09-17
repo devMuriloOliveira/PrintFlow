@@ -36,6 +36,7 @@ const tenantTables = [
   'marketplace_webhook_events',
   'financial_history',
   'inventory_movements',
+  'product_inventory',
   'operational_notifications',
   'operational_audit_events',
   'tenant_memberships',
@@ -2994,7 +2995,7 @@ export const migrate =
       create table if not exists inventory_movements (
         id bigserial primary key,
         tenant_id text not null references tenants(id) on delete cascade,
-        resource text not null check (resource in ('filaments')),
+        resource text not null check (resource in ('filaments', 'products')),
         resource_id bigint not null,
         movement_type text not null check (movement_type in ('in', 'out', 'adjustment')),
         quantity numeric(12,2) not null check (quantity > 0),
@@ -3005,6 +3006,21 @@ export const migrate =
         created_at timestamptz not null default now()
       )
     `)
+    await query(`alter table inventory_movements drop constraint if exists inventory_movements_resource_check`)
+    await query(`alter table inventory_movements add constraint inventory_movements_resource_check check (resource in ('filaments', 'products'))`)
+    await query(`
+      create table if not exists product_inventory (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        product_id bigint not null references products(id) on delete cascade,
+        quantity numeric(12,2) not null default 0 check (quantity >= 0),
+        reserved_quantity numeric(12,2) not null default 0 check (reserved_quantity >= 0 and reserved_quantity <= quantity),
+        status text not null default 'Disponivel' check (status in ('Disponivel', 'Reservado', 'Esgotado')),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, product_id)
+      )
+    `)
+    await query(`create index if not exists product_inventory_tenant_status_idx on product_inventory (tenant_id, status, updated_at desc)`)
     await query(`create index if not exists inventory_movements_lookup_idx on inventory_movements (tenant_id, resource, resource_id, created_at desc)`)
 
     // Índices usados pela listagem paginada e pelos relatórios de vendas.

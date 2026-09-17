@@ -11,7 +11,7 @@ const isEditing = computed(() => Boolean(editingId.value))
 const hydratedFor = ref('')
 const selectedPrintFile = ref<File | null>(null)
 const allowedPrintFileFormats = new Set(['3mf', 'gcode', 'bgcode'])
-const form = reactive({ name: '', sku: '', category: 'Decoração', description: '', status: 'Ativo', printerId: '', filamentId: '', weight: 0, wastePercent: 0, hours: 0, minutes: 0, layer: 0.2, infill: 15, dimensions: '', printFileName: '', printFileFormat: '', printFileHash: '', printFileSizeBytes: 0, printFileStorageKey: '', nozzleMm: 0.4, bedTemperature: 60, nozzleTemperature: 205, support: false, scalePercent: 100, allowedMaterials: 'PLA', validationStatus: 'needs_validation', validationMessage: '', packaging: 0, materials: 0, labor: 0, energy: true, shopeeFee: 0, otherMarketplaceFee: 0, marketplaceFee: 0, taxPercent: 0, otherCosts: 0, price: 0, desiredMargin: 40 })
+const form = reactive({ name: '', sku: '', category: 'Decoração', description: '', status: 'Ativo', printerId: '', filamentId: '', weight: 0, wastePercent: 0, failurePercent: 0, hours: 0, minutes: 0, quantity: 1, layer: 0.2, infill: 15, dimensions: '', printFileName: '', printFileFormat: '', printFileHash: '', printFileSizeBytes: 0, printFileStorageKey: '', nozzleMm: 0.4, bedTemperature: 60, nozzleTemperature: 205, support: false, scalePercent: 100, allowedMaterials: 'PLA', validationStatus: 'needs_validation', validationMessage: '', packaging: 0, materials: 0, labor: 0, setupMinutes: 0, postProcessingMinutes: 0, packagingMinutes: 0, laborRatePerHour: 0, printerPurchasePrice: 0, printerLifespanHours: 5000, machineMaintenancePerHour: 0, minimumPrice: 0, energy: true, shopeeFee: 0, otherMarketplaceFee: 0, marketplaceFee: 0, taxPercent: 0, otherCosts: 0, price: 0, desiredMargin: 40 })
 const selectedPrinter = computed(() => printers.value.find((printer) => printer.id === form.printerId))
 const selectedFilament = computed(() => filaments.value.find((filament) => filament.id === form.filamentId))
 const kwhCost = computed(() => Number(settings.value?.kwh || 0.68))
@@ -21,7 +21,7 @@ const fixedCostPerUnit = computed(() => {
   const planned = Number(financialDefaults.value.plannedMonthlyUnits || 0)
   return planned > 0 ? fixed / planned : 0
 })
-const pricing = computed(() => calculatePricing({ pricePerKg: selectedFilament.value?.initial ? Number(selectedFilament.value.cost || 0) / Number(selectedFilament.value.initial) * 1000 : 0, weight: form.weight, wastePercent: form.wastePercent, hours: form.hours, minutes: form.minutes, energyEnabled: form.energy && Boolean(selectedPrinter.value), energyRate: kwhCost.value, watts: selectedPrinter.value?.power || 0, fixedCostPerUnit: fixedCostPerUnit.value, packaging: form.packaging, materials: form.materials, labor: form.labor, otherCosts: form.otherCosts, marketplaceFee: Number(form.shopeeFee || 0) + Number(form.otherMarketplaceFee || 0) + Number(form.marketplaceFee || 0), taxPercent: form.taxPercent, desiredMargin: form.desiredMargin, salePrice: form.price }))
+const pricing = computed(() => calculatePricing({ pricePerKg: selectedFilament.value?.initial ? Number(selectedFilament.value.cost || 0) / Number(selectedFilament.value.initial) * 1000 : 0, weight: form.weight, wastePercent: form.wastePercent, failurePercent: form.failurePercent, hours: form.hours, minutes: form.minutes, energyEnabled: form.energy && Boolean(selectedPrinter.value), energyRate: kwhCost.value, watts: selectedPrinter.value?.power || 0, fixedCostPerUnit: fixedCostPerUnit.value, packaging: form.packaging, materials: form.materials, labor: form.labor, setupMinutes: form.setupMinutes, postProcessingMinutes: form.postProcessingMinutes, packagingMinutes: form.packagingMinutes, laborRatePerHour: form.laborRatePerHour, printerPurchasePrice: form.printerPurchasePrice, printerLifespanHours: form.printerLifespanHours, machineMaintenancePerHour: form.machineMaintenancePerHour, minimumPrice: form.minimumPrice, quantity: form.quantity, otherCosts: form.otherCosts, marketplaceFee: Number(form.shopeeFee || 0) + Number(form.otherMarketplaceFee || 0) + Number(form.marketplaceFee || 0), taxPercent: form.taxPercent, desiredMargin: form.desiredMargin, salePrice: form.price }))
 const filamentCost = computed(() => pricing.value.materialCost)
 const energyCost = computed(() => pricing.value.energyCost)
 const shopeeCost = computed(() => form.price * form.shopeeFee / 100)
@@ -35,6 +35,7 @@ const productionMinutes = computed(() => Number(form.hours || 0) * 60 + Number(f
 const costBreakdown = computed(() => ({
   materialWeight: Number(form.weight || 0),
   wastePercent: Number(form.wastePercent || 0),
+  failurePercent: Number(form.failurePercent || 0),
   materialName: selectedFilament.value?.name || '',
   materialCost: filamentCost.value,
   packagingCost: Number(form.packaging || 0),
@@ -46,6 +47,17 @@ const costBreakdown = computed(() => ({
   plannedMonthlyUnits: Number(financialDefaults.value.plannedMonthlyUnits || 0),
   additionalMaterialsCost: Number(form.materials || 0),
   laborCost: Number(form.labor || 0),
+  stagedLaborCost: pricing.value.stagedLaborCost,
+  laborMinutes: pricing.value.laborMinutes,
+  laborRatePerHour: Number(form.laborRatePerHour || 0),
+  machineCost: pricing.value.machineCost,
+  machineHourlyCost: pricing.value.machineHourlyCost,
+  printerPurchasePrice: Number(form.printerPurchasePrice || 0),
+  printerLifespanHours: Number(form.printerLifespanHours || 0),
+  machineMaintenancePerHour: Number(form.machineMaintenancePerHour || 0),
+  failureCost: pricing.value.failureCost,
+  quantity: Number(form.quantity || 1),
+  minimumPrice: Number(form.minimumPrice || 0),
   otherCosts: Number(form.otherCosts || 0),
   shopeeFeePercent: Number(form.shopeeFee || 0),
   shopeeFeeCost: shopeeCost.value,
@@ -101,8 +113,10 @@ const hydrateForm = (product: any) => {
     filamentId: product.filamentId || filaments.value.find((filament) => filament.name === product.filament)?.id || '',
     weight: Number(product.weight || 0),
     wastePercent: Number(product.costBreakdown?.wastePercent || 0),
+    failurePercent: Number(product.costBreakdown?.failurePercent || 0),
     hours: time.hours,
     minutes: time.minutes,
+    quantity: Number(product.costBreakdown?.quantity || 1),
     layer: Number(product.layer || product.printProfile?.layerHeightMm || 0.2),
     infill: Number(product.infill || product.printProfile?.infillPercent || 15),
     dimensions: product.dimensions || '',
@@ -122,6 +136,14 @@ const hydrateForm = (product: any) => {
     packaging: Number(product.packaging || 0),
     materials: Number(product.materials || 0),
     labor: Number(product.labor || 0),
+    setupMinutes: Number(product.costBreakdown?.setupMinutes || 0),
+    postProcessingMinutes: Number(product.costBreakdown?.postProcessingMinutes || 0),
+    packagingMinutes: Number(product.costBreakdown?.packagingMinutes || 0),
+    laborRatePerHour: Number(product.costBreakdown?.laborRatePerHour || 0),
+    printerPurchasePrice: Number(product.costBreakdown?.printerPurchasePrice || 0),
+    printerLifespanHours: Number(product.costBreakdown?.printerLifespanHours || 5000),
+    machineMaintenancePerHour: Number(product.costBreakdown?.machineMaintenancePerHour || 0),
+    minimumPrice: Number(product.costBreakdown?.minimumPrice || 0),
     energy: product.energy !== false,
     shopeeFee: Number(product.costBreakdown?.shopeeFeePercent || 0),
     otherMarketplaceFee: Number(product.costBreakdown?.otherMarketplaceFeePercent || 0),
@@ -156,9 +178,9 @@ onMounted(() => {
   try {
     const draft = JSON.parse(raw)
     Object.assign(form, {
-      printerId: draft.printerId || '', filamentId: draft.filamentId || '', weight: Number(draft.weight || 0), wastePercent: Number(draft.wastePercent || 0),
-      hours: Number(draft.hours || 0), minutes: Number(draft.minutes || 0), packaging: Number(draft.packaging || 0),
-      materials: Number(draft.materials || 0), labor: Number(draft.labor || 0), otherCosts: Number(draft.otherCosts || 0),
+      printerId: draft.printerId || '', filamentId: draft.filamentId || '', weight: Number(draft.weight || 0), wastePercent: Number(draft.wastePercent || 0), failurePercent: Number(draft.failurePercent || 0),
+      hours: Number(draft.hours || 0), minutes: Number(draft.minutes || 0), quantity: Number(draft.quantity || 1), packaging: Number(draft.packaging || 0),
+      materials: Number(draft.materials || 0), labor: Number(draft.labor || 0), setupMinutes: Number(draft.setupMinutes || 0), postProcessingMinutes: Number(draft.postProcessingMinutes || 0), packagingMinutes: Number(draft.packagingMinutes || 0), laborRatePerHour: Number(draft.laborRatePerHour || 0), printerPurchasePrice: Number(draft.printerPurchasePrice || 0), printerLifespanHours: Number(draft.printerLifespanHours || 5000), machineMaintenancePerHour: Number(draft.machineMaintenancePerHour || 0), minimumPrice: Number(draft.minimumPrice || 0), otherCosts: Number(draft.otherCosts || 0),
       energy: draft.energyEnabled !== false, marketplaceFee: Number(draft.marketplaceFee || 0), taxPercent: Number(draft.taxPercent || 0),
       price: Number(draft.suggestedPrice || 0), desiredMargin: Number(draft.desiredMargin || 40)
     })
@@ -234,7 +256,7 @@ const save = async () => {
 <template>
   <div>
     <PageHeader :title="isEditing ? 'Editar Produto' : 'Novo Produto'" :subtitle="isEditing ? 'Atualize preço, custos e especificações do produto.' : 'Cadastre um novo produto e calcule automaticamente seus custos e margem.'" />
-    <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
+    <div class="split-layout">
       <div>
         <form class="form-card" @submit.prevent="save"><h2 class="form-card__title"><UiIcon name="box"/>1. Informações Básicas</h2><div class="form-grid">
           <div class="field col-5" :class="{'field--error':errors.name}"><label>Nome do Produto *</label><input v-model="form.name" required><small v-if="errors.name" class="field__error">{{errors.name}}</small></div><div class="field col-4" :class="{'field--error':errors.sku}"><label>SKU *</label><input v-model="form.sku" required><small v-if="errors.sku" class="field__error">{{errors.sku}}</small></div><div class="field col-3"><label>Status *</label><select v-model="form.status"><option>Ativo</option><option>Rascunho</option></select></div>
