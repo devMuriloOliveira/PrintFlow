@@ -27,7 +27,9 @@ const stripeRequest = async (path, { method = 'GET', form = null } = {}) => {
   try { data = raw ? JSON.parse(raw) : {} } catch { data = {} }
   if (!response.ok) {
     const reference = text(response.headers.get('request-id'), 120)
-    throw new Error(`Stripe retornou HTTP ${response.status}${reference ? ` (referencia Stripe: ${reference})` : ''}`)
+    const error = new Error(`Stripe retornou HTTP ${response.status}${reference ? ` (referencia Stripe: ${reference})` : ''}`)
+    error.stripeStatus = response.status
+    throw error
   }
   return data
 }
@@ -60,7 +62,21 @@ const activePlan = async () => {
 }
 
 const ensureStripePrices = async (plan) => {
-  if (plan.stripeMonthlyPriceId && plan.stripeYearlyPriceId) return plan
+  const matches = async (priceId, amount, interval) => {
+    if (!priceId) return false
+    try {
+      const price = await stripeRequest(`/prices/${encodeURIComponent(priceId)}`)
+      return Boolean(price.active) && price.currency === 'brl' && Number(price.unit_amount) === Math.round(amount * 100) && price.recurring?.interval === interval
+    } catch (error) {
+      if (error?.stripeStatus === 404) return false
+      throw error
+    }
+  }
+  const [monthlyMatches, yearlyMatches] = await Promise.all([
+    matches(plan.stripeMonthlyPriceId, plan.monthly, 'month'),
+    matches(plan.stripeYearlyPriceId, plan.yearly, 'year')
+  ])
+  if (monthlyMatches && yearlyMatches) return plan
   const prices = await synchronizeStripePrices(plan)
   const result = await withPlatformAdmin((client) => client.query(`
     update platform_plans
@@ -125,8 +141,8 @@ export const createStripeCheckout = async ({ tenantId, actorId, actorEmail, plan
     // Serializa também a leitura do checkout pendente e sua criação; duas abas
     // simultâneas não podem abrir dois fluxos de cobrança para a mesma empresa.
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [String(tenantId)])
-    await client.query(`update tenant_billing_checkouts set status = 'expired', updated_at = now() where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status = 'open' and coalesce(expires_at, created_at + interval '24 hours') <= now()`, [tenantId, cycle])
-    const pending = await client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') and (status = 'creating' or coalesce(expires_at, created_at + interval '24 hours') > now()) order by created_at desc limit 1`, [tenantId, cycle])
+    await client.query(`update tenant_billing_checkouts set status = 'expired', updated_at = now() where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and status in ('creating', 'open') and (provider_plan_id <> $3 or coalesce(expires_at, created_at + interval '24 hours') <= now())`, [tenantId, cycle, priceId])
+    const pending = await client.query(`select id, checkout_url, expires_at from tenant_billing_checkouts where tenant_id = $1 and billing_cycle = $2 and provider = '${provider}' and provider_plan_id = $3 and status in ('creating', 'open') and (status = 'creating' or coalesce(expires_at, created_at + interval '24 hours') > now()) order by created_at desc limit 1`, [tenantId, cycle, priceId])
     if (pending.rowCount) {
       if (!pending.rows[0].checkout_url) throw new Error('Ja existe um checkout em processamento para esta empresa. Aguarde alguns instantes.')
       return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
