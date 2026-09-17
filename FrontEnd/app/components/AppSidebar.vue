@@ -29,7 +29,7 @@ const sections = [
   {
     label: 'CANAIS DE VENDA',
     items: [
-      { label: 'Marketplaces', to: '/marketplaces?secao=canais', icon: 'store', children: [{ label: 'Canais e taxas', to: '/marketplaces?secao=canais' }, { label: 'Conexões', to: '/marketplaces?secao=conexoes' }, { label: 'Pedidos sincronizados', to: '/marketplaces?secao=pedidos' }] }
+      { label: 'Marketplaces', to: '/marketplaces?secao=canais', icon: 'store', children: [{ label: 'Canais e taxas', to: '/marketplaces?secao=canais' }, { label: 'Contas conectadas', to: '/marketplaces?secao=conexoes' }, { label: 'Pedidos sincronizados', to: '/marketplaces?secao=pedidos' }] }
     ]
   },
   {

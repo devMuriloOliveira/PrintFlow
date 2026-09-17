@@ -5,6 +5,11 @@ const { notify } = useUi()
 const router = useRouter()
 const route = useRoute()
 const activeSection = computed(() => ['canais', 'conexoes', 'pedidos'].includes(String(route.query.secao)) ? String(route.query.secao) : 'canais')
+const pageSubtitle = computed(() => activeSection.value === 'conexoes'
+  ? 'Gerencie as contas autorizadas e o estado da sincronização.'
+  : activeSection.value === 'pedidos'
+    ? 'Revise os pedidos recebidos e vincule-os aos produtos.'
+    : 'Gerencie seus canais de venda e estruturas de taxas')
 const saleValue = ref(100)
 const selectedName = ref('Shopee')
 const marketplaceFilter = ref('Todos os canais')
@@ -158,7 +163,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 
 <template>
   <div>
-    <PageHeader title="Marketplaces" subtitle="Gerencie seus canais de venda e estruturas de taxas"><a class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Adicionar canal</a></PageHeader>
+    <PageHeader title="Marketplaces" :subtitle="pageSubtitle"><a v-if="activeSection === 'canais'" class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Adicionar canal</a><a v-else-if="activeSection === 'conexoes'" class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Conectar conta</a></PageHeader>
     <div v-if="activeSection !== 'pedidos'" class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <div>
         <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" :points="marketplaces.map(marketplace => marketplace.active ? 1 : 0)" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" :points="marketplaces.map(feeRate)" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" :points="marketplaces.map(marketplace => Number(marketplace.net || 0))" /><MetricCard label="Maior Taxa" :value="metrics.percent(metrics.highestFeeMarketplace.value ? feeRate(metrics.highestFeeMarketplace.value) : 0)" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" :points="marketplaces.map(feeRate)" /></div>
@@ -187,7 +192,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
           </div>
           <div class="table-footer"><span>Exibindo {{ filteredMarketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
         </PanelCard>
-        <PanelCard v-if="activeSection === 'conexoes'" title="Contas conectadas do Mercado Livre" subtitle="Cada conta OAuth recebe pedidos separadamente; as taxas permanecem configuradas no canal Mercado Livre." style="margin-top:12px">
+        <PanelCard v-if="activeSection === 'conexoes'" title="Contas conectadas" subtitle="Cada conta OAuth recebe pedidos separadamente. As taxas ficam configuradas no canal correspondente." style="margin-top:12px">
           <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row"><div><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small><small v-if="integration.lastError" style="display:block;color:var(--danger,#c0392b)">{{ integration.lastError }}</small></div><div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" aria-label="Sincronizar pedido por ID" @click="syncConnectionOrder(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar autorização" aria-label="Reconectar autorização do Mercado Livre" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" aria-label="Desconectar conta do Mercado Livre" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div></div>
           <div v-if="!marketplaceConnections.length" style="color:var(--muted);font-size:11px">Nenhuma conta OAuth conectada ainda.</div>
         </PanelCard>
