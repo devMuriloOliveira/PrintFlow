@@ -2,7 +2,7 @@
 import { computed, nextTick, reactive, ref, watch, watchEffect } from 'vue'
 import { navigateTo } from '#app'
 
-const { apiBase, marketplaces, createItem, updateItem, createMarketplaceIntegration, startMarketplaceOAuth } = useAppData()
+const { marketplaces, createItem, updateItem, createMarketplaceIntegration, startMarketplaceOAuth } = useAppData()
 const { notify } = useUi()
 const route = useRoute()
 const saving = ref(false)
@@ -16,10 +16,10 @@ const connectionMode = ref<'oauth' | 'manual'>('oauth')
 const persistedConnectionStatus = ref('manual')
 
 const platforms = [
-  { id: 'mercado_livre', name: 'Mercado Livre', short: 'ML', color: '#ffe600', webhook: '/webhooks/mercadolivre', commission: 16, fixed: 5, financial: 0, ads: 3 },
-  { id: 'shopee', name: 'Shopee', short: 'SP', color: '#ee4d2d', webhook: '/webhooks/shopee', commission: 14, fixed: 4, financial: 0, ads: 3 },
-  { id: 'amazon', name: 'Amazon', short: 'AM', color: '#232f3e', webhook: '/webhooks/amazon', commission: 15, fixed: 0, financial: 0, ads: 2 },
-  { id: 'custom', name: 'Outro canal', short: 'OT', color: '#1768f2', webhook: '', commission: 0, fixed: 0, financial: 0, ads: 0 }
+  { id: 'mercado_livre', name: 'Mercado Livre', short: 'ML', color: '#ffe600', commission: 16, fixed: 5, financial: 0, ads: 3 },
+  { id: 'shopee', name: 'Shopee', short: 'SP', color: '#ee4d2d', commission: 14, fixed: 4, financial: 0, ads: 3 },
+  { id: 'amazon', name: 'Amazon', short: 'AM', color: '#232f3e', commission: 15, fixed: 0, financial: 0, ads: 2 },
+  { id: 'custom', name: 'Outro canal', short: 'OT', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0 }
 ]
 
 const form = reactive({
@@ -42,9 +42,7 @@ const form = reactive({
   startDate: ''
 })
 
-const selectedPlatform = computed(() => platforms.find((item) => item.id === form.platform) || platforms[0])
 const requiresManualCredentials = computed(() => form.platform !== 'custom' && connectionMode.value === 'manual' && !isEditing.value)
-const webhookUrl = computed(() => selectedPlatform.value.webhook ? `${apiBase}${selectedPlatform.value.webhook}` : '')
 const connectionStatus = computed(() => form.platform === 'custom' ? 'manual' : persistedConnectionStatus.value)
 const fees = computed(() => ({
   commission: saleValue.value * form.commission / 100,
@@ -88,11 +86,6 @@ const validate = () => {
   const first = Object.keys(errors)[0]
   if (first) nextTick(() => document.querySelector(`[data-field="${first}"] input,[data-field="${first}"] select`)?.focus())
   return !first
-}
-
-const copyWebhook = () => {
-  navigator.clipboard?.writeText(webhookUrl.value)
-  notify('URL copiada.')
 }
 
 const connectOfficialOAuth = async () => {
@@ -166,7 +159,7 @@ const cancel = () => {
           <button v-for="platform in platforms" :key="platform.id" class="integration-card" :class="{active:form.platform===platform.id}" type="button" @click="form.platform=platform.id">
             <MarketplaceLogo :platform="platform.id" :name="platform.name" :short="platform.short" :size="30" />
             <strong>{{platform.name}}</strong>
-            <small>{{platform.id==='custom' ? 'Controle manual de taxas' : 'Webhook e token obrigatório'}}</small>
+            <small>{{platform.id==='custom' ? 'Controle manual de taxas' : 'OAuth e sincronização automática'}}</small>
           </button>
         </div><div class="form-grid" style="margin-top:14px">
           <div class="field col-5" data-field="name" :class="{'field--error':errors.name}"><label>Nome no PrintFlow *</label><input v-model="form.name"><small v-if="errors.name" class="field__error">{{errors.name}}</small></div>
@@ -175,14 +168,13 @@ const cancel = () => {
           <div class="field col-3"><label>Status</label><select v-model="form.active"><option :value="true">Ativo</option><option :value="false">Inativo</option></select></div>
         </div></div>
 
-        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais e webhook</h2><template v-if="form.platform !== 'custom'"><div class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />O OAuth identifica automaticamente a conta vendedora e guarda os tokens de forma criptografada. Para adicionar outra conta, entre no Mercado Livre com a outra conta principal antes de autorizar.</div><div class="form-actions" style="justify-content:flex-start;margin:0 0 12px"><button type="button" class="btn btn--primary" :disabled="oauthLoading" @click="connectOfficialOAuth">{{ oauthLoading ? 'Abrindo...' : 'Conectar outra conta com OAuth oficial' }}</button><button type="button" class="btn" :class="{ 'btn--primary': connectionMode === 'manual' }" @click="connectionMode = connectionMode === 'manual' ? 'oauth' : 'manual'">{{ connectionMode === 'manual' ? 'Usar OAuth oficial' : 'Configuração manual' }}</button></div></template><div v-if="requiresManualCredentials" class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />Use somente se você recebeu credenciais do serviço. O ID externo é o Seller/User ID e permite diferenciar contas da mesma empresa.</div><div class="form-grid">
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais da integração</h2><template v-if="form.platform !== 'custom'"><div class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />O OAuth identifica automaticamente a conta vendedora e guarda os tokens de forma criptografada. Para adicionar outra conta, entre no Mercado Livre com a outra conta principal antes de autorizar.</div><div class="form-actions" style="justify-content:flex-start;margin:0 0 12px"><button type="button" class="btn btn--primary" :disabled="oauthLoading" @click="connectOfficialOAuth">{{ oauthLoading ? 'Abrindo...' : 'Conectar outra conta com OAuth oficial' }}</button><button type="button" class="btn" :class="{ 'btn--primary': connectionMode === 'manual' }" @click="connectionMode = connectionMode === 'manual' ? 'oauth' : 'manual'">{{ connectionMode === 'manual' ? 'Usar OAuth oficial' : 'Configuração manual' }}</button></div></template><div v-if="requiresManualCredentials" class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />Use somente se você recebeu credenciais do serviço. O ID externo é o Seller/User ID e permite diferenciar contas da mesma empresa.</div><div class="form-grid">
           <div v-if="requiresManualCredentials" class="field col-4" data-field="accountExternalId" :class="{'field--error':errors.accountExternalId}"><label>ID da conta externa *</label><input v-model="form.accountExternalId" :placeholder="form.platform==='shopee'?'Shop ID':'Seller/User ID'"><small v-if="errors.accountExternalId" class="field__error">{{errors.accountExternalId}}</small></div>
           <div v-if="requiresManualCredentials" class="field col-4"><label>Nome da conexão</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
           <div v-if="requiresManualCredentials" class="field col-4"><label>Expira em</label><input v-model="form.tokenExpiresAt" type="datetime-local"></div>
           <div v-if="requiresManualCredentials" class="field col-6" data-field="accessToken" :class="{'field--error':errors.accessToken}"><label>Access token *</label><input v-model="form.accessToken" type="password" autocomplete="off" placeholder="Obrigatório e criptografado"><small v-if="errors.accessToken" class="field__error">{{errors.accessToken}}</small></div>
           <div v-if="requiresManualCredentials" class="field col-6"><label>Refresh token</label><input v-model="form.refreshToken" type="password" autocomplete="off" placeholder="Opcional e criptografado"></div>
           <div v-if="requiresManualCredentials" class="field col-12"><label>Escopos/permissões</label><input v-model="form.scopes" placeholder="orders.read, finances.read"></div>
-          <div v-if="webhookUrl" class="field col-12"><label>URL do webhook para configurar no serviço</label><div class="copy-field"><input :value="webhookUrl" readonly><button class="btn" type="button" @click="copyWebhook"><UiIcon name="download" :size="15"/>Copiar</button></div></div>
         </div></div>
 
         <div class="form-card"><h2 class="form-card__title"><UiIcon name="percent" />3. Taxas e vigência</h2><div class="form-grid">
@@ -207,6 +199,5 @@ const cancel = () => {
 .integration-card{display:flex;min-height:92px;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;text-align:left;cursor:pointer}
 .integration-card.active{border-color:var(--blue);box-shadow:0 0 0 2px #e4f0ff;background:#fbfdff}
 .integration-card small{color:var(--muted);font-size:8px}
-.copy-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
 @media (max-width:900px){.integration-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
