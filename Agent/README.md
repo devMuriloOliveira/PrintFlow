@@ -95,11 +95,15 @@ Adapter com base para conectar, ler status, pausar, retomar, cancelar, enviar ar
 
 O Agent salva dados locais em um diretorio proprio. Por padrao, usa a pasta `data` dentro do Agent, ou o diretorio definido por `PRINTFLOW_AGENT_DATA_DIR`.
 
-Arquivos locais principais:
+Arquivos locais principais (todos sob `PRINTFLOW_AGENT_DATA_DIR`, ou no diretório gerenciado do Agent):
 
-- `agent.json`: credencial de pareamento do Agent.
+- `agent.json`: envelope protegido por DPAPI no Windows com a credencial de
+  pareamento do Agent; instalações antigas são migradas ao carregar.
 - `printer-credentials.json`: credenciais de impressoras salvas localmente.
-- cache de arquivos de impressao baixados.
+- `agent-operations.sqlite`: comandos processados, confirmações pendentes,
+  outbox de eventos agregados e último estado local de impressoras/jobs.
+- `cache/files`: arquivos de impressão baixados e validados por hash.
+- `logs`: logs locais do Agent.
 
 As credenciais de impressora sao armazenadas criptografadas localmente. Elas nao devem ser copiadas para README, logs ou telas do usuario.
 
@@ -125,6 +129,9 @@ O FrontEnd usa esse protocolo para solicitar abertura do Agent instalado. Um exe
 Nao documente codigos reais de pareamento. Eles sao temporarios e devem ser usados somente pelo usuario durante a configuracao.
 
 ## Desenvolvimento Local
+
+O Agent requer Node.js 22.13 ou superior, pois usa o SQLite nativo do Node para
+manter comandos concluídos e confirmações pendentes após reinício.
 
 ```powershell
 npm.cmd install

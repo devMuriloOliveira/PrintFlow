@@ -3,20 +3,13 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-const dataDirectory = process.env.PRINTFLOW_AGENT_DATA_DIR
-  ? path.resolve(process.env.PRINTFLOW_AGENT_DATA_DIR)
-  : path.resolve(__dirname, '../../data')
+import {
+  getAgentLocalPaths
+} from '../storage/localPaths.js'
 
 const cacheDirectory =
-  path.join(
-    dataDirectory,
-    'print-files'
-  )
+  getAgentLocalPaths()
+    .cacheFiles
 
 const defaultCacheMaxAgeMs =
   Number(
@@ -122,7 +115,10 @@ const listCacheFiles =
       []
 
     for (const entry of entries) {
-      if (!entry.isFile()) {
+      if (
+        !entry.isFile() ||
+        entry.name.endsWith('.pin')
+      ) {
         continue
       }
 
@@ -146,9 +142,16 @@ const listCacheFiles =
         mtimeMs:
           info.mtimeMs,
         isTemp:
-          entry.name.includes(
-            '.tmp-'
+          entry.name.includes('.tmp-') ||
+          entry.name.endsWith('.part'),
+        isPinned:
+          await fs.access(
+            `${filePath}.pin`
           )
+            .then(
+              () => true,
+              () => false
+            )
       })
     }
 
@@ -182,11 +185,13 @@ export const cleanupPrintFileCache =
       if (
         (
           file.isTemp &&
+          !file.isPinned &&
           ageMs >=
             tempMaxAgeMs
         ) ||
         (
           !file.isTemp &&
+          !file.isPinned &&
           maxAgeMs > 0 &&
           ageMs >=
             maxAgeMs
@@ -228,7 +233,8 @@ export const cleanupPrintFileCache =
     const removable =
       remaining
         .filter((file) =>
-          !file.isTemp
+          !file.isTemp &&
+          !file.isPinned
         )
         .sort((a, b) =>
           a.mtimeMs -
@@ -271,6 +277,40 @@ export const cleanupPrintFileCache =
         removedFiles.size,
       remainingBytes
     }
+  }
+
+export const pinPrintFileCache =
+  async (
+    localPath
+  ) => {
+    if (!localPath) {
+      throw new Error(
+        'Caminho local do cache obrigatorio.'
+      )
+    }
+
+    await fs.writeFile(
+      `${localPath}.pin`,
+      'pinned\n',
+      'utf8'
+    )
+  }
+
+export const unpinPrintFileCache =
+  async (
+    localPath
+  ) => {
+    if (!localPath) {
+      return
+    }
+
+    await fs.rm(
+      `${localPath}.pin`,
+      {
+        force:
+          true
+      }
+    )
   }
 
 export const ensurePrintFileCached =
@@ -355,15 +395,53 @@ export const ensurePrintFileCached =
     }
 
     const tempPath =
-      `${finalPath}.tmp-${Date.now()}`
+      `${finalPath}.part`
 
-    const hash =
-      crypto.createHash(
-        'sha256'
+    let partialBytes =
+      0
+
+    try {
+      partialBytes =
+        (await fs.stat(tempPath)).size
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw error
+      }
+    }
+
+    const expectedBytes =
+      Number(
+        printFile.sizeBytes ||
+        0
       )
 
-    let sizeBytes =
-      0
+    if (
+      expectedBytes > 0 &&
+      partialBytes >= expectedBytes
+    ) {
+      await fs.rm(
+        tempPath,
+        {
+          force:
+            true
+        }
+      )
+      partialBytes =
+        0
+    }
+
+    const requestHeaders = {
+      'x-agent-id':
+        credentials.agentId,
+      'x-agent-secret':
+        credentials.agentSecret,
+      ...(partialBytes > 0
+        ? {
+            Range:
+              `bytes=${partialBytes}-`
+          }
+        : {})
+    }
 
     const response =
       await axios.get(
@@ -371,14 +449,83 @@ export const ensurePrintFileCached =
         {
           responseType:
             'stream',
-          headers: {
-            'x-agent-id':
-              credentials.agentId,
-            'x-agent-secret':
-              credentials.agentSecret
-          }
+          headers:
+            requestHeaders,
+          validateStatus:
+            status =>
+              (status >= 200 &&
+                status < 300) ||
+              status === 416
         }
       )
+
+    if (
+      response.status ===
+      416
+    ) {
+      await fs.rm(
+        tempPath,
+        {
+          force:
+            true
+        }
+      )
+
+      return ensurePrintFileCached(
+        apiUrl,
+        credentials,
+        printFile
+      )
+    }
+
+    const resume =
+      partialBytes > 0 &&
+      response.status === 206
+
+    if (
+      partialBytes > 0 &&
+      !resume
+    ) {
+      await fs.rm(
+        tempPath,
+        {
+          force:
+            true
+        }
+      )
+      partialBytes =
+        0
+    }
+
+    const hash =
+      crypto.createHash(
+        'sha256'
+      )
+
+    let sizeBytes =
+      partialBytes
+
+    if (resume) {
+      await new Promise((resolve, reject) => {
+        const existing =
+          createReadStream(
+            tempPath
+          )
+
+        existing.on(
+          'data',
+          chunk => hash.update(chunk)
+        )
+        existing.on(
+          'error',
+          reject
+        )
+        existing.on(
+          'end',
+          resolve
+        )
+      })
+    }
 
     try {
       await new Promise((resolve, reject) => {
@@ -387,7 +534,9 @@ export const ensurePrintFileCached =
             tempPath,
             {
               flags:
-                'wx'
+                resume
+                  ? 'a'
+                  : 'w'
             }
           )
 
@@ -438,9 +587,8 @@ export const ensurePrintFileCached =
       }
 
       if (
-        printFile.sizeBytes &&
-        Number(printFile.sizeBytes) !==
-          sizeBytes
+        expectedBytes > 0 &&
+        expectedBytes !== sizeBytes
       ) {
         throw new Error(
           'Tamanho do arquivo baixado nao confere.'
@@ -462,13 +610,18 @@ export const ensurePrintFileCached =
           false
       }
     } catch (error) {
-      await fs.rm(
-        tempPath,
-        {
-          force:
-            true
-        }
-      )
+      if (
+        error.message ===
+        'Hash do arquivo baixado nao confere.'
+      ) {
+        await fs.rm(
+          tempPath,
+          {
+            force:
+              true
+          }
+        )
+      }
 
       throw error
     }

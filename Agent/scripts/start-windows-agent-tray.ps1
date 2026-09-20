@@ -56,6 +56,7 @@ function Start-AgentProcess {
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $true
   $startInfo.EnvironmentVariables["PRINTFLOW_API_URL"] = $ApiUrl
+  $startInfo.EnvironmentVariables["PRINTFLOW_ENVIRONMENT"] = "PRODUCTION"
   $startInfo.EnvironmentVariables["PRINTFLOW_AGENT_LOG_DIR"] = $logPath
 
   if ($PairingCode) {

@@ -60,6 +60,20 @@ if (productionLike && !String(process.env.CORS_ALLOWED_ORIGINS || '').trim()) {
   throw new Error('CORS_ALLOWED_ORIGINS obrigatorio quando o backend usa banco real.')
 }
 const developmentAuthSecret = authSecret || randomBytes(32).toString('base64url')
+const objectStorageProvider = String(process.env.OBJECT_STORAGE_PROVIDER || 'local').toLowerCase()
+if (!['local', 'r2'].includes(objectStorageProvider)) {
+  throw new Error('OBJECT_STORAGE_PROVIDER deve ser local ou r2.')
+}
+if (isProduction && objectStorageProvider !== 'r2') {
+  throw new Error('OBJECT_STORAGE_PROVIDER deve ser r2 em Production.')
+}
+if (productionLike && objectStorageProvider === 'r2') {
+  for (const name of ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY']) {
+    if (!String(process.env[name] || '').trim()) throw new Error(`${name} obrigatorio quando R2 esta habilitado.`)
+  }
+  const r2Endpoint = process.env.R2_ENDPOINT || `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+  if (!/^https:\/\/[^/]+$/i.test(r2Endpoint)) throw new Error('R2_ENDPOINT deve usar HTTPS.')
+}
 
 export const env = {
   port: Number(process.env.PORT || 3333),
@@ -108,6 +122,14 @@ export const env = {
   supportAttachmentCleanupIntervalMs: Number(process.env.SUPPORT_ATTACHMENT_CLEANUP_INTERVAL_MS || 6 * 60 * 60 * 1000),
   expenseRecurringIntervalMs: Number(process.env.EXPENSE_RECURRING_INTERVAL_MS || 60 * 60 * 1000),
   printFileStorageDir: process.env.PRINT_FILE_STORAGE_DIR || resolve(currentDir, '../../storage/print-files'),
+  objectStorageProvider,
+  objectStorageLocalDir: process.env.OBJECT_STORAGE_LOCAL_DIR || resolve(currentDir, '../../storage/object-storage'),
+  r2AccountId: process.env.R2_ACCOUNT_ID || '',
+  r2Bucket: process.env.R2_BUCKET || '',
+  r2AccessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+  r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+  r2Endpoint: process.env.R2_ENDPOINT || '',
+  r2PresignExpiresSeconds: Number(process.env.R2_PRESIGN_EXPIRES_SECONDS || 900),
   printFileMaxBytes: Number(process.env.PRINT_FILE_MAX_BYTES || 250 * 1024 * 1024),
   printFileStorageMaxBytes: Number(process.env.PRINT_FILE_STORAGE_MAX_BYTES || 10 * 1024 * 1024 * 1024),
   printFileStorageRetentionDays: Number(process.env.PRINT_FILE_STORAGE_RETENTION_DAYS || 30),

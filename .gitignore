@@ -10,6 +10,7 @@ dist
 *-cdp.png
 *-preview*.png
 
+
 FrontEnd/node_modules
 FrontEnd/.nuxt
 FrontEnd/.output
@@ -21,3 +22,25 @@ BackEnd/backups
 Agent/data/
 Agent/.env
 Agent/certs/
+docs/PRINTFLOW_AGENT_FASE_0_AUDITORIA.md
+
+# Configuracao local: exemplos sanitizados permanecem rastreados.
+.env.*
+!.env.example
+!**/.env.example
+
+# Runtime do PrintFlow Agent. Nao ignore globalmente extensoes usadas por artefatos publicados.
+/Agent/.data/
+/Agent/cache/
+/Agent/logs/
+/Agent/temp/
+/Agent/updates/
+/Agent/*.sqlite
+/Agent/*.sqlite3
+/Agent/*.db
+/Agent/*.db-journal
+/Agent/*.db-shm
+/Agent/*.db-wal
+
+# Dados operacionais locais que nao fazem parte do codigo-fonte.
+/BackEnd/backups/

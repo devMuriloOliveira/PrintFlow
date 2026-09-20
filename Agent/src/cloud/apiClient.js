@@ -69,3 +69,46 @@ export const completeCommand = async (
 
   return response.data
 }
+
+export const syncAgentEvents = async (
+  apiUrl,
+  credentials,
+  events = []
+) => {
+  if (!events.length) {
+    return {
+      accepted:
+        0
+    }
+  }
+
+  const response =
+    await axios.post(
+      `${apiUrl}/api/agents/sync-events`,
+      {
+        events
+      },
+      {
+        headers: {
+          'x-agent-id':
+            credentials.agentId,
+          'x-agent-secret':
+            credentials.agentSecret,
+          'Content-Type':
+            'application/json'
+        }
+      }
+    )
+
+  return response.data
+}
+
+export const rotateAgentCredential = async (apiUrl, credentials) => {
+  const response = await axios.post(`${apiUrl}/api/agents/credential/rotate`, {}, { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret } })
+  return response.data
+}
+
+export const confirmAgentCredentialRotation = async (apiUrl, credentials) => {
+  const response = await axios.post(`${apiUrl}/api/agents/credential/rotate/confirm`, {}, { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret } })
+  return response.data
+}

@@ -78,6 +78,11 @@ const allowedFormatsByProtocol: Record<string, string[]> = {
   prusalink: ['gcode', 'bgcode'],
   marlin: ['gcode']
 }
+const supportsAgentCapability = (printer: any, capability: string) => {
+  const capabilities = printer?.agentCapabilities
+  if (!capabilities || typeof capabilities !== 'object' || !Object.keys(capabilities).length) return true
+  return capabilities[capability] === true
+}
 const readyPrintFormats = ['3mf', 'gcode', 'bgcode']
 const normalizeList = (value: any) => Array.isArray(value) ? value.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean) : String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
 const normalizePrinterStatus = (printer: any, status: any = {}) => ({
@@ -114,7 +119,7 @@ const seedPrinterStatusCache = () => {
 }
 const refreshAllPrinterStatuses = async () => {
   if (printerStatusLoadingId.value || printerControlLoadingId.value) return
-  const linkedPrinters = (printers.value as any[]).filter((printer) => printer?.agentId && printer?.agentPrinterId)
+  const linkedPrinters = (printers.value as any[]).filter((printer) => printer?.agentId && printer?.agentPrinterId && supportsAgentCapability(printer, 'status'))
   for (const printer of linkedPrinters) {
     if (printerStatusLoadingId.value || printerControlLoadingId.value) break
     await loadPrinterStatus(printer, { silent: true }).catch(() => {})
@@ -134,6 +139,7 @@ const printReadinessError = (job: any) => {
   if (!readyPrintFormats.includes(format)) return `Formato ${format.toUpperCase()} ainda não está liberado para impressão automática.`
   const extension = String(product.printFileName || '').split('.').pop()?.toLowerCase() || ''
   if (extension && extension !== format) return 'Extensão do arquivo não confere com o formato informado.'
+  if (!supportsAgentCapability(printer, 'startPrint')) return 'Esta impressora não oferece início remoto de impressão.'
   const protocol = String(printer?.agentProtocol || '').toLowerCase()
   const allowed = allowedFormatsByProtocol[protocol] || readyPrintFormats
   if (protocol && !allowed.includes(format)) return `Formato ${format.toUpperCase()} não é recomendado para esta impressora.`
@@ -217,6 +223,7 @@ const assertAgentPrinterReady = (printer: any) => {
   return agent
 }
 const loadPrinterStatus = async (printer: any, options: { silent?: boolean } = {}) => {
+  if (!supportsAgentCapability(printer, 'status')) throw new Error('Esta impressora não oferece consulta remota de status.')
   const agent = assertAgentPrinterReady(printer)
   const agentPrinterId = String(printer.agentPrinterId)
   if (printerStatusLoadingId.value) return
@@ -250,6 +257,7 @@ const loadPrinterStatus = async (printer: any, options: { silent?: boolean } = {
   }
 }
 const controlPrinter = async (printer: any, action: 'pause' | 'resume' | 'cancel' | 'disconnect') => {
+  if (!supportsAgentCapability(printer, action)) throw new Error(`Esta impressora não oferece o comando remoto: ${action}.`)
   const agent = assertAgentPrinterReady(printer)
   const agentPrinterId = String(printer.agentPrinterId)
   if (printerControlLoadingId.value) return

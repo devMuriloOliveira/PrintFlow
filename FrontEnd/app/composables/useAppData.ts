@@ -49,7 +49,7 @@ export type Printer = {
   hours: number; status: string; maintenance: string; serial: string; location?: string; volume?: string; defaultFilament?: string;
   nozzleMm?: number; supportedMaterials?: string; minLayerHeight?: number; maxLayerHeight?: number;
   agentId?: string; agentPrinterId?: string; agentConnectionKey?: string; agentProtocol?: string; agentConnectionType?: string
-  agentPrinterStatus?: string; agentLastStatus?: Record<string, unknown>; agentLastConnectionError?: string; agentLastSeenAt?: string | null
+  agentPrinterStatus?: string; agentLastStatus?: Record<string, unknown>; agentCapabilities?: Record<string, boolean>; agentLastConnectionError?: string; agentLastSeenAt?: string | null
 }
 
 export type Marketplace = {

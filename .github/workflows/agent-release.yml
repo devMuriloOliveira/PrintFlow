@@ -1,0 +1,93 @@
+name: Agent Release
+
+on:
+  push:
+    tags:
+      - 'agent-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    if: startsWith(github.ref_name, 'agent-v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Agent/package-lock.json
+
+      - name: Validate tag and package
+        shell: pwsh
+        run: |
+          $tagVersion = '${{ github.ref_name }}' -replace '^agent-v', ''
+          $packageVersion = (Get-Content Agent/package.json -Raw | ConvertFrom-Json).version
+          $minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'
+          if ($tagVersion -ne $packageVersion) {
+            throw "Tag $tagVersion diverge da versao do Agent $packageVersion."
+          }
+          if ($minimumSupportedVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw 'Configure PRINTFLOW_MINIMUM_SUPPORTED_VERSION como SemVer antes de publicar uma release.'
+          }
+          node scripts/validate-agent-package.mjs
+
+      - name: Install production dependencies
+        working-directory: Agent
+        run: npm ci --omit=dev
+
+      - name: Test Agent
+        working-directory: Agent
+        run: npm test
+
+      - name: Build Early Access package
+        working-directory: Agent
+        shell: pwsh
+        env:
+          PRINTFLOW_API_URL: ${{ vars.PRINTFLOW_API_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRINTFLOW_API_URL)) {
+            throw 'Configure a variavel de repositorio PRINTFLOW_API_URL antes de publicar uma release.'
+          }
+          ./scripts/build-windows-package.ps1 -ApiUrl $env:PRINTFLOW_API_URL -SignDev -SkipInstall
+
+      - name: Hash release artifacts
+        shell: pwsh
+        run: |
+          $package = Get-Content Agent/package.json -Raw | ConvertFrom-Json
+          [ordered]@{
+            tag = '${{ github.ref_name }}'
+            version = $package.version
+            minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'
+            signingMode = 'DEV_SELF_SIGNED'
+            productionTrusted = $false
+          } | ConvertTo-Json | Set-Content Agent/dist/RELEASE-METADATA.json
+          $artifacts = @(
+            'Agent/dist/PrintFlow-Agent-Windows.zip',
+            'Agent/dist/PrintFlow-Agent-Setup.exe',
+            'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer',
+            'Agent/dist/RELEASE-METADATA.json'
+          )
+          $hashes = foreach ($artifact in $artifacts) {
+            if (-not (Test-Path $artifact)) { throw "Artefato ausente: $artifact" }
+            Get-FileHash $artifact -Algorithm SHA256
+          }
+          $hashes | Format-Table -AutoSize
+          $hashes | ForEach-Object { "$($_.Hash)  $($_.Path)" } | Set-Content Agent/dist/SHA256SUMS.txt
+
+      - name: Publish Early Access release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            Agent/dist/PrintFlow-Agent-Windows.zip `
+            Agent/dist/PrintFlow-Agent-Setup.exe `
+            Agent/dist/PrintFlow-Agent-Dev-Certificate.cer `
+            Agent/dist/RELEASE-METADATA.json `
+            Agent/dist/SHA256SUMS.txt `
+            --title "PrintFlow Agent ${{ github.ref_name }} — Early Access / Pilot" `
+            --notes "signingMode=DEV_SELF_SIGNED. Certificado self-signed nao e publicamente confiavel; nao instalar automaticamente em Trusted Root. PRODUCTION_TRUSTED permanece pendente de certificado Code Signing confiavel."

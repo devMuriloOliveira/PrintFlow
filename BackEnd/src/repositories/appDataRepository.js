@@ -275,6 +275,7 @@ const readPrinters = async (client, tenantId) => {
       p.agent_connection_type,
       ap.status as agent_printer_status,
       ap.last_status as agent_last_status,
+      ap.metadata -> 'capabilities' as agent_capabilities,
       ap.last_connection_error as agent_last_connection_error,
       ap.last_seen_at as agent_last_seen_at
     from printers p
@@ -289,7 +290,7 @@ const readPrinters = async (client, tenantId) => {
     minLayerHeight: number(row.min_layer_height), maxLayerHeight: number(row.max_layer_height),
     agentId: row.agent_id ? String(row.agent_id) : '', agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
     agentConnectionKey: row.agent_connection_key || '', agentProtocol: row.agent_protocol || '', agentConnectionType: row.agent_connection_type || '',
-    agentPrinterStatus: row.agent_printer_status || '', agentLastStatus: row.agent_last_status || {},
+    agentPrinterStatus: row.agent_printer_status || '', agentLastStatus: row.agent_last_status || {}, agentCapabilities: row.agent_capabilities || {},
     agentLastConnectionError: row.agent_last_connection_error || '', agentLastSeenAt: row.agent_last_seen_at || null }))
 }
 

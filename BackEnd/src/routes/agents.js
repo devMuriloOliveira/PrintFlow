@@ -27,6 +27,10 @@ import {
 } from '../services/printFileStorage.js'
 
 import {
+  isAgentPrinterActionSupported
+} from '../services/agentPrinterCapabilities.js'
+
+import {
   writeAuditEvent,
   writeOperationalNotification
 } from '../services/operationalEvents.js'
@@ -34,6 +38,11 @@ import {
 import {
   assertTenantResourceLimit
 } from '../services/subscriptionEntitlements.js'
+
+import {
+  publishAgentCommandAvailable,
+  subscribeAgentEvents
+} from '../services/agentRealtime.js'
 
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
@@ -260,7 +269,7 @@ const encryptCommandSecret = (
   }
 }
 
-const authenticateAgentRequest =
+export const authenticateAgentRequest =
   async (
     req
   ) => {
@@ -307,7 +316,13 @@ const authenticateAgentRequest =
             tenant_id
           from agents
           where id = $1
-            and secret_hash = $2
+            and (
+              secret_hash = $2
+              or (
+                pending_secret_hash = $2
+                and pending_secret_expires_at > now()
+              )
+            )
             and secret_hash is not null
             and status <> 'revoked'
           limit 1
@@ -687,6 +702,7 @@ export const handleAgentPair =
             architecture,
             agent_version,
             secret_hash,
+            secret_rotated_at,
             status,
             last_seen_at
           )
@@ -698,6 +714,7 @@ export const handleAgentPair =
             $5,
             $6,
             $7,
+            now(),
             'online',
             now()
           )
@@ -719,6 +736,18 @@ export const handleAgentPair =
 
             secret_hash =
               excluded.secret_hash,
+
+            secret_rotated_at =
+              now(),
+
+            pending_secret_hash =
+              null,
+
+            pending_credential_version =
+              null,
+
+            pending_secret_expires_at =
+              null,
 
             status =
               'online',
@@ -755,7 +784,8 @@ export const handleAgentPair =
      * CÃ³digo de pareamento Ã©
      * utilizado somente uma vez.
      */
-    await query(
+    const claimResult =
+      await query(
       `
         update agent_pairing_codes
         set
@@ -1087,6 +1117,235 @@ export const handleAgentHeartbeat =
     )
   }
 
+export const handleAgentCredentialRotate = async (req, res) => {
+  const agent = await authenticateAgentRequest(req)
+  if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })
+
+  const currentSecretHash = crypto.createHash('sha256').update(String(req.headers['x-agent-secret'] || '')).digest('hex')
+  const newSecret = crypto.randomBytes(32).toString('base64url')
+  const newSecretHash = crypto.createHash('sha256').update(newSecret).digest('hex')
+  const result = await query(
+    `update agents
+     set pending_secret_hash = $3,
+         pending_credential_version = coalesce(credential_version, 1) + 1,
+         pending_secret_expires_at = now() + interval '15 minutes',
+         updated_at = now()
+     where id = $1 and tenant_id = $2 and secret_hash = $4
+       and (pending_secret_hash is null or pending_secret_expires_at <= now())
+       and coalesce(secret_rotated_at, created_at) <= now() - interval '30 days'
+     returning pending_credential_version`,
+    [agent.id, agent.tenant_id, newSecretHash, currentSecretHash]
+  )
+  if (!result.rowCount) return sendJson(res, 200, { rotated: false })
+  return sendJson(res, 200, { agentSecret: newSecret, credentialVersion: result.rows[0].pending_credential_version })
+}
+
+export const handleAgentCredentialRotateConfirm = async (req, res) => {
+  const agent = await authenticateAgentRequest(req)
+  if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })
+  const secretHash = crypto.createHash('sha256').update(String(req.headers['x-agent-secret'] || '')).digest('hex')
+  const result = await query(
+    `update agents
+     set secret_hash = pending_secret_hash,
+         credential_version = pending_credential_version,
+         pending_secret_hash = null,
+         pending_credential_version = null,
+         pending_secret_expires_at = null,
+         secret_rotated_at = now(),
+         updated_at = now()
+     where id = $1 and tenant_id = $2 and pending_secret_hash = $3
+       and pending_secret_expires_at > now()
+     returning credential_version`,
+    [agent.id, agent.tenant_id, secretHash]
+  )
+  if (result.rowCount) return sendJson(res, 200, { credentialVersion: result.rows[0].credential_version })
+  const current = await query(
+    `select credential_version from agents where id = $1 and tenant_id = $2 and secret_hash = $3 limit 1`,
+    [agent.id, agent.tenant_id, secretHash]
+  )
+  if (current.rowCount) return sendJson(res, 200, { credentialVersion: current.rows[0].credential_version })
+  return sendJson(res, 409, { error: 'Nenhuma rotacao pendente para confirmar.' })
+}
+
+export const handleAgentEvents =
+  async (
+    req,
+    res
+  ) => {
+    const agent =
+      await authenticateAgentRequest(
+        req
+      )
+
+    if (!agent) {
+      return sendJson(
+        res,
+        401,
+        {
+          error:
+            'Agent invalido'
+        }
+      )
+    }
+
+    subscribeAgentEvents(
+      agent,
+      req,
+      res
+    )
+  }
+
+export const handleAgentEventSync =
+  async (
+    req,
+    res
+  ) => {
+    const agent =
+      await authenticateAgentRequest(
+        req
+      )
+
+    if (!agent) {
+      return sendJson(
+        res,
+        401,
+        {
+          error:
+            'Agent invalido'
+        }
+      )
+    }
+
+    const body =
+      await readJsonBody(
+        req
+      )
+    const events =
+      Array.isArray(body?.events)
+        ? body.events.slice(0, 50)
+        : []
+
+    if (
+      !Array.isArray(body?.events) ||
+      body.events.length > 50
+    ) {
+      return sendJson(
+        res,
+        400,
+        {
+          error:
+            'Lote de eventos invalido.'
+        }
+      )
+    }
+
+    let accepted =
+      0
+
+    await withTenant(
+      agent.tenant_id,
+      async client => {
+        for (const event of events) {
+          const localEventId =
+            String(
+              event?.id ||
+              ''
+            ).trim()
+          const eventType =
+            String(
+              event?.type ||
+              ''
+            ).trim().toLowerCase()
+
+          if (
+            !localEventId ||
+            !/^[a-z0-9._:-]{1,100}$/i.test(localEventId) ||
+            !/^[a-z0-9._:-]{1,80}$/i.test(eventType)
+          ) {
+            continue
+          }
+
+          const receipt =
+            await client.query(
+              `
+                insert into agent_event_receipts (
+                  tenant_id,
+                  agent_id,
+                  event_id,
+                  event_type
+                ) values ($1, $2, $3, $4)
+                on conflict (
+                  tenant_id,
+                  agent_id,
+                  event_id
+                ) do nothing
+                returning event_id
+              `,
+              [
+                agent.tenant_id,
+                String(agent.id),
+                localEventId,
+                eventType
+              ]
+            )
+
+          if (!receipt.rows[0]) {
+            continue
+          }
+
+          const payload =
+            event?.payload &&
+            typeof event.payload === 'object'
+              ? event.payload
+              : {}
+          const details = {
+            localEventId,
+            commandId:
+              String(payload.commandId || '').slice(0, 120),
+            commandType:
+              String(payload.commandType || '').slice(0, 80),
+            success:
+              payload.success !== false,
+            status:
+              String(payload.status || '').slice(0, 80) || null,
+            queuedAt:
+              String(event.createdAt || '').slice(0, 40)
+          }
+
+          await writeAuditEvent(
+            agent.tenant_id,
+            {
+              action:
+                `agent.sync.${eventType}`,
+              actorType:
+                'agent',
+              actorId:
+                String(agent.id),
+              entityType:
+                details.commandId
+                  ? 'agent_command'
+                  : 'agent',
+              entityId:
+                details.commandId ||
+                String(agent.id),
+              details
+            },
+            client
+          )
+          accepted += 1
+        }
+      }
+    )
+
+    return sendJson(
+      res,
+      200,
+      {
+        accepted
+      }
+    )
+  }
+
 // ======================================================
 // LISTAR AGENTS
 // ======================================================
@@ -1258,7 +1517,8 @@ export const handleAgentRevoke =
         set
           status = 'failed',
           result = $3::jsonb,
-          completed_at = now()
+          completed_at = now(),
+          lease_expires_at = null
         where tenant_id = $1
           and agent_id = $2
           and status in ('pending', 'running')
@@ -1394,6 +1654,11 @@ export const handleAgentDiscoverCreate =
       commandResult
         .rows[0]
 
+    publishAgentCommandAvailable({
+      agentId:
+        agent.id
+    })
+
     return sendJson(
       res,
       201,
@@ -1524,17 +1789,19 @@ export const handleAgentCommandsPending =
     // ele ficava indefinidamente como running.
     // ==================================================
 
-    await query(
+    const claimResult =
+      await query(
       `
         update agent_commands
         set
           status = 'failed',
           result = $3::jsonb,
-          completed_at = now()
+          completed_at = now(),
+          lease_expires_at = null
         where agent_id = $1
           and tenant_id = $2
           and status = 'running'
-          and started_at < now() - interval '3 minutes'
+          and coalesce(lease_expires_at, started_at + interval '3 minutes') < now()
       `,
       [
         agent.id,
@@ -1705,7 +1972,8 @@ export const handleAgentCommandsPending =
     // MARCAR COMO RUNNING
     // ==================================================
 
-    await query(
+    const claimCommandResult =
+      await query(
       `
         update agent_commands
         set
@@ -1715,19 +1983,56 @@ export const handleAgentCommandsPending =
           started_at =
             now(),
 
+          accepted_at =
+            coalesce(accepted_at, now()),
+
+          lease_expires_at =
+            now() + interval '3 minutes',
+
+          attempt =
+            coalesce(attempt, 0) + 1,
+
           payload =
             $2::jsonb
 
         where id = $1
+          and agent_id = $3
+          and tenant_id = $4
+          and status = 'pending'
+
+        returning
+          id
       `,
       [
         command.id,
 
         JSON.stringify(
           payloadForStorage
-        )
+        ),
+
+        agent.id,
+
+        agent.tenant_id
       ]
     )
+
+    /*
+     * Outro processo do mesmo Agent pode ter vencido a
+     * corrida entre o select de pendentes e este update.
+     * Nesse caso nao reenviamos o comando fisico.
+     */
+    if (
+      !claimCommandResult.rowCount
+    ) {
+      return sendJson(
+        res,
+        200,
+        {
+          command:
+            null
+        }
+      )
+    }
 
     // ==================================================
     // ENVIAR PARA O AGENT
@@ -2658,20 +2963,122 @@ export const handleAgentPrintFileGet =
     }
 
     try {
-      const file =
+      const fullFile =
         await openPrintFileReadStream(
           storageKey
         )
 
+      fullFile.stream.destroy()
+
+      const rangeHeader =
+        String(
+          req.headers.range ||
+          ''
+        ).trim()
+
+      let range =
+        null
+
+      if (rangeHeader) {
+        const match =
+          rangeHeader.match(
+            /^bytes=(\d*)-(\d*)$/
+          )
+
+        if (!match) {
+          res.writeHead(
+            416,
+            {
+              'Content-Range':
+                `bytes */${fullFile.sizeBytes}`
+            }
+          )
+          return res.end()
+        }
+
+        const requestedStart =
+          match[1] === ''
+            ? null
+            : Number(
+                match[1]
+              )
+        const requestedEnd =
+          match[2] === ''
+            ? null
+            : Number(
+                match[2]
+              )
+
+        const start =
+          requestedStart === null
+            ? Math.max(
+                0,
+                fullFile.sizeBytes -
+                  (requestedEnd || 0)
+              )
+            : requestedStart
+
+        const end =
+          requestedStart === null
+            ? fullFile.sizeBytes - 1
+            : Math.min(
+                requestedEnd === null
+                  ? fullFile.sizeBytes - 1
+                  : requestedEnd,
+                fullFile.sizeBytes - 1
+              )
+
+        if (
+          !Number.isSafeInteger(start) ||
+          !Number.isSafeInteger(end) ||
+          start < 0 ||
+          start >= fullFile.sizeBytes ||
+          end < start
+        ) {
+          res.writeHead(
+            416,
+            {
+              'Content-Range':
+                `bytes */${fullFile.sizeBytes}`
+            }
+          )
+          return res.end()
+        }
+
+        range = {
+          start,
+          end
+        }
+      }
+
+      const file =
+        await openPrintFileReadStream(
+          storageKey,
+          range || {}
+        )
+
+      const contentLength =
+        range
+          ? range.end - range.start + 1
+          : file.sizeBytes
+
       res.writeHead(
-        200,
+        range ? 206 : 200,
         {
           'Content-Type':
             'application/octet-stream',
           'Content-Length':
             String(
-              file.sizeBytes
+              contentLength
             ),
+          'Accept-Ranges':
+            'bytes',
+          ...(range
+            ? {
+                'Content-Range':
+                  `bytes ${range.start}-${range.end}/${file.sizeBytes}`
+              }
+            : {}),
           'X-PrintFlow-File-Name':
             encodeURIComponent(
               product.print_file_name ||
@@ -2846,11 +3253,15 @@ export const handleAgentCommandComplete =
               $2::jsonb,
 
             completed_at =
-              now()
+              now(),
+
+            lease_expires_at =
+              null
 
           where id = $3
             and agent_id = $4
             and tenant_id = $5
+            and status = 'running'
 
           returning
             id,
@@ -2881,6 +3292,65 @@ export const handleAgentCommandComplete =
         .rows[0]
 
     if (!command) {
+      /*
+       * A resposta HTTP pode se perder depois de o servidor
+       * persistir a conclusao. O Agent conserva uma outbox e
+       * reenviara o mesmo complete; devolvemos o resultado
+       * terminal sem executar novamente os efeitos colaterais.
+       */
+      const existingResult =
+        await query(
+          `
+            select
+              id,
+              command,
+              status,
+              result,
+              completed_at
+            from agent_commands
+            where id = $1
+              and agent_id = $2
+              and tenant_id = $3
+              and status in ('completed', 'failed')
+            limit 1
+          `,
+          [
+            commandId,
+            agent.id,
+            agent.tenant_id
+          ]
+        )
+
+      const existing =
+        existingResult.rows[0]
+
+      if (existing) {
+        return sendJson(
+          res,
+          200,
+          {
+            command: {
+              id:
+                String(
+                  existing.id
+                ),
+
+              type:
+                existing.command,
+
+              status:
+                existing.status,
+
+              result:
+                existing.result,
+
+              completedAt:
+                existing.completed_at
+            }
+          }
+        )
+      }
+
       return sendJson(
         res,
         404,
@@ -3438,6 +3908,11 @@ export const handleAgentConnectPrinterCreate =
       commandResult
         .rows[0]
 
+    publishAgentCommandAvailable({
+      agentId:
+        agent.id
+    })
+
     return sendJson(
       res,
       201,
@@ -3775,6 +4250,11 @@ export const handleAgentPrinterStatusCreate =
       commandResult
         .rows[0]
 
+    publishAgentCommandAvailable({
+      agentId:
+        agent.id
+    })
+
     // ==================================================
     // RETORNO
     // ==================================================
@@ -4040,6 +4520,22 @@ export const handleAgentPrinterControlCreate =
         {
           error:
             'Impressora do Agent nao encontrada'
+        }
+      )
+    }
+
+    if (
+      !isAgentPrinterActionSupported(
+        storedPrinter.metadata,
+        action
+      )
+    ) {
+      return sendJson(
+        res,
+        400,
+        {
+          error:
+            'Esta impressora nao oferece esta operacao remota.'
         }
       )
     }
@@ -4547,6 +5043,11 @@ export const handleAgentPrinterControlCreate =
     const command =
       commandResult
         .rows[0]
+
+    publishAgentCommandAvailable({
+      agentId:
+        agent.id
+    })
 
     // ==================================================
     // RETORNO

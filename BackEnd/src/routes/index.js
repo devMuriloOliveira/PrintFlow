@@ -176,6 +176,10 @@ import {
   handleAgentPairingCodeCreate,
   handleAgentVerify,
   handleAgentHeartbeat,
+  handleAgentCredentialRotate,
+  handleAgentCredentialRotateConfirm,
+  handleAgentEvents,
+  handleAgentEventSync,
   handleAgentsList,
   handleAgentRevoke,
   handleAgentDiscoverCreate,
@@ -272,7 +276,7 @@ export const handleRequest =
 
       if (
         req.method ===
-          'GET' &&
+        'GET' &&
         url.pathname ===
           '/'
       ) {
@@ -325,6 +329,33 @@ export const handleRequest =
           '/api/auth/register'
       ) {
         return await handleRegister(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+        'POST' &&
+        url.pathname ===
+          '/api/agents/sync-events'
+      ) {
+        return await handleAgentEventSync(
+          req,
+          res
+        )
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/agents/credential/rotate') return await handleAgentCredentialRotate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/agents/credential/rotate/confirm') return await handleAgentCredentialRotateConfirm(req, res)
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/agents/events'
+      ) {
+        return await handleAgentEvents(
           req,
           res
         )
@@ -562,6 +593,12 @@ export const handleRequest =
               url.pathname
             )
           )
+        ) ||
+        (
+          req.method ===
+            'GET' &&
+          url.pathname ===
+            '/api/agents/events'
         ) ||
         (
           req.method ===

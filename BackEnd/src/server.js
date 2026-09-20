@@ -10,6 +10,7 @@ import { startPrivacyRequestRetention } from './jobs/privacyRequestRetention.js'
 import { startSubscriptionWatchdog } from './jobs/subscriptionWatchdog.js'
 import { syncConfiguredPlatformSuperAdmins } from './services/platformAdmin.js'
 import { handleRequest } from './routes/index.js'
+import { attachAgentWebSocket } from './services/agentWebSocket.js'
 
 process.on('uncaughtException', (error) => {
   console.error('Excecao nao capturada', error)
@@ -20,6 +21,7 @@ process.on('unhandledRejection', (error) => {
 })
 
 const server = createServer(handleRequest)
+attachAgentWebSocket(server)
 server.keepAliveTimeout = 120_000
 server.headersTimeout = 120_000
 

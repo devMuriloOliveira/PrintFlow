@@ -9,6 +9,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$apiUri = [Uri]$ApiUrl
+if ($apiUri.Scheme -ne "https" -or $apiUri.Host -in @("localhost", "127.0.0.1", "0.0.0.0", "::1")) {
+  throw "O pacote Windows exige PRINTFLOW_API_URL HTTPS publico; localhost nao pode ser empacotado como Production."
+}
+
 $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $outputRoot = Join-Path $agentRoot $OutputDir
 $stageRoot = Join-Path $outputRoot $PackageName

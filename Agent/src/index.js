@@ -1,12 +1,13 @@
-import os from 'node:os'
 import axios from 'axios'
-import dotenv from 'dotenv'
+import os from 'node:os'
 
+import { config } from './config/config.js'
 import { installFileLogger } from './logging/fileLogger.js'
 import { AGENT_VERSION, getAgentRuntimeInfo } from './agentInfo.js'
 import {
   consumePendingPairingCode,
-  loadCredentials
+  loadCredentials,
+  saveCredentials
 } from './storage/credentials.js'
 import { pairAgent } from './pairing/pairing.js'
 import { verifyAgent } from './cloud/auth.js'
@@ -14,21 +15,33 @@ import { verifyAgent } from './cloud/auth.js'
 import {
   sendHeartbeat,
   getPendingCommand,
-  completeCommand
+  completeCommand,
+  syncAgentEvents,
+  rotateAgentCredential,
+  confirmAgentCredentialRotation
 } from './cloud/apiClient.js'
 
-import { handleCommand } from './commands/commandHandler.js'
 import { startLocalServer } from './localServer.js'
 import { cleanupPrintFileCache } from './files/printFileCache.js'
-
-dotenv.config()
+import {
+  createLocalOperationsDb
+} from './storage/localOperationsDb.js'
+import {
+  executeAgentCommand,
+  flushPendingCommandCompletions,
+  flushPendingEvents
+} from './commands/commandExecution.js'
+import {
+  startCommandEvents
+} from './cloud/commandEvents.js'
+import {
+  startAgentWebSocket
+} from './cloud/websocket.js'
 
 const logger =
   installFileLogger()
 
-const apiUrl =
-  process.env.PRINTFLOW_API_URL ||
-  'http://localhost:3333'
+const apiUrl = config.apiUrl
 
 const pairingCode =
   process.env.PRINTFLOW_PAIRING_CODE ||
@@ -125,6 +138,26 @@ process.on('unhandledRejection', error => {
 startLocalServer()
 startCacheCleanup()
 
+const localOperations =
+  createLocalOperationsDb()
+
+const recoveredCommands =
+  localOperations.recoverInterruptedCommands()
+
+if (
+  recoveredCommands >
+  0
+) {
+  console.log(
+    `[Commands] ${recoveredCommands} comando(s) interrompido(s) foram concluídos sem repetição.`
+  )
+}
+
+console.log(
+  'Operacoes locais:',
+  localOperations.databasePath
+)
+
 const start = async () => {
   try {
     console.log('')
@@ -181,6 +214,31 @@ const start = async () => {
 
     console.log('Agent autenticado pelo PrintFlow')
     console.log('Status:', authResult.status)
+
+    // A nova credencial é salva primeiro e confirmada usando o hash pendente.
+    // O Backend mantém a anterior por quinze minutos, evitando perda de pareamento.
+    if (credentials.pendingCredentialVersion) {
+      const confirmed = await confirmAgentCredentialRotation(apiUrl, credentials)
+      credentials = { ...credentials, credentialVersion: confirmed.credentialVersion }
+      delete credentials.pendingCredentialVersion
+      await saveCredentials(credentials)
+    }
+
+    try {
+      const rotation = await rotateAgentCredential(apiUrl, credentials)
+      if (!rotation.agentSecret) {
+        // A credencial ainda está dentro da janela de rotação de 30 dias.
+      } else {
+      const rotatedCredentials = { ...credentials, agentSecret: rotation.agentSecret, pendingCredentialVersion: rotation.credentialVersion }
+      await saveCredentials(rotatedCredentials)
+      const confirmed = await confirmAgentCredentialRotation(apiUrl, rotatedCredentials)
+      credentials = { ...rotatedCredentials, credentialVersion: confirmed.credentialVersion }
+      delete credentials.pendingCredentialVersion
+      await saveCredentials(credentials)
+      }
+    } catch (error) {
+      if (error.response?.status !== 409) console.log('[Credentials] Rotacao adiada:', error.response?.data?.error || error.message)
+    }
 
     // =====================================================
     // HEARTBEAT
@@ -258,6 +316,54 @@ const checkCommands = async () => {
   }
 
   try {
+    const synchronized =
+      await flushPendingCommandCompletions({
+        operations:
+          localOperations,
+
+        complete: (
+          commandId,
+          result
+        ) =>
+          completeCommand(
+            apiUrl,
+            credentials,
+            commandId,
+            result
+          )
+      })
+
+    const eventsSynchronized =
+      await flushPendingEvents({
+        operations:
+          localOperations,
+        publish:
+          events =>
+            syncAgentEvents(
+              apiUrl,
+              credentials,
+              [events]
+            )
+      })
+
+    if (
+      synchronized >
+      0
+    ) {
+      console.log(
+        `[Commands] ${synchronized} conclusao(oes) local(is) sincronizada(s).`
+      )
+    }
+
+    if (
+      eventsSynchronized >
+      0
+    ) {
+      console.log(
+        `[Events] ${eventsSynchronized} evento(s) local(is) sincronizado(s).`
+      )
+    }
+
     const command = await getPendingCommand(
       apiUrl,
       credentials
@@ -271,20 +377,45 @@ const checkCommands = async () => {
 
     processingCommand = true
 
-    const result = await handleCommand(
+    await executeAgentCommand({
       command,
-      {
+
+      context: {
         apiUrl,
         credentials
-      }
-    )
+      },
 
-    await completeCommand(
-      apiUrl,
-      credentials,
-      command.id,
-      result
-    )
+      operations:
+        localOperations
+    })
+
+    await flushPendingCommandCompletions({
+      operations:
+        localOperations,
+
+      complete: (
+        commandId,
+        result
+      ) =>
+        completeCommand(
+          apiUrl,
+          credentials,
+          commandId,
+          result
+        )
+      })
+
+    await flushPendingEvents({
+      operations:
+        localOperations,
+      publish:
+        events =>
+          syncAgentEvents(
+            apiUrl,
+            credentials,
+            [events]
+          )
+    })
 
     console.log(
       `[Commands] Comando ${command.id} concluido.`
@@ -312,6 +443,38 @@ const checkCommands = async () => {
 }
 
 await checkCommands()
+
+    startCommandEvents({
+      apiUrl,
+      credentials,
+
+      onCommandAvailable: async () => {
+        commandPollDelay =
+          5_000
+
+        scheduleCommandCheck(0)
+      },
+
+      onError: error => {
+        console.log(
+          '[Events] Canal em tempo real indisponivel; polling permanece ativo:',
+          error.message ||
+            error
+        )
+      }
+    })
+
+    startAgentWebSocket({
+      apiUrl,
+      credentials,
+      onCommandAvailable: async () => {
+        commandPollDelay = 5_000
+        scheduleCommandCheck(0)
+      },
+      onError: error => {
+        console.log('[WebSocket] Canal indisponivel; SSE e polling permanecem ativos:', error.message || error)
+      }
+    })
 
     // =====================================================
     // AGENT PRONTO

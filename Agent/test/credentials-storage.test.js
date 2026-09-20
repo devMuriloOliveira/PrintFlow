@@ -45,6 +45,26 @@ test('credenciais do Agent usam diretorio local configuravel', async () => {
       'pc-a'
   })
 
+  const storedContent =
+    await fs.readFile(
+      path.join(
+        tempDir,
+        'agent.json'
+      ),
+      'utf8'
+    )
+
+  if (process.platform === 'win32') {
+    assert.equal(
+      storedContent.includes('secret-1'),
+      false
+    )
+    assert.match(
+      storedContent,
+      /windows-dpapi/
+    )
+  }
+
   assert.deepEqual(
     await loadCredentials(),
     {

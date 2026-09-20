@@ -22,6 +22,7 @@ const tenantTables = [
   'agent_pairing_codes',
   'agent_commands',
   'agent_printers',
+  'agent_event_receipts',
 
   'marketplaces',
   'clients',
@@ -2261,6 +2262,17 @@ export const migrate =
           started_at
             timestamptz,
 
+          accepted_at
+            timestamptz,
+
+          lease_expires_at
+            timestamptz,
+
+          attempt
+            integer
+            not null
+            default 0,
+
           completed_at
             timestamptz
         )
@@ -3058,6 +3070,36 @@ export const migrate =
           details jsonb not null default '{}'::jsonb,
           created_at timestamptz not null default now()
         )
+      `
+    )
+
+    await query(`alter table agent_commands add column if not exists accepted_at timestamptz`)
+    await query(`alter table agent_commands add column if not exists lease_expires_at timestamptz`)
+    await query(`alter table agent_commands add column if not exists attempt integer not null default 0`)
+    await query(`create index if not exists agent_commands_lease_idx on agent_commands (tenant_id, agent_id, status, lease_expires_at)`)
+    await query(`alter table agents add column if not exists credential_version integer not null default 1`)
+    await query(`alter table agents add column if not exists pending_secret_hash text`)
+    await query(`alter table agents add column if not exists pending_credential_version integer`)
+    await query(`alter table agents add column if not exists pending_secret_expires_at timestamptz`)
+    await query(`alter table agents add column if not exists secret_rotated_at timestamptz`)
+
+    await query(
+      `
+        create table if not exists agent_event_receipts (
+          tenant_id text not null references tenants(id) on delete cascade,
+          agent_id text not null,
+          event_id text not null,
+          event_type text not null,
+          received_at timestamptz not null default now(),
+          primary key (tenant_id, agent_id, event_id)
+        )
+      `
+    )
+
+    await query(
+      `
+        create index if not exists agent_event_receipts_received_idx
+        on agent_event_receipts (tenant_id, received_at desc)
       `
     )
 

@@ -211,31 +211,31 @@ test('access token contem apenas os dados minimos de sessao e permissao', () => 
 })
 
 test('alteracao de senha exige a senha atual e invalida as sessoes anteriores', async () => {
-  const session = await registerSession('troca-senha', '127.0.0.211')
+  const session = await registerSession('troca-senha', '127.10.0.211')
 
   const rejected = await request({
-    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.0.0.212',
+    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.10.0.212',
     body: { currentPassword: 'SenhaIncorreta1!', newPassword: 'NovaSenhaForte1!' }
   })
   assert.equal(rejected.status, 400)
   assert.equal(rejected.body.error, 'Senha atual invalida.')
 
   const changed = await request({
-    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.0.0.213',
+    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.10.0.213',
     body: { currentPassword: 'SenhaForte1!', newPassword: 'NovaSenhaForte1!' }
   })
   assert.equal(changed.status, 200)
   assert.ok(changed.body.accessToken)
   assert.notEqual(changed.body.accessToken, session.accessToken)
 
-  const oldSession = await request({ method: 'GET', path: '/api/auth/me', token: session.accessToken, ip: '127.0.0.214' })
+  const oldSession = await request({ method: 'GET', path: '/api/auth/me', token: session.accessToken, ip: '127.10.0.214' })
   assert.equal(oldSession.status, 401)
-  const currentSession = await request({ method: 'GET', path: '/api/auth/me', token: changed.body.accessToken, ip: '127.0.0.215' })
+  const currentSession = await request({ method: 'GET', path: '/api/auth/me', token: changed.body.accessToken, ip: '127.10.0.215' })
   assert.equal(currentSession.status, 200)
 
-  const oldPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.0.0.216', body: { email: session.user.email, password: 'SenhaForte1!' } })
+  const oldPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.10.0.216', body: { email: session.user.email, password: 'SenhaForte1!' } })
   assert.equal(oldPassword.status, 400)
-  const newPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.0.0.217', body: { email: session.user.email, password: 'NovaSenhaForte1!' } })
+  const newPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.10.0.217', body: { email: session.user.email, password: 'NovaSenhaForte1!' } })
   assert.equal(newPassword.status, 200)
 })
 

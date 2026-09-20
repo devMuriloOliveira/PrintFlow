@@ -5,8 +5,10 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
-  cleanupPrintFileStorage
+  cleanupPrintFileStorage,
+  openPrintFileReadStream
 } from '../src/services/printFileStorage.js'
+import { env } from '../src/config/env.js'
 
 const writeFile =
   async (
@@ -35,6 +37,35 @@ const writeFile =
       mtime
     )
   }
+
+test('leitura R2 usa arquivo local legado quando o objeto ainda nao existe', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-storage-fallback-'))
+  const previousProvider = env.objectStorageProvider
+  const previousRoot = env.printFileStorageDir
+  const storageKey = 'tenant-a/product-a/legacy.3mf'
+  const localPath = path.join(root, ...storageKey.split('/'))
+
+  try {
+    await writeFile(localPath, 'legacy-content', new Date())
+    env.objectStorageProvider = 'r2'
+    env.printFileStorageDir = root
+
+    const result = await openPrintFileReadStream(storageKey, {
+      objectStorageProvider: {
+        async head () { throw new Error('objeto ausente no R2') },
+        async get () { throw new Error('objeto ausente no R2') }
+      }
+    })
+    const chunks = []
+    for await (const chunk of result.stream) chunks.push(chunk)
+    assert.equal(Buffer.concat(chunks).toString(), 'legacy-content')
+    assert.equal(result.filePath, localPath)
+  } finally {
+    env.objectStorageProvider = previousProvider
+    env.printFileStorageDir = previousRoot
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
 
 test('limpeza do storage remove temporarios e arquivos inativos sem apagar chaves ativas', async () => {
   const root =

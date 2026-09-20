@@ -6,6 +6,15 @@ import path from 'node:path'
 import {
   env
 } from '../config/env.js'
+import {
+  createConfiguredObjectStorage
+} from './configuredObjectStorage.js'
+
+let configuredObjectStorage
+const getConfiguredObjectStorage = () => {
+  configuredObjectStorage ||= createConfiguredObjectStorage()
+  return configuredObjectStorage
+}
 
 const allowedFormats =
   new Set([
@@ -199,6 +208,14 @@ export const savePrintFileStream =
         finalPath
       )
 
+      if (env.objectStorageProvider === 'r2') {
+        await getConfiguredObjectStorage().put({
+          key: `${safeTenant}/${safeProduct}/${storedName}`,
+          body: createReadStream(finalPath),
+          contentType: 'application/octet-stream'
+        })
+      }
+
       return {
         fileName:
           safeName,
@@ -283,28 +300,56 @@ export const removeTenantPrintFiles = async (tenantId) => {
 
 export const openPrintFileReadStream =
   async (
-    storageKey
+    storageKey,
+    {
+      start,
+      end,
+      objectStorageProvider
+    } = {}
   ) => {
-    const resolved =
-      resolvePrintFilePath(
-        storageKey
-      )
+    const openLocalFile = async () => {
+      const resolved = resolvePrintFilePath(storageKey)
+      const info = await stat(resolved)
 
-    const info =
-      await stat(
-        resolved
-      )
-
-    return {
-      stream:
-        createReadStream(
-          resolved
+      return {
+        stream: createReadStream(
+          resolved,
+          Number.isInteger(start) || Number.isInteger(end)
+            ? {
+                ...(Number.isInteger(start) ? { start } : {}),
+                ...(Number.isInteger(end) ? { end } : {})
+              }
+            : undefined
         ),
-      sizeBytes:
-        info.size,
-      filePath:
-        resolved
+        sizeBytes: info.size,
+        filePath: resolved
+      }
     }
+
+    if (env.objectStorageProvider === 'r2') {
+      try {
+        const provider = objectStorageProvider || getConfiguredObjectStorage()
+        const metadata = await provider.head(storageKey)
+        const object = await provider.get(storageKey, {
+          start,
+          end
+        })
+
+        return {
+          stream: object.body,
+          sizeBytes: Number(metadata.sizeBytes || 0),
+          filePath: null
+        }
+      } catch (r2Error) {
+        try {
+          return await openLocalFile()
+        } catch {
+          throw r2Error
+        }
+      }
+    }
+
+    return openLocalFile()
   }
 
 const listStorageFiles =
