@@ -26,7 +26,7 @@ jobs:
         run: |
           $tagVersion = '${{ github.ref_name }}' -replace '^agent-v', ''
           $packageVersion = (Get-Content Agent/package.json -Raw | ConvertFrom-Json).version
-          $minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'
+          $minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'.Trim()
           if ($tagVersion -ne $packageVersion) {
             throw "Tag $tagVersion diverge da versao do Agent $packageVersion."
           }
@@ -49,10 +49,11 @@ jobs:
         env:
           PRINTFLOW_API_URL: ${{ vars.PRINTFLOW_API_URL }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:PRINTFLOW_API_URL)) {
+          $apiUrl = $env:PRINTFLOW_API_URL.Trim()
+          if ([string]::IsNullOrWhiteSpace($apiUrl)) {
             throw 'Configure a variavel de repositorio PRINTFLOW_API_URL antes de publicar uma release.'
           }
-          ./scripts/build-windows-package.ps1 -ApiUrl $env:PRINTFLOW_API_URL -SignDev -SkipInstall
+          ./scripts/build-windows-package.ps1 -ApiUrl $apiUrl -SignDev -SkipInstall
 
       - name: Hash release artifacts
         shell: pwsh
@@ -64,7 +65,7 @@ jobs:
           [ordered]@{
             tag = '${{ github.ref_name }}'
             version = $package.version
-            minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'
+            minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'.Trim()
             signingMode = 'DEV_SELF_SIGNED'
             productionTrusted = $false
             certificateSha256 = $certificateSha256
