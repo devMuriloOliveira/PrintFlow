@@ -2591,3 +2591,9 @@ terminou com sucesso, incluindo os gates de seguranca, testes, builds e
 empacotamento Windows Production. O workflow `Agent Release` ainda nao foi
 reexecutado apos a correcao das variaveis; portanto a publicacao da release
 Early Access continua aguardando somente o `Re-run jobs` da execucao da tag.
+
+O `Re-run jobs` foi executado como tentativa 2 do run `35506898521`, mas a
+etapa `Validate tag and package` falhou novamente e a API publica continua
+sem nenhuma GitHub Release. A causa operacional permanece a configuracao
+nao confirmada das variaveis de repositorio; e necessario conferir os dois
+nomes exatos e o valor SemVer antes de uma nova tentativa.
