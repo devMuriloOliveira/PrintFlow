@@ -14,6 +14,7 @@ const required = [
   'Get-FileHash',
   'SHA256SUMS.txt',
   'RELEASE-METADATA.json',
+  'certificateSha256',
   'DEV_SELF_SIGNED',
   'PRODUCTION_TRUSTED',
   'gh release create'

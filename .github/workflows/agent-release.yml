@@ -58,12 +58,16 @@ jobs:
         shell: pwsh
         run: |
           $package = Get-Content Agent/package.json -Raw | ConvertFrom-Json
+          $certificatePath = 'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer'
+          if (-not (Test-Path $certificatePath)) { throw "Certificado ausente: $certificatePath" }
+          $certificateSha256 = (Get-FileHash $certificatePath -Algorithm SHA256).Hash
           [ordered]@{
             tag = '${{ github.ref_name }}'
             version = $package.version
             minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'
             signingMode = 'DEV_SELF_SIGNED'
             productionTrusted = $false
+            certificateSha256 = $certificateSha256
           } | ConvertTo-Json | Set-Content Agent/dist/RELEASE-METADATA.json
           $artifacts = @(
             'Agent/dist/PrintFlow-Agent-Windows.zip',

@@ -2550,3 +2550,9 @@ O workflow CI do commit `c118a0e` foi executado no GitHub (run 58,
 do ZIP e do instalador, e a etapa seguinte expandiu o ZIP e validou o runtime
 e o launcher Production. Security, Backend, Agent e os dois frontends tambem
 passaram.
+
+O manifesto da release Early Access passou a registrar tambem
+`certificateSha256`, derivado do certificado publico que acompanha o
+instalador. O contrato estatico do workflow foi atualizado e passou de 11
+para 12 verificacoes; isso reforca a conferencia de integridade sem apresentar
+o certificado self-signed como confiavel.
