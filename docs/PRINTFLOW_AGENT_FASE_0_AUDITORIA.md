@@ -2597,3 +2597,20 @@ etapa `Validate tag and package` falhou novamente e a API publica continua
 sem nenhuma GitHub Release. A causa operacional permanece a configuracao
 nao confirmada das variaveis de repositorio; e necessario conferir os dois
 nomes exatos e o valor SemVer antes de uma nova tentativa.
+
+O run `35508029010` confirmou que o `Trim()` resolveu a leitura das
+variaveis; a falha seguinte revelou que o `signtool` do runner rejeita
+`https://timestamp.digicert.com` como URL RFC 3161. O endpoint foi ajustado
+para `http://timestamp.digicert.com`, formato aceito pelo `signtool`; a API
+do Agent continua exigindo HTTPS. O validador preserva a exigencia de
+timestamp DigiCert e a suite do Agent passou com 40 testes.
+
+Depois dessa correcao, o workflow `Agent Release` run `35508666595` terminou
+com sucesso e publicou a release
+`PrintFlow Agent agent-v0.1.0 - Early Access / Pilot`. A release contem ZIP,
+installer EXE, certificado publico CER, `RELEASE-METADATA.json` e
+`SHA256SUMS.txt`. A verificacao externa baixou os cinco artefatos: os quatro
+hashes listados passaram e o `certificateSha256` do manifesto coincidiu com o
+certificado publicado. O manifesto registra `signingMode=DEV_SELF_SIGNED` e
+`productionTrusted=false`; nenhum certificado foi instalado como Trusted
+Root.
