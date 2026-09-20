@@ -2566,3 +2566,7 @@ workflow de release depois da geracao de `SHA256SUMS.txt`. Ele valida o
 manifesto, o modo de assinatura, cada hash publicado e a correspondencia de
 `certificateSha256`. Um fixture temporario DEV_SELF_SIGNED foi validado
 localmente com quatro hashes e removido ao final.
+
+O CI do commit `1fde783` foi executado no GitHub (run 62,
+`35506552343`) e terminou com sucesso, incluindo o novo contrato estatico de
+13 verificacoes e o empacotamento Windows Production.
