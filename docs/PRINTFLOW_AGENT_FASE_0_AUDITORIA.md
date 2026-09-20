@@ -2536,3 +2536,11 @@ Production foi gerado e o launcher VBS recebeu a URL HTTPS correta; o
 interrompido, portanto a verificacao final do instalador permanece atribuida
 ao runner `windows-latest` do CI. O diretorio temporario foi removido e nenhum
 artefato local existente foi sobrescrito.
+
+O empacotador foi corrigido para aguardar o artefato do IExpress com prazo
+limitado e encerrar somente o processo iniciado pelo proprio script quando o
+`.exe` ja existe. Tambem foi adicionado cancelamento de execucoes antigas por
+branch no CI. Repeticao local com `-OutputDir .tmp-agent-package-check4`
+terminou com sucesso e gerou ZIP de 4.629.549 bytes e instalador de 4.341.760
+bytes; o launcher foi conferido com HTTPS e sem endpoint local. Os temporarios
+foram removidos.
