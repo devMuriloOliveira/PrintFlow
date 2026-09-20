@@ -2544,3 +2544,9 @@ branch no CI. Repeticao local com `-OutputDir .tmp-agent-package-check4`
 terminou com sucesso e gerou ZIP de 4.629.549 bytes e instalador de 4.341.760
 bytes; o launcher foi conferido com HTTPS e sem endpoint local. Os temporarios
 foram removidos.
+
+O workflow CI do commit `c118a0e` foi executado no GitHub (run 58,
+`35505625741`) e terminou com sucesso. O runner Windows confirmou a geracao
+do ZIP e do instalador, e a etapa seguinte expandiu o ZIP e validou o runtime
+e o launcher Production. Security, Backend, Agent e os dois frontends tambem
+passaram.
