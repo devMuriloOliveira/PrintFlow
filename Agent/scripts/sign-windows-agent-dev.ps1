@@ -1,7 +1,10 @@
 param(
   [string]$FilePath = "dist\PrintFlow-Agent-Setup.exe",
   [string]$CertificateSubject = "CN=PrintFlow 3D Local Dev",
-  [string]$TimestampUrl = "https://timestamp.digicert.com",
+  # O signtool do Windows requer o endpoint RFC 3161 DigiCert neste formato
+  # HTTP; isso se aplica somente ao serviço de timestamp, nao ao endpoint da
+  # API, que continua obrigatoriamente HTTPS.
+  [string]$TimestampUrl = "http://timestamp.digicert.com",
   [string]$ExportPublicCertificatePath = "",
   [string]$CertificatePfxPath = "certs\PrintFlow-Agent-Dev-CodeSigning.pfx"
 )

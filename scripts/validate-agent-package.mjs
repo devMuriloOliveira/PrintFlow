@@ -133,8 +133,11 @@ try {
   if (/TrustedPublisher|X509Store\s*\(\s*["']Root/i.test(devSigner)) {
     errors.push('assinatura DEV instala certificado silenciosamente como confiavel.')
   }
-  if (!devSigner.includes('https://timestamp.digicert.com')) {
-    errors.push('assinatura DEV deve usar timestamp HTTPS.')
+  if (
+    !devSigner.includes('https://timestamp.digicert.com') &&
+    !devSigner.includes('http://timestamp.digicert.com')
+  ) {
+    errors.push('assinatura DEV deve usar timestamp DigiCert RFC 3161.')
   }
 
   const copyItems =
