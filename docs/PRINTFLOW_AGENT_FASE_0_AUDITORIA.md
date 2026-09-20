@@ -2579,3 +2579,9 @@ O bloqueio e externo e explicito: as variaveis de repositorio
 configuradas. Nenhum artefato, instalador ou GitHub Release foi publicado.
 A tag permanece preservada para reexecucao depois da configuracao; nenhum
 valor foi inventado e nenhum segredo foi exposto.
+
+Na mesma verificacao, o health endpoint publico do Backend foi consultado
+em `https://printflow-api-4y5l.onrender.com/healthz` e respondeu HTTP 200 com
+`{"status":"ok"}`. Esta evidencia confirma disponibilidade HTTP basica do
+servico, mas nao substitui smoke de autenticacao, banco, Agent ou hardware em
+Production.
