@@ -2556,3 +2556,7 @@ O manifesto da release Early Access passou a registrar tambem
 instalador. O contrato estatico do workflow foi atualizado e passou de 11
 para 12 verificacoes; isso reforca a conferencia de integridade sem apresentar
 o certificado self-signed como confiavel.
+
+O CI do commit `e68d4dd` foi executado no GitHub (run 60,
+`35506094563`) e terminou com sucesso, incluindo a verificacao atualizada do
+contrato de release e o empacotamento Windows Production.
