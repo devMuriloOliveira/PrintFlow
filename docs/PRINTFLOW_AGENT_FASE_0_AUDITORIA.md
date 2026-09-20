@@ -2585,3 +2585,9 @@ em `https://printflow-api-4y5l.onrender.com/healthz` e respondeu HTTP 200 com
 `{"status":"ok"}`. Esta evidencia confirma disponibilidade HTTP basica do
 servico, mas nao substitui smoke de autenticacao, banco, Agent ou hardware em
 Production.
+
+O CI do commit `18772f6` foi executado no GitHub (run `35507146156`) e
+terminou com sucesso, incluindo os gates de seguranca, testes, builds e
+empacotamento Windows Production. O workflow `Agent Release` ainda nao foi
+reexecutado apos a correcao das variaveis; portanto a publicacao da release
+Early Access continua aguardando somente o `Re-run jobs` da execucao da tag.
