@@ -2570,3 +2570,12 @@ localmente com quatro hashes e removido ao final.
 O CI do commit `1fde783` foi executado no GitHub (run 62,
 `35506552343`) e terminou com sucesso, incluindo o novo contrato estatico de
 13 verificacoes e o empacotamento Windows Production.
+
+Em 2026-09-20, a tag anotada `agent-v0.1.0` foi publicada no GitHub para
+validar o primeiro release Early Access. O workflow `Agent Release` foi
+acionado (run `35506898521`), mas parou na etapa `Validate tag and package`.
+O bloqueio e externo e explicito: as variaveis de repositorio
+`PRINTFLOW_API_URL` e `PRINTFLOW_MINIMUM_SUPPORTED_VERSION` ainda nao estao
+configuradas. Nenhum artefato, instalador ou GitHub Release foi publicado.
+A tag permanece preservada para reexecucao depois da configuracao; nenhum
+valor foi inventado e nenhum segredo foi exposto.
