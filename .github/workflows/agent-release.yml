@@ -81,6 +81,7 @@ jobs:
           }
           $hashes | Format-Table -AutoSize
           $hashes | ForEach-Object { "$($_.Hash)  $($_.Path)" } | Set-Content Agent/dist/SHA256SUMS.txt
+          node scripts/validate-agent-release-artifacts.mjs
 
       - name: Publish Early Access release
         shell: pwsh

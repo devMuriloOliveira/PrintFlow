@@ -15,6 +15,7 @@ const required = [
   'SHA256SUMS.txt',
   'RELEASE-METADATA.json',
   'certificateSha256',
+  'validate-agent-release-artifacts.mjs',
   'DEV_SELF_SIGNED',
   'PRODUCTION_TRUSTED',
   'gh release create'

@@ -2560,3 +2560,9 @@ o certificado self-signed como confiavel.
 O CI do commit `e68d4dd` foi executado no GitHub (run 60,
 `35506094563`) e terminou com sucesso, incluindo a verificacao atualizada do
 contrato de release e o empacotamento Windows Production.
+
+Foi adicionado `scripts/validate-agent-release-artifacts.mjs`, executado pelo
+workflow de release depois da geracao de `SHA256SUMS.txt`. Ele valida o
+manifesto, o modo de assinatura, cada hash publicado e a correspondencia de
+`certificateSha256`. Um fixture temporario DEV_SELF_SIGNED foi validado
+localmente com quatro hashes e removido ao final.
