@@ -8,7 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   executeAgentCommand,
   flushPendingCommandCompletions,
-  flushPendingEvents
+  flushPendingEvents,
+  flushPendingProductionMetrics
 } from '../src/commands/commandExecution.js'
 
 import {
@@ -33,7 +34,8 @@ const createStore = async () => {
             directory,
             'agent-operations.sqlite'
           )
-      })
+})
+
   }
 }
 
@@ -121,6 +123,48 @@ test(
   }
 )
 
+test('persiste metricas de conclusao e sincroniza apos falha de rede', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-agent-metrics-'))
+  const operations = createLocalOperationsDb({ databasePath: path.join(directory, 'agent.sqlite') })
+  operations.queueProductionMetrics({ printJobId: 'job-1', payload: { status: 'completed', idempotencyKey: 'metric-1', actualPrintSeconds: 10 } })
+  let reported = 0
+  const synchronized = await flushPendingProductionMetrics({
+    operations,
+    report: async (printJobId, payload) => { reported += 1; assert.equal(printJobId, 'job-1'); assert.equal(payload.idempotencyKey, 'metric-1') }
+  })
+  assert.equal(synchronized, 1)
+  assert.equal(reported, 1)
+  assert.equal(operations.listPendingProductionMetrics().length, 0)
+  operations.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
+
+test('persiste monitoramento de Production Job para retomar apos reinicio', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-agent-monitor-'))
+  const databasePath = path.join(directory, 'agent.sqlite')
+  const operations = createLocalOperationsDb({ databasePath })
+  operations.queueProductionJobMonitor({
+    printJobId: 'job-monitor-1',
+    commandId: 'command-monitor-1',
+    printer: { id: 'printer-1', protocol: 'bambu' },
+    startedAt: '2026-09-21T12:00:00.000Z'
+  })
+  operations.close()
+
+  const reopened = createLocalOperationsDb({ databasePath })
+  assert.deepEqual(reopened.listPendingProductionJobMonitors(), [{
+    printJobId: 'job-monitor-1',
+    commandId: 'command-monitor-1',
+    printer: { id: 'printer-1', protocol: 'bambu' },
+    startedAt: '2026-09-21T12:00:00.000Z',
+    createdAt: reopened.listPendingProductionJobMonitors()[0].createdAt
+  }])
+  reopened.acknowledgeProductionJobMonitor('job-monitor-1')
+  assert.equal(reopened.listPendingProductionJobMonitors().length, 0)
+  reopened.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
+
 test(
   'migra banco local existente para o schema versionado sem perder comando',
   async () => {
@@ -179,7 +223,7 @@ test(
 
     assert.equal(
       operations.schemaVersion,
-      3
+      5
     )
     assert.deepEqual(
       operations.begin({

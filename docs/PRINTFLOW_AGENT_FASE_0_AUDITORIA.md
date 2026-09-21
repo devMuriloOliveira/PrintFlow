@@ -2637,7 +2637,71 @@ contagem e o estado do smoke test real.
 Atualização posterior: o smoke test real local do OrcaSlicer foi concluído com
 o perfil P1S e produziu G-code temporário. O registro estrito agora cobre P1S,
 P1P, X1 Carbon, A1 e A1 mini; modelos sem perfil oficial são recusados. A
-suite do Agent passou com 49 testes. O pipeline local agora combina análise,
-seleção de perfil e slicing antes de retornar o artefato. Isso ainda não valida hardware real nem
-envio de Production Job, que dependem de uma impressora e credenciais do
-cliente.
+suite do Agent passou com 51 testes. O pipeline local agora combina análise,
+seleção de perfil e slicing antes de retornar o artefato. Isso ainda não valida
+hardware real nem envio de Production Job, que dependem de uma impressora e
+credenciais do cliente.
+
+Status formal do recorte P2: itens 1–3 (slicer único, perfis versionados e
+análise local) estão concluídos em DEVELOPMENT. Os itens 4–8 permanecem
+pendentes porque exigem o contrato persistente de Production Job, migrações e
+validação PostgreSQL, além de hardware/credenciais para consumo real. Nenhum
+estoque, custo real ou manutenção foi inferido a partir de métricas locais.
+
+Em 2026-09-21 foi preparada localmente a fundação aditiva para esses itens:
+`print_jobs` passou a ter campos opcionais para perfil, artefato e métricas;
+`print_job_attempts` recebeu idempotência por tenant/job/tentativa; e
+`BackEnd/src/services/productionJobMetrics.js` calcula consumo estimado versus
+medido, custo material/energia e horas de manutenção sem mutar estoque. A
+migration e o fluxo transacional ainda precisam ser executados em PostgreSQL
+de teste antes de qualquer publicação ou declaração de readiness Production.
+
+Também foi adicionado o endpoint autenticado pelo Agent
+`POST /api/agents/print-jobs/:id/metrics`. Ele deriva o tenant da credencial,
+exige `idempotencyKey`, valida limites, vincula o job ao `agent_printer` do
+Agent e persiste uma tentativa única antes de atualizar métricas reais. O
+Agent ainda não o chama automaticamente porque a telemetria de conclusão da
+impressora não foi implementada/validada.
+
+Foi criado um teste determinístico sem hardware que simula Agent → Cloud:
+início, conclusão com métricas, persistência da tentativa e retry com a mesma
+`idempotencyKey`. O teste confirmou uma única atualização do job, mas não
+substitui a validação de telemetria de uma impressora física.
+
+Em 2026-09-21 o Agent passou a iniciar um monitoramento após `start_print`
+aceito. O monitor consulta o adapter até um estado terminal, normaliza
+`completed`, `cancelled` ou `failed` e envia `POST /api/agents/print-jobs/:id/metrics`
+com uma chave idempotente derivada do comando. Os adapters Bambu, Moonraker,
+OctoPrint e PrusaLink agora expõem campos padronizados quando a fonte deles
+fornece tempo/filamento; valores ausentes permanecem nulos e não são
+inventados. O mock e o teste do monitor exercitam o contrato sem hardware.
+
+A migration foi executada duas vezes em PostgreSQL local isolado
+`printflow_agent_test_20260921` com SSL local desabilitado apenas para esse
+teste. A primeira e a segunda execuções foram concluídas, e a segunda
+confirmou idempotência. A tabela `print_job_attempts` e as quatro colunas de
+métricas/custos foram verificadas no catálogo do banco.
+
+Na transição idempotente `completed`, o Backend agora baixa o filamento
+medido uma única vez, grava custo material/energia e soma horas medidas na
+impressora. Sem filamento medido, o estoque não é reduzido silenciosamente;
+sem tempo medido, horas e energia permanecem nulas. O retry idempotente sai
+antes desses efeitos.
+
+Um smoke test transacional adicional foi executado contra o PostgreSQL local
+com tenant, Agent, impressora, filamento, produto e Production Job reais. A
+conclusao reduziu o filamento de 100 para 90, registrou uma movimentacao,
+somou 1 hora, gravou custos material/energia e, no retry, manteve uma unica
+tentativa/movimentacao. Esse teste tambem encontrou e corrigiu a inferencia
+ambigua de tipo no `update filaments`.
+
+Para evitar perda de conclusão durante uma indisponibilidade momentânea da
+API, o SQLite do Agent foi atualizado para o schema v4 com a outbox
+`production_metrics`. O envio do monitor entra nessa outbox quando a rede
+falha e é reenviado no próximo ciclo, inclusive após reinício do Agent. A
+suíte local confirmou persistência, sincronização e remoção após confirmação.
+
+O recorte de conclusão também resolve a impressora por `printer_id` ou pelo
+`printer_id` associado ao `agent_printer_id`, e usa a tarifa `tenants.kwh_cost`
+como fallback para energia. O smoke PostgreSQL foi repetido após essa mudança
+e manteve o resultado de uma baixa e uma atualização de horas.

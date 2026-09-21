@@ -1,0 +1,7 @@
+title = "PrintFlow secret-scanning policy"
+
+# Historical OAuth test fixture. The exact literal is non-functional and exists
+# only to satisfy the backend's minimum test-secret length requirement.
+[[allowlists]]
+description = "OAuth PKCE test fixture"
+regexes = ["marketplace-pkce-test-secret-32-characters"]

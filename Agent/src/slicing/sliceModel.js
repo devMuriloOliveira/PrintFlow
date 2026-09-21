@@ -1,6 +1,7 @@
 import { analyzeModelFile } from './modelAnalyzer.js'
 import { resolveOfficialOrcaProfileForPrinter } from './orcaProfiles.js'
 import { sliceWithOrcaSlicer } from './orcaSlicer.js'
+import { readGcodeMetrics } from './gcodeMetrics.js'
 
 /**
  * Local-only preflight and slicing pipeline. It never sends the result to a
@@ -31,5 +32,5 @@ export const sliceModelWithOrcaSlicer = async ({
     spawnImpl,
     timeoutMs
   })
-  return { analysis, profile, artifact }
+  return { analysis, profile, artifact, metrics: await readGcodeMetrics(artifact.outputPath) }
 }

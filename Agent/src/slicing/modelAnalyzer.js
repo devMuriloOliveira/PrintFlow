@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
+import { inflateRawSync } from 'node:zlib'
 
 const MAX_MODEL_BYTES = 200 * 1024 * 1024
 
@@ -39,8 +40,8 @@ const parseAsciiStl = (buffer) => {
   return { format: 'stl', encoding: 'ascii', triangleCount: vertices.length / 3, bounds: boundsFor(vertices) }
 }
 
-const zipEntryNames = (buffer) => {
-  const names = []
+const zipEntries = (buffer) => {
+  const entries = []
   for (let offset = 0; offset + 46 <= buffer.length; offset += 1) {
     if (buffer.readUInt32LE(offset) !== 0x02014b50) continue
     const nameLength = buffer.readUInt16LE(offset + 28)
@@ -48,10 +49,37 @@ const zipEntryNames = (buffer) => {
     const commentLength = buffer.readUInt16LE(offset + 32)
     const end = offset + 46 + nameLength + extraLength + commentLength
     if (end > buffer.length) continue
-    names.push(buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8'))
+    entries.push({
+      name: buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8'),
+      method: buffer.readUInt16LE(offset + 10),
+      compressedSize: buffer.readUInt32LE(offset + 20),
+      localOffset: buffer.readUInt32LE(offset + 42)
+    })
     offset = end - 1
   }
-  return names
+  return entries
+}
+
+const readZipEntry = (buffer, entry) => {
+  const offset = entry.localOffset
+  if (buffer.readUInt32LE(offset) !== 0x04034b50) throw new Error('Entrada 3MF invalida.')
+  const nameLength = buffer.readUInt16LE(offset + 26)
+  const extraLength = buffer.readUInt16LE(offset + 28)
+  const start = offset + 30 + nameLength + extraLength
+  const compressed = buffer.subarray(start, start + entry.compressedSize)
+  if (compressed.length !== entry.compressedSize) throw new Error('Entrada 3MF truncada.')
+  if (entry.method === 0) return compressed
+  if (entry.method === 8) return inflateRawSync(compressed)
+  throw new Error('Compressao 3MF nao suportada.')
+}
+
+const parse3mfModel = (xml) => {
+  const vertices = [...xml.matchAll(/<vertex\b[^>]*\bx="([^" ]+)"[^>]*\by="([^" ]+)"[^>]*\bz="([^" ]+)"[^>]*\/?/gi)]
+    .map((match) => match.slice(1).map(Number))
+    .filter((vertex) => vertex.every(Number.isFinite))
+  const triangleCount = [...xml.matchAll(/<triangle\b/gi)].length
+  if (!vertices.length || !triangleCount) throw new Error('Modelo 3MF sem geometria valida.')
+  return { format: '3mf', encoding: 'zip', triangleCount, bounds: boundsFor(vertices) }
 }
 
 export const analyzeModelFile = async (inputPath) => {
@@ -61,9 +89,10 @@ export const analyzeModelFile = async (inputPath) => {
   const extension = path.extname(resolved).toLowerCase()
   let result = extension === '.stl' && (parseBinaryStl(buffer) || parseAsciiStl(buffer))
   if (!result && extension === '.3mf' && buffer.length >= 4 && buffer.readUInt32LE(0) === 0x04034b50) {
-    const entries = zipEntryNames(buffer)
-    if (entries.includes('[Content_Types].xml') && entries.includes('3D/3dmodel.model')) {
-      result = { format: '3mf', encoding: 'zip', entries: entries.length }
+    const entries = zipEntries(buffer)
+    if (entries.some((entry) => entry.name === '[Content_Types].xml') && entries.some((entry) => entry.name === '3D/3dmodel.model')) {
+      const modelEntry = entries.find((entry) => entry.name === '3D/3dmodel.model')
+      result = { ...parse3mfModel(readZipEntry(buffer, modelEntry).toString('utf8')), entries: entries.length }
     }
   }
   if (!result) throw new Error('Formato de modelo nao suportado ou invalido.')

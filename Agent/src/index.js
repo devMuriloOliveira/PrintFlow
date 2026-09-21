@@ -18,7 +18,9 @@ import {
   completeCommand,
   syncAgentEvents,
   rotateAgentCredential,
-  confirmAgentCredentialRotation
+  confirmAgentCredentialRotation,
+  reportPrintJobMetrics,
+  uploadSlicedPrintArtifact
 } from './cloud/apiClient.js'
 
 import { startLocalServer } from './localServer.js'
@@ -29,7 +31,8 @@ import {
 import {
   executeAgentCommand,
   flushPendingCommandCompletions,
-  flushPendingEvents
+  flushPendingEvents,
+  flushPendingProductionMetrics
 } from './commands/commandExecution.js'
 import {
   startCommandEvents
@@ -37,6 +40,7 @@ import {
 import {
   startAgentWebSocket
 } from './cloud/websocket.js'
+import { monitorPrintJobCompletion } from './printing/productionJobMonitor.js'
 
 const logger =
   installFileLogger()
@@ -300,6 +304,116 @@ console.log('Iniciando busca de comandos...')
 let processingCommand = false
 let commandPollDelay = 5_000
 
+const reportProductionJobCompletion = async (
+  targetApiUrl,
+  targetCredentials,
+  printJobId,
+  payload
+) => {
+  try {
+    return await reportPrintJobMetrics(
+      targetApiUrl,
+      targetCredentials,
+      printJobId,
+      payload
+    )
+  } catch (error) {
+    localOperations.queueProductionMetrics({
+      printJobId,
+      payload
+    })
+
+    return {
+      queued: true,
+      error: error.message
+    }
+  }
+}
+
+const runProductionJobMonitor = (
+  monitor
+) => {
+  const command = {
+    id: monitor.commandId,
+    payload: {
+      printJobId: monitor.printJobId,
+      printer: monitor.printer,
+      startedAt: monitor.startedAt
+    }
+  }
+
+  void monitorPrintJobCompletion({
+    command,
+    context: { apiUrl, credentials },
+    report: reportProductionJobCompletion
+  }).then(
+    () => {
+      localOperations.acknowledgeProductionJobMonitor(
+        monitor.printJobId
+      )
+    }
+  ).catch((error) => {
+    console.error(
+      '[ProductionJob] Falha ao reportar conclusao',
+      {
+        printJobId: monitor.printJobId,
+        message: error.message
+      }
+    )
+  })
+}
+
+const startProductionJobMonitor = (
+  command
+) => {
+  const monitor = {
+    printJobId: command?.payload?.printJobId,
+    commandId: command?.id,
+    printer: command?.payload?.printer,
+    startedAt: command?.payload?.startedAt || new Date().toISOString()
+  }
+
+  try {
+    localOperations.queueProductionJobMonitor(
+      monitor
+    )
+  } catch (error) {
+    console.error(
+      '[ProductionJob] Nao foi possivel persistir monitoramento',
+      {
+        printJobId: monitor.printJobId,
+        message: error.message
+      }
+    )
+    return
+  }
+
+  runProductionJobMonitor(
+    monitor
+  )
+}
+
+const pendingProductionJobMonitors =
+  localOperations.listPendingProductionJobMonitors()
+
+for (
+  const monitor
+  of pendingProductionJobMonitors
+) {
+  runProductionJobMonitor(
+    monitor
+  )
+}
+
+if (
+  pendingProductionJobMonitors.length >
+  0
+) {
+  console.log(
+    `[ProductionJob] ${pendingProductionJobMonitors.length} monitoramento(s) retomado(s) apos reinicio.`
+  )
+}
+
 const scheduleCommandCheck = (
   delay = commandPollDelay
 ) => {
@@ -316,6 +430,12 @@ const checkCommands = async () => {
   }
 
   try {
+    const metricsSynchronized = await flushPendingProductionMetrics({
+      operations: localOperations,
+      report: (printJobId, payload) => reportPrintJobMetrics(apiUrl, credentials, printJobId, payload)
+    })
+    if (metricsSynchronized > 0) console.log(`[ProductionJob] ${metricsSynchronized} métrica(s) local(is) sincronizada(s).`)
+
     const synchronized =
       await flushPendingCommandCompletions({
         operations:
@@ -382,7 +502,14 @@ const checkCommands = async () => {
 
       context: {
         apiUrl,
-        credentials
+        credentials,
+        orcaSlicerPath: process.env.PRINTFLOW_ORCA_SLICER_PATH || '',
+        uploadSlicedPrintArtifact,
+        onPrintJobStarted: ({ command }) => {
+          startProductionJobMonitor(
+            command
+          )
+        }
       },
 
       operations:

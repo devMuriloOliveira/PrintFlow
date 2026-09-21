@@ -180,6 +180,8 @@ import {
   handleAgentCredentialRotateConfirm,
   handleAgentEvents,
   handleAgentEventSync,
+  handleAgentPrintJobMetrics,
+  handleAgentPrintJobSlicingArtifact,
   handleAgentsList,
   handleAgentRevoke,
   handleAgentDiscoverCreate,
@@ -336,7 +338,7 @@ export const handleRequest =
 
       if (
         req.method ===
-        'POST' &&
+          'POST' &&
         url.pathname ===
           '/api/agents/sync-events'
       ) {
@@ -344,6 +346,16 @@ export const handleRequest =
           req,
           res
         )
+      }
+
+      const agentPrintJobMetricsMatch = url.pathname.match(/^\/api\/agents\/print-jobs\/([^/]+)\/metrics$/)
+      if (req.method === 'POST' && agentPrintJobMetricsMatch) {
+        return await handleAgentPrintJobMetrics(req, res, agentPrintJobMetricsMatch[1])
+      }
+
+      const agentPrintJobSlicingArtifactMatch = url.pathname.match(/^\/api\/agents\/print-jobs\/([^/]+)\/slicing-artifact$/)
+      if (req.method === 'POST' && agentPrintJobSlicingArtifactMatch) {
+        return await handleAgentPrintJobSlicingArtifact(req, res, agentPrintJobSlicingArtifactMatch[1])
       }
 
       if (req.method === 'POST' && url.pathname === '/api/agents/credential/rotate') return await handleAgentCredentialRotate(req, res)
@@ -591,7 +603,8 @@ export const handleRequest =
 
             /^\/api\/agents\/commands\/[^/]+\/complete$/.test(
               url.pathname
-            )
+            ) ||
+            /^\/api\/agents\/print-jobs\/[^/]+\/metrics$/.test(url.pathname)
           )
         ) ||
         (
@@ -853,6 +866,24 @@ export const handleRequest =
           res,
           agentId,
           'start'
+        )
+      }
+
+      const agentPrinterSliceMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-slice$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterSliceMatch
+      ) {
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentPrinterSliceMatch[1],
+          'slice'
         )
       }
 

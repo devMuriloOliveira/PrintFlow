@@ -20,8 +20,8 @@ export const createFilamentMovementWithClient = async (client, tenantId, filamen
   if (resultingWeight < 0) throw new Error('Estoque insuficiente para esse consumo')
 
   const updated = await client.query(
-    `update filaments set remaining_weight = $3,
-       status = case when $3 = 0 then 'Esgotado' when $3 <= min_stock_weight then 'Baixo estoque' else 'Em estoque' end,
+    `update filaments set remaining_weight = $3::numeric,
+       status = case when $3::numeric = 0 then 'Esgotado' when $3::numeric <= min_stock_weight then 'Baixo estoque' else 'Em estoque' end,
        updated_at = now() where tenant_id = $1 and id = $2 returning status`,
     [tenantId, filamentId, resultingWeight]
   )

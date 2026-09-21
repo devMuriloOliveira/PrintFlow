@@ -169,6 +169,11 @@ análise é prévia ao slicing e não substitui a validação do Backend.
 e a geração local do G-code. O resultado ainda fica local e não inicia uma
 impressão.
 
+Quando o G-code contém os comentários padrão do Orca, o pipeline também
+retorna estimativas locais de tempo e filamento. Esses valores são apenas
+estimativas; estoque, custo e consumo real continuam sendo responsabilidade
+do Backend/Production Job.
+
 Para uma impressora cadastrada, `resolveOfficialOrcaProfileForPrinter()` exige
 um modelo exato com preset oficial (P1S, P1P, X1 Carbon, A1 ou A1 mini). Nao
 ha fallback entre modelos: sem perfil correspondente o slicing e recusado.

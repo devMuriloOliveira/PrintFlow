@@ -1,6 +1,7 @@
 const capabilityByAction = {
   status: 'status',
   start: 'startPrint',
+  slice: 'startPrint',
   pause: 'pause',
   resume: 'resume',
   cancel: 'cancel',

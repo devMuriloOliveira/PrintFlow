@@ -54,6 +54,10 @@ export const executeAgentCommand = async (
       context
     )
 
+  if (command.type === 'start_print' && result?.success !== false && typeof context.onPrintJobStarted === 'function') {
+    context.onPrintJobStarted({ command, result })
+  }
+
   operations.recordResult(
     command.id,
     result
@@ -163,6 +167,18 @@ export const flushPendingEvents = async (
     synchronized += 1
   }
 
+  return synchronized
+}
+
+export const flushPendingProductionMetrics = async ({ operations, report, limit = 20 }) => {
+  if (typeof operations.listPendingProductionMetrics !== 'function') return 0
+  let synchronized = 0
+  for (const metric of operations.listPendingProductionMetrics(limit)) {
+    operations.markProductionMetricAttempted?.(metric.id)
+    await report(metric.printJobId, metric.payload)
+    operations.acknowledgeProductionMetric(metric.id)
+    synchronized += 1
+  }
   return synchronized
 }
 
