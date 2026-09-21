@@ -43,12 +43,16 @@ const applyCompletionEffects = async ({ client, tenantId, printJobId, metrics })
   let inventory = 'not_measured'
   if (materialGrams != null && materialGrams > 0 && row.filament_id) {
     try {
+      await client.query('savepoint production_inventory_effect')
       await createFilamentMovementWithClient(client, tenantId, row.filament_id, {
         type: 'out', quantity: materialGrams,
         reason: `Consumo medido pela conclusão da impressão #${printJobId}`
       })
+      await client.query('release savepoint production_inventory_effect')
       inventory = 'deducted'
     } catch (error) {
+      await client.query('rollback to savepoint production_inventory_effect')
+      await client.query('release savepoint production_inventory_effect')
       inventory = 'pending'
     }
   }

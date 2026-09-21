@@ -2687,3 +2687,10 @@ medido uma única vez, grava custo material/energia e soma horas medidas na
 impressora. Sem filamento medido, o estoque não é reduzido silenciosamente;
 sem tempo medido, horas e energia permanecem nulas. O retry idempotente sai
 antes desses efeitos.
+
+Um smoke test transacional adicional foi executado contra o PostgreSQL local
+com tenant, Agent, impressora, filamento, produto e Production Job reais. A
+conclusao reduziu o filamento de 100 para 90, registrou uma movimentacao,
+somou 1 hora, gravou custos material/energia e, no retry, manteve uma unica
+tentativa/movimentacao. Esse teste tambem encontrou e corrigiu a inferencia
+ambigua de tipo no `update filaments`.

@@ -72,6 +72,7 @@ test('conclusão medida baixa estoque e horas uma única vez', async () => {
   const state = { attempts: [], movements: 0, printerUpdates: 0, effectUpdates: 0 }
   const client = {
     async query(sql, params) {
+      if (/^(savepoint|release savepoint|rollback to savepoint)/i.test(sql.trim())) return { rowCount: 0, rows: [] }
       if (sql.includes('from print_jobs j') && sql.includes('left join products')) return { rowCount: 1, rows: [{ quantity: 1, printer_id: 9, filament_id: 4, weight: 10, cost_breakdown: { energyRate: 1 }, initial_weight: 1000, cost: 20, power_w: 100 }] }
       if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
       if (sql.includes('from print_job_attempts')) return { rowCount: 0, rows: [] }
