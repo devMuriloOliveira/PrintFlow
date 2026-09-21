@@ -2694,3 +2694,9 @@ conclusao reduziu o filamento de 100 para 90, registrou uma movimentacao,
 somou 1 hora, gravou custos material/energia e, no retry, manteve uma unica
 tentativa/movimentacao. Esse teste tambem encontrou e corrigiu a inferencia
 ambigua de tipo no `update filaments`.
+
+Para evitar perda de conclusão durante uma indisponibilidade momentânea da
+API, o SQLite do Agent foi atualizado para o schema v4 com a outbox
+`production_metrics`. O envio do monitor entra nessa outbox quando a rede
+falha e é reenviado no próximo ciclo, inclusive após reinício do Agent. A
+suíte local confirmou persistência, sincronização e remoção após confirmação.

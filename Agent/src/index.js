@@ -18,7 +18,8 @@ import {
   completeCommand,
   syncAgentEvents,
   rotateAgentCredential,
-  confirmAgentCredentialRotation
+  confirmAgentCredentialRotation,
+  reportPrintJobMetrics
 } from './cloud/apiClient.js'
 
 import { startLocalServer } from './localServer.js'
@@ -29,7 +30,8 @@ import {
 import {
   executeAgentCommand,
   flushPendingCommandCompletions,
-  flushPendingEvents
+  flushPendingEvents,
+  flushPendingProductionMetrics
 } from './commands/commandExecution.js'
 import {
   startCommandEvents
@@ -317,6 +319,12 @@ const checkCommands = async () => {
   }
 
   try {
+    const metricsSynchronized = await flushPendingProductionMetrics({
+      operations: localOperations,
+      report: (printJobId, payload) => reportPrintJobMetrics(apiUrl, credentials, printJobId, payload)
+    })
+    if (metricsSynchronized > 0) console.log(`[ProductionJob] ${metricsSynchronized} métrica(s) local(is) sincronizada(s).`)
+
     const synchronized =
       await flushPendingCommandCompletions({
         operations:
@@ -387,7 +395,15 @@ const checkCommands = async () => {
         onPrintJobStarted: ({ command }) => {
           void monitorPrintJobCompletion({
             command,
-            context: { apiUrl, credentials }
+            context: { apiUrl, credentials },
+            report: async (targetApiUrl, targetCredentials, printJobId, payload) => {
+              try {
+                return await reportPrintJobMetrics(targetApiUrl, targetCredentials, printJobId, payload)
+              } catch (error) {
+                localOperations.queueProductionMetrics({ printJobId, payload })
+                return { queued: true, error: error.message }
+              }
+            }
           }).catch((error) => {
             console.error('[ProductionJob] Falha ao reportar conclusão', { printJobId: command?.payload?.printJobId, message: error.message })
           })

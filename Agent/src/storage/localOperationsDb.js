@@ -42,7 +42,7 @@ const now = () =>
     .toISOString()
 
 const CURRENT_SCHEMA_VERSION =
-  3
+  4
 
 const migrateSchema = (
   database
@@ -110,6 +110,20 @@ const migrateSchema = (
       );
 
       pragma user_version = 3;
+
+      create table if not exists production_metrics (
+        id integer primary key autoincrement,
+        print_job_id text not null,
+        idempotency_key text not null unique,
+        payload_json text not null,
+        created_at text not null,
+        attempts integer not null default 0
+      );
+
+      create index if not exists production_metrics_created_idx
+        on production_metrics (created_at);
+
+      pragma user_version = 4;
       commit;
     `
   )
@@ -280,6 +294,18 @@ export const createLocalOperationsDb = (
         where id = ?
       `
     )
+
+  const insertProductionMetric = database.prepare(`
+    insert into production_metrics (print_job_id, idempotency_key, payload_json, created_at)
+    values (?, ?, ?, ?)
+    on conflict (idempotency_key) do update set payload_json = excluded.payload_json
+  `)
+  const listProductionMetrics = database.prepare(`
+    select id, print_job_id, idempotency_key, payload_json, created_at, attempts
+      from production_metrics order by id asc limit ?
+  `)
+  const incrementProductionMetricAttempts = database.prepare('update production_metrics set attempts = attempts + 1 where id = ?')
+  const deleteProductionMetric = database.prepare('delete from production_metrics where id = ?')
 
   const upsertLocalState =
     database.prepare(
@@ -525,6 +551,21 @@ export const createLocalOperationsDb = (
         Number(eventId)
       )
     },
+    queueProductionMetrics: ({ printJobId, payload } = {}) => {
+      const id = String(printJobId || '').trim()
+      const key = String(payload?.idempotencyKey || '').trim()
+      if (!id || !key) throw new Error('Production metric idempotente invalida.')
+      return Number(insertProductionMetric.run(id, key, JSON.stringify(payload), now()).lastInsertRowid)
+    },
+    listPendingProductionMetrics: (limit = 20) => listProductionMetrics.all(Math.max(1, Math.min(100, Number(limit) || 20))).map((item) => ({
+      id: Number(item.id),
+      printJobId: item.print_job_id,
+      payload: parseResult(item.payload_json),
+      createdAt: item.created_at,
+      attempts: Number(item.attempts || 0)
+    })),
+    markProductionMetricAttempted: (id) => { incrementProductionMetricAttempts.run(Number(id)) },
+    acknowledgeProductionMetric: (id) => { deleteProductionMetric.run(Number(id)) },
     upsertLocalState: (
       entityType,
       entityId,

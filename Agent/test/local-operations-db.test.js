@@ -8,7 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   executeAgentCommand,
   flushPendingCommandCompletions,
-  flushPendingEvents
+  flushPendingEvents,
+  flushPendingProductionMetrics
 } from '../src/commands/commandExecution.js'
 
 import {
@@ -33,7 +34,8 @@ const createStore = async () => {
             directory,
             'agent-operations.sqlite'
           )
-      })
+})
+
   }
 }
 
@@ -121,6 +123,22 @@ test(
   }
 )
 
+test('persiste metricas de conclusao e sincroniza apos falha de rede', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-agent-metrics-'))
+  const operations = createLocalOperationsDb({ databasePath: path.join(directory, 'agent.sqlite') })
+  operations.queueProductionMetrics({ printJobId: 'job-1', payload: { status: 'completed', idempotencyKey: 'metric-1', actualPrintSeconds: 10 } })
+  let reported = 0
+  const synchronized = await flushPendingProductionMetrics({
+    operations,
+    report: async (printJobId, payload) => { reported += 1; assert.equal(printJobId, 'job-1'); assert.equal(payload.idempotencyKey, 'metric-1') }
+  })
+  assert.equal(synchronized, 1)
+  assert.equal(reported, 1)
+  assert.equal(operations.listPendingProductionMetrics().length, 0)
+  operations.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
+
 test(
   'migra banco local existente para o schema versionado sem perder comando',
   async () => {
@@ -179,7 +197,7 @@ test(
 
     assert.equal(
       operations.schemaVersion,
-      3
+      4
     )
     assert.deepEqual(
       operations.begin({
