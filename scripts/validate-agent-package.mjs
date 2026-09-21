@@ -76,6 +76,7 @@ for (const relativePath of [
   'src/cloud/productionJobSlicing.js',
   'src/printing/productionJobMonitor.js',
   'src/slicing/prepareProductionJob.js',
+  'src/updates/releaseVerifier.js',
   'src/storage/localOperationsDb.js'
 ]) {
   try {
