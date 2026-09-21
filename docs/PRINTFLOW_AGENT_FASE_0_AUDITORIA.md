@@ -2662,3 +2662,8 @@ exige `idempotencyKey`, valida limites, vincula o job ao `agent_printer` do
 Agent e persiste uma tentativa única antes de atualizar métricas reais. O
 Agent ainda não o chama automaticamente porque a telemetria de conclusão da
 impressora não foi implementada/validada.
+
+Foi criado um teste determinístico sem hardware que simula Agent → Cloud:
+início, conclusão com métricas, persistência da tentativa e retry com a mesma
+`idempotencyKey`. O teste confirmou uma única atualização do job, mas não
+substitui a validação de telemetria de uma impressora física.

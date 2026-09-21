@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildProductionMeasurements, normalizeAgentMetrics, recipeMaterialGrams } from '../src/services/productionJobMetrics.js'
+import { buildProductionMeasurements, normalizeAgentMetrics, recipeMaterialGrams, recordProductionJobMetrics } from '../src/services/productionJobMetrics.js'
 
 test('production metrics prefer measurement and calculate material/energy cost', () => {
   const result = buildProductionMeasurements({
@@ -36,4 +36,34 @@ test('Agent metrics require idempotency and reject invalid status or bounds', ()
   })
   assert.throws(() => normalizeAgentMetrics({ status: 'running', idempotencyKey: 'cmd-2' }), /Status de Production Job invalido/)
   assert.equal(normalizeAgentMetrics({ idempotencyKey: 'cmd-3', actualPrintSeconds: 999999999 }).actualPrintSeconds, null)
+})
+
+test('simulação Agent -> Cloud persiste conclusão uma única vez', async () => {
+  const state = { attempts: [], updates: 0 }
+  const client = {
+    async query(sql, params) {
+      if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
+      if (sql.includes('from print_job_attempts')) {
+        const row = state.attempts.find((item) => item.idempotencyKey === params[1])
+        return { rowCount: row ? 1 : 0, rows: row ? [row] : [] }
+      }
+      if (sql.includes('insert into print_job_attempts')) {
+        const row = { id: 1, print_job_id: params[1], attempt_no: params[2], idempotencyKey: params[3], status: params[4], result: JSON.parse(params[5]) }
+        state.attempts.push(row)
+        return { rowCount: 1, rows: [row] }
+      }
+      if (sql.includes('update print_jobs')) {
+        state.updates += 1
+        return { rowCount: 1, rows: [] }
+      }
+      throw new Error(`SQL inesperado: ${sql}`)
+    }
+  }
+  const payload = { status: 'completed', idempotencyKey: 'agent-job-88-complete', attemptNo: 1, actualPrintSeconds: 120, actualFilamentGrams: 4.2 }
+  const first = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload })
+  const retry = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload })
+  assert.equal(first.idempotent, false)
+  assert.equal(retry.idempotent, true)
+  assert.equal(state.attempts.length, 1)
+  assert.equal(state.updates, 1)
 })
