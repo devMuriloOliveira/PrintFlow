@@ -2577,7 +2577,7 @@ const cancel = () => {
 </script>
 
 <template>
-  <div>
+  <div class="printer-editor">
     <!-- ================================================= -->
     <!-- CABEÇALHO                                         -->
     <!-- ================================================= -->
@@ -2618,68 +2618,66 @@ const cancel = () => {
     <!-- ESCOLHER MÉTODO                                   -->
     <!-- ================================================= -->
 
-    <div
+    <section
       v-if="!isEditing"
-      class="form-card"
-      style="
-        margin-bottom: 16px;
-      "
+      class="printer-mode-section"
     >
-      <h2 class="form-card__title">
-        <UiIcon
-          name="printer"
-        />
+      <div class="printer-mode-section__head">
+        <span>Forma de cadastro</span>
+        <h2>Como você quer conectar esta impressora?</h2>
+        <p>Escolha a automação pelo Agent ou faça um cadastro simples para controle manual.</p>
+      </div>
 
-        Como deseja adicionar a impressora?
-      </h2>
-
-      <div
-        style="
-          display: grid;
-          grid-template-columns:
-            repeat(2, minmax(0, 1fr));
-          gap: 12px;
-        "
-      >
+      <div class="printer-mode-grid">
         <button
           type="button"
-          class="btn"
+          class="printer-mode-card"
           :class="{
-            'btn--primary':
+            'printer-mode-card--active':
               connectionMode ===
               'agent'
           }"
-          style="
-            min-height: 70px;
-          "
           @click="
             connectionMode =
               'agent'
           "
         >
-          Conectar com PrintFlow Agent · PRO
+          <span class="printer-mode-card__icon">
+            <UiIcon name="settings" :size="24" />
+          </span>
+          <span class="printer-mode-card__copy">
+            <span class="printer-mode-card__eyebrow">Recomendado · PRO</span>
+            <strong>Conectar com o Agent</strong>
+            <small>Detecte impressoras, acompanhe o status e envie trabalhos automaticamente.</small>
+          </span>
+          <span class="printer-mode-card__check">✓</span>
         </button>
 
         <button
           type="button"
-          class="btn"
+          class="printer-mode-card"
           :class="{
-            'btn--primary':
+            'printer-mode-card--active':
               connectionMode ===
               'manual'
           }"
-          style="
-            min-height: 70px;
-          "
           @click="
             connectionMode =
               'manual'
           "
         >
-          Cadastrar manualmente
+          <span class="printer-mode-card__icon printer-mode-card__icon--manual">
+            <UiIcon name="printer" :size="24" />
+          </span>
+          <span class="printer-mode-card__copy">
+            <span class="printer-mode-card__eyebrow">Disponível no FREE</span>
+            <strong>Cadastrar manualmente</strong>
+            <small>Registre especificações, custos e manutenção sem conexão automática.</small>
+          </span>
+          <span class="printer-mode-card__check">✓</span>
         </button>
       </div>
-    </div>
+    </section>
 
     <!-- ================================================= -->
     <!-- PRINTFLOW AGENT                                   -->
@@ -2691,84 +2689,46 @@ const cancel = () => {
         connectionMode ===
           'agent'
       "
-      class="form-card"
-      style="
-        margin-bottom: 16px;
-      "
+      class="printer-agent-panel"
     >
-      <h2 class="form-card__title">
-        <UiIcon
-          name="settings"
-        />
-
-        PrintFlow Agent
-      </h2>
+      <div class="printer-agent-panel__head">
+        <span class="printer-agent-panel__icon"><UiIcon name="settings" :size="24" /></span>
+        <div>
+          <span class="printer-agent-panel__eyebrow">Conexão automática</span>
+          <h2>PrintFlow Agent</h2>
+          <p>Conecte este computador e encontre impressoras na rede local ou por USB.</p>
+        </div>
+        <span
+          class="printer-agent-panel__status"
+          :class="{ 'printer-agent-panel__status--online': agentLocalAvailable }"
+        >
+          {{ agentLocalAvailable ? 'Agent detectado' : 'Agent não detectado' }}
+        </span>
+      </div>
 
       <div
-        class="summary-box"
-        style="
-          margin-bottom: 14px;
-        "
+        class="printer-agent-connect"
       >
-        <div class="detail-list__row">
-          <span>
-            Conexão automática
-          </span>
-
-          <strong>
-            Agent local
-          </strong>
-        </div>
-
-        <p
-          style="
-            margin-top: 8px;
-          "
-        >
-          Use esta opção para encontrar impressoras na rede ou conectadas por cabo USB neste computador.
-        </p>
-
         <p
           v-if="
             !agentLocalAvailable
           "
-          style="
-            margin-top: 10px;
-            padding: 10px 12px;
-            border: 1px solid #bfd6ff;
-            border-radius: 8px;
-            background: #f1f6ff;
-            color: #164ea6;
-            font-size: 13px;
-            line-height: 1.45;
-          "
+          class="printer-agent-notice"
         >
-          Versão de teste: antes de baixar e executar o Agent Windows, baixe o certificado de teste e instale-o no Windows como Autoridade Raiz Confiável e Editor Confiável. Isso ajuda este computador a reconhecer a assinatura local do instalador.
+          <strong>Primeiro acesso neste computador</strong>
+          Baixe o Agent para começar. O certificado é opcional e serve apenas para reduzir avisos nas versões Early Access.
         </p>
 
         <p
           v-else
-          style="
-            margin-top: 10px;
-            padding: 10px 12px;
-            border: 1px solid #bbf7d0;
-            border-radius: 8px;
-            background: #f0fdf4;
-            color: #166534;
-            font-size: 13px;
-            line-height: 1.45;
-          "
+          class="printer-agent-notice printer-agent-notice--success"
         >
-          PrintFlow Agent detectado neste computador. Use Conectar Agent instalado para vincular este computador a sua conta.
+          <strong>Agent pronto para conectar</strong>
+          Encontramos o Agent neste computador. Agora vincule-o à sua conta PrintFlow.
         </p>
 
         <div
-          style="
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-top: 12px;
-          "
+          class="printer-agent-actions"
         >
           <button
             v-if="
@@ -2838,9 +2798,7 @@ const cancel = () => {
           v-if="
             agentOpenMessage
           "
-          style="
-            margin-top: 10px;
-          "
+          class="printer-agent-message"
         >
           {{
             agentOpenMessage
@@ -3749,14 +3707,10 @@ const cancel = () => {
         connectionMode ===
           'manual'
       "
-      class="split-layout"
-      style="
-        grid-template-columns:
-          minmax(0, 1fr)
-          340px;
-      "
+      class="split-layout printer-manual-layout"
     >
       <form
+        class="printer-manual-form"
         @submit.prevent="
           save(false)
         "
@@ -4335,7 +4289,7 @@ const cancel = () => {
       <!-- LATERAL                                           -->
       <!-- ================================================= -->
 
-      <aside>
+      <aside class="printer-summary-aside">
         <div class="detail-card">
           <div class="detail-card__head">
             <span
