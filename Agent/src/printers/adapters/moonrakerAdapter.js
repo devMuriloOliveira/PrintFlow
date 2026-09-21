@@ -126,6 +126,9 @@ const normalizeStatus = (
         : null,
     remainingMinutes:
       null,
+    actualPrintSeconds: Number.isFinite(Number(printStats.print_duration)) ? Number(printStats.print_duration) : null,
+    actualFilamentGrams: Number.isFinite(Number(printStats.filament_used)) ? Number(printStats.filament_used) : null,
+    actualFilamentMillimeters: Number.isFinite(Number(printStats.filament_used_mm)) ? Number(printStats.filament_used_mm) : null,
     nozzleTemperature:
       extruder.temperature ??
       null,

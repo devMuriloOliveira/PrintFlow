@@ -1,4 +1,5 @@
 import axios from 'axios'
+export { reportPrintJobMetrics } from './productionJobMetrics.js'
 
 // ======================================================
 // HEARTBEAT

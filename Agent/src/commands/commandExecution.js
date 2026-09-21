@@ -54,6 +54,10 @@ export const executeAgentCommand = async (
       context
     )
 
+  if (command.type === 'start_print' && result?.success !== false && typeof context.onPrintJobStarted === 'function') {
+    context.onPrintJobStarted({ command, result })
+  }
+
   operations.recordResult(
     command.id,
     result

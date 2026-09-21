@@ -641,6 +641,10 @@ const normalizeStatus = (
           )
         : null,
 
+    actualPrintSeconds: Number.isFinite(Number(print.print_time)) ? Number(print.print_time) : null,
+    actualFilamentGrams: Number.isFinite(Number(print.filament_used_g ?? print.filament_used)) ? Number(print.filament_used_g ?? print.filament_used) : null,
+    actualFilamentMillimeters: Number.isFinite(Number(print.filament_used_mm)) ? Number(print.filament_used_mm) : null,
+
     currentLayer:
       Number.isFinite(
         Number(

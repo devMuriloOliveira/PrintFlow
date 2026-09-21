@@ -1,3 +1,5 @@
+import { createFilamentMovementWithClient } from '../repositories/inventoryRepository.js'
+
 const finiteNonNegative = (value) => {
   const number = Number(value)
   return Number.isFinite(number) && number >= 0 ? number : null
@@ -20,7 +22,66 @@ export const normalizeAgentMetrics = (payload = {}) => {
   }
 }
 
-export const recordProductionJobMetrics = async ({ client, tenantId, agentId, printJobId, payload }) => {
+const applyCompletionEffects = async ({ client, tenantId, printJobId, metrics }) => {
+  const details = await client.query(
+    `select j.quantity, j.printer_id, p.filament_id, p.weight, p.cost_breakdown,
+            f.initial_weight, f.cost, pr.power_w
+       from print_jobs j
+       left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id
+       left join filaments f on f.id = p.filament_id and f.tenant_id = j.tenant_id
+       left join printers pr on pr.id = j.printer_id and pr.tenant_id = j.tenant_id
+      where j.tenant_id = $1 and j.id = $2
+      for update of j`,
+    [tenantId, printJobId]
+  )
+  if (!details.rowCount) return { inventory: 'unavailable' }
+  const row = details.rows[0]
+  const product = { weight: row.weight, cost_breakdown: row.cost_breakdown || {} }
+  const measuredGrams = finiteNonNegative(metrics.actualFilamentGrams)
+  const measuredSeconds = finiteNonNegative(metrics.actualPrintSeconds)
+  const materialGrams = measuredGrams != null ? measuredGrams : null
+  let inventory = 'not_measured'
+  if (materialGrams != null && materialGrams > 0 && row.filament_id) {
+    try {
+      await createFilamentMovementWithClient(client, tenantId, row.filament_id, {
+        type: 'out', quantity: materialGrams,
+        reason: `Consumo medido pela conclusão da impressão #${printJobId}`
+      })
+      inventory = 'deducted'
+    } catch (error) {
+      inventory = 'pending'
+    }
+  }
+  const measurements = buildProductionMeasurements({
+    job: { quantity: row.quantity },
+    product,
+    filament: { initial_weight: row.initial_weight, cost: row.cost },
+    printer: { power_w: row.power_w },
+    energyPricePerKwh: product.cost_breakdown.energyRate ?? product.cost_breakdown.energy_rate ?? 0,
+    metrics
+  })
+  await client.query(
+    `update print_jobs
+        set actual_material_cost = $3::numeric,
+            actual_energy_cost = $4::numeric,
+            actual_maintenance_hours = $5::numeric,
+            updated_at = now()
+      where tenant_id = $1 and id = $2`,
+    [tenantId, printJobId, measurements.materialCost, measurements.energyCost, measurements.maintenanceHours]
+  )
+  if (row.printer_id && measuredSeconds != null) {
+    await client.query(
+      `update printers
+          set accumulated_hours = coalesce(accumulated_hours, 0) + ($3::numeric / 3600),
+              updated_at = now()
+        where tenant_id = $1 and id = $2`,
+      [tenantId, row.printer_id, measuredSeconds]
+    )
+  }
+  return { inventory, materialCost: measurements.materialCost, energyCost: measurements.energyCost, maintenanceHours: measurements.maintenanceHours }
+}
+
+export const recordProductionJobMetrics = async ({ client, tenantId, agentId, printJobId, payload, applyEffects = true }) => {
   const metrics = normalizeAgentMetrics(payload)
   if (!metrics.idempotencyKey) throw new Error('idempotencyKey obrigatoria.')
   const jobResult = await client.query(
@@ -77,7 +138,10 @@ export const recordProductionJobMetrics = async ({ client, tenantId, agentId, pr
       where tenant_id = $1 and id = $2`,
     [tenantId, printJobId, metrics.status, metrics.actualPrintSeconds, metrics.actualFilamentGrams, metrics.actualFilamentMillimeters]
   )
-  return { idempotent: false, attempt: attempt.rows[0] }
+  const effects = metrics.status === 'completed' && applyEffects
+    ? await applyCompletionEffects({ client, tenantId, printJobId, metrics })
+    : null
+  return { idempotent: false, attempt: attempt.rows[0], effects }
 }
 
 const round = (value, digits = 3) => {

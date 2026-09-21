@@ -37,6 +37,7 @@ import {
 import {
   startAgentWebSocket
 } from './cloud/websocket.js'
+import { monitorPrintJobCompletion } from './printing/productionJobMonitor.js'
 
 const logger =
   installFileLogger()
@@ -382,7 +383,15 @@ const checkCommands = async () => {
 
       context: {
         apiUrl,
-        credentials
+        credentials,
+        onPrintJobStarted: ({ command }) => {
+          void monitorPrintJobCompletion({
+            command,
+            context: { apiUrl, credentials }
+          }).catch((error) => {
+            console.error('[ProductionJob] Falha ao reportar conclusão', { printJobId: command?.payload?.printJobId, message: error.message })
+          })
+        }
       },
 
       operations:

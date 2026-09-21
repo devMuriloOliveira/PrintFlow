@@ -2667,3 +2667,23 @@ Foi criado um teste determinístico sem hardware que simula Agent → Cloud:
 início, conclusão com métricas, persistência da tentativa e retry com a mesma
 `idempotencyKey`. O teste confirmou uma única atualização do job, mas não
 substitui a validação de telemetria de uma impressora física.
+
+Em 2026-09-21 o Agent passou a iniciar um monitoramento após `start_print`
+aceito. O monitor consulta o adapter até um estado terminal, normaliza
+`completed`, `cancelled` ou `failed` e envia `POST /api/agents/print-jobs/:id/metrics`
+com uma chave idempotente derivada do comando. Os adapters Bambu, Moonraker,
+OctoPrint e PrusaLink agora expõem campos padronizados quando a fonte deles
+fornece tempo/filamento; valores ausentes permanecem nulos e não são
+inventados. O mock e o teste do monitor exercitam o contrato sem hardware.
+
+A migration foi executada duas vezes em PostgreSQL local isolado
+`printflow_agent_test_20260921` com SSL local desabilitado apenas para esse
+teste. A primeira e a segunda execuções foram concluídas, e a segunda
+confirmou idempotência. A tabela `print_job_attempts` e as quatro colunas de
+métricas/custos foram verificadas no catálogo do banco.
+
+Na transição idempotente `completed`, o Backend agora baixa o filamento
+medido uma única vez, grava custo material/energia e soma horas medidas na
+impressora. Sem filamento medido, o estoque não é reduzido silenciosamente;
+sem tempo medido, horas e energia permanecem nulas. O retry idempotente sai
+antes desses efeitos.

@@ -60,10 +60,39 @@ test('simulação Agent -> Cloud persiste conclusão uma única vez', async () =
     }
   }
   const payload = { status: 'completed', idempotencyKey: 'agent-job-88-complete', attemptNo: 1, actualPrintSeconds: 120, actualFilamentGrams: 4.2 }
-  const first = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload })
-  const retry = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload })
+  const first = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload, applyEffects: false })
+  const retry = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload, applyEffects: false })
   assert.equal(first.idempotent, false)
   assert.equal(retry.idempotent, true)
   assert.equal(state.attempts.length, 1)
   assert.equal(state.updates, 1)
+})
+
+test('conclusão medida baixa estoque e horas uma única vez', async () => {
+  const state = { attempts: [], movements: 0, printerUpdates: 0, effectUpdates: 0 }
+  const client = {
+    async query(sql, params) {
+      if (sql.includes('from print_jobs j') && sql.includes('left join products')) return { rowCount: 1, rows: [{ quantity: 1, printer_id: 9, filament_id: 4, weight: 10, cost_breakdown: { energyRate: 1 }, initial_weight: 1000, cost: 20, power_w: 100 }] }
+      if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
+      if (sql.includes('from print_job_attempts')) return { rowCount: 0, rows: [] }
+      if (sql.includes('insert into print_job_attempts')) {
+        const row = { id: 1, print_job_id: params[1], attempt_no: params[2], status: params[4], result: JSON.parse(params[5]) }
+        state.attempts.push(row)
+        return { rowCount: 1, rows: [row] }
+      }
+      if (sql.includes('select id, remaining_weight')) return { rowCount: 1, rows: [{ id: 4, remaining_weight: 100, min_stock_weight: 10 }] }
+      if (sql.includes('insert into inventory_movements')) { state.movements += 1; return { rowCount: 1, rows: [{ id: 1 }] } }
+      if (sql.includes('update filaments')) return { rowCount: 1, rows: [{ status: 'Em estoque' }] }
+      if (sql.includes('actual_material_cost')) { state.effectUpdates += 1; return { rowCount: 1, rows: [] } }
+      if (sql.includes('update printers')) { state.printerUpdates += 1; return { rowCount: 1, rows: [] } }
+      if (sql.includes('update print_jobs')) return { rowCount: 1, rows: [] }
+      throw new Error(`SQL inesperado: ${sql}`)
+    }
+  }
+  const payload = { status: 'completed', idempotencyKey: 'agent-job-88-measured', actualPrintSeconds: 3600, actualFilamentGrams: 10 }
+  const result = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 88, payload })
+  assert.equal(result.effects.inventory, 'deducted')
+  assert.equal(state.movements, 1)
+  assert.equal(state.printerUpdates, 1)
+  assert.equal(state.effectUpdates, 1)
 })

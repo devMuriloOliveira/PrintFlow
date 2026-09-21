@@ -3097,6 +3097,9 @@ export const migrate =
     await query(`alter table print_jobs add column if not exists actual_filament_millimeters numeric(14,3)`)
     await query(`alter table print_jobs add column if not exists metrics_source text`)
     await query(`alter table print_jobs add column if not exists metrics_recorded_at timestamptz`)
+    await query(`alter table print_jobs add column if not exists actual_material_cost numeric(12,2)`)
+    await query(`alter table print_jobs add column if not exists actual_energy_cost numeric(12,2)`)
+    await query(`alter table print_jobs add column if not exists actual_maintenance_hours numeric(12,3)`)
 
     await query(`
       create table if not exists print_job_attempts (

@@ -94,6 +94,9 @@ const normalizeStatus = (
             payload.progress.printTimeLeft / 60
           )
         : null,
+    actualPrintSeconds: Number.isFinite(Number(payload?.progress?.printTime)) ? Number(payload.progress.printTime) : null,
+    actualFilamentGrams: Number.isFinite(Number(payload?.job?.filamentUsed)) ? Number(payload.job.filamentUsed) : null,
+    actualFilamentMillimeters: Number.isFinite(Number(payload?.job?.filamentUsedMm)) ? Number(payload.job.filamentUsedMm) : null,
     nozzleTemperature:
       temperatures.tool0
         ?.actual ??
