@@ -3,11 +3,11 @@ const props = withDefaults(defineProps<{ initialActive?: string; standalone?: bo
 const { notify } = useUi()
 const auth = useAuth()
 const route = useRoute()
-const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, changeStripeSubscriptionPlan, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
+const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
-const active = ref(props.initialActive)
+const active = ref(String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
 const savingMemberId = ref('')
 const inviting = ref(false)
 const invitationActionId = ref('')
@@ -41,7 +41,7 @@ const billingLoading = ref(false)
 const creatingBillingLink = ref(false)
 const subscriptionActionLoading = ref(false)
 const stripeBilling = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
-const billingForm = reactive<{ billingCycle: 'monthly' | 'yearly' }>({ billingCycle: 'monthly' })
+const stripeReturnRetries = ref(0)
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
 const memberDrafts = reactive<Record<string, { role: string; status: string }>>({})
 const invite = reactive({ email: '', role: 'usuario' as 'admin' | 'financeiro' | 'producao' | 'usuario' })
@@ -111,10 +111,15 @@ const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.
 const isOwner = computed(() => auth.user.value?.role === 'owner')
 const isPrivileged = computed(() => ['owner', 'platform_super_admin'].includes(String(auth.user.value?.role || auth.user.value?.platformRole || '')))
 const selectedBillingPlan = computed(() => stripeBilling.value?.plans[0] || null)
-const billingPlanValue = computed(() => selectedBillingPlan.value?.[billingForm.billingCycle] || 0)
 const billingActionLoading = computed(() => creatingBillingLink.value || subscriptionActionLoading.value)
 const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const subscriptionStatus = (status: string) => ({ trial: 'Em teste', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carencia', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
+const fixedCostPerUnitPreview = computed(() => {
+  const monthlyCost = Number(preferences.monthlyFixedCost || 0)
+  const plannedUnits = Number(preferences.plannedMonthlyUnits || 0)
+  return plannedUnits > 0 ? monthlyCost / plannedUnits : 0
+})
+const subscriptionStatus = (status: string) => ({ trial: 'Trial histórico', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carência', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
+const hasProSubscription = computed(() => stripeBilling.value?.subscription?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'courtesy'].includes(stripeBilling.value?.subscription?.status || ''))
 const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', privacy: 'Privacidade e LGPD', audit: 'Auditoria excepcional' }[category] || category)
 const supportStatusLabel = (status: string) => ({ pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada' }[status] || status)
 const supportStatusClass = (status: string) => ['closed', 'cancelled', 'expired'].includes(status) ? 'badge badge--gray' : status === 'pending' ? 'badge badge--orange' : 'badge'
@@ -322,30 +327,24 @@ const loadStripeBilling = async () => {
   billingLoading.value = true
   try {
     stripeBilling.value = await getStripeBilling()
-    if (selectedBillingPlan.value && !selectedBillingPlan.value[billingForm.billingCycle === 'monthly' ? 'monthlyEnabled' : 'yearlyEnabled']) {
-      billingForm.billingCycle = selectedBillingPlan.value.monthlyEnabled ? 'monthly' : 'yearly'
+    const billingReturn = String(route.query.billing || '')
+    if (billingReturn === 'cancelled' && stripeReturnRetries.value === 0) notify('Checkout cancelado. Nenhuma cobrança foi criada.')
+    if (billingReturn === 'success') {
+      if (hasProSubscription.value) notify('Assinatura confirmada com sucesso.')
+      else if (stripeReturnRetries.value < 3 && import.meta.client) {
+        if (stripeReturnRetries.value === 0) notify('Pagamento recebido. Confirmando sua assinatura...')
+        stripeReturnRetries.value += 1
+        window.setTimeout(() => { void loadStripeBilling() }, 2_000)
+      }
     }
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel consultar a assinatura.')
   } finally { billingLoading.value = false }
 }
-const startStripeCheckout = async (cycle: 'monthly' | 'yearly' = billingForm.billingCycle) => {
-  billingForm.billingCycle = cycle
-  const amount = selectedBillingPlan.value?.[cycle] || 0
+const startStripeCheckout = async () => {
+  const cycle = 'monthly'
+  const amount = selectedBillingPlan.value?.monthly || 0
   if (!selectedBillingPlan.value || amount <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
-  const current = stripeBilling.value?.subscription
-  if (current && ['trial', 'active', 'past_due', 'grace'].includes(current.status)) {
-    if (current.billingCycle === cycle) return notify('Sua assinatura ja esta ativa neste ciclo de cobranca.')
-    if (!window.confirm(`Alterar para o plano ${cycle === 'yearly' ? 'anual' : 'mensal'}? A Stripe calculara a cobranca proporcional da alteracao.`)) return
-    subscriptionActionLoading.value = true
-    try {
-      stripeBilling.value = await changeStripeSubscriptionPlan(cycle)
-      notify('Plano alterado. A Stripe aplicou a cobranca proporcional, quando aplicavel.')
-    } catch (error: any) {
-      notify(error?.data?.error || error?.message || 'Nao foi possivel alterar o plano.')
-    } finally { subscriptionActionLoading.value = false }
-    return
-  }
   creatingBillingLink.value = true
   try {
     const result = await createStripeCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
@@ -466,54 +465,99 @@ watch(() => supportDraft.category, (category) => {
 
       <section class="settings-panel settings-panel--content">
         <NuxtLink v-if="standalone" class="settings-page-back" to="/configuracoes"><UiIcon name="chevron" :size="14" />Central de configurações</NuxtLink>
-        <div v-if="active === 'Empresa'">
-          <div style="display:flex;justify-content:space-between;gap:12px">
-            <div><h2>Informacoes da Empresa</h2><p>Atualize os dados principais da sua empresa.</p></div>
-            <button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">{{ savingSettings ? 'Salvando...' : 'Salvar alteracoes' }}</button>
-          </div>
-          <div class="form-grid">
-            <div class="field col-7"><label>Nome da Empresa *</label><input v-model="company.name"></div><div class="field col-5"><label>{{ companyDocumentLabel }} <small v-if="company.documentLocked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Contas existentes podem permanecer sem documento. Ao salvar um CPF ou CNPJ, ele ficará bloqueado.</small><small v-if="company.documentLocked && company.documentType === 'cpf'">Para substituir o CPF por CNPJ, <button class="link-button" type="button" @click="openDocumentChangeRequest">abra uma solicitação</button>.</small></div><div class="field col-6"><label>Telefone</label><input v-model="company.phone"></div><div class="field col-6"><label>E-mail *</label><input v-model="company.email" type="email"></div><div class="field col-8"><label>Endereco</label><input v-model="company.address"></div><div class="field col-4"><label>Bairro</label><input v-model="company.district"></div><div class="field col-4"><label>Cidade</label><input v-model="company.city"></div><div class="field col-2"><label>Estado</label><input v-model="company.state"></div><div class="field col-3"><label>CEP</label><input v-model="company.zip"></div><div class="field col-3"><label>Pais</label><input v-model="company.country"></div><div class="field col-12"><label>Fuso Horario</label><input v-model="company.timezone"></div>
+        <div v-if="active === 'Empresa'" class="company-settings">
+          <header class="company-settings__hero">
+            <span class="company-settings__hero-icon"><UiIcon name="building" :size="23" /></span>
+            <div class="company-settings__hero-copy">
+              <span class="company-settings__eyebrow">Perfil da empresa</span>
+              <h2>Informações da empresa</h2>
+              <p>Mantenha os dados cadastrais e de contato atualizados.</p>
+            </div>
+            <button class="btn btn--primary company-settings__save" :disabled="savingSettings" @click="saveSettings"><UiIcon name="save" :size="16" />{{ savingSettings ? 'Salvando...' : 'Salvar alterações' }}</button>
+          </header>
+
+          <div class="company-settings__sections">
+            <section class="company-settings__section">
+              <div class="company-settings__section-head"><span><UiIcon name="building" :size="17" /></span><div><h3>Identificação</h3><p>Nome e documento usados no cadastro da conta.</p></div></div>
+              <div class="form-grid">
+                <div class="field col-7"><label for="company-name">Nome da empresa *</label><input id="company-name" v-model="company.name" autocomplete="organization" placeholder="Nome da sua empresa"></div>
+                <div class="field col-5"><label for="company-document">{{ companyDocumentLabel }} <small v-if="company.documentLocked" class="company-settings__locked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input id="company-document" v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Depois de salvo, o documento fica protegido contra alterações diretas.</small><small v-if="company.documentLocked && company.documentType === 'cpf'">Para substituir o CPF por CNPJ, <button class="link-button" type="button" @click="openDocumentChangeRequest">abra uma solicitação</button>.</small></div>
+              </div>
+            </section>
+
+            <section class="company-settings__section">
+              <div class="company-settings__section-head"><span><UiIcon name="users" :size="17" /></span><div><h3>Contato</h3><p>Canais principais para comunicação com a empresa.</p></div></div>
+              <div class="form-grid">
+                <div class="field col-6"><label for="company-phone">Telefone</label><input id="company-phone" v-model="company.phone" type="tel" autocomplete="tel" placeholder="(00) 00000-0000"></div>
+                <div class="field col-6"><label for="company-email">E-mail *</label><input id="company-email" v-model="company.email" type="email" autocomplete="email" placeholder="contato@empresa.com.br"></div>
+              </div>
+            </section>
+
+            <section class="company-settings__section">
+              <div class="company-settings__section-head"><span><UiIcon name="store" :size="17" /></span><div><h3>Endereço e localização</h3><p>Localização operacional e fuso horário da empresa.</p></div></div>
+              <div class="form-grid">
+                <div class="field col-8"><label for="company-address">Endereço</label><input id="company-address" v-model="company.address" autocomplete="street-address" placeholder="Rua, número e complemento"></div>
+                <div class="field col-4"><label for="company-district">Bairro</label><input id="company-district" v-model="company.district" placeholder="Bairro"></div>
+                <div class="field col-4"><label for="company-city">Cidade</label><input id="company-city" v-model="company.city" autocomplete="address-level2" placeholder="Cidade"></div>
+                <div class="field col-2"><label for="company-state">Estado</label><input id="company-state" v-model="company.state" autocomplete="address-level1" maxlength="2" placeholder="UF"></div>
+                <div class="field col-3"><label for="company-zip">CEP</label><input id="company-zip" v-model="company.zip" inputmode="numeric" autocomplete="postal-code" placeholder="00000-000"></div>
+                <div class="field col-3"><label for="company-country">País</label><input id="company-country" v-model="company.country" autocomplete="country-name" placeholder="Brasil"></div>
+                <div class="field col-12"><label for="company-timezone">Fuso horário</label><input id="company-timezone" v-model="company.timezone" placeholder="America/Sao_Paulo"></div>
+              </div>
+            </section>
           </div>
         </div>
 
-        <div v-else-if="active === 'Financeiro'">
-          <h2>Parametros Financeiros</h2><p>Esses valores sao usados como padrao em novos calculos de produto.</p>
-          <div class="form-grid"><label class="field col-4"><span>Moeda</span><select v-model="company.currency"><option value="Real (R$)">Real (R$)</option><option value="Dolar (US$)">Dolar (US$)</option><option value="Euro (EUR)">Euro (EUR)</option></select></label><label class="field col-4"><span>Custo do kWh</span><input v-model.number="company.kwh" type="number" min="0" step=".01"></label><label class="field col-4"><span>Margem padrao (%)</span><input v-model.number="preferences.defaultMargin" type="number" min="0" step=".1"></label><label class="field col-6"><span>Custos fixos mensais</span><input v-model.number="preferences.monthlyFixedCost" type="number" min="0" step=".01"></label><label class="field col-6"><span>Unidades planejadas por mes</span><input v-model.number="preferences.plannedMonthlyUnits" type="number" min="0" step="1"></label></div>
-          <div class="info-note" style="margin:16px 0"><UiIcon name="info" />O custo fixo e rateado por unidade somente em novos calculos. Produtos ja salvos preservam a composicao financeira original.</div>
-          <button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">{{ savingSettings ? 'Salvando...' : 'Salvar parametros' }}</button>
+        <div v-else-if="active === 'Financeiro'" class="settings-feature-page">
+          <header class="settings-feature-hero settings-feature-hero--finance">
+            <span class="settings-feature-hero__icon"><UiIcon name="wallet" :size="23" /></span>
+            <div class="settings-feature-hero__copy"><span>Custos e precificação</span><h2>Parâmetros financeiros</h2><p>Defina os valores que serão preenchidos automaticamente em novos cálculos e produtos.</p></div>
+            <button class="btn btn--primary settings-feature-hero__action" :disabled="savingSettings" @click="saveSettings"><UiIcon name="save" :size="16" />{{ savingSettings ? 'Salvando...' : 'Salvar parâmetros' }}</button>
+          </header>
+
+          <section class="settings-feature-section">
+            <div class="settings-feature-section__head"><span><UiIcon name="calculator" :size="17" /></span><div><h3>Padrões de cálculo</h3><p>Valores iniciais usados pela Calculadora 3D e no cadastro de produtos.</p></div></div>
+            <div class="form-grid">
+              <label class="field col-6" for="financial-kwh"><span>Custo da energia (R$/kWh)</span><input id="financial-kwh" v-model.number="company.kwh" type="number" min="0" step=".01" placeholder="0,00"><small>Usado para calcular o consumo elétrico durante a impressão.</small></label>
+              <label class="field col-6" for="financial-margin"><span>Margem desejada padrão (%)</span><input id="financial-margin" v-model.number="preferences.defaultMargin" type="number" min="0" step=".1" placeholder="40"><small>Preenche a margem inicial; ela ainda pode ser ajustada em cada cálculo.</small></label>
+            </div>
+          </section>
+
+          <section class="settings-feature-section">
+            <div class="settings-feature-section__head"><span><UiIcon name="money" :size="17" /></span><div><h3>Rateio dos custos fixos</h3><p>Distribua despesas mensais, como aluguel e internet, entre as unidades planejadas.</p></div></div>
+            <div class="form-grid">
+              <label class="field col-6" for="financial-fixed-cost"><span>Custos fixos mensais (R$)</span><input id="financial-fixed-cost" v-model.number="preferences.monthlyFixedCost" type="number" min="0" step=".01" placeholder="0,00"></label>
+              <label class="field col-6" for="financial-units"><span>Produção planejada por mês</span><input id="financial-units" v-model.number="preferences.plannedMonthlyUnits" type="number" min="0" step="1" placeholder="0"><small>Quantidade estimada de peças produzidas no mês.</small></label>
+            </div>
+            <div class="financial-preview" :class="{ 'financial-preview--empty': Number(preferences.plannedMonthlyUnits || 0) <= 0 }"><span class="financial-preview__icon"><UiIcon name="trend" :size="19" /></span><div><small>Custo fixo estimado por unidade</small><strong>{{ currency(fixedCostPerUnitPreview) }}</strong><p>{{ Number(preferences.plannedMonthlyUnits || 0) > 0 ? 'Esse valor entra automaticamente em cada novo cálculo.' : 'Informe a produção mensal para visualizar o rateio.' }}</p></div></div>
+          </section>
+
+          <div class="info-note"><UiIcon name="info" />As alterações valem somente para novos cálculos. Produtos já salvos mantêm sua composição financeira original.</div>
         </div>
 
         <div v-else-if="active === 'Assinatura'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>Escolha a cobranca mensal ou anual e conclua o pagamento em uma pagina segura do Stripe.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadStripeBilling">Atualizar</button></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>PRO mensal por preço de lançamento vigente. Cobrança recorrente pelo Stripe, sem fidelidade.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadStripeBilling">Atualizar</button></div>
           <div v-if="!isOwner" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Somente o Owner pode consultar ou alterar a assinatura da empresa.</div>
           <div v-else-if="billingLoading" class="empty-state"><div><h3>Consultando assinatura</h3></div></div>
           <template v-else-if="stripeBilling">
             <div v-if="stripeBilling.subscription" class="billing-subscription-summary">
               <div class="billing-subscription-summary__status"><UiIcon name="check" /><div><span>Assinatura atual</span><strong>{{ stripeBilling.subscription.planName || stripeBilling.subscription.planCode }} · {{ subscriptionStatus(stripeBilling.subscription.status) }}</strong></div></div>
-              <div v-if="stripeBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ stripeBilling.subscription.status === 'trial' ? 'Teste termina em' : 'Próxima cobrança em' }}</span><strong>{{ new Date(stripeBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="stripeBilling.subscription.status !== 'trial'">{{ currency(stripeBilling.plans[0]?.[stripeBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ stripeBilling.subscription.billingCycle === 'yearly' ? 'anual' : 'mensal' }}</small></div>
+              <div v-if="stripeBilling.subscription.status === 'grace' && stripeBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(stripeBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>Você mantém o PRO por 3 dias. Depois, a empresa volta ao FREE sem excluir dados.</small></div><div v-else-if="stripeBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ stripeBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança em' }}</span><strong>{{ new Date(stripeBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="stripeBilling.subscription.status !== 'trial'">{{ currency(stripeBilling.plans[0]?.[stripeBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ stripeBilling.subscription.billingCycle === 'yearly' ? 'anual existente' : 'mensal' }}</small></div>
               <div class="billing-subscription-summary__actions"><span v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="badge badge--orange">Cancelamento programado</span><button v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="btn" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(false)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Continuar assinatura' }}</button><button v-else-if="['trial', 'active', 'past_due', 'grace'].includes(stripeBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(true)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div>
             </div>
             <div v-if="stripeBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(stripeBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="stripeBilling.checkout.url" rel="noopener noreferrer">Abrir link</a>.</div>
             <div v-if="!stripeBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Stripe ainda precisa do segredo de webhook no ambiente antes de gerar um checkout.</div>
-            <form v-else class="integration-section" style="margin-top:16px" @submit.prevent="startStripeCheckout">
+            <form v-else-if="!hasProSubscription" class="integration-section" style="margin-top:16px" @submit.prevent="startStripeCheckout">
               <div class="integration-section__head"><div><h3>Assinatura PrintFlow</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no PrintFlow.</p></div><span class="badge badge--orange">Producao</span></div>
               <div v-if="selectedBillingPlan" class="billing-plans">
                 <article class="billing-plan-card">
-                  <div class="billing-plan-card__title"><h3>Mensal</h3><span class="billing-plan-card__caption">Flexível, cancele quando quiser.</span></div>
+                  <div class="billing-plan-card__title"><h3>PRO mensal</h3><span class="billing-plan-card__caption">Preço de lançamento vigente. Cancele quando quiser.</span></div>
                   <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.monthly || 0).replace('R$', '').trim() }}<span>/mês</span></div>
-                  <ul class="billing-plan-card__features"><li>Calculadora 3D completa</li><li>Pedidos, clientes e produtos</li><li>Impressoras conectadas e fila de impressão</li><li>Filamentos, despesas e metas</li></ul>
-                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout('monthly')">{{ billingActionLoading ? 'Atualizando...' : (stripeBilling?.subscription?.billingCycle === 'monthly' ? 'Plano mensal atual' : 'Começar teste grátis') }}</button>
-                </article>
-                <article class="billing-plan-card billing-plan-card--featured">
-                  <span class="billing-plan-card__ribbon">Melhor custo-benefício</span>
-                  <div class="billing-plan-card__title"><h3>Anual</h3><span class="billing-plan-card__caption">Tudo do plano mensal com economia.</span></div>
-                  <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.yearly || 0).replace('R$', '').trim() }}<span>/ano</span></div>
-                  <div class="billing-plan-card__saving">Equivale a {{ currency((selectedBillingPlan.yearly || 0) / 12) }}/mês; 7 dias grátis.</div>
-                  <ul class="billing-plan-card__features"><li>Tudo do plano mensal</li><li>Marketplaces integrados e taxas por canal</li><li>Equipe com convites e permissões</li><li>Relatórios avançados e exportações</li></ul>
-                  <button class="billing-plan-card__button billing-plan-card__button--featured" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.yearly || 0) <= 0" @click="startStripeCheckout('yearly')">{{ billingActionLoading ? 'Atualizando...' : (stripeBilling?.subscription?.billingCycle === 'yearly' ? 'Plano anual atual' : 'Começar 7 dias grátis') }} <span aria-hidden="true">→</span></button>
+                  <ul class="billing-plan-card__features"><li>Automação com PrintFlow Agent e fila de impressão</li><li>Marketplaces e relatórios avançados</li><li>Equipe com até 8 pessoas</li><li>Operação sem os limites do plano FREE</li></ul>
+                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout">{{ billingActionLoading ? 'Atualizando...' : 'Assinar PRO' }}</button>
                 </article>
               </div>
-              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cartão para iniciar o teste — só cobramos se você continuar.</div>
+              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cobrança mensal recorrente pelo Stripe. Você pode programar o cancelamento para o fim do período pago.</div>
             </form>
           </template>
         </div>
@@ -627,7 +671,29 @@ watch(() => supportDraft.category, (category) => {
           </div>
         </div>
 
-        <div v-else-if="active === 'Notificacoes'" class="settings-security-card"><div><h2>Notificacoes</h2><p>Defina quais alertas operacionais devem aparecer para a sua equipe no sistema.</p></div><div class="info-note" style="margin-top:16px"><UiIcon name="info" />O envio automático de resumo diário por e-mail ainda não está disponível; por isso ele não é oferecido como preferência.</div><div class="form-grid" style="margin-top:16px"><label class="field col-6"><span>Alertas de producao</span><input v-model="preferences.productionAlerts" type="checkbox"></label><label class="field col-6"><span>Alertas de marketplace</span><input v-model="preferences.marketplaceAlerts" type="checkbox"></label></div><button class="btn btn--primary" :disabled="savingSettings" @click="saveSettings">Salvar preferencias</button></div>
+        <div v-else-if="active === 'Notificacoes'" class="settings-feature-page">
+          <header class="settings-feature-hero settings-feature-hero--notifications">
+            <span class="settings-feature-hero__icon"><UiIcon name="bell" :size="23" /></span>
+            <div class="settings-feature-hero__copy"><span>Central de alertas</span><h2>Notificações</h2><p>Escolha quais eventos operacionais devem aparecer para a equipe dentro do PrintFlow.</p></div>
+            <button class="btn btn--primary settings-feature-hero__action" :disabled="savingSettings" @click="saveSettings"><UiIcon name="save" :size="16" />{{ savingSettings ? 'Salvando...' : 'Salvar preferências' }}</button>
+          </header>
+
+          <div class="notification-preference-list">
+            <article class="notification-preference" :class="{ 'notification-preference--active': preferences.productionAlerts }">
+              <span class="notification-preference__icon"><UiIcon name="printer" :size="20" /></span>
+              <div class="notification-preference__copy"><strong>Produção e impressoras</strong><p>Falhas, conclusão de impressões, fila de produção e estado do PrintFlow Agent.</p></div>
+              <div class="notification-preference__control"><small>{{ preferences.productionAlerts ? 'Ativado' : 'Desativado' }}</small><button type="button" class="switch" :class="{ active: preferences.productionAlerts }" role="switch" :aria-checked="preferences.productionAlerts" aria-label="Alternar alertas de produção" @click="preferences.productionAlerts = !preferences.productionAlerts"></button></div>
+            </article>
+
+            <article class="notification-preference" :class="{ 'notification-preference--active': preferences.marketplaceAlerts }">
+              <span class="notification-preference__icon"><UiIcon name="store" :size="20" /></span>
+              <div class="notification-preference__copy"><strong>Marketplaces</strong><p>Novos pedidos, sincronizações e ocorrências nas integrações de vendas.</p></div>
+              <div class="notification-preference__control"><small>{{ preferences.marketplaceAlerts ? 'Ativado' : 'Desativado' }}</small><button type="button" class="switch" :class="{ active: preferences.marketplaceAlerts }" role="switch" :aria-checked="preferences.marketplaceAlerts" aria-label="Alternar alertas de marketplace" @click="preferences.marketplaceAlerts = !preferences.marketplaceAlerts"></button></div>
+            </article>
+          </div>
+
+          <div class="info-note"><UiIcon name="info" />Estas preferências controlam os avisos exibidos dentro do sistema. Resumos automáticos por e-mail ainda não estão disponíveis.</div>
+        </div>
         <div v-else-if="active === 'Integracoes'">
           <div class="settings-section-heading"><div><h2>Integracoes</h2><p>Visao operacional das conexoes, sem expor tokens, chaves ou senhas.</p></div><button class="btn" :disabled="integrationsLoading" @click="loadIntegrations">Atualizar</button></div>
           <div v-if="integrationsLoading" class="empty-state"><div><h3>Consultando integracoes</h3></div></div>

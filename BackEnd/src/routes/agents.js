@@ -37,7 +37,9 @@ import {
 } from '../services/operationalEvents.js'
 
 import {
-  assertTenantResourceLimit
+  assertTenantResourceLimit,
+  resolveTenantEntitlement,
+  supportsSubscriptionFeature
 } from '../services/subscriptionEntitlements.js'
 
 import {
@@ -658,6 +660,11 @@ export const handleAgentPair =
             'Codigo de conexao expirado'
         }
       )
+    }
+
+    const entitlement = await resolveTenantEntitlement(pairing.tenant_id)
+    if (!supportsSubscriptionFeature(entitlement, 'agent')) {
+      return sendJson(res, 403, { error: 'O PrintFlow Agent esta disponivel apenas no plano PRO.' })
     }
 
     // ==================================================
@@ -1875,6 +1882,13 @@ export const handleAgentCommandsPending =
             'Agent invalido'
         }
       )
+    }
+
+    // O pareamento e o heartbeat permanecem para permitir retomada futura,
+    // mas nenhum comando novo e entregue sem entitlement PRO.
+    const entitlement = await resolveTenantEntitlement(agent.tenant_id)
+    if (!supportsSubscriptionFeature(entitlement, 'agent')) {
+      return sendJson(res, 200, { command: null })
     }
 
     // ==================================================

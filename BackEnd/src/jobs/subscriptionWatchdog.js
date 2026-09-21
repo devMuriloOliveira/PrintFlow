@@ -3,8 +3,6 @@ import { hasDatabase, withPlatformAdmin, withTenant } from '../db/pool.js'
 import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
 const deadlineFor = (subscription = {}) => {
-  if (subscription.status === 'trial') return subscription.trial_ends_at
-  if (subscription.status === 'active') return subscription.current_period_end
   if (subscription.status === 'grace') return subscription.grace_ends_at
   return null
 }
@@ -12,8 +10,6 @@ const deadlineFor = (subscription = {}) => {
 export const subscriptionTransition = (subscription, now = new Date()) => {
   const deadline = deadlineFor(subscription)
   if (!deadline || new Date(deadline) > now) return null
-  if (subscription.status === 'trial') return 'ended'
-  if (subscription.status === 'active') return 'past_due'
   if (subscription.status === 'grace') return 'paused'
   return null
 }
@@ -24,9 +20,9 @@ export const runSubscriptionWatchdog = async ({ now = new Date(), warningMs = en
   const warningUntil = new Date(now.getTime() + Math.max(60 * 60 * 1000, Number(warningMs) || 3 * 24 * 60 * 60 * 1000))
   const work = await withPlatformAdmin(async (client) => {
     const result = await client.query(`
-      select id, tenant_id, status, trial_ends_at, current_period_end, grace_ends_at
+      select id, tenant_id, status, grace_ends_at
         from tenant_subscriptions
-       where status in ('trial', 'active', 'grace')
+       where status = 'grace'
        for update
     `)
     const transitions = []
@@ -36,14 +32,15 @@ export const runSubscriptionWatchdog = async ({ now = new Date(), warningMs = en
       const deadline = deadlineFor(subscription)
       const nextStatus = subscriptionTransition(subscription, now)
       if (nextStatus) {
+        const freePlan = await client.query("select id from platform_plans where code = 'free' and active = true limit 1")
         await client.query(
-          'update tenant_subscriptions set status = $2, updated_at = now() where id = $1',
-          [subscription.id, nextStatus]
+          'update tenant_subscriptions set plan_id = coalesce($3, plan_id), status = $2, updated_at = now() where id = $1',
+          [subscription.id, nextStatus, freePlan.rows[0]?.id || null]
         )
         await client.query(`
           insert into tenant_subscription_events (tenant_id, subscription_id, action, previous_state, new_state, reason, actor_user_id, source)
           values ($1, $2, 'subscription.deadline_transition', $3::jsonb, $4::jsonb, $5, '', 'system')
-        `, [subscription.tenant_id, subscription.id, JSON.stringify({ status: subscription.status, deadline }), JSON.stringify({ status: nextStatus }), 'Transicao automatica pelo prazo da assinatura.'])
+        `, [subscription.tenant_id, subscription.id, JSON.stringify({ status: subscription.status, deadline }), JSON.stringify({ status: nextStatus, planCode: 'free' }), 'Carencia de pagamento encerrada; empresa retornou ao FREE sem excluir dados.'])
         transitions.push({ tenantId: subscription.tenant_id, subscriptionId: subscription.id, fromStatus: subscription.status, toStatus: nextStatus, deadline })
       } else if (deadline && new Date(deadline) <= warningUntil) {
         warnings.push({ tenantId: subscription.tenant_id, subscriptionId: subscription.id, status: subscription.status, deadline })

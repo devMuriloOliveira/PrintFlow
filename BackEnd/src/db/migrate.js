@@ -459,6 +459,7 @@ export const migrate =
     await query(`alter table platform_plans add column if not exists stripe_monthly_price_id text not null default ''`)
     await query(`alter table platform_plans add column if not exists stripe_yearly_price_id text not null default ''`)
     await query(`alter table platform_plans add column if not exists trial_days integer not null default 7`)
+    await query(`alter table platform_plans add column if not exists yearly_enabled boolean not null default false`)
     await query(`alter table platform_plans drop constraint if exists platform_plans_trial_days_check`)
     await query(`alter table platform_plans add constraint platform_plans_trial_days_check check (trial_days between 0 and 30)`)
     await query(`
@@ -589,12 +590,12 @@ export const migrate =
     await query(`
       insert into platform_plans (id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features, trial_days)
       values
-        ('plan_free', 'free', 'Grátis', 'Calculadora e dashboard em modo limitado.', 0, 0, '{"calculatorSimulations":1}', '{"coreOperations":false,"marketplaces":false,"advancedReports":false,"printers":false,"team":false}', 0),
-        ('plan_starter', 'starter', 'PRO', 'Acesso completo ao PrintFlow.', 19.90, 199.90, '{"users":8}', '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"printers":true,"team":true,"prioritySupport":true}', 7)
+        ('plan_free', 'free', 'FREE', 'Organize sua operação com gestão manual dentro dos limites do plano.', 0, 0, '{"clients":20,"products":10,"ordersMonthly":15,"printers":1,"filaments":5,"goals":1}', '{"coreOperations":true,"marketplaces":false,"advancedReports":false,"manualPrinters":true,"agent":false,"team":false}', 0),
+        ('plan_starter', 'starter', 'PRO', 'Conecte e automatize sua produção.', 19.90, 199.90, '{"users":8}', '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"manualPrinters":true,"agent":true,"team":true,"prioritySupport":true}', 0)
       on conflict (code) do nothing
     `)
-    await query(`update platform_plans set name = 'Grátis', description = 'Calculadora e dashboard em modo limitado.', monthly_reference_price = 0, yearly_reference_price = 0, limits = '{"calculatorSimulations":1}'::jsonb, features = '{"coreOperations":false,"marketplaces":false,"advancedReports":false,"printers":false,"team":false}'::jsonb, trial_days = 0, active = true, updated_at = now() where code = 'free'`)
-    await query(`update platform_plans set name = 'PRO', description = 'Acesso completo ao PrintFlow.', stripe_product_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_product_id end, stripe_monthly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_monthly_price_id end, stripe_yearly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_yearly_price_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"printers":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 7, active = true, updated_at = now() where code = 'starter'`)
+    await query(`update platform_plans set name = 'FREE', description = 'Organize sua operação com gestão manual dentro dos limites do plano.', monthly_reference_price = 0, yearly_reference_price = 0, limits = '{"clients":20,"products":10,"ordersMonthly":15,"printers":1,"filaments":5,"goals":1}'::jsonb, features = '{"coreOperations":true,"marketplaces":false,"advancedReports":false,"manualPrinters":true,"agent":false,"team":false}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'free'`)
+    await query(`update platform_plans set name = 'PRO', description = 'Conecte e automatize sua produção.', stripe_product_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_product_id end, stripe_monthly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_monthly_price_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"manualPrinters":true,"agent":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'starter'`)
     await query(`update platform_plans set active = false, updated_at = now() where code in ('growth', 'scale')`)
 
     await query(`

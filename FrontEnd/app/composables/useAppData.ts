@@ -91,7 +91,7 @@ export type StripeBillingSummary = {
   configured: boolean;
   environment: 'sandbox' | 'production';
   plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
-  subscription: null | { status: string; billingCycle: string; planCode: string; planName: string; currentPeriodEnd: string | null; cancelAtPeriodEnd?: boolean };
+  subscription: null | { status: string; billingCycle: string; planCode: string; planName: string; currentPeriodEnd: string | null; graceEndsAt?: string | null; cancelAtPeriodEnd?: boolean };
   checkout: null | { status: string; url: string; expiresAt: string | null; createdAt: string };
 }
 

@@ -196,7 +196,7 @@ const pairingExpiresAt =
 
 const connectionMode =
   ref<'agent' | 'manual'>(
-    'agent'
+    'manual'
   )
 
 const onlineAgents =
@@ -2610,7 +2610,7 @@ const cancel = () => {
       :subtitle="
         isEditing
           ? 'Atualize operação, potência e manutenção da impressora.'
-          : 'Cadastre manualmente ou conecte uma impressora utilizando o PrintFlow Agent.'
+          : 'Cadastre manualmente no FREE. A conexão e automação pelo PrintFlow Agent estão disponíveis no PRO.'
       "
     />
 
@@ -2657,7 +2657,7 @@ const cancel = () => {
               'agent'
           "
         >
-          Conectar com PrintFlow Agent
+          Conectar com PrintFlow Agent · PRO
         </button>
 
         <button

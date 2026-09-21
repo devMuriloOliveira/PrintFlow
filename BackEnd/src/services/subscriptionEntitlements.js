@@ -1,13 +1,17 @@
 import { env } from '../config/env.js'
 import { hasDatabase, withTenant } from '../db/pool.js'
 
-const readOnlyStatuses = new Set(['past_due', 'paused', 'cancelled', 'ended'])
-const managedFeatures = new Set(['coreOperations', 'marketplaces', 'advancedReports', 'printers', 'team'])
+const proAccessStatuses = new Set(['trial', 'active', 'grace', 'courtesy'])
+const managedFeatures = new Set(['coreOperations', 'marketplaces', 'advancedReports', 'manualPrinters', 'agent', 'team'])
 const resourceLimits = {
   users: { table: 'users', where: "status = 'active'" },
   printers: { table: 'printers', where: 'true' },
   agents: { table: 'agents', where: "status <> 'revoked'" },
   products: { table: 'products', where: 'true' },
+  clients: { table: 'clients', where: 'true' },
+  filaments: { table: 'filaments', where: 'true' },
+  goals: { table: 'goals', where: 'true' },
+  ordersMonthly: { table: 'orders', where: "order_date >= date_trunc('month', current_date) and order_date < date_trunc('month', current_date) + interval '1 month'" },
   calculatorSimulations: { table: 'calculator_simulations', where: 'true' }
 }
 
@@ -33,16 +37,22 @@ export const entitlementFromSubscription = (subscription = null, billingEnforcem
       configured: false,
       status: billingEnforcementExempt ? 'not_configured' : 'payment_required',
       mode: billingEnforcementExempt ? 'full' : 'read_only',
+      planCode: '',
       limits: {},
       features: {}
     }
   }
 
   const status = String(subscription.status)
+  const planCode = String(subscription.plan_code || subscription.planCode || '')
+  const isFree = planCode === 'free'
   return {
     configured: true,
     status,
-    mode: readOnlyStatuses.has(status) ? 'read_only' : 'full',
+    planCode,
+    // O plano define o produto contratado. O status financeiro so libera PRO
+    // enquanto estiver saudavel, em carencia ou em trial historico.
+    mode: isFree || proAccessStatuses.has(status) ? 'full' : 'read_only',
     limits: subscription.limits && typeof subscription.limits === 'object' ? subscription.limits : {},
     features: subscription.features && typeof subscription.features === 'object' ? subscription.features : {}
   }
@@ -54,6 +64,18 @@ export const canUseSubscriptionRequest = ({ method, pathname, entitlement }) => 
   if (pathname.startsWith('/api/support/requests')) return true
   if (/^\/api\/operational-notifications\/[^/]+\/read$/.test(pathname)) return true
   return false
+}
+
+export const subscriptionFeatureForRequest = ({ method, pathname }) => {
+  if (pathname === '/api/reports/financial-export') return 'advancedReports'
+  if (['/api/agents', '/api/agent-commands', '/api/print-jobs'].some((path) => pathname.startsWith(path))) return 'agent'
+  if (method === 'GET') return null
+  return [
+    { feature: 'coreOperations', paths: ['/api/products', '/api/orders', '/api/clients', '/api/filaments', '/api/expenses', '/api/goals'] },
+    { feature: 'marketplaces', paths: ['/api/marketplaces', '/api/marketplace-integrations'] },
+    { feature: 'manualPrinters', paths: ['/api/printers'] },
+    { feature: 'team', paths: ['/api/members'] }
+  ].find((item) => item.paths.some((path) => pathname.startsWith(path)))?.feature || null
 }
 
 const subscriptionError = () => {
@@ -68,7 +90,7 @@ export const resolveTenantEntitlement = async (tenantId, client = null, user = n
 
   const read = async (queryClient) => {
     const result = await queryClient.query(`
-      select subscription.status, plan.limits, plan.features, tenant.billing_enforcement_exempt
+      select subscription.status, plan.code as plan_code, plan.limits, plan.features, tenant.billing_enforcement_exempt
         from tenants tenant
         left join tenant_subscriptions subscription on subscription.tenant_id = tenant.id
         left join platform_plans plan on plan.id = subscription.plan_id
@@ -84,26 +106,15 @@ export const resolveTenantEntitlement = async (tenantId, client = null, user = n
 
 export const assertTenantRequestEntitlement = async ({ tenantId, method, pathname, user = null }) => {
   if (isPlatformDeveloper(user)) return developerEntitlement()
-  const isAdvancedReport = pathname === '/api/reports/financial-export'
-  if (method === 'GET' && !isAdvancedReport) return null
+  const requiredFeature = subscriptionFeatureForRequest({ method, pathname })
+  if (method === 'GET' && !requiredFeature) return null
 
   const entitlement = await resolveTenantEntitlement(tenantId, null, user)
   if (!canUseSubscriptionRequest({ method, pathname, entitlement })) throw subscriptionError()
 
-  if (isAdvancedReport && !supportsSubscriptionFeature(entitlement, 'advancedReports')) {
-    throw new Error('O plano atual nao inclui relatorios avancados.')
-  }
-
-  if (method !== 'GET') {
-    const blockedFeature = [
-      { feature: 'coreOperations', paths: ['/api/products', '/api/orders', '/api/clients', '/api/filaments', '/api/expenses', '/api/goals'] },
-      { feature: 'marketplaces', paths: ['/api/marketplaces', '/api/marketplace-integrations'] },
-      { feature: 'printers', paths: ['/api/printers', '/api/print-jobs', '/api/agents', '/api/agent-commands'] },
-      { feature: 'team', paths: ['/api/members'] }
-    ].find((item) => item.paths.some((path) => pathname.startsWith(path)))
-    if (blockedFeature && !supportsSubscriptionFeature(entitlement, blockedFeature.feature)) {
-      throw new Error('Este recurso esta disponivel apenas no plano PRO.')
-    }
+  if (requiredFeature && !supportsSubscriptionFeature(entitlement, requiredFeature)) {
+    if (requiredFeature === 'advancedReports') throw new Error('O plano atual nao inclui relatorios avancados.')
+    throw new Error('Este recurso esta disponivel apenas no plano PRO.')
   }
 
   return entitlement

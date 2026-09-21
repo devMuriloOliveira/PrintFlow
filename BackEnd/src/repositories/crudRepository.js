@@ -78,6 +78,8 @@ const findOrCreateClientId = async (client, tenantId, name) => {
   )
   if (existing.rows[0]) return { id: existing.rows[0].id, created: false }
 
+  await assertTenantResourceLimit(client, tenantId, 'clients')
+
   const created = await client.query(
     `insert into clients (tenant_id, name, name_hash, email, phone)
      values ($1, $2, $3, $4, $5)
@@ -316,7 +318,7 @@ const configFor = (resource) => {
 
 const writePatch = async (client, tenantId, resource, item, id = null) => {
   const config = configFor(resource)
-  if (!id && resource === 'printers') await assertTenantResourceLimit(client, tenantId, resource)
+  if (!id && ['printers', 'clients', 'filaments', 'goals'].includes(resource)) await assertTenantResourceLimit(client, tenantId, resource)
   if (config.create && !id) {
     const created = await config.create(tenantId, item)
     return { id: created.id, changedFields: safeChangedFields({}, item) }
@@ -325,6 +327,8 @@ const writePatch = async (client, tenantId, resource, item, id = null) => {
   const values = config.patch(item)
   const relatedCreated = []
   if (resource === 'orders') {
+    const existingOrder = await client.query('select id from orders where tenant_id = $1 and external_id = $2 limit 1', [tenantId, values.external_id])
+    if (!existingOrder.rowCount) await assertTenantResourceLimit(client, tenantId, 'ordersMonthly')
     let clientReference = null
     if (item.clientId) {
       const selectedClient = await client.query('select id from clients where tenant_id = $1 and id = $2 limit 1', [tenantId, idOrNull(item.clientId)])

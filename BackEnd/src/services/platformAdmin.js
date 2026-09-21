@@ -139,16 +139,17 @@ export const listPlatformPlans = async () => {
 export const updatePlatformPlanBillingConfiguration = async (planId, payload = {}) => {
   const monthlyReferencePrice = Number(payload.monthlyReferencePrice)
   const yearlyReferencePrice = Number(payload.yearlyReferencePrice)
-  const trialDays = Number(payload.trialDays)
+  // O campo continua aceito para clientes administrativos antigos, mas novas
+  // configurações não podem reativar um trial comercial.
+  const trialDays = 0
   if (!Number.isFinite(monthlyReferencePrice) || monthlyReferencePrice <= 0 || !Number.isFinite(yearlyReferencePrice) || yearlyReferencePrice <= 0) throw new Error('Informe valores mensal e anual validos.')
-  if (!Number.isInteger(trialDays) || trialDays < 0 || trialDays > 30) throw new Error('O periodo de teste deve ter entre 0 e 30 dias.')
   const current = await query(`select id, name, monthly_reference_price, yearly_reference_price, trial_days, stripe_product_id, stripe_monthly_price_id, stripe_yearly_price_id from platform_plans where id = $1 limit 1`, [planId])
   if (!current.rowCount) throw new Error('Plano nao encontrado.')
   const plan = current.rows[0]
   const pricesChanged = Number(plan.monthly_reference_price) !== monthlyReferencePrice || Number(plan.yearly_reference_price) !== yearlyReferencePrice
-  const hasProviderPlans = Boolean(plan.stripe_monthly_price_id && plan.stripe_yearly_price_id)
+  const hasProviderPlans = Boolean(plan.stripe_monthly_price_id)
   const providerPlans = pricesChanged || !hasProviderPlans
-    ? await synchronizeStripePrices({ name: plan.name, monthly: monthlyReferencePrice, yearly: yearlyReferencePrice })
+    ? await synchronizeStripePrices({ name: plan.name, monthly: monthlyReferencePrice, yearly: yearlyReferencePrice, existingYearlyPriceId: plan.stripe_yearly_price_id })
     : { productId: plan.stripe_product_id, monthlyPriceId: plan.stripe_monthly_price_id, yearlyPriceId: plan.stripe_yearly_price_id }
   const result = await query(`
     update platform_plans
