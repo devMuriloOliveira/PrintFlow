@@ -73,7 +73,9 @@ for (const relativePath of [
   'src/index.js',
   'src/config/agentVersion.js',
   'src/cloud/productionJobMetrics.js',
+  'src/cloud/productionJobSlicing.js',
   'src/printing/productionJobMonitor.js',
+  'src/slicing/prepareProductionJob.js',
   'src/storage/localOperationsDb.js'
 ]) {
   try {
