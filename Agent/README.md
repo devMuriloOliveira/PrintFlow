@@ -165,6 +165,10 @@ o perfil real da impressora associado ao Production Job pelo Backend.
 e 3MF (container e modelo principal), sem enviar o modelo para a nuvem. Essa
 análise é prévia ao slicing e não substitui a validação do Backend.
 
+`sliceModelWithOrcaSlicer()` combina essa análise, a resolução do perfil exato
+e a geração local do G-code. O resultado ainda fica local e não inicia uma
+impressão.
+
 Para uma impressora cadastrada, `resolveOfficialOrcaProfileForPrinter()` exige
 um modelo exato com preset oficial (P1S, P1P, X1 Carbon, A1 ou A1 mini). Nao
 ha fallback entre modelos: sem perfil correspondente o slicing e recusado.
