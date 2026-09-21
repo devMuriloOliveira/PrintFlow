@@ -8,6 +8,47 @@ import { buildOfficialBambuP1SProfile, resolveOfficialOrcaProfileForPrinter } fr
 import { analyzeModelFile } from '../src/slicing/modelAnalyzer.js'
 import { sliceModelWithOrcaSlicer } from '../src/slicing/sliceModel.js'
 
+const storedZip = (entries) => {
+  const locals = []
+  const centrals = []
+  let offset = 0
+  for (const [name, content] of entries) {
+    const nameBytes = Buffer.from(name)
+    const data = Buffer.from(content)
+    const local = Buffer.alloc(30 + nameBytes.length + data.length)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0, 6)
+    local.writeUInt16LE(0, 8)
+    local.writeUInt32LE(data.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(nameBytes.length, 26)
+    nameBytes.copy(local, 30)
+    data.copy(local, 30 + nameBytes.length)
+    locals.push(local)
+
+    const central = Buffer.alloc(46 + nameBytes.length)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt32LE(data.length, 20)
+    central.writeUInt32LE(data.length, 24)
+    central.writeUInt16LE(nameBytes.length, 28)
+    central.writeUInt32LE(offset, 42)
+    nameBytes.copy(central, 46)
+    centrals.push(central)
+    offset += local.length
+  }
+  const centralDirectory = Buffer.concat(centrals)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(entries.length, 8)
+  end.writeUInt16LE(entries.length, 10)
+  end.writeUInt32LE(centralDirectory.length, 12)
+  end.writeUInt32LE(offset, 16)
+  return Buffer.concat([...locals, centralDirectory, end])
+}
+
 test('perfil oficial de referencia deriva presets da instalacao Orca', () => {
   const profile = buildOfficialBambuP1SProfile({ executablePath: 'C:/Program Files/OrcaSlicer/orca-slicer.exe' })
   assert.equal(profile.id, 'bambu-p1s-pla-basic')
@@ -42,6 +83,24 @@ test('analisador local extrai limites e triangulos de STL', async () => {
   assert.equal(result.encoding, 'ascii')
   assert.equal(result.triangleCount, 12)
   assert.deepEqual(result.bounds.size, [20, 20, 20])
+})
+
+test('analisador local extrai geometria principal de 3MF', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'printflow-3mf-'))
+  try {
+    const inputPath = path.join(root, 'cube.3mf')
+    const model = '<model><resources><object><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="2" y="3" z="4"/><vertex x="1" y="2" z="3"/></vertices><triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources></model>'
+    await writeFile(inputPath, storedZip([
+      ['[Content_Types].xml', '<Types/>'],
+      ['3D/3dmodel.model', model]
+    ]))
+    const result = await analyzeModelFile(inputPath)
+    assert.equal(result.format, '3mf')
+    assert.equal(result.triangleCount, 1)
+    assert.deepEqual(result.bounds.size, [2, 3, 4])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('pipeline local analisa, seleciona perfil e fatia sem enviar a impressora', async () => {
