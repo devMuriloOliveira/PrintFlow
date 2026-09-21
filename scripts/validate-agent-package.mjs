@@ -71,7 +71,10 @@ for (const relativePath of [
   'scripts/start-windows-agent-tray.ps1',
   'scripts/install-windows-agent.ps1',
   'src/index.js',
-  'src/config/agentVersion.js'
+  'src/config/agentVersion.js',
+  'src/cloud/productionJobMetrics.js',
+  'src/printing/productionJobMonitor.js',
+  'src/storage/localOperationsDb.js'
 ]) {
   try {
     await fs.access(
