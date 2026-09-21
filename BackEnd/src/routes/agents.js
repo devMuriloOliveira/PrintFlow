@@ -4565,8 +4565,7 @@ export const handleAgentPrinterControlCreate =
     }
 
     if (
-      action ===
-        'start' &&
+      ['start', 'slice'].includes(action) &&
       !printJobId
     ) {
       return sendJson(
@@ -4653,8 +4652,7 @@ export const handleAgentPrinterControlCreate =
       null
 
     if (
-      action ===
-      'start'
+      ['start', 'slice'].includes(action)
     ) {
       const jobResult =
         await tenantQuery(
@@ -4747,6 +4745,13 @@ export const handleAgentPrinterControlCreate =
               'Item da fila nao encontrado'
           }
         )
+      }
+
+      if (action === 'slice' && storedJob.slicing_artifact_storage_key) {
+        return sendJson(res, 409, { error: 'Este Production Job ja possui um G-code preparado.' })
+      }
+      if (action === 'slice' && String(storedJob.print_file_format || '').toLowerCase() !== '3mf') {
+        return sendJson(res, 400, { error: 'Preparar G-code requer um arquivo fonte 3MF.' })
       }
 
       const validation =
@@ -5008,6 +5013,8 @@ export const handleAgentPrinterControlCreate =
         : action ===
             'start'
           ? 'start_print'
+          : action === 'slice'
+            ? 'slice_print_job'
           : `printer_${action}`
 
     // ==================================================

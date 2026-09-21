@@ -19,7 +19,8 @@ import {
   syncAgentEvents,
   rotateAgentCredential,
   confirmAgentCredentialRotation,
-  reportPrintJobMetrics
+  reportPrintJobMetrics,
+  uploadSlicedPrintArtifact
 } from './cloud/apiClient.js'
 
 import { startLocalServer } from './localServer.js'
@@ -392,6 +393,8 @@ const checkCommands = async () => {
       context: {
         apiUrl,
         credentials,
+        orcaSlicerPath: process.env.PRINTFLOW_ORCA_SLICER_PATH || '',
+        uploadSlicedPrintArtifact,
         onPrintJobStarted: ({ command }) => {
           void monitorPrintJobCompletion({
             command,

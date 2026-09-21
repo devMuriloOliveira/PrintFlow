@@ -869,6 +869,24 @@ export const handleRequest =
         )
       }
 
+      const agentPrinterSliceMatch =
+        url.pathname.match(
+          /^\/api\/agents\/([^/]+)\/printer-slice$/
+        )
+
+      if (
+        req.method ===
+          'POST' &&
+        agentPrinterSliceMatch
+      ) {
+        return await handleAgentPrinterControlCreate(
+          req,
+          res,
+          agentPrinterSliceMatch[1],
+          'slice'
+        )
+      }
+
       const agentPrinterPauseMatch =
         url.pathname.match(
           /^\/api\/agents\/([^/]+)\/printer-pause$/

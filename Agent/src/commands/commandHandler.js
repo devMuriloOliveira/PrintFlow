@@ -22,6 +22,8 @@ import {
   savePrinterCredentials
 } from '../storage/printerCredentials.js'
 
+import { prepareProductionJobSlicing } from '../slicing/prepareProductionJob.js'
+
 const allowedPrintFormatsByProtocol = {
   bambu:
     new Set(['3mf', 'gcode', 'bgcode']),
@@ -402,6 +404,32 @@ export const handleCommand = async (
           error.message ||
           'Falha ao desconectar impressora.'
       }
+    }
+  }
+
+  // ====================================================
+  // PREPARAR G-CODE LOCALMENTE
+  // ====================================================
+
+  if (command.type === 'slice_print_job') {
+    const printer = command.payload?.printer
+    const job = command.payload?.job || {}
+    if (!printer) return { success: false, error: 'Dados da impressora nao foram enviados.' }
+
+    try {
+      const fileManager = createFileManager({ apiUrl: context.apiUrl, credentials: context.credentials })
+      const result = await prepareProductionJobSlicing({
+        job,
+        printer,
+        apiUrl: context.apiUrl,
+        credentials: context.credentials,
+        fileManager,
+        executablePath: context.orcaSlicerPath || process.env.PRINTFLOW_ORCA_SLICER_PATH,
+        upload: context.uploadSlicedPrintArtifact
+      })
+      return result
+    } catch (error) {
+      return { success: false, error: error.message || 'Falha ao preparar o G-code.' }
     }
   }
 
