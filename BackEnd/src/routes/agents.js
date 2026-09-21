@@ -1428,7 +1428,10 @@ export const handleAgentPrintJobSlicingArtifact = async (req, res, printJobId) =
         estimatedPrintSeconds: req.headers['x-printflow-estimated-print-seconds'],
         estimatedFilamentGrams: req.headers['x-printflow-estimated-filament-grams'],
         estimatedFilamentMillimeters: req.headers['x-printflow-estimated-filament-millimeters'],
-        artifact: stored
+        artifact: {
+          ...stored,
+          name: stored.fileName
+        }
       }
     }))
     if (!result) return sendJson(res, 404, { error: 'Production Job nao encontrado para este Agent.' })
