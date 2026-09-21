@@ -2638,6 +2638,12 @@ Atualização posterior: o smoke test real local do OrcaSlicer foi concluído co
 o perfil P1S e produziu G-code temporário. O registro estrito agora cobre P1S,
 P1P, X1 Carbon, A1 e A1 mini; modelos sem perfil oficial são recusados. A
 suite do Agent passou com 51 testes. O pipeline local agora combina análise,
-seleção de perfil e slicing antes de retornar o artefato. Isso ainda não valida hardware real nem
-envio de Production Job, que dependem de uma impressora e credenciais do
-cliente.
+seleção de perfil e slicing antes de retornar o artefato. Isso ainda não valida
+hardware real nem envio de Production Job, que dependem de uma impressora e
+credenciais do cliente.
+
+Status formal do recorte P2: itens 1–3 (slicer único, perfis versionados e
+análise local) estão concluídos em DEVELOPMENT. Os itens 4–8 permanecem
+pendentes porque exigem o contrato persistente de Production Job, migrações e
+validação PostgreSQL, além de hardware/credenciais para consumo real. Nenhum
+estoque, custo real ou manutenção foi inferido a partir de métricas locais.
