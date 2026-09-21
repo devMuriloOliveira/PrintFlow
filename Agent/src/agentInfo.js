@@ -1,11 +1,16 @@
 import os from 'node:os'
 
 import {
+  AGENT_VERSION
+} from './config/agentVersion.js'
+
+import {
   getPrinterProfiles
 } from './printers/printerProfiles.js'
 
-export const AGENT_VERSION =
-  '0.1.0'
+export {
+  AGENT_VERSION
+}
 
 export const getAgentRuntimeInfo = () => ({
   version:

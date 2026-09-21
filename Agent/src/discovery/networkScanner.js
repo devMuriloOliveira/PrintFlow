@@ -468,36 +468,102 @@ const identifyPrinter = async (
 }
 
 // ======================================================
-// PEGAR PREFIXO DA REDE
-//
-// 192.168.2.179
-//
-// vira:
-//
-// 192.168.2
-//
-// ATENCAO:
-// Esta versao ainda assume rede /24.
-// Depois vamos calcular pela netmask.
+// CALCULAR FAIXA IPv4 DA INTERFACE
 // ======================================================
 
-const getNetworkPrefix = (
-  address
+const ipv4ToInt = (
+  value
 ) => {
   const parts =
-    address.split('.')
+    String(value || '').split('.')
 
   if (
-    parts.length !== 4
+    parts.length !== 4 ||
+    parts.some(
+      part =>
+        !/^\d+$/.test(part) ||
+        Number(part) > 255
+    )
   ) {
     return null
   }
 
-  return (
-    `${parts[0]}.` +
-    `${parts[1]}.` +
-    `${parts[2]}`
+  return parts.reduce(
+    (valuePart, part) =>
+      ((valuePart << 8) |
+        Number(part)) >>> 0,
+    0
   )
+}
+
+const intToIpv4 = (
+  value
+) => [
+  value >>> 24,
+  (value >>> 16) & 255,
+  (value >>> 8) & 255,
+  value & 255
+].join('.')
+
+export const getNetworkHostRange = (
+  address,
+  netmask,
+  maxHosts = Number(
+    process.env.PRINTFLOW_DISCOVERY_MAX_HOSTS ||
+    1024
+  )
+) => {
+  const addressInt =
+    ipv4ToInt(address)
+  const maskInt =
+    ipv4ToInt(netmask)
+
+  if (
+    addressInt === null ||
+    maskInt === null
+  ) {
+    return null
+  }
+
+  const networkInt =
+    (addressInt & maskInt) >>> 0
+  const broadcastInt =
+    (networkInt | (~maskInt >>> 0)) >>> 0
+  const firstHost =
+    networkInt + 1
+  const lastHost =
+    broadcastInt - 1
+
+  if (
+    firstHost > lastHost
+  ) {
+    return null
+  }
+
+  const boundedMax =
+    Math.max(
+      1,
+      Math.min(
+        4096,
+        Number(maxHosts) || 1024
+      )
+    )
+  const end =
+    Math.min(
+      lastHost,
+      firstHost + boundedMax - 1
+    )
+
+  return {
+    start:
+      intToIpv4(firstHost),
+    end:
+      intToIpv4(end),
+    truncated:
+      end < lastHost,
+    totalHosts:
+      broadcastInt - networkInt - 1
+  }
 }
 
 // ======================================================
@@ -507,20 +573,32 @@ const getNetworkPrefix = (
 const scanNetworkRange = async (
   network
 ) => {
-  const prefix =
-    getNetworkPrefix(
-      network.address
+  const range =
+    getNetworkHostRange(
+      network.address,
+      network.netmask
     )
 
-  if (!prefix) {
+  if (!range) {
     return []
   }
+
+  const startInt =
+    ipv4ToInt(range.start)
+  const endInt =
+    ipv4ToInt(range.end)
 
   console.log('')
 
   console.log(
-    `[Discovery] Escaneando rede ${prefix}.1 - ${prefix}.254`
+    `[Discovery] Escaneando rede ${range.start} - ${range.end}`
   )
+
+  if (range.truncated) {
+    console.log(
+      `[Discovery] Faixa limitada a ${range.totalHosts > 1024 ? 1024 : range.totalHosts} hosts por segurança.`
+    )
+  }
 
   const printers = []
 
@@ -532,8 +610,8 @@ const scanNetworkRange = async (
   const batchSize = 20
 
   for (
-    let start = 1;
-    start <= 254;
+    let start = startInt;
+    start <= endInt;
     start += batchSize
   ) {
     const end =
@@ -541,7 +619,7 @@ const scanNetworkRange = async (
         start +
           batchSize -
           1,
-        254
+        endInt
       )
 
     const tasks = []
@@ -552,7 +630,7 @@ const scanNetworkRange = async (
       host++
     ) {
       const ip =
-        `${prefix}.${host}`
+        intToIpv4(host)
 
       // Nao precisamos testar o proprio PC.
 

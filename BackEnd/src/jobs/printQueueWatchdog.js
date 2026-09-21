@@ -12,7 +12,7 @@ const appendNoteSql = `
   concat_ws(
     E'\\n',
     nullif(notes, ''),
-    $3
+    $3::text
   )
 `
 

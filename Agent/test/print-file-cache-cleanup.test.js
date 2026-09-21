@@ -5,7 +5,9 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
-  cleanupPrintFileCache
+  cleanupPrintFileCache,
+  pinPrintFileCache,
+  unpinPrintFileCache
 } from '../src/files/printFileCache.js'
 
 const writeCacheFile =
@@ -248,4 +250,40 @@ test('limpeza do cache do Agent corta tamanho removendo arquivos mais antigos', 
         true
     }
   )
+})
+
+test('limpeza do cache preserva arquivo pinado', async () => {
+  const root =
+    await fs.mkdtemp(
+      path.join(
+        os.tmpdir(),
+        'printflow-agent-cache-pin-'
+      )
+    )
+  const filePath =
+    path.join(root, 'active.3mf')
+
+  await writeCacheFile(
+    filePath,
+    'active',
+    new Date(Date.now() - 10 * 60 * 1000)
+  )
+  await pinPrintFileCache(filePath)
+
+  const result =
+    await cleanupPrintFileCache({
+      directory: root,
+      maxAgeMs: 1,
+      maxTotalBytes: 1,
+      tempMaxAgeMs: 1
+    })
+
+  assert.equal(result.removed, 0)
+  assert.equal(
+    await fs.readFile(filePath, 'utf8'),
+    'active'
+  )
+
+  await unpinPrintFileCache(filePath)
+  await fs.rm(root, { recursive: true, force: true })
 })

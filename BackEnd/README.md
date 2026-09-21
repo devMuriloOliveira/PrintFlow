@@ -47,11 +47,88 @@ Variaveis principais:
 - `RATE_LIMIT_WINDOW_MS`: janela do rate limit.
 - `RATE_LIMIT_MAX_REQUESTS`: limite geral por janela.
 - `RATE_LIMIT_AUTH_MAX_REQUESTS`: limite para rotas de autenticacao.
+- `RATE_LIMIT_SHARED`: use `true` em ambientes com mais de uma instancia; usa a tabela `api_rate_limits` no PostgreSQL para compartilhar a janela entre processos.
 - `MAX_CONCURRENT_REQUESTS_PER_IP`: limite de concorrencia por IP.
+- `PRINT_QUEUE_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de comandos de impressao pendentes.
+- `AGENT_OFFLINE_AFTER_MS`: tempo sem heartbeat para considerar o Agent indisponivel.
+- `AGENT_HEALTH_WATCHDOG_INTERVAL_MS`: frequencia de verificacao da saude dos Agents.
+- `SUBSCRIPTION_WATCHDOG_INTERVAL_MS`: frequencia de verificacao de prazos das assinaturas.
+- `SUBSCRIPTION_WARNING_MS`: antecedencia dos avisos de vencimento da assinatura.
+- `STRIPE_SECRET_KEY`: chave privada live/teste, configurada somente no ambiente de deploy.
+- `STRIPE_WEBHOOK_SECRET`: segredo `whsec_...` do endpoint Stripe, configurado depois de criar o webhook.
+- `EXPENSE_RECURRING_INTERVAL_MS`: intervalo da geração automática de despesas recorrentes vencidas.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
+- `MERCADO_LIVRE_CLIENT_ID`: App ID privado da aplicacao Mercado Livre.
+- `MERCADO_LIVRE_CLIENT_SECRET`: Secret Key privada da aplicacao Mercado Livre.
+- `MERCADO_LIVRE_REDIRECT_URI`: callback fixa registrada no Mercado Livre.
+- `APP_PUBLIC_URL`: URL publica do FrontEnd usada ao finalizar OAuth e retornar do checkout.
+- `CORS_ALLOWED_ORIGINS`: origens HTTPS autorizadas (FrontEnd e AdminFrontEnd), separadas por virgula; nao use `*` com cookies.
+- `RESEND_API_KEY`: chave privada do Resend para verificacao de e-mail e recuperacao de senha.
+- `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `PrintFlow <acesso@seudominio.com>`.
+- `AUTH_REQUIRE_EMAIL_VERIFICATION`: use `true` para exigir confirmacao de e-mail em novos cadastros.
+- `AUTH_REQUIRE_MFA_FOR_PRIVILEGED`: use `true` para exigir MFA em Owner e Superadmin; cada perfil configura o aplicativo autenticador em Configuracoes > Seguranca.
+
+Para Mercado Livre, cadastre a mesma callback informada em
+`MERCADO_LIVRE_REDIRECT_URI` no painel de desenvolvedores. Em producao ela deve
+apontar para `/api/marketplace-integrations/oauth-callback` da API. O fluxo usa
+PKCE e tentativas OAuth de uso unico; nunca copie tokens, authorization codes ou
+secrets para o repositorio, logs ou canais de conversa.
 
 Nao publique valores reais dessas variaveis.
+
+### Ativacao da autenticacao reforcada
+
+No Render, cadastre primeiro o dominio do remetente no Resend (SPF/DKIM), crie
+uma API key somente com permissao de envio e informe `APP_PUBLIC_URL` com a URL
+real do FrontEnd. Depois defina `RESEND_API_KEY`, `EMAIL_FROM` e
+`AUTH_REQUIRE_EMAIL_VERIFICATION=true`. O cadastro passa a retornar uma tela de
+aguardo e o link de verificacao expira em 15 minutos.
+
+Para habilitar o segundo fator, defina `AUTH_REQUIRE_MFA_FOR_PRIVILEGED=true`.
+Cada Owner/Superadmin deve abrir Configuracoes > Seguranca, cadastrar a chave no
+Google Authenticator, 1Password ou aplicativo equivalente e confirmar o codigo.
+Sem essa etapa o login privilegiado ficara impedido, portanto habilite a flag
+somente depois de preparar os administradores.
+
+## Publicacao
+
+O repositorio possui verificacao continua em `.github/workflows/ci.yml`: a cada
+push para `main` ou pull request, executa os testes do BackEnd e Agent e os
+builds dos dois FrontEnds. A publicacao continua separada da verificacao e deve
+ser feita somente depois que esses checks estiverem verdes.
+
+No Render, configure o servico da API com diretorio raiz `BackEnd`, comando de
+build `npm ci` e comando de inicio `npm start`. O inicio da API executa as
+migracoes de forma idempotente antes de abrir a porta; confirme o backup do
+banco e a saude do deploy antes de enviar trafego real.
+
+Checklist de producao:
+
+- Definir `DATABASE_URL`, `AUTH_SECRET`, `DATA_ENCRYPTION_KEY` e
+  `WEBHOOK_SHARED_SECRET` como variaveis privadas no Render.
+- Definir as quatro variaveis Mercado Livre e registrar exatamente a callback
+  HTTPS da API em `MERCADO_LIVRE_REDIRECT_URI`.
+- Publicar o FrontEnd com `NUXT_PUBLIC_API_BASE` apontando para a URL HTTPS da
+  API e informar essa URL em `APP_PUBLIC_URL`.
+- Confirmar que `/healthz`, login, a calculadora e um pedido de teste respondem
+  no ambiente publicado antes de conectar uma impressora real.
+- Configurar o monitor externo para consultar somente `GET /healthz`. O resumo
+  autenticado `GET /api/operational-health` fica restrito a usuarios com acesso
+  de producao e deve ser acompanhado pelo painel de Notificacoes.
+- Para o Stripe, cadastrar no Dashboard o endpoint `POST
+  https://SUA-API.onrender.com/webhooks/stripe` e habilitar `checkout.session.completed`,
+  `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`,
+  `invoice.payment_failed`, `invoice.marked_uncollectible` e `invoice.voided`.
+  Copiar o segredo `whsec_...` exibido pelo Stripe para `STRIPE_WEBHOOK_SECRET` no
+  Render. O retorno do Checkout nao confirma a assinatura: somente o webhook com
+  assinatura valida altera o acesso.
+- Antes da primeira cobranca, no Superadmin > Empresas, informe os valores e
+  o periodo de teste. A plataforma cria o produto e os precos mensal/anual pela
+  API do Stripe e guarda os identificadores com alteracao auditada; a chave
+  continua apenas nas variaveis privadas do Render.
+- Manter backup recuperavel antes da primeira migracao e observar os logs do
+  Render durante a inicializacao.
 
 ## Rodar Localmente
 
@@ -105,6 +182,12 @@ Autenticacao:
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+
+Assinatura Stripe (restrita ao Owner):
+
+- `GET /api/billing/stripe`
+- `POST /api/billing/stripe/checkout`
+- `POST /webhooks/stripe`
 
 Dados do aplicativo:
 

@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/check-production-config.mjs
+        env:
+          PRINTFLOW_API_URL: https://api.example.invalid
+          NUXT_PUBLIC_API_BASE: https://app.example.invalid
+          PRINTFLOW_WS_URL: wss://api.example.invalid
+          PRINTFLOW_DEV_MOCK_BAMBU: 'false'
+          OBJECT_STORAGE_PROVIDER: r2
+          R2_ACCOUNT_ID: account-example
+          R2_BUCKET: printflow3d-storage
+          R2_ENDPOINT: https://account-example.r2.cloudflarestorage.com
+          R2_ACCESS_KEY_ID: access-example
+          R2_SECRET_ACCESS_KEY: secret-example
+
+  verify:
+    needs: security
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            path: BackEnd
+            command: npm test
+          - name: agent
+            path: Agent
+            command: node ../scripts/check-agent-release-contract.mjs && node ../scripts/validate-agent-package.mjs && npm test
+          - name: frontend
+            path: FrontEnd
+            command: npm run build
+          - name: admin-frontend
+            path: AdminFrontEnd
+            command: npm run build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ${{ matrix.path }}/package-lock.json
+      - run: npm ci
+        working-directory: ${{ matrix.path }}
+      - run: ${{ matrix.command }}
+        working-directory: ${{ matrix.path }}
+
+  agent-production-package:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Agent/package-lock.json
+      - run: npm ci
+        working-directory: Agent
+      - name: Build Production package without publishing
+        shell: powershell
+        env:
+          PRINTFLOW_API_URL: https://api.example.invalid
+        run: >-
+          npm.cmd --prefix Agent run build:windows --
+          -ApiUrl $env:PRINTFLOW_API_URL -SkipInstall
+      - name: Validate package contract and generated artifact
+        shell: powershell
+        run: |
+          node scripts/validate-agent-package.mjs
+          $zip = 'Agent/dist/PrintFlow-Agent-Windows.zip'
+          if (-not (Test-Path $zip)) {
+            throw 'O pacote Production do Agent nao foi gerado.'
+          }
+          $source = Get-Content 'Agent/dist/PrintFlow-Agent-Setup-source/install-windows-agent.vbs' -Raw
+          if ($source -match 'localhost|127\.0\.0\.1|http://') {
+            throw 'O launcher do artefato Production contem endpoint local ou HTTP.'
+          }
+          if ($source -notmatch 'https://api\.example\.invalid') {
+            throw 'O launcher do artefato Production nao recebeu o endpoint esperado.'
+          }
+          $extract = Join-Path $env:RUNNER_TEMP 'printflow-agent-package-check'
+          if (Test-Path $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract
+          if (-not (Test-Path (Join-Path $extract 'src/index.js'))) {
+            throw 'O ZIP do Agent nao contem o runtime esperado.'
+          }

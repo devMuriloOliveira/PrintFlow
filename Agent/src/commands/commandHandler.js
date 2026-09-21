@@ -14,8 +14,8 @@ import {
 } from '../printers/printerManager.js'
 
 import {
-  ensurePrintFileCached
-} from '../files/printFileCache.js'
+  createFileManager
+} from '../files/fileManager.js'
 
 import {
   loadPrinterCredentials,
@@ -474,6 +474,17 @@ export const handleCommand = async (
         printer
       )
 
+      let pinnedFilePath =
+        null
+
+      const fileManager =
+        createFileManager({
+          apiUrl:
+            context.apiUrl,
+          credentials:
+            context.credentials
+        })
+
       if (
         job.printFile
           ?.storageKey
@@ -488,9 +499,7 @@ export const handleCommand = async (
         }
 
         const cachedFile =
-          await ensurePrintFileCached(
-            context.apiUrl,
-            context.credentials,
+          await fileManager.ensureCached(
             job.printFile
           )
 
@@ -500,16 +509,30 @@ export const handleCommand = async (
             cachedFile
         }
 
+        await fileManager.pin(
+          cachedFile.localPath
+        )
+        pinnedFilePath =
+          cachedFile.localPath
+
         console.log(
           `[PrintFile] Arquivo pronto: ${cachedFile.localPath}`
         )
       }
 
-      const result =
-        await startPrinterJob(
-          printer,
-          job
+      let result
+
+      try {
+        result =
+          await startPrinterJob(
+            printer,
+            job
+          )
+      } finally {
+        await fileManager.unpin(
+          pinnedFilePath
         )
+      }
 
       console.log(
         'Impressao iniciada.'

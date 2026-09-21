@@ -23,6 +23,7 @@ const publicOrder = (row) => ({
   gross: number(row.gross),
   marketplaceFee: number(row.marketplace_fee),
   shipping: number(row.shipping),
+  feeBreakdown: row.fee_breakdown || {},
   net: number(row.net),
   profit: number(row.profit),
   status: row.status || 'received',
@@ -35,11 +36,16 @@ const publicOrder = (row) => ({
   suggestedProductName: row.suggested_product_name || ''
 })
 
-export const listMarketplaceOrders = async (tenantId) => {
+export const listMarketplaceOrders = async (tenantId, options = {}) => {
   if (!hasDatabase) return []
+
+  const paged = options && (options.limit !== undefined || options.offset !== undefined)
+  const limit = Math.min(100, Math.max(1, Number(options.limit) || 25))
+  const offset = Math.max(0, Number(options.offset) || 0)
 
   const result = await withTenant(tenantId, (client) => client.query(`
     select
+      count(*) over()::int as total_count,
       s.id,
       s.integration_id,
       s.marketplace_id,
@@ -52,6 +58,7 @@ export const listMarketplaceOrders = async (tenantId) => {
       s.gross,
       s.marketplace_fee,
       s.shipping,
+      s.fee_breakdown,
       s.net,
       s.profit,
       s.status,
@@ -85,9 +92,12 @@ export const listMarketplaceOrders = async (tenantId) => {
       end,
       s.sold_at desc,
       s.id desc
-  `, [tenantId]))
+    ${paged ? 'limit $2 offset $3' : ''}
+  `, paged ? [tenantId, limit, offset] : [tenantId]))
 
-  return result.rows.map(publicOrder)
+  const items = result.rows.map(publicOrder)
+  if (!paged) return items
+  return { items, total: result.rows.length ? Number(result.rows[0].total_count || 0) : 0, limit, offset }
 }
 
 export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => {
@@ -112,6 +122,7 @@ export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => 
           s.gross,
           s.marketplace_fee,
           s.shipping,
+          s.fee_breakdown,
           s.net,
           s.profit,
           i.id as integration_id,
@@ -134,7 +145,7 @@ export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => 
     }
 
     const productResult = await client.query(
-      'select id, name, printer_id from products where tenant_id = $1 and id = $2 limit 1',
+      'select id, name, printer_id, cost from products where tenant_id = $1 and id = $2 limit 1',
       [tenantId, productId]
     )
     const product = productResult.rows[0]
@@ -187,6 +198,16 @@ export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => 
       net: sale.net,
       profit: sale.profit
     })
+
+    const productionCost = number(product.cost) * Math.max(1, Number(sale.quantity || 1))
+    await client.query(
+      `update tracked_sales
+          set cost = $3,
+              profit = net - $3,
+              updated_at = now()
+        where tenant_id = $1 and id = $2`,
+      [tenantId, sale.id, productionCost]
+    )
 
     return true
   })

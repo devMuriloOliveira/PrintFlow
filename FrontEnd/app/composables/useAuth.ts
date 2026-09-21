@@ -5,19 +5,20 @@ type AuthUser = {
   email: string
   role: string
   status: string
+  platformRole?: string
 }
 
 type AuthResponse = {
   user: AuthUser
   accessToken?: string
-  refreshToken: string
   token?: string
+  deletionCancelled?: boolean
+  verificationRequired?: boolean
+  mfaRequired?: boolean
+  challengeToken?: string
 }
 
-const AUTH_TOKEN_KEY = 'printflow-auth-token'
-const AUTH_REFRESH_TOKEN_KEY = 'printflow-refresh-token'
-const AUTH_USER_KEY = 'printflow-auth-user'
-const AUTH_EXPIRES_KEY = 'printflow-auth-expires-at'
+export type AuthSession = { sessionId: string; createdAt: string; expiresAt: string; lastSeenAt: string; deviceLabel: string; ipMasked: string }
 
 let logoutTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -38,27 +39,20 @@ export const useAuth = () => {
   const config = useRuntimeConfig()
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
   const token = useState<string>('auth-token', () => '')
-  const refreshToken = useState<string>('auth-refresh-token', () => '')
   const user = useState<AuthUser | null>('auth-user', () => null)
   const expiresAt = useState<number>('auth-expires-at', () => 0)
   const ready = useState('auth-ready', () => false)
+  const tenantDeletionCancelled = useState('tenant-deletion-cancelled', () => false)
 
   const apiUrl = (path: string) => `${apiBase}${path}`
 
   const clearSession = () => {
     token.value = ''
-    refreshToken.value = ''
     user.value = null
     expiresAt.value = 0
     if (logoutTimer) clearTimeout(logoutTimer)
     logoutTimer = undefined
 
-    if (process.client) {
-      localStorage.removeItem(AUTH_TOKEN_KEY)
-      localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY)
-      localStorage.removeItem(AUTH_USER_KEY)
-      localStorage.removeItem(AUTH_EXPIRES_KEY)
-    }
   }
 
   const sessionIsExpired = () => !expiresAt.value || expiresAt.value <= Date.now()
@@ -89,60 +83,44 @@ export const useAuth = () => {
     const tokenExpiresAt = decodeTokenExpiresAt(accessToken)
 
     token.value = accessToken
-    refreshToken.value = session.refreshToken || ''
     user.value = session.user
     expiresAt.value = tokenExpiresAt || Date.now() + 15 * 60 * 1000
     if (process.client) {
-      localStorage.setItem(AUTH_TOKEN_KEY, accessToken)
-      localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken.value)
-      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(session.user))
-      localStorage.setItem(AUTH_EXPIRES_KEY, String(expiresAt.value))
-      localStorage.setItem('printflow-workspace-id', session.user.tenantId)
       scheduleLogout()
     }
   }
 
   const refreshSession = async () => {
-    if (!refreshToken.value) throw new Error('Sessao expirada.')
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/refresh'), {
       method: 'POST',
-      body: { refreshToken: refreshToken.value }
+      credentials: 'include'
     })
     setSession(session)
     return session.user
   }
 
+  const completeMfaLogin = async (challengeToken: string, code: string) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/mfa/login'), { method: 'POST', body: { challengeToken, code }, credentials: 'include' })
+    setSession(session)
+    return session.user
+  }
+
+  const setupMfa = () => $fetch<{ secret: string; otpauthUri: string }>(apiUrl('/api/auth/mfa/setup'), { headers: authHeaders.value })
+  const mfaStatus = () => $fetch<{ enabled: boolean }>(apiUrl('/api/auth/mfa/status'), { headers: authHeaders.value })
+  const enableMfa = (secret: string, code: string) => $fetch(apiUrl('/api/auth/mfa/enable'), { method: 'POST', headers: authHeaders.value, body: { secret, code } })
+  const disableMfa = (currentPassword: string) => $fetch(apiUrl('/api/auth/mfa/disable'), { method: 'POST', headers: authHeaders.value, body: { currentPassword } })
+
   const restore = async () => {
     if (!process.client) return
-
-    const storedExpiresAt = Number(localStorage.getItem(AUTH_EXPIRES_KEY) || 0)
 
     if (ready.value) {
       if (token.value && user.value && expiresAt.value) scheduleLogout()
       return
     }
 
-    token.value = localStorage.getItem(AUTH_TOKEN_KEY) || ''
-    refreshToken.value = localStorage.getItem(AUTH_REFRESH_TOKEN_KEY) || ''
-    expiresAt.value = storedExpiresAt
-    const storedUser = localStorage.getItem(AUTH_USER_KEY)
-    if (storedUser) {
-      try {
-        user.value = JSON.parse(storedUser)
-      } catch {
-        user.value = null
-      }
-    }
-
-    if (token.value && user.value && !sessionIsExpired()) {
-      scheduleLogout()
-    } else if (refreshToken.value) {
-      try {
-        await refreshSession()
-      } catch {
-        clearSession()
-      }
-    } else {
+    try {
+      await refreshSession()
+    } catch {
       clearSession()
     }
 
@@ -152,32 +130,59 @@ export const useAuth = () => {
   const login = async (email: string, password: string) => {
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/login'), {
       method: 'POST',
-      body: { email, password }
+      body: { email, password },
+      credentials: 'include'
     })
+    if (session.mfaRequired) return { mfaRequired: true, challengeToken: session.challengeToken || '' }
     setSession(session)
+    tenantDeletionCancelled.value = Boolean(session.deletionCancelled)
     return session.user
   }
 
-  const register = async (payload: { name: string; email: string; password: string; company: string }) => {
+  const register = async (payload: { name: string; email: string; password: string; company: string; document: string }) => {
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/register'), {
       method: 'POST',
-      body: payload
+      body: payload,
+      credentials: 'include'
     })
+    if (session.accessToken || session.token) setSession(session)
+    return session
+  }
+
+  const acceptInvitation = async (payload: { token: string; name: string; password: string }) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/invitations/accept'), { method: 'POST', body: payload, credentials: 'include' })
     setSession(session)
+    tenantDeletionCancelled.value = Boolean(session.deletionCancelled)
     return session.user
   }
 
+  const listSessions = () => $fetch<AuthSession[]>(apiUrl('/api/auth/sessions'), { headers: authHeaders.value })
+  const revokeSession = (sessionId: string) => $fetch(apiUrl(`/api/auth/sessions/${encodeURIComponent(sessionId)}`), { method: 'DELETE', headers: authHeaders.value })
+  const revokeAllSessions = () => $fetch(apiUrl('/api/auth/sessions/revoke-all'), { method: 'POST', headers: authHeaders.value })
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/change-password'), {
+      method: 'POST',
+      headers: authHeaders.value,
+      body: { currentPassword, newPassword },
+      credentials: 'include'
+    })
+    if (session.accessToken || session.token) setSession(session)
+    return session.user
+  }
+
+  const requestTenantDeletion = (currentPassword: string) => $fetch<{ scheduledFor: string }>(apiUrl('/api/auth/tenant-deletion-request'), {
+    method: 'POST', headers: authHeaders.value,
+    body: { currentPassword, confirmation: 'EXCLUIR', acknowledgedCancellation: true }
+  })
+
   const logout = async () => {
-    const currentRefreshToken = refreshToken.value
-    if (currentRefreshToken) {
-      try {
-        await $fetch(apiUrl('/api/auth/logout'), {
-          method: 'POST',
-          body: { refreshToken: currentRefreshToken }
-        })
-      } catch {
-        // Local logout still proceeds if the session is already invalid server-side.
-      }
+    try {
+      await $fetch(apiUrl('/api/auth/logout'), {
+        method: 'POST',
+        credentials: 'include'
+      })
+    } catch {
+      // Local logout still proceeds if the session is already invalid server-side.
     }
     clearSession()
     await navigateTo('/login')
@@ -187,16 +192,28 @@ export const useAuth = () => {
 
   return {
     token,
-    refreshToken,
     user,
     expiresAt,
     ready,
+    tenantDeletionCancelled,
     isAuthenticated: computed(() => Boolean(token.value && user.value && !sessionIsExpired())),
     authHeaders,
+    clearSession,
     restore,
     refreshSession,
     login,
+    completeMfaLogin,
+    setupMfa,
+    mfaStatus,
+    enableMfa,
+    disableMfa,
     register,
+    acceptInvitation,
+    listSessions,
+    revokeSession,
+    revokeAllSessions,
+    changePassword,
+    requestTenantDeletion,
     logout
   }
 }

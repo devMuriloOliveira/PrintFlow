@@ -27,7 +27,7 @@ const emit = defineEmits<{ click: [] }>()
   >
     <div class="metric-card__top">
       <span class="metric-card__icon"><UiIcon :name="icon" :size="21" /></span>
-      <span class="metric-card__label">{{ label }} <UiIcon name="info" :size="13" /></span>
+      <span class="metric-card__label">{{ label }}</span>
     </div>
     <strong class="metric-card__value">{{ value }}</strong>
     <div class="metric-card__bottom">

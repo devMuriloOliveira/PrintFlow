@@ -3,6 +3,7 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: false },
   nitro: { preset: 'static' },
+  routeRules: { '/_nuxt/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } } },
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com'

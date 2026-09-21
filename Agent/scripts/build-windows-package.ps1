@@ -9,6 +9,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$apiUri = [Uri]$ApiUrl
+if ($apiUri.Scheme -ne "https" -or $apiUri.Host -in @("localhost", "127.0.0.1", "0.0.0.0", "::1")) {
+  throw "O pacote Windows exige PRINTFLOW_API_URL HTTPS publico; localhost nao pode ser empacotado como Production."
+}
+
 $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $outputRoot = Join-Path $agentRoot $OutputDir
 $stageRoot = Join-Path $outputRoot $PackageName
@@ -95,8 +100,10 @@ if (Test-Path $installerSedPath) {
   Remove-Item -LiteralPath $installerSedPath -Force
 }
 
-$escapedInstallerPath = $installerPath.Replace("\", "\\")
-$escapedSourceRoot = $installerSourceRoot.Replace("\", "\\")
+# SED paths use normal Windows separators; escaping them doubles the path and
+# can make IExpress wait indefinitely while resolving the target/source.
+$escapedInstallerPath = $installerPath
+$escapedSourceRoot = $installerSourceRoot
 $appLaunched = "wscript.exe $installerLauncherName"
 
 $sed = @"
@@ -145,7 +152,34 @@ SourceFiles0=$escapedSourceRoot
 
 Set-Content -LiteralPath $installerSedPath -Value $sed -Encoding ASCII
 
-iexpress.exe /N /Q $installerSedPath | Out-Null
+$iexpressPath = Join-Path $env:WINDIR "System32\iexpress.exe"
+$iexpressProcess = Start-Process `
+  -FilePath $iexpressPath `
+  -ArgumentList @('/N', '/Q', $installerSedPath) `
+  -PassThru
+
+$buildDeadline = [DateTime]::UtcNow.AddMinutes(3)
+while (
+  -not $iexpressProcess.HasExited -and
+  -not (Test-Path $installerPath) -and
+  [DateTime]::UtcNow -lt $buildDeadline
+) {
+  Start-Sleep -Milliseconds 500
+}
+
+if (-not (Test-Path $installerPath)) {
+  if (-not $iexpressProcess.HasExited) {
+    Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+  throw "IExpress nao gerou o instalador dentro do prazo."
+}
+
+# Algumas versoes do IExpress deixam o processo vivo depois de escrever o
+# artefato. O processo foi iniciado por este script e pode ser encerrado com
+# seguranca agora que o .exe existe.
+if (-not $iexpressProcess.HasExited) {
+  Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
+}
 
 if ($SignDev) {
   & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `

@@ -1,7 +1,10 @@
+const appDataInFlight = new Map<string, Promise<AppData>>()
+
 export type Order = {
   dbId?: string;
-  id: string; productId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
-  gross: number; fee: number; shipping: number; net: number; profit: number; status: string
+  id: string; productId?: string; clientId?: string; date: string; client: string; marketplace: string; product: string; qty: number;
+  gross: number; fee: number; shipping: number; net: number; profit: number; status: string;
+  trackingCode?: string; packedAt?: string | null; shippedAt?: string | null; deliveredAt?: string | null; marketplaceOrder?: boolean; salesChannel?: 'direct' | 'marketplace'
 }
 
 export type PrintJob = {
@@ -31,13 +34,13 @@ export type Product = {
 export type Expense = {
   id?: string;
   description: string; category: string; supplier: string; value: number; date: string;
-  payment: string; recurrence: string; status: string
+  payment: string; recurrence: string; status: string; nextDueDate?: string; notes?: string
 }
 
 export type Filament = {
   id?: string;
   name: string; maker: string; material: string; type: string; color: string; colorHex: string;
-  initial: number; remaining: number; cost: number; supplier: string; date: string; status: string
+  initial: number; remaining: number; cost: number; supplier: string; date: string; status: string; minStock?: number
 }
 
 export type Printer = {
@@ -46,13 +49,13 @@ export type Printer = {
   hours: number; status: string; maintenance: string; serial: string; location?: string; volume?: string; defaultFilament?: string;
   nozzleMm?: number; supportedMaterials?: string; minLayerHeight?: number; maxLayerHeight?: number;
   agentId?: string; agentPrinterId?: string; agentConnectionKey?: string; agentProtocol?: string; agentConnectionType?: string
-  agentPrinterStatus?: string; agentLastStatus?: Record<string, unknown>; agentLastConnectionError?: string; agentLastSeenAt?: string | null
+  agentPrinterStatus?: string; agentLastStatus?: Record<string, unknown>; agentCapabilities?: Record<string, boolean>; agentLastConnectionError?: string; agentLastSeenAt?: string | null
 }
 
 export type Marketplace = {
   id?: string;
   name: string; short: string; color: string; commission: number; fixed: number; financial: number;
-  ads: number; others: number; gross: number; net: number; orders: number; active: boolean;
+  ads: number; others: number; gross: number; net: number; fees?: number; orders: number; active: boolean;
   platform?: string; connectionStatus?: string
 }
 
@@ -67,20 +70,29 @@ export type MarketplaceIntegration = {
   hasAccessToken?: boolean;
   hasRefreshToken?: boolean;
   tokenExpiresAt?: string | null;
-  lastSyncAt?: string | null
+  lastSyncAt?: string | null;
+  lastError?: string
 }
 
 export type MarketplaceOrder = {
   id: string;
   integrationId?: string; marketplaceId?: string; platform: string; externalOrderId: string; externalSku: string;
-  productName: string; quantity: number; gross: number; marketplaceFee: number; shipping: number; net: number; profit: number;
+  productName: string; quantity: number; gross: number; marketplaceFee: number; shipping: number; net: number; profit: number; feeBreakdown?: Record<string, unknown>;
   status: string; soldAt?: string | null; printJobId?: string; printJobStatus?: string;
   mappedProductId?: string; mappedProductName?: string; suggestedProductId?: string; suggestedProductName?: string
 }
 
 export type Client = {
   id?: string;
-  name: string; email: string; phone: string; orders: number; revenue: number; ticket: number; last: string
+  name: string; email: string; phone: string; type?: string; document?: string; zip?: string; address?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; origin?: string; notes?: string; tags?: string; status?: string; orders: number; revenue: number; ticket: number; last: string
+}
+
+export type StripeBillingSummary = {
+  configured: boolean;
+  environment: 'sandbox' | 'production';
+  plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
+  subscription: null | { status: string; billingCycle: string; planCode: string; planName: string; currentPeriodEnd: string | null; cancelAtPeriodEnd?: boolean };
+  checkout: null | { status: string; url: string; expiresAt: string | null; createdAt: string };
 }
 
 export type ChartSegment = {
@@ -89,7 +101,7 @@ export type ChartSegment = {
 
 export type Goal = {
   id?: string;
-  name: string; current: number; target: number; color: string; icon: string;
+  name: string; goalType?: string; current: number; target: number; color: string; icon: string;
   periodStart?: string; periodEnd?: string; status?: string
 }
 
@@ -125,7 +137,44 @@ const emptyData = (): AppData => ({
   settings: null
 })
 
-export const formatCurrency = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+const currencyCode = (value: unknown) => {
+  const setting = String(value || '').toLowerCase()
+  if (setting.includes('dolar') || setting.includes('usd')) return 'USD'
+  if (setting.includes('euro') || setting.includes('eur')) return 'EUR'
+  return 'BRL'
+}
+
+export type IntegrationsOverview = {
+  marketplaces: MarketplaceIntegration[]
+  agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>
+  email: { provider: string; status: 'connected' | 'not_configured' }
+}
+
+export type OrdersPage = {
+  items: Order[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type BackupStatus = {
+  databaseAvailable: boolean
+  export: { enabled: boolean; format: 'json'; excludes: string[] }
+  restore: { enabled: false; reason: string }
+}
+export type SupportRequest = { id: string; status: string; supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; supportFirstResponseDueAt?: string | null; supportResolutionDueAt?: string | null; supportReopenUntil?: string | null; supportReopenedAt?: string | null; supportParentRequestId?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
+export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
+export type SupportAttachment = { id: string; requestId: string; originalName: string; mimeType: string; sizeBytes: number; expiresAt: string; createdAt: string }
+export type FinancialHistoryEntry = { id: string; resource: string; resourceId: string; snapshot: Record<string, any>; source: string; createdAt: string }
+export type CalculatorSimulation = { id: string; name: string; pricePerKg: number; weight: number; durationMinutes: number; energyEnabled: boolean; energyRate: number; watts: number; margin: number; directCost: number; suggestedPrice: number; snapshot: Record<string, any>; createdAt: string }
+export type InventoryMovement = { id: string; type: 'in' | 'out' | 'adjustment'; quantity: number; previousQuantity: number; resultingQuantity: number; reason: string; createdAt: string }
+export type ProductInventory = { id: string; name: string; sku: string; price: number; cost: number; weight: number; quantity: number; reservedQuantity: number; status: string; updatedAt?: string | null }
+export type InventoryOverview = { products: ProductInventory[]; movements: Array<InventoryMovement & { resource: 'filaments' | 'products'; resourceId: string; resourceName?: string; productName?: string; sku?: string }>; total: number; limit: number; offset: number }
+export type FinancialHistoryPage = { items: FinancialHistoryEntry[]; total: number; limit: number; offset: number }
+export const formatCurrency = (value: number) => {
+  const settings = useState<AppData>('app-data', emptyData).value.settings
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currencyCode(settings?.currency) }).format(value)
+}
 export const formatNumber = (value: number) => new Intl.NumberFormat('pt-BR').format(value)
 
 export const useAppData = () => {
@@ -133,29 +182,106 @@ export const useAppData = () => {
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
   const auth = useAuth()
   const tenantId = useTenantId()
+  const route = useRoute()
   const data = useState<AppData>('app-data', emptyData)
   const pending = useState('app-data-pending', () => false)
   const loaded = useState('app-data-loaded', () => false)
   const loadedTenant = useState('app-data-loaded-tenant', () => '')
+  const loadedAt = useState('app-data-loaded-at', () => 0)
+  const loadedScope = useState('app-data-loaded-scope', () => '')
+  const scopeCache = useState<Record<string, { data: AppData; loadedAt: number }>>('app-data-scope-cache', () => ({}))
   const error = useState<string | null>('app-data-error', () => null)
   const goals = useState<Goal[]>('goals', () => [])
+  let appDataAbortController: AbortController | null = null
+  let appDataRequestSequence = 0
 
   const apiUrl = (path: string) => `${apiBase}${path}`
 
-  const loadAppData = async () => {
+  const resourceScopeForRoute = () => {
+    const path = String(route.path || '')
+    const scopes: Record<string, string[]> = {
+      '/': ['products', 'orders', 'expenses', 'expenseSegments', 'filaments', 'goals', 'printers', 'printJobs'],
+      '/configuracoes': ['settings'],
+      '/clientes': ['clients'],
+      '/vendas': ['orders', 'products', 'printers', 'printJobs', 'clients'],
+      '/produtos': ['products', 'printers', 'filaments'],
+      '/impressoras': ['printers', 'printJobs', 'products', 'filaments'],
+      '/filamentos': ['filaments', 'printJobs', 'products'],
+      '/estoque': ['filaments', 'products'],
+      '/despesas': ['expenses', 'expenseSegments'],
+      '/metas': ['goals'],
+      '/marketplaces': ['marketplaces', 'products'],
+      '/relatorios': (() => {
+        const section = String(route.query.secao || 'financeiro')
+        if (section === 'historico') return []
+        if (section === 'produtos') return ['orders', 'products']
+        return ['orders', 'products', 'expenses', 'expenseSegments']
+      })()
+    }
+    const match = Object.entries(scopes).find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))
+    return match ? match[1] : null
+  }
+
+  const loadAppData = async (force = false) => {
+    const cacheTtlMs = 60_000
+    const scope = resourceScopeForRoute()
+    const scopeKey = scope?.slice().sort().join(',') || 'all'
+    const cacheKey = `${tenantId.value}:${scopeKey}`
+    const cachedScope = scopeCache.value[cacheKey]
+    if (!force && cachedScope && Date.now() - cachedScope.loadedAt < cacheTtlMs) {
+      data.value = cachedScope.data
+      loaded.value = true
+      loadedTenant.value = tenantId.value
+      loadedAt.value = cachedScope.loadedAt
+      loadedScope.value = scopeKey
+      goals.value = data.value.goals || []
+      return data.value
+    }
+    if (!force && loaded.value && loadedTenant.value === tenantId.value && loadedScope.value === scopeKey && Date.now() - loadedAt.value < cacheTtlMs) return data.value
+    const inFlight = process.client && !force ? appDataInFlight.get(cacheKey) : null
+    if (inFlight) {
+      try {
+        const nextData = await inFlight
+        data.value = nextData
+        goals.value = nextData.goals || []
+        loaded.value = true
+        loadedTenant.value = tenantId.value
+        loadedAt.value = Date.now()
+        loadedScope.value = scopeKey
+        return nextData
+      } catch (err) {
+        error.value = err instanceof Error ? err.message : 'NÃ£o foi possÃ­vel carregar os dados.'
+        return data.value
+      }
+    }
+    appDataAbortController?.abort()
+    const requestController = process.client ? new AbortController() : null
+    appDataAbortController = requestController
+    const sequence = ++appDataRequestSequence
     pending.value = true
     error.value = null
-    try {
-      data.value = await $fetch<AppData>(apiUrl('/api/app-data'), {
-        headers: auth.authHeaders.value
+    const request = $fetch<AppData>(apiUrl(`/api/app-data${scope !== null ? `?resources=${encodeURIComponent(scope.join(','))}` : ''}`), {
+        headers: auth.authHeaders.value,
+        signal: requestController?.signal
       })
+    if (process.client) appDataInFlight.set(cacheKey, request)
+    try {
+      const nextData = await request
+      if (sequence !== appDataRequestSequence) return data.value
+      data.value = nextData
       goals.value = data.value.goals || []
       loaded.value = true
       loadedTenant.value = tenantId.value
+      loadedAt.value = Date.now()
+      loadedScope.value = scopeKey
+      scopeCache.value = { ...scopeCache.value, [cacheKey]: { data: nextData, loadedAt: loadedAt.value } }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados da API'
+      if (requestController?.signal.aborted || sequence !== appDataRequestSequence) return data.value
+      error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
     } finally {
-      pending.value = false
+      if (process.client && appDataInFlight.get(cacheKey) === request) appDataInFlight.delete(cacheKey)
+      if (sequence === appDataRequestSequence) pending.value = false
+      if (appDataAbortController === requestController) appDataAbortController = null
     }
   }
 
@@ -164,10 +290,16 @@ export const useAppData = () => {
     goals.value = []
     loaded.value = false
     loadedTenant.value = ''
+    loadedAt.value = 0
+    loadedScope.value = ''
+    scopeCache.value = {}
   }
 
   if (process.client && !loaded.value && !pending.value && !error.value) {
     void loadAppData()
+  }
+  if (process.client) {
+    watch(() => route.fullPath, () => { void loadAppData() })
   }
 
   const resourceHeaders = () => auth.authHeaders.value
@@ -269,6 +401,14 @@ export const useAppData = () => {
     return response
   }
 
+  const advanceOrderStage = async (orderId: string, status: string, trackingCode = '') => {
+    const result = await $fetch<{ order: { id: string; status: string } }>(apiUrl(`/api/orders/${encodeURIComponent(orderId)}/advance-stage`), {
+      method: 'POST', body: { status, trackingCode }, headers: resourceHeaders()
+    })
+    await loadAppData(true)
+    return result.order
+  }
+
   const createMarketplaceIntegration = async (integration: Partial<MarketplaceIntegration> & Record<string, unknown>) => {
     const created = await $fetch<MarketplaceIntegration>(apiUrl('/api/marketplace-integrations'), {
       method: 'POST',
@@ -292,12 +432,59 @@ export const useAppData = () => {
     return response.url
   }
 
+  const disconnectMarketplaceIntegration = async (id: string) => {
+    await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(id)}`), {
+      method: 'DELETE', headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || 'Nao foi possivel desconectar a conta do marketplace.')
+    })
+    await loadAppData(true)
+  }
+
   const refreshMarketplaceOrders = async () => {
     const list = await $fetch<MarketplaceOrder[]>(apiUrl('/api/marketplace-orders'), {
       headers: resourceHeaders()
     })
     data.value.marketplaceOrders = list
     return list
+  }
+
+  const loadMarketplaceOrdersPage = async (params: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, String(value))
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return $fetch<{ items: MarketplaceOrder[]; total: number; limit: number; offset: number }>(apiUrl(`/api/marketplace-orders${suffix}`), { headers: resourceHeaders() })
+  }
+
+  const loadOrdersPage = async (params: { limit?: number; offset?: number; status?: string; salesChannel?: string; search?: string; from?: string; to?: string; clientId?: string } = {}) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') query.set(key, String(value))
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return $fetch<OrdersPage>(apiUrl(`/api/orders${suffix}`), { headers: resourceHeaders() })
+  }
+  const loadClientOrders = (clientId: string) => loadOrdersPage({ clientId, salesChannel: 'direct', limit: 100, offset: 0 })
+
+  const loadOrdersSummary = async () => $fetch<{
+    orderCount: number; gross: number; net: number; profit: number; fees: number; shipping: number; ticket: number;
+    byStatus: Array<{ status: string; count: number }>
+  }>(apiUrl('/api/orders/summary'), { headers: resourceHeaders() })
+
+  const generateRecurringExpenses = async () => {
+    const response = await $fetch<{ generated: number; expenses: Expense[] }>(apiUrl('/api/expenses/recurring/generate'), {
+      method: 'POST', headers: resourceHeaders()
+    })
+    data.value.expenses = response.expenses
+    return response.generated
+  }
+
+  const syncMarketplaceOrder = async (integrationId: string, externalOrderId: string) => {
+    await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(integrationId)}/sync-order`), {
+      method: 'POST', body: { externalOrderId }, headers: resourceHeaders()
+    }).catch((err) => {
+      throw new Error(err?.data?.error || err?.message || 'Nao foi possivel sincronizar o pedido.')
+    })
+    await loadAppData(true)
+    await refreshMarketplaceOrders()
   }
 
   const linkMarketplaceOrderProduct = async (id: string, productId: string) => {
@@ -309,9 +496,80 @@ export const useAppData = () => {
       throw new Error(err?.data?.error || err?.message || 'Nao foi possivel vincular o pedido ao produto.')
     })
     data.value.marketplaceOrders = list
-    await loadAppData()
+    await loadAppData(true)
     return list
   }
+
+  const updateSettings = async (settings: Record<string, unknown>) => {
+    const saved = await $fetch<Record<string, unknown>>(apiUrl('/api/settings'), {
+      method: 'PUT', body: settings, headers: resourceHeaders()
+    })
+    data.value.settings = saved
+    return saved
+  }
+
+  const lookupCompanyByCnpj = (cnpj: string) => $fetch<{
+    name: string; legalName: string; phone: string; email: string; address: string; district: string; city: string; state: string; zip: string; status: string
+  }>(apiUrl('/api/settings/company-lookup'), { query: { cnpj }, headers: resourceHeaders() })
+
+  const exportTenantData = (groups: string[] = ['all']) => $fetch<Blob>(apiUrl('/api/settings/export'), {
+    query: { groups: groups.join(',') }, responseType: 'blob', headers: resourceHeaders()
+  })
+
+  const getStripeBilling = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
+    headers: resourceHeaders()
+  })
+
+  const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) =>
+    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
+      method: 'POST', body, headers: resourceHeaders()
+    })
+  const changeStripeSubscriptionPlan = (billingCycle: 'monthly' | 'yearly') => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/change-plan'), { method: 'POST', body: { billingCycle }, headers: resourceHeaders() })
+  const cancelStripeSubscription = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/cancel'), { method: 'POST', headers: resourceHeaders() })
+  const resumeStripeSubscription = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/resume'), { method: 'POST', headers: resourceHeaders() })
+
+  const listSettingsExports = () => $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
+    headers: resourceHeaders()
+  })
+
+  const listFinancialHistory = (options: { resource?: string; resourceId?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) => $fetch<FinancialHistoryPage>(apiUrl('/api/financial-history'), { query: options, headers: resourceHeaders() })
+
+  const exportFinancialReport = (filters: Record<string, string>) => $fetch<Blob>(apiUrl('/api/reports/financial-export'), {
+    query: filters, responseType: 'blob', headers: resourceHeaders()
+  })
+
+  const listCalculatorSimulations = () => $fetch<CalculatorSimulation[]>(apiUrl('/api/calculator/simulations'), { headers: resourceHeaders() })
+  const createCalculatorSimulation = (body: Record<string, unknown>) => $fetch<CalculatorSimulation>(apiUrl('/api/calculator/simulations'), { method: 'POST', body, headers: resourceHeaders() })
+
+  const listFilamentMovements = (filamentId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
+  const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
+  const loadInventoryOverview = (options: { from?: string; to?: string; resource?: string; type?: string; search?: string; limit?: number; offset?: number } = {}) => $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { query: options, headers: resourceHeaders() })
+  const listProductInventoryMovements = (productId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/inventory/products/${productId}/movements`), { headers: resourceHeaders() })
+  const createProductInventoryMovement = (productId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/inventory/products/${productId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
+
+  const loadBackupStatus = () => $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
+    headers: resourceHeaders()
+  })
+  const listSupportRequests = () => $fetch<SupportRequest[]>(apiUrl('/api/support/requests'), { headers: resourceHeaders() })
+  const createSupportRequest = (body: Record<string, unknown>) => $fetch<SupportRequest>(apiUrl('/api/support/requests'), { method: 'POST', body, headers: resourceHeaders() })
+  const cancelSupportRequest = (id: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}`), { method: 'DELETE', headers: resourceHeaders() })
+  const listSupportMessages = (id: string, since?: string) => $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
+  const getSupportUnread = (since?: string) => $fetch<{ total: number; byRequest: Array<{ requestId: string; total: number }> }>(apiUrl(`/api/support/unread${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
+  const sendSupportMessage = (id: string, body: string) => $fetch<{ requestId: string; createdNewProtocol: boolean; previousRequestId?: string | null }>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
+  const listSupportAttachments = (id: string) => $fetch<SupportAttachment[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { headers: resourceHeaders() })
+  const uploadSupportAttachment = async (id: string, file: File) => {
+    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || '').split(',').pop() || ''); reader.onerror = reject; reader.readAsDataURL(file) })
+    return $fetch<SupportAttachment>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { method: 'POST', body: { fileName: file.name, mimeType: file.type, data }, headers: resourceHeaders() })
+  }
+  const downloadSupportAttachment = async (id: string, attachment: SupportAttachment) => {
+    const response = await fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`), { credentials: 'include', headers: resourceHeaders() })
+    if (!response.ok) throw new Error('Nao foi possivel baixar o anexo.')
+    const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob()); link.download = attachment.originalName; link.click(); URL.revokeObjectURL(link.href)
+  }
+
+  const loadIntegrationsOverview = () => $fetch<IntegrationsOverview>(apiUrl('/api/integrations/overview'), {
+    headers: resourceHeaders()
+  })
 
   return {
     products: computed(() => data.value.products),
@@ -333,11 +591,39 @@ export const useAppData = () => {
     error,
     refreshAppData: loadAppData,
     createProduct
-    , uploadProductPrintFile
+    , uploadProductPrintFile, generateRecurringExpenses
     , createMarketplaceIntegration
+    , loadInventoryOverview, listProductInventoryMovements, createProductInventoryMovement
+    , advanceOrderStage
     , startMarketplaceOAuth
-    , refreshMarketplaceOrders
+    , disconnectMarketplaceIntegration
+    , refreshMarketplaceOrders, loadMarketplaceOrdersPage, loadOrdersPage, loadClientOrders, loadOrdersSummary
+    , syncMarketplaceOrder
     , linkMarketplaceOrderProduct
+    , updateSettings
+    , lookupCompanyByCnpj
+    , exportTenantData
+    , getStripeBilling
+    , createStripeCheckout, changeStripeSubscriptionPlan
+    , cancelStripeSubscription
+    , resumeStripeSubscription
+    , listSettingsExports
+    , listFinancialHistory
+    , exportFinancialReport
+    , listCalculatorSimulations
+    , createCalculatorSimulation
+    , listFilamentMovements
+    , createFilamentMovement
+    , loadBackupStatus
+    , listSupportRequests
+    , createSupportRequest
+    , cancelSupportRequest
+    , listSupportAttachments
+    , uploadSupportAttachment
+    , downloadSupportAttachment
+    , listSupportMessages, getSupportUnread
+    , sendSupportMessage
+    , loadIntegrationsOverview
     , enqueuePrintJob
     , reorderPrintJob
     , movePrintJobPrinter

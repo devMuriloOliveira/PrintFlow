@@ -1,0 +1,204 @@
+<script setup lang="ts">
+import { computed, nextTick, reactive, ref, watch, watchEffect } from 'vue'
+import { navigateTo } from '#app'
+
+const { marketplaces, createItem, updateItem, createMarketplaceIntegration, startMarketplaceOAuth } = useAppData()
+const { notify } = useUi()
+const route = useRoute()
+const saving = ref(false)
+const oauthLoading = ref(false)
+const errors = reactive<Record<string, string>>({})
+const saleValue = ref(100)
+const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
+const isEditing = computed(() => Boolean(editId.value))
+const hydrated = ref(false)
+const connectionMode = ref<'oauth' | 'manual'>('oauth')
+const persistedConnectionStatus = ref('manual')
+
+const platforms = [
+  { id: 'mercado_livre', name: 'Mercado Livre', short: 'ML', color: '#ffe600', commission: 16, fixed: 5, financial: 0, ads: 3 },
+  { id: 'shopee', name: 'Shopee', short: 'SP', color: '#ee4d2d', commission: 14, fixed: 4, financial: 0, ads: 3 },
+  { id: 'amazon', name: 'Amazon', short: 'AM', color: '#232f3e', commission: 15, fixed: 0, financial: 0, ads: 2 },
+  { id: 'custom', name: 'Outro canal', short: 'OT', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0 }
+]
+
+const form = reactive({
+  platform: 'mercado_livre',
+  name: 'Mercado Livre',
+  short: 'ML',
+  color: '#ffe600',
+  active: true,
+  accountExternalId: '',
+  connectionName: '',
+  accessToken: '',
+  refreshToken: '',
+  tokenExpiresAt: '',
+  scopes: '',
+  commission: 16,
+  fixed: 5,
+  financial: 0,
+  ads: 3,
+  others: 0,
+  startDate: ''
+})
+
+const requiresManualCredentials = computed(() => form.platform !== 'custom' && connectionMode.value === 'manual' && !isEditing.value)
+const connectionStatus = computed(() => form.platform === 'custom' ? 'manual' : persistedConnectionStatus.value)
+const fees = computed(() => ({
+  commission: saleValue.value * form.commission / 100,
+  fixed: form.fixed,
+  financial: saleValue.value * form.financial / 100,
+  ads: saleValue.value * form.ads / 100,
+  others: saleValue.value * form.others / 100
+}))
+const totalFees = computed(() => Object.values(fees.value).reduce((a, b) => a + b, 0))
+const netPreview = computed(() => saleValue.value - totalFees.value)
+
+watch(() => form.platform, (platformId) => {
+  if (isEditing.value && hydrated.value) return
+  const platform = platforms.find((item) => item.id === platformId) || platforms[0]
+  form.name = platform.name
+  form.short = platform.short
+  form.color = platform.color
+  form.commission = platform.commission
+  form.fixed = platform.fixed
+  form.financial = platform.financial
+  form.ads = platform.ads
+  connectionMode.value = platformId === 'custom' ? 'manual' : 'oauth'
+})
+
+watchEffect(() => {
+  if (!editId.value || hydrated.value) return
+  const item = marketplaces.value.find(marketplace => marketplace.id === editId.value)
+  if (!item) return
+  Object.assign(form, { platform: item.platform || 'custom', name: item.name, short: item.short, color: item.color, active: item.active, commission: item.commission, fixed: item.fixed, financial: item.financial, ads: item.ads, others: item.others })
+  persistedConnectionStatus.value = item.connectionStatus || 'manual'
+  hydrated.value = true
+})
+
+const validate = () => {
+  Object.keys(errors).forEach(key => delete errors[key])
+  if (!form.name.trim()) errors.name = 'Informe o nome do canal.'
+  if (requiresManualCredentials.value && !form.accountExternalId.trim()) errors.accountExternalId = 'Informe o ID da conta externa.'
+  if (requiresManualCredentials.value && !form.accessToken.trim()) errors.accessToken = 'Informe o access token da integração.'
+  if (form.commission < 0) errors.commission = 'Informe uma comissão válida.'
+  if (!form.startDate.trim()) errors.startDate = 'Informe a data de início.'
+  const first = Object.keys(errors)[0]
+  if (first) nextTick(() => document.querySelector(`[data-field="${first}"] input,[data-field="${first}"] select`)?.focus())
+  return !first
+}
+
+const connectOfficialOAuth = async () => {
+  if (form.platform === 'custom' || oauthLoading.value) return
+  if (!window.confirm('O Mercado Livre vai autorizar a conta que estiver aberta no navegador. Se você quer adicionar outra conta, entre nela ou troque de usuário no Mercado Livre antes de continuar.')) return
+  oauthLoading.value = true
+  try {
+    const url = await startMarketplaceOAuth(form.platform)
+    window.location.href = url
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível iniciar a autorização oficial.', 'info')
+  } finally {
+    oauthLoading.value = false
+  }
+}
+
+const save = async () => {
+  if (!validate() || saving.value) return
+  saving.value = true
+  try {
+    const payload = {
+      id: editId.value,
+      name: form.name,
+      short: (form.short || form.name[0]).slice(0, 2).toUpperCase(),
+      color: form.color,
+      platform: form.platform,
+      connectionStatus: connectionStatus.value,
+      commission: form.commission,
+      fixed: form.fixed,
+      financial: form.financial,
+      ads: form.ads,
+      others: form.others,
+      active: form.active
+    }
+    if (isEditing.value) await updateItem('marketplaces', payload)
+    else await createItem('marketplaces', payload)
+
+    if (!isEditing.value && requiresManualCredentials.value) {
+      await createMarketplaceIntegration({
+        platform: form.platform,
+        marketplaceName: form.name,
+        connectionName: form.connectionName || form.name,
+        accountExternalId: form.accountExternalId,
+        accessToken: form.accessToken,
+        refreshToken: form.refreshToken,
+        tokenExpiresAt: form.tokenExpiresAt,
+        scopes: form.scopes
+      })
+    }
+
+    notify(isEditing.value ? 'Marketplace atualizado com sucesso.' : requiresManualCredentials.value ? 'Marketplace conectado com sucesso.' : 'Marketplace cadastrado com sucesso.')
+    navigateTo('/marketplaces')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível salvar o marketplace.', 'info')
+  } finally {
+    saving.value = false
+  }
+}
+
+const cancel = () => {
+  if ((!form.accountExternalId && !form.startDate) || window.confirm('Descartar alterações?\n\nAs informações preenchidas ainda não foram salvas.')) navigateTo('/marketplaces')
+}
+</script>
+
+<template>
+  <div>
+    <div class="breadcrumb"><span>Marketplaces</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar canal' : 'Adicionar canal' }}</strong></div>
+    <PageHeader :title="isEditing ? 'Editar canal' : 'Adicionar canal'" :subtitle="isEditing ? 'Atualize taxas, status e identificação do canal.' : 'Conecte canais de venda e acompanhe receita, taxas e lucro automaticamente.'" />
+    <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
+      <form @submit.prevent="save">
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="store" />1. Serviço de venda</h2><div class="integration-grid">
+          <button v-for="platform in platforms" :key="platform.id" class="integration-card" :class="{active:form.platform===platform.id}" type="button" @click="form.platform=platform.id">
+            <MarketplaceLogo :platform="platform.id" :name="platform.name" :short="platform.short" :size="30" />
+            <strong>{{platform.name}}</strong>
+            <small>{{platform.id==='custom' ? 'Controle manual de taxas' : 'OAuth e sincronização automática'}}</small>
+          </button>
+        </div><div class="form-grid" style="margin-top:14px">
+          <div class="field col-5" data-field="name" :class="{'field--error':errors.name}"><label>Nome no PrintFlow *</label><input v-model="form.name"><small v-if="errors.name" class="field__error">{{errors.name}}</small></div>
+          <div class="field col-2"><label>Sigla</label><input v-model="form.short" maxlength="2"></div>
+          <div class="field col-2"><label>Cor</label><input v-model="form.color" type="color"></div>
+          <div class="field col-3"><label>Status</label><select v-model="form.active"><option :value="true">Ativo</option><option :value="false">Inativo</option></select></div>
+        </div></div>
+
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="shield" />2. Credenciais da integração</h2><template v-if="form.platform !== 'custom'"><div class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" /><span><strong>Importante para adicionar outra conta:</strong> primeiro entre nessa conta no Mercado Livre ou troque de usuário. O OAuth sempre autoriza a conta que estiver aberta no navegador.</span></div><div class="form-actions" style="justify-content:flex-start;margin:0 0 12px"><button type="button" class="btn btn--primary" :disabled="oauthLoading" @click="connectOfficialOAuth">{{ oauthLoading ? 'Abrindo...' : 'Conectar conta com OAuth oficial' }}</button><button type="button" class="btn" :class="{ 'btn--primary': connectionMode === 'manual' }" @click="connectionMode = connectionMode === 'manual' ? 'oauth' : 'manual'">{{ connectionMode === 'manual' ? 'Usar OAuth oficial' : 'Configuração manual' }}</button></div></template><div v-if="requiresManualCredentials" class="info-note" style="margin-bottom:10px"><UiIcon name="info" :size="18" />Use somente se você recebeu credenciais do serviço. O ID externo é o Seller/User ID e permite diferenciar contas da mesma empresa.</div><div class="form-grid">
+          <div v-if="requiresManualCredentials" class="field col-4" data-field="accountExternalId" :class="{'field--error':errors.accountExternalId}"><label>ID da conta externa *</label><input v-model="form.accountExternalId" :placeholder="form.platform==='shopee'?'Shop ID':'Seller/User ID'"><small v-if="errors.accountExternalId" class="field__error">{{errors.accountExternalId}}</small></div>
+          <div v-if="requiresManualCredentials" class="field col-4"><label>Nome da conexão</label><input v-model="form.connectionName" placeholder="Loja principal"></div>
+          <div v-if="requiresManualCredentials" class="field col-4"><label>Expira em</label><input v-model="form.tokenExpiresAt" type="datetime-local"></div>
+          <div v-if="requiresManualCredentials" class="field col-6" data-field="accessToken" :class="{'field--error':errors.accessToken}"><label>Access token *</label><input v-model="form.accessToken" type="password" autocomplete="off" placeholder="Obrigatório e criptografado"><small v-if="errors.accessToken" class="field__error">{{errors.accessToken}}</small></div>
+          <div v-if="requiresManualCredentials" class="field col-6"><label>Refresh token</label><input v-model="form.refreshToken" type="password" autocomplete="off" placeholder="Opcional e criptografado"></div>
+          <div v-if="requiresManualCredentials" class="field col-12"><label>Escopos/permissões</label><input v-model="form.scopes" placeholder="orders.read, finances.read"></div>
+        </div></div>
+
+        <div class="form-card"><h2 class="form-card__title"><UiIcon name="percent" />3. Taxas e vigência</h2><div class="form-grid">
+          <div class="field col-3" data-field="commission" :class="{'field--error':errors.commission}"><label>Comissão (%) *</label><input v-model.number="form.commission" type="number" step=".01"><small v-if="errors.commission" class="field__error">{{errors.commission}}</small></div>
+          <div class="field col-3"><label>Tarifa fixa</label><input v-model.number="form.fixed" type="number" step=".01"></div>
+          <div class="field col-3"><label>Taxa financeira (%)</label><input v-model.number="form.financial" type="number" step=".01"></div>
+          <div class="field col-3"><label>Anúncios (%)</label><input v-model.number="form.ads" type="number" step=".01"></div>
+          <div class="field col-3"><label>Outras taxas (%)</label><input v-model.number="form.others" type="number" step=".01"></div>
+          <div class="field col-4" data-field="startDate" :class="{'field--error':errors.startDate}"><label>Início das taxas *</label><input v-model="form.startDate" type="date"><small v-if="errors.startDate" class="field__error">{{errors.startDate}}</small></div>
+          <div class="col-5 info-note"><UiIcon name="info" :size="18" />Essas regras entram quando a plataforma não enviar o detalhamento completo das taxas.</div>
+        </div></div>
+
+        <div class="form-actions"><button class="btn" type="button" @click="cancel">Cancelar</button><button class="btn btn--primary" type="submit" :disabled="saving">{{ saving ? 'Salvando...' : isEditing ? 'Salvar alterações' : 'Salvar canal' }}</button></div>
+      </form>
+      <aside><PanelCard title="Prévia de resultado"><div class="field"><label>Valor da venda</label><input v-model.number="saleValue" type="number"></div><div class="detail-list" style="margin-top:10px"><div class="detail-list__row"><span>Venda bruta</span><strong>{{formatCurrency(saleValue)}}</strong></div><div class="detail-list__row"><span>Total de taxas</span><strong>- {{formatCurrency(totalFees)}}</strong></div><div class="detail-list__row"><span>Receita líquida</span><strong class="money-positive">{{formatCurrency(netPreview)}}</strong></div></div><div class="summary-box"><small>Status da conexão</small><strong style="display:block;font-size:18px;margin-top:6px">{{connectionStatus === 'connected' ? 'Conectado' : 'Manual'}}</strong><span class="badge badge--green" style="margin-top:7px">{{netPreview && saleValue ? (netPreview/saleValue*100).toFixed(1) : '0.0'}}% do bruto</span></div></PanelCard></aside>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.integration-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.integration-card{display:flex;min-height:92px;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;text-align:left;cursor:pointer}
+.integration-card.active{border-color:var(--blue);box-shadow:0 0 0 2px #e4f0ff;background:#fbfdff}
+.integration-card small{color:var(--muted);font-size:8px}
+@media (max-width:900px){.integration-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>

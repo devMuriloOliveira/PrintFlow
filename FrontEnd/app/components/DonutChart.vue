@@ -2,6 +2,7 @@
 const props = withDefaults(defineProps<{ segments: { label: string; value: number; color: string }[]; total: string; caption?: string }>(), { caption: 'Total' })
 const background = computed(() => {
   const sum = props.segments.reduce((acc, item) => acc + item.value, 0)
+  if (!sum) return 'conic-gradient(#e8edf4 0 100%)'
   let current = 0
   const stops = props.segments.map(item => {
     const from = current

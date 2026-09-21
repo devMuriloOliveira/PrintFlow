@@ -1,6 +1,9 @@
 param(
   [string]$FilePath = "dist\PrintFlow-Agent-Setup.exe",
   [string]$CertificateSubject = "CN=PrintFlow 3D Local Dev",
+  # O signtool do Windows requer o endpoint RFC 3161 DigiCert neste formato
+  # HTTP; isso se aplica somente ao serviço de timestamp, nao ao endpoint da
+  # API, que continua obrigatoriamente HTTPS.
   [string]$TimestampUrl = "http://timestamp.digicert.com",
   [string]$ExportPublicCertificatePath = "",
   [string]$CertificatePfxPath = "certs\PrintFlow-Agent-Dev-CodeSigning.pfx"
@@ -53,28 +56,6 @@ if (-not $signTool) {
   throw "signtool.exe nao encontrado. Instale o Windows SDK e selecione o componente Windows SDK Signing Tools for Desktop Apps."
 }
 
-function Trust-DevCertificate {
-  param(
-    [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
-  )
-
-  $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-    "Root",
-    "CurrentUser"
-  )
-  $rootStore.Open("ReadWrite")
-  $rootStore.Add($Certificate)
-  $rootStore.Close()
-
-  $publisherStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-    "TrustedPublisher",
-    "CurrentUser"
-  )
-  $publisherStore.Open("ReadWrite")
-  $publisherStore.Add($Certificate)
-  $publisherStore.Close()
-}
-
 $certificate = $null
 
 if (Test-Path $pfxPath) {
@@ -108,8 +89,6 @@ if (-not $certificate) {
 
   Write-Host "Certificado local de desenvolvimento criado."
 }
-
-Trust-DevCertificate -Certificate $certificate
 
 $pfxDir = Split-Path -Parent $pfxPath
 if (-not (Test-Path $pfxDir)) {
@@ -154,12 +133,26 @@ if ($ExportPublicCertificatePath) {
   /td SHA256 `
   $targetPath
 
+$signExitCode = $LASTEXITCODE
+if ($signExitCode -ne 0) {
+  throw "signtool nao conseguiu assinar o instalador (exit code $signExitCode)."
+}
+
 & $signTool verify `
   /pa `
   /v `
   $targetPath
 
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "A assinatura DEV_SELF_SIGNED foi criada, mas o Windows nao confia na cadeia self-signed sem uma acao explicita do usuario."
+}
+
 Write-Host "Instalador assinado para teste local:"
 Write-Host $targetPath
 Write-Host "Thumbprint:"
 Write-Host $certificate.Thumbprint
+
+# A verificacao /pa pode retornar != 0 apenas porque o certificado e
+# self-signed; isso e esperado no Early Access. O pipeline ja confirmou que
+# a operacao de assinatura em si terminou com sucesso acima.
+exit 0

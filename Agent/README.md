@@ -95,11 +95,15 @@ Adapter com base para conectar, ler status, pausar, retomar, cancelar, enviar ar
 
 O Agent salva dados locais em um diretorio proprio. Por padrao, usa a pasta `data` dentro do Agent, ou o diretorio definido por `PRINTFLOW_AGENT_DATA_DIR`.
 
-Arquivos locais principais:
+Arquivos locais principais (todos sob `PRINTFLOW_AGENT_DATA_DIR`, ou no diretório gerenciado do Agent):
 
-- `agent.json`: credencial de pareamento do Agent.
+- `agent.json`: envelope protegido por DPAPI no Windows com a credencial de
+  pareamento do Agent; instalações antigas são migradas ao carregar.
 - `printer-credentials.json`: credenciais de impressoras salvas localmente.
-- cache de arquivos de impressao baixados.
+- `agent-operations.sqlite`: comandos processados, confirmações pendentes,
+  outbox de eventos agregados e último estado local de impressoras/jobs.
+- `cache/files`: arquivos de impressão baixados e validados por hash.
+- `logs`: logs locais do Agent.
 
 As credenciais de impressora sao armazenadas criptografadas localmente. Elas nao devem ser copiadas para README, logs ou telas do usuario.
 
@@ -126,6 +130,9 @@ Nao documente codigos reais de pareamento. Eles sao temporarios e devem ser usad
 
 ## Desenvolvimento Local
 
+O Agent requer Node.js 22.13 ou superior, pois usa o SQLite nativo do Node para
+manter comandos concluídos e confirmações pendentes após reinício.
+
 ```powershell
 npm.cmd install
 $env:PRINTFLOW_API_URL="http://localhost:3333"
@@ -140,6 +147,31 @@ npm.cmd run start
 ```
 
 O mock permite validar descoberta, conexao, status, pausa, retomada, cancelamento, desconexao e reconexao sem impressora fisica.
+
+### OrcaSlicer local
+
+O Agent possui um contrato local para executar o OrcaSlicer em modo headless.
+O perfil precisa referenciar arquivos de máquina/processo e filamento
+exportados pelo OrcaSlicer, sempre com uma versão identificável. O helper
+`buildOfficialBambuP1SProfile()` usa os presets oficiais instalados como
+referência para smoke test; ele não representa uma impressora cadastrada e
+não envia trabalhos automaticamente.
+
+O resultado só é aceito quando o Orca termina, o G-code é novo e não vazio,
+e o Agent calcula seu tamanho e SHA-256. O caminho de produção deverá receber
+o perfil real da impressora associado ao Production Job pelo Backend.
+
+`analyzeModelFile()` valida localmente STL ASCII/binário (triângulos e limites)
+e 3MF (container e modelo principal), sem enviar o modelo para a nuvem. Essa
+análise é prévia ao slicing e não substitui a validação do Backend.
+
+`sliceModelWithOrcaSlicer()` combina essa análise, a resolução do perfil exato
+e a geração local do G-code. O resultado ainda fica local e não inicia uma
+impressão.
+
+Para uma impressora cadastrada, `resolveOfficialOrcaProfileForPrinter()` exige
+um modelo exato com preset oficial (P1S, P1P, X1 Carbon, A1 ou A1 mini). Nao
+ha fallback entre modelos: sem perfil correspondente o slicing e recusado.
 
 ## Scripts
 

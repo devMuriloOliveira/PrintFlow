@@ -9,6 +9,7 @@ $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $logPath = Join-Path $agentRoot "logs"
 
 $env:PRINTFLOW_API_URL = $ApiUrl
+$env:PRINTFLOW_ENVIRONMENT = "PRODUCTION"
 $env:PRINTFLOW_AGENT_LOG_DIR = $logPath
 
 if ($PairingCode) {

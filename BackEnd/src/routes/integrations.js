@@ -3,11 +3,16 @@ import { sendJson } from '../http/response.js'
 import { verifyWebhookSecret } from '../security/webhook.js'
 import { getTenantId } from '../config/tenant.js'
 import { env } from '../config/env.js'
+import { getAuthUser } from './auth.js'
+import { tenantQuery } from '../db/pool.js'
 import {
   createMarketplaceIntegration,
+  consumeMarketplaceOAuthAttempt,
+  disconnectMarketplaceIntegration,
   findIntegrationById,
   findIntegrationByExternalAccount,
   listMarketplaceIntegrations,
+  markMarketplaceIntegrationSync,
   recordTrackedSale,
   recordWebhookEvent
 } from '../repositories/integrationsRepository.js'
@@ -33,9 +38,40 @@ const safeNormalizeOrFetch = async (integration, platform, externalOrderId, payl
 }
 
 const ignored = (res) => sendJson(res, 200, { message: 'Conta ignorada ou nao integrada.' })
+const syncErrorMessage = (error) => String(error?.message || '').includes('Token do Mercado Livre')
+  ? error.message
+  : 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.'
 
 export const handleIntegrationsList = async (req, res) =>
   sendJson(res, 200, await listMarketplaceIntegrations(await getTenantId(req)))
+
+export const handleIntegrationsOverview = async (req, res) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Login necessario' })
+
+  const [marketplaces, agents] = await Promise.all([
+    listMarketplaceIntegrations(user.tenantId),
+    tenantQuery(user.tenantId, `
+      select id, name, machine_name, platform, status, last_seen_at
+        from agents
+       where tenant_id = $1
+       order by created_at desc
+    `, [user.tenantId])
+  ])
+
+  return sendJson(res, 200, {
+    marketplaces,
+    agents: agents.rows.map((agent) => ({
+      id: String(agent.id), name: agent.name || agent.machine_name,
+      machineName: agent.machine_name, platform: agent.platform,
+      status: agent.status, lastSeenAt: agent.last_seen_at
+    })),
+    email: {
+      provider: 'Resend',
+      status: env.resendApiKey && env.emailFrom && env.appPublicUrl ? 'connected' : 'not_configured'
+    }
+  })
+}
 
 export const handleIntegrationCreate = async (req, res) => {
   const payload = await readJsonBody(req)
@@ -46,11 +82,17 @@ export const handleIntegrationCreate = async (req, res) => {
 export const handleMarketplaceOAuthStart = async (req, res, platform) => {
   const tenantId = await getTenantId(req)
   return sendJson(res, 200, {
-    url: marketplaceAuthorizationUrl({
+    url: await marketplaceAuthorizationUrl({
       tenantId,
       platform
     })
   })
+}
+
+export const handleMarketplaceIntegrationDisconnect = async (req, res, integrationId) => {
+  const disconnected = await disconnectMarketplaceIntegration(await getTenantId(req), integrationId)
+  if (!disconnected) return sendJson(res, 404, { error: 'Integracao nao encontrada.' })
+  return sendJson(res, 200, { status: 'disconnected' })
 }
 
 export const handleMarketplaceOAuthCallback = async (req, res, url) => {
@@ -58,15 +100,20 @@ export const handleMarketplaceOAuthCallback = async (req, res, url) => {
   const state = readMarketplaceOAuthState(url.searchParams.get('state') || '')
   if (!code) return sendJson(res, 400, { error: 'Codigo OAuth nao informado.' })
 
+  const attempt = await consumeMarketplaceOAuthAttempt(state.tenantId, state.platform, state.attemptId)
+
   const token = await exchangeMarketplaceOAuthCode({
     platform: state.platform,
-    code
+    code,
+    codeVerifier: attempt.codeVerifier
   })
+
+  const marketplaceName = state.platform === 'mercado_livre' ? 'Mercado Livre' : state.platform === 'shopee' ? 'Shopee' : state.platform === 'amazon' ? 'Amazon' : state.platform
 
   await createMarketplaceIntegration(state.tenantId, {
     platform: state.platform,
-    marketplaceName: state.platform,
-    connectionName: state.platform,
+    marketplaceName,
+    connectionName: marketplaceName,
     accountExternalId: token.accountExternalId || `${state.platform}-${state.tenantId}`,
     accessToken: token.accessToken,
     refreshToken: token.refreshToken,
@@ -94,7 +141,13 @@ export const handleMarketplaceOrderSync = async (req, res, integrationId) => {
   const integration = await findIntegrationById(tenantId, integrationId)
   if (!integration) return sendJson(res, 404, { error: 'Integracao nao encontrada.' })
 
-  const sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
+  let sale
+  try {
+    sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
+  } catch (error) {
+    await markMarketplaceIntegrationSync(tenantId, integration.id, { status: 'error', lastError: syncErrorMessage(error) })
+    return sendJson(res, 502, { error: 'Nao foi possivel consultar o pedido no marketplace. Verifique a conexao da conta.' })
+  }
   const trackedSale = await recordTrackedSale(integration, {
     platform: integration.platform,
     externalOrderId,
@@ -106,13 +159,12 @@ export const handleMarketplaceOrderSync = async (req, res, integrationId) => {
     id: trackedSale?.id,
     externalOrderId
   })
+  await markMarketplaceIntegrationSync(tenantId, integration.id)
 
   return sendJson(res, 200, { status: 'synced', trackedSaleId: trackedSale?.id ? String(trackedSale.id) : '' })
 }
 
 export const handleMercadoLivreWebhook = async (req, res) => {
-  if (!verifyWebhookSecret(req)) return sendJson(res, 401, { error: 'Webhook nao autorizado.' })
-
   const payload = await readJsonBody(req)
   const externalAccountId = String(payload.user_id || '')
   if (!externalAccountId) return sendJson(res, 400, { error: 'ID externo do vendedor nao informado.' })
@@ -129,8 +181,15 @@ export const handleMercadoLivreWebhook = async (req, res) => {
     payload
   })
 
-  if (externalOrderId && ['orders', 'merchant_orders'].includes(String(payload.topic))) {
-    const sale = await safeNormalizeOrFetch(integration, 'mercado_livre', externalOrderId, payload)
+  if (externalOrderId && ['orders', 'orders_v2', 'merchant_orders'].includes(String(payload.topic))) {
+    let sale
+    try {
+      // A notificacao e apenas um gatilho. Dados de pedido sempre vem da API oficial.
+      sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
+    } catch (error) {
+      await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, { status: 'error', lastError: syncErrorMessage(error) })
+      return sendJson(res, 200, { status: 'received', sync: 'pending' })
+    }
     const trackedSale = await recordTrackedSale(integration, {
       platform: 'mercado_livre',
       externalOrderId,
@@ -142,6 +201,7 @@ export const handleMercadoLivreWebhook = async (req, res) => {
       id: trackedSale?.id,
       externalOrderId
     })
+    await markMarketplaceIntegrationSync(integration.tenant_id, integration.id)
   }
 
   return sendJson(res, 200, { status: 'success' })

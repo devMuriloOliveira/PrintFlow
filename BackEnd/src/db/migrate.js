@@ -2,6 +2,9 @@ import {
   hasDatabase,
   query
 } from './pool.js'
+import { env } from '../config/env.js'
+
+const supportReopenWindowDays = Math.min(30, Math.max(1, Number(env.supportReopenWindowDays) || 7))
 
 // ======================================================
 // TABELAS COM ISOLAMENTO POR TENANT
@@ -19,6 +22,7 @@ const tenantTables = [
   'agent_pairing_codes',
   'agent_commands',
   'agent_printers',
+  'agent_event_receipts',
 
   'marketplaces',
   'clients',
@@ -27,12 +31,29 @@ const tenantTables = [
   'calculator_simulations',
   'export_history',
   'marketplace_integrations',
+  'marketplace_oauth_attempts',
   'marketplace_product_links',
   'tracked_sales',
   'marketplace_webhook_events',
+  'financial_history',
+  'inventory_movements',
+  'product_inventory',
+  'order_inventory_fulfillments',
   'operational_notifications',
-  'operational_audit_events'
+  'operational_audit_events',
+  'tenant_memberships',
+  'tenant_invitations',
+  'tenant_subscriptions',
+  'tenant_billing_checkouts',
+  'tenant_billing_records',
+  'tenant_subscription_events'
 ]
+const platformTenantTables = new Set([
+  'tenant_subscriptions',
+  'tenant_billing_checkouts',
+  'tenant_billing_records',
+  'tenant_subscription_events'
+])
 
 // ======================================================
 // HABILITAR RLS POR TENANT
@@ -71,19 +92,13 @@ const enableTenantIsolation =
         on ${table}
 
         using (
-          tenant_id =
-          current_setting(
-            'app.tenant_id',
-            true
-          )
+          tenant_id = current_setting('app.tenant_id', true)
+          ${platformTenantTables.has(table) ? "or current_setting('app.platform_admin', true) = 'true'" : ''}
         )
 
         with check (
-          tenant_id =
-          current_setting(
-            'app.tenant_id',
-            true
-          )
+          tenant_id = current_setting('app.tenant_id', true)
+          ${platformTenantTables.has(table) ? "or current_setting('app.platform_admin', true) = 'true'" : ''}
         )
       `
     )
@@ -194,6 +209,16 @@ export const migrate =
     await query(`alter table tenants add column if not exists account_status text not null default 'active'`)
     await query(`alter table tenants add column if not exists billing_status text not null default 'not_configured'`)
     await query(`alter table tenants add column if not exists billing_due_at timestamptz`)
+    // Empresas existentes permanecem no acesso historico. Cadastros novos entram
+    // no fluxo comercial e so ganham escrita apos checkout autorizado.
+    await query(`alter table tenants add column if not exists billing_enforcement_exempt boolean not null default true`)
+    await query(`alter table tenants add column if not exists pricing_generation integer not null default 0`)
+    await query(`alter table tenants add column if not exists document_hash text`)
+    await query(`alter table tenants add column if not exists document_type text`)
+    await query(`alter table tenants add column if not exists document_locked_at timestamptz`)
+    await query(`alter table tenants drop constraint if exists tenants_document_type_check`)
+    await query(`alter table tenants add constraint tenants_document_type_check check (document_type is null or document_type in ('cpf', 'cnpj'))`)
+    await query(`create unique index if not exists tenants_document_hash_unique on tenants (document_hash) where document_hash is not null and document_hash <> ''`)
 
     // ==================================================
     // USERS
@@ -304,6 +329,28 @@ export const migrate =
 
     await query(
       `
+        create table if not exists marketplace_oauth_attempts (
+          id text primary key,
+          tenant_id text not null references tenants(id) on delete cascade,
+          platform text not null,
+          code_verifier text not null default '',
+          expires_at timestamptz not null,
+          consumed_at timestamptz,
+          created_at timestamptz not null default now()
+        )
+      `
+    )
+
+    await query(
+      `
+        create index if not exists marketplace_oauth_attempts_active_idx
+        on marketplace_oauth_attempts (tenant_id, platform, expires_at)
+        where consumed_at is null
+      `
+    )
+
+    await query(
+      `
         create unique index if not exists
           users_email_hash_unique
         on users (
@@ -331,6 +378,223 @@ export const migrate =
        limit 1
     `)
     const platformAdminUserIdType = userIdTypeResult.rows[0]?.type === 'uuid' ? 'uuid' : 'bigint'
+
+  await query(`
+    create table if not exists api_rate_limits (
+      rate_key text primary key,
+      request_count integer not null default 0,
+      reset_at timestamptz not null,
+      updated_at timestamptz not null default now()
+    )
+  `)
+  await query('create index if not exists api_rate_limits_reset_at_idx on api_rate_limits (reset_at)')
+
+  await query(`
+      create table if not exists tenant_memberships (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        user_id ${platformAdminUserIdType} not null references users(id) on delete cascade,
+        role text not null check (role in ('owner', 'admin', 'financeiro', 'producao', 'usuario')),
+        status text not null default 'active' check (status in ('active', 'suspended')),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, user_id)
+      )
+    `)
+
+    await query(`
+      insert into tenant_memberships (tenant_id, user_id, role, status)
+      select tenant_id,
+             id,
+             case when role in ('admin', 'platform_super_admin') then 'owner' else 'usuario' end,
+             case when status = 'active' then 'active' else 'suspended' end
+        from users
+      on conflict (tenant_id, user_id) do nothing
+    `)
+
+    await query(`create index if not exists tenant_memberships_user_id_idx on tenant_memberships (user_id)`)
+
+    await query(`
+      create table if not exists tenant_invitations (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        email text not null,
+        email_hash text not null,
+        role text not null check (role in ('admin', 'financeiro', 'producao', 'usuario')),
+        token_hash text not null unique,
+        invited_by ${platformAdminUserIdType} not null references users(id) on delete restrict,
+        expires_at timestamptz not null,
+        accepted_at timestamptz,
+        revoked_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists tenant_invitations_tenant_id_idx on tenant_invitations (tenant_id)`)
+    await query(`create index if not exists tenant_invitations_email_hash_idx on tenant_invitations (email_hash)`)
+
+    // ==================================================
+    // PLANOS E ASSINATURAS INTERNAS DA PLATAFORMA
+    // ==================================================
+
+    await query(`
+      create table if not exists platform_plans (
+        id text primary key,
+        code text not null unique,
+        name text not null,
+        description text not null default '',
+        monthly_reference_price numeric(12,2) not null default 0 check (monthly_reference_price >= 0),
+        yearly_reference_price numeric(12,2) not null default 0 check (yearly_reference_price >= 0),
+        limits jsonb not null default '{}'::jsonb,
+        features jsonb not null default '{}'::jsonb,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table platform_plans add column if not exists mercado_pago_monthly_plan_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists mercado_pago_yearly_plan_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists stripe_product_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists stripe_monthly_price_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists stripe_yearly_price_id text not null default ''`)
+    await query(`alter table platform_plans add column if not exists trial_days integer not null default 7`)
+    await query(`alter table platform_plans drop constraint if exists platform_plans_trial_days_check`)
+    await query(`alter table platform_plans add constraint platform_plans_trial_days_check check (trial_days between 0 and 30)`)
+    await query(`
+      create table if not exists tenant_subscriptions (
+        id text primary key,
+        tenant_id text not null unique references tenants(id) on delete cascade,
+        plan_id text references platform_plans(id) on delete restrict,
+        status text not null default 'trial' check (status in ('trial','active','past_due','grace','paused','courtesy','cancelled','ended')),
+        billing_cycle text not null default 'monthly' check (billing_cycle in ('monthly','yearly','manual')),
+        started_at timestamptz,
+        current_period_start timestamptz,
+        current_period_end timestamptz,
+        trial_ends_at timestamptz,
+        grace_ends_at timestamptz,
+        cancelled_at timestamptz,
+        cancellation_reason text not null default '',
+        manual_override boolean not null default false,
+        source text not null default 'manual' check (source in ('manual', 'provider')),
+        provider text,
+        provider_customer_id text,
+        provider_subscription_id text,
+        last_provider_sync_at timestamptz,
+        notes text not null default '',
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table tenant_subscriptions add column if not exists source text not null default 'manual' check (source in ('manual', 'provider'))`)
+    await query(`alter table tenant_subscriptions add column if not exists provider text`)
+    await query(`alter table tenant_subscriptions add column if not exists provider_customer_id text`)
+    await query(`alter table tenant_subscriptions add column if not exists provider_subscription_id text`)
+    await query(`alter table tenant_subscriptions add column if not exists last_provider_sync_at timestamptz`)
+    await query(`alter table tenant_subscriptions add column if not exists trial_started_at timestamptz`)
+    await query(`alter table tenant_subscriptions add column if not exists trial_used_at timestamptz`)
+    await query(`alter table tenant_subscriptions add column if not exists cancel_at_period_end boolean not null default false`)
+    await query(`
+      update tenant_subscriptions
+         set trial_used_at = coalesce(trial_used_at, trial_ends_at, started_at, created_at)
+       where trial_used_at is null
+         and status in ('trial', 'active', 'past_due', 'grace', 'paused', 'courtesy', 'cancelled', 'ended')
+    `)
+    await query(`create index if not exists tenant_subscriptions_status_idx on tenant_subscriptions (status, current_period_end)`)
+    await query(`create unique index if not exists tenant_subscriptions_provider_subscription_unique on tenant_subscriptions (provider, provider_subscription_id) where provider_subscription_id is not null and provider_subscription_id <> ''`)
+    await query(`
+      create table if not exists tenant_billing_checkouts (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        plan_id text not null references platform_plans(id) on delete restrict,
+        billing_cycle text not null check (billing_cycle in ('monthly', 'yearly')),
+        amount numeric(12,2) not null check (amount > 0),
+        currency text not null default 'BRL',
+        status text not null default 'creating' check (status in ('creating', 'open', 'paid', 'cancelled', 'expired', 'failed')),
+        provider text not null,
+        provider_checkout_id text,
+        checkout_url text not null default '',
+        created_by text not null default '',
+        expires_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`create unique index if not exists tenant_billing_checkouts_provider_unique on tenant_billing_checkouts (provider, provider_checkout_id) where provider_checkout_id is not null and provider_checkout_id <> ''`)
+    await query(`create index if not exists tenant_billing_checkouts_lookup_idx on tenant_billing_checkouts (tenant_id, created_at desc)`)
+    await query(`alter table tenant_billing_checkouts add column if not exists provider_plan_id text not null default ''`)
+    await query(`alter table tenant_billing_checkouts add column if not exists trial_days integer not null default 0`)
+    await query(`
+      create table if not exists payment_provider_events (
+        id bigserial primary key,
+        provider text not null,
+        provider_event_id text not null,
+        event_type text not null,
+        provider_resource_id text not null default '',
+        tenant_id text references tenants(id) on delete set null,
+        received_at timestamptz not null default now(),
+        processed_at timestamptz,
+        unique (provider, provider_event_id)
+      )
+    `)
+    await query(`create index if not exists payment_provider_events_tenant_idx on payment_provider_events (tenant_id, received_at desc)`)
+    await query(`
+      create table if not exists tenant_billing_records (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        subscription_id text references tenant_subscriptions(id) on delete set null,
+        reference text not null default '',
+        amount numeric(12,2) not null default 0 check (amount >= 0),
+        currency text not null default 'BRL',
+        due_at timestamptz,
+        paid_at timestamptz,
+        status text not null default 'pending' check (status in ('pending','paid','overdue','void','courtesy')),
+        source text not null default 'manual' check (source in ('manual', 'provider')),
+        provider text,
+        provider_invoice_id text,
+        notes text not null default '',
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table tenant_billing_records add column if not exists source text not null default 'manual' check (source in ('manual', 'provider'))`)
+    await query(`alter table tenant_billing_records add column if not exists provider text`)
+    await query(`alter table tenant_billing_records add column if not exists provider_invoice_id text`)
+    await query(`create index if not exists tenant_billing_records_lookup_idx on tenant_billing_records (tenant_id, due_at desc)`)
+    await query(`create unique index if not exists tenant_billing_records_provider_invoice_unique on tenant_billing_records (provider, provider_invoice_id) where provider_invoice_id is not null and provider_invoice_id <> ''`)
+    await query(`
+      create table if not exists tenant_subscription_events (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        subscription_id text references tenant_subscriptions(id) on delete set null,
+        action text not null,
+        previous_state jsonb not null default '{}'::jsonb,
+        new_state jsonb not null default '{}'::jsonb,
+        reason text not null default '',
+        actor_user_id text not null default '',
+        source text not null default 'manual' check (source in ('manual', 'provider', 'system')),
+        provider text,
+        provider_event_id text,
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table tenant_subscription_events add column if not exists source text not null default 'manual' check (source in ('manual', 'provider', 'system'))`)
+    await query(`alter table tenant_subscription_events drop constraint if exists tenant_subscription_events_source_check`)
+    await query(`alter table tenant_subscription_events add constraint tenant_subscription_events_source_check check (source in ('manual', 'provider', 'system'))`)
+    await query(`alter table tenant_subscription_events add column if not exists provider text`)
+    await query(`alter table tenant_subscription_events add column if not exists provider_event_id text`)
+    await query(`create index if not exists tenant_subscription_events_lookup_idx on tenant_subscription_events (tenant_id, created_at desc)`)
+    await query(`update tenants set billing_enforcement_exempt = true, pricing_generation = 1 where pricing_generation = 0`)
+    await query(`alter table tenants alter column pricing_generation set default 1`)
+    await query(`
+      insert into platform_plans (id, code, name, description, monthly_reference_price, yearly_reference_price, limits, features, trial_days)
+      values
+        ('plan_free', 'free', 'Grátis', 'Calculadora e dashboard em modo limitado.', 0, 0, '{"calculatorSimulations":1}', '{"coreOperations":false,"marketplaces":false,"advancedReports":false,"printers":false,"team":false}', 0),
+        ('plan_starter', 'starter', 'PRO', 'Acesso completo ao PrintFlow.', 19.90, 199.90, '{"users":8}', '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"printers":true,"team":true,"prioritySupport":true}', 7)
+      on conflict (code) do nothing
+    `)
+    await query(`update platform_plans set name = 'Grátis', description = 'Calculadora e dashboard em modo limitado.', monthly_reference_price = 0, yearly_reference_price = 0, limits = '{"calculatorSimulations":1}'::jsonb, features = '{"coreOperations":false,"marketplaces":false,"advancedReports":false,"printers":false,"team":false}'::jsonb, trial_days = 0, active = true, updated_at = now() where code = 'free'`)
+    await query(`update platform_plans set name = 'PRO', description = 'Acesso completo ao PrintFlow.', stripe_product_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_product_id end, stripe_monthly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_monthly_price_id end, stripe_yearly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_yearly_price_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"printers":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 7, active = true, updated_at = now() where code = 'starter'`)
+    await query(`update platform_plans set active = false, updated_at = now() where code in ('growth', 'scale')`)
 
     await query(`
       create table if not exists platform_super_admins (
@@ -360,6 +624,59 @@ export const migrate =
 
     await query(`create index if not exists platform_admin_audit_events_created_at_idx on platform_admin_audit_events (created_at desc)`)
     await query(`create index if not exists platform_admin_audit_events_target_tenant_idx on platform_admin_audit_events (target_tenant_id, created_at desc)`)
+    await query(`create table if not exists platform_admin_notifications (
+      id bigserial primary key, recipient_id text not null, type text not null default 'support',
+      severity text not null default 'info', title text not null, message text not null default '',
+      entity_type text not null default '', entity_id text not null default '', dedupe_key text not null,
+      read_at timestamptz, created_at timestamptz not null default now(),
+      unique (recipient_id, dedupe_key)
+    )`)
+    await query(`create index if not exists platform_admin_notifications_recipient_idx on platform_admin_notifications (recipient_id, read_at, created_at desc)`)
+
+    await query(`
+      create table if not exists platform_data_access_requests (
+        id text primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        requested_by ${platformAdminUserIdType} not null references users(id) on delete restrict,
+        reason text not null,
+        scope text not null default 'user_audit',
+        status text not null default 'pending' check (status in ('pending', 'approved', 'expired', 'rejected')),
+        verified_at timestamptz,
+        expires_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists platform_data_access_requests_tenant_idx on platform_data_access_requests (tenant_id, created_at desc)`)
+
+    // Exclusoes aguardam o prazo de arrependimento. A trilha separada nao tem
+    // chaves para o tenant, para sobreviver ao descarte sem reter dados pessoais.
+    await query(`
+      create table if not exists tenant_deletion_requests (
+        id text primary key,
+        tenant_id text not null unique references tenants(id) on delete cascade,
+        requested_by text not null,
+        status text not null default 'pending' check (status in ('pending', 'cancelled')),
+        requested_at timestamptz not null default now(),
+        scheduled_for timestamptz not null,
+        cancelled_at timestamptz,
+        cancellation_reason text not null default '',
+        evidence jsonb not null default '{}'::jsonb
+      )
+    `)
+    await query(`create index if not exists tenant_deletion_requests_due_idx on tenant_deletion_requests (scheduled_for) where status = 'pending'`)
+    await query(`
+      create table if not exists platform_tenant_deletion_audit (
+        id bigserial primary key,
+        deletion_request_id text not null,
+        event_type text not null,
+        evidence jsonb not null default '{}'::jsonb,
+        ip_hash text not null default '',
+        user_agent text not null default '',
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists platform_tenant_deletion_audit_request_idx on platform_tenant_deletion_audit (deletion_request_id, created_at desc)`)
 
     // ==================================================
     // REFRESH TOKENS
@@ -426,6 +743,40 @@ export const migrate =
         )
       `
     )
+
+    await query(`alter table users add column if not exists email_verified_at timestamptz`)
+    await query(`update users set email_verified_at = coalesce(email_verified_at, created_at) where email_verified_at is null`)
+
+    await query(`
+      create table if not exists auth_email_tokens (
+        token_hash text primary key,
+        user_id text not null,
+        purpose text not null,
+        expires_at timestamptz not null,
+        consumed_at timestamptz,
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`create index if not exists auth_email_tokens_active_idx on auth_email_tokens (user_id, purpose, expires_at) where consumed_at is null`)
+
+    await query(`
+      create table if not exists user_mfa (
+        user_id text primary key,
+        secret text not null,
+        enabled boolean not null default false,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `)
+
+    for (const columnDefinition of [
+      "ip_masked text not null default ''",
+      "device_label text not null default ''",
+      "user_agent text not null default ''",
+      'last_seen_at timestamptz not null default now()'
+    ]) {
+      await query(`alter table refresh_tokens add column if not exists ${columnDefinition}`)
+    }
 
     // ==================================================
     // PRODUCTS
@@ -711,6 +1062,27 @@ export const migrate =
       `
     )
 
+    for (const column of [
+      "client_type text not null default 'Pessoa Fisica'",
+      "document text not null default ''",
+      "document_hash text",
+      "zip text not null default ''",
+      "address text not null default ''",
+      "address_number text not null default ''",
+      "complement text not null default ''",
+      "district text not null default ''",
+      "city text not null default ''",
+      "state text not null default ''",
+      "origin text not null default 'Outro'",
+      "notes text not null default ''",
+      "tags text not null default ''",
+      "status text not null default 'active'"
+    ]) {
+      await query(`alter table clients add column if not exists ${column}`)
+    }
+
+    await query(`create index if not exists clients_tenant_document_hash_idx on clients (tenant_id, document_hash)`)
+
     await query(
       `
         create index if not exists
@@ -912,6 +1284,11 @@ export const migrate =
       `
     )
 
+    await query(`
+      alter table marketplace_integrations
+      add column if not exists last_error text not null default ''
+    `)
+
     // ==================================================
     // TRACKED SALES
     // ==================================================
@@ -1030,7 +1407,8 @@ export const migrate =
         "external_sku text not null default ''",
         "external_sku_hash text not null default ''",
         "product_name text not null default ''",
-        'quantity integer not null default 1'
+        'quantity integer not null default 1',
+        "fee_breakdown jsonb not null default '{}'::jsonb"
       ]
     ) {
       await query(
@@ -1285,14 +1663,10 @@ export const migrate =
             on delete set null,
 
           printer_id
-            bigint
-            references printers(id)
-            on delete set null,
+            bigint,
 
           agent_printer_id
-            bigint
-            references agent_printers(id)
-            on delete set null,
+            bigint,
 
           source
             text
@@ -1446,6 +1820,16 @@ export const migrate =
           next_due_date
             date,
 
+          notes
+            text
+            not null
+            default '',
+
+          recurrence_parent_id
+            bigint
+            references expenses(id)
+            on delete set null,
+
           created_at
             timestamptz
             not null
@@ -1453,6 +1837,10 @@ export const migrate =
         )
       `
     )
+
+    await query(`alter table expenses add column if not exists notes text not null default ''`)
+    await query(`alter table expenses add column if not exists recurrence_parent_id bigint references expenses(id) on delete set null`)
+    await query(`create unique index if not exists expenses_recurrence_once_idx on expenses (tenant_id, recurrence_parent_id, expense_date) where recurrence_parent_id is not null`)
 
     // ==================================================
     // FILAMENTS
@@ -1507,6 +1895,11 @@ export const migrate =
             numeric(12,2)
             not null
             default 0,
+
+          min_stock_weight
+            numeric(12,2)
+            not null
+            default 300,
 
           cost
             numeric(12,2)
@@ -1869,6 +2262,17 @@ export const migrate =
           started_at
             timestamptz,
 
+          accepted_at
+            timestamptz,
+
+          lease_expires_at
+            timestamptz,
+
+          attempt
+            integer
+            not null
+            default 0,
+
           completed_at
             timestamptz
         )
@@ -2107,6 +2511,8 @@ export const migrate =
       `
     )
 
+    await query(`create index if not exists agents_tenant_status_idx on agents (tenant_id, status)`)
+
         // ==================================================
     // ERROS DA IMPRESSORA
     // ==================================================
@@ -2279,6 +2685,156 @@ export const migrate =
       `
     )
 
+
+    for (const column of [
+      "delivery_tracking_code text not null default ''",
+      'packed_at timestamptz',
+      'shipped_at timestamptz',
+      'delivered_at timestamptz',
+      "sales_channel text not null default 'marketplace'"
+    ]) {
+      await query(`alter table orders add column if not exists ${column}`)
+    }
+
+    await query(`update orders o set sales_channel = 'direct' from marketplaces m where o.marketplace_id = m.id and o.tenant_id = m.tenant_id and lower(m.name) = 'manual' and o.sales_channel = 'marketplace'`)
+
+    await query(`alter table company_settings add column if not exists preferences jsonb not null default '{}'::jsonb`)
+
+    await query(`alter table goals add column if not exists goal_type text not null default 'revenue'`)
+
+    await query(`create table if not exists tenant_audit_requests (
+      id text primary key, tenant_id text not null references tenants(id) on delete cascade,
+      requested_by text not null, reviewed_by text, reason text not null, scope jsonb not null default '{}'::jsonb,
+      status text not null default 'pending' check (status in ('pending','under_review','approved','rejected','cancelled','closed','expired')),
+      review_reason text not null default '', expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+    )`)
+    await query(`create index if not exists tenant_audit_requests_tenant_idx on tenant_audit_requests (tenant_id, created_at desc)`)
+    await query(`create table if not exists tenant_audit_request_messages (
+      id bigserial primary key, tenant_id text not null references tenants(id) on delete cascade,
+      request_id text not null references tenant_audit_requests(id) on delete cascade,
+      sender_type text not null check (sender_type in ('owner','superadmin')), sender_id text not null,
+      body text not null check (char_length(body) between 1 and 1000), created_at timestamptz not null default now()
+    )`)
+    await query(`create index if not exists tenant_audit_request_messages_request_idx on tenant_audit_request_messages (request_id, created_at)`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_opened_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_closed_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists subject text not null default ''`)
+    await query(`alter table tenant_audit_requests add column if not exists category text not null default 'audit'`)
+    await query(`alter table tenant_audit_requests add column if not exists priority text not null default 'normal'`)
+    await query(`alter table tenant_audit_requests add column if not exists requester_role text not null default ''`)
+    await query(`alter table tenant_audit_requests add column if not exists request_kind text not null default 'support'`)
+    await query(`alter table tenant_audit_requests add column if not exists privacy_right text not null default ''`)
+    await query(`alter table tenant_audit_requests add column if not exists due_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists responsible_id text`)
+    await query(`alter table tenant_audit_requests add column if not exists privacy_anonymized_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_assigned_to text`)
+    await query(`alter table tenant_audit_requests add column if not exists chat_assigned_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_status text not null default 'new'`)
+    await query(`alter table tenant_audit_requests add column if not exists support_tags jsonb not null default '[]'::jsonb`)
+    await query(`alter table tenant_audit_requests add column if not exists support_first_response_due_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_resolution_due_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_resolved_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_reopened_at timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_snoozed_until timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_reopen_until timestamptz`)
+    await query(`alter table tenant_audit_requests add column if not exists support_parent_request_id text`)
+    await query(`create index if not exists tenant_audit_requests_chat_assigned_idx on tenant_audit_requests (chat_assigned_to, updated_at desc)`)
+    await query(`create index if not exists tenant_audit_requests_support_parent_idx on tenant_audit_requests (support_parent_request_id, created_at desc)`)
+    await query(`
+      create table if not exists platform_chat_collaborators (
+        request_id text not null references tenant_audit_requests(id) on delete cascade,
+        user_id text not null,
+        added_by text not null,
+        created_at timestamptz not null default now(),
+        primary key (request_id, user_id)
+      )
+    `)
+    await query(`create index if not exists platform_chat_collaborators_user_idx on platform_chat_collaborators (user_id, request_id)`)
+    await query(`
+      create table if not exists tenant_audit_request_attachments (
+        id text primary key, tenant_id text not null, request_id text not null references tenant_audit_requests(id) on delete cascade,
+        uploader_type text not null check (uploader_type in ('requester','superadmin')), uploader_id text not null,
+        original_name text not null, storage_key text not null unique, mime_type text not null, size_bytes integer not null,
+        expires_at timestamptz not null, created_at timestamptz not null default now(), deleted_at timestamptz
+      )
+    `)
+    await query(`create index if not exists tenant_audit_request_attachments_request_idx on tenant_audit_request_attachments (request_id, created_at desc)`)
+    await query(`create table if not exists platform_support_macros (
+      id text primary key, name text not null unique, body text not null,
+      category text not null default 'general', active boolean not null default true,
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+    )`)
+    await query(`
+      create table if not exists platform_support_sla_rules (
+        id text primary key, category text not null default '*', priority text not null default '*',
+        first_response_minutes integer not null check (first_response_minutes > 0),
+        resolution_minutes integer not null check (resolution_minutes > 0), active boolean not null default true,
+        created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+        unique (category, priority)
+      )
+    `)
+    await query(`insert into platform_support_sla_rules (id, category, priority, first_response_minutes, resolution_minutes) values
+      ('sla-default-low', '*', 'low', 1440, 10080),
+      ('sla-default-normal', '*', 'normal', 480, 10080),
+      ('sla-default-high', '*', 'high', 240, 4320)
+      on conflict (category, priority) do nothing`)
+    await query(`insert into platform_support_macros (id, name, body, category) values
+      ('macro-login', 'Problema de login', 'Vamos verificar o acesso a sua conta. Por favor, confirme o horario aproximado da falha e a mensagem exibida.', 'account'),
+      ('macro-integration', 'Falha de integracao', 'Vamos analisar a integracao informada. Envie, por favor, o protocolo e o horario aproximado do erro.', 'integration'),
+      ('macro-analysis', 'Pedido em analise', 'Sua solicitacao esta em analise pela equipe responsavel. Atualizaremos este protocolo assim que houver uma conclusao.', 'general'),
+      ('macro-more-data', 'Solicitar dados', 'Para continuarmos a analise, precisamos de algumas informacoes adicionais sobre o ocorrido.', 'general'),
+      ('macro-close', 'Confirmar encerramento', 'A solicitacao foi resolvida. Se precisar de algo relacionado ao mesmo assunto, responda antes do encerramento definitivo.', 'general'),
+      ('macro-lgpd-export', 'Orientacao LGPD', 'A solicitacao relacionada a dados pessoais sera tratada dentro do protocolo e do prazo legal aplicavel.', 'privacy')
+      on conflict (name) do nothing`)
+    await query(`alter table tenant_audit_request_messages add column if not exists visibility text not null default 'public'`)
+    await query(`update tenant_audit_requests
+       set support_resolved_at = coalesce(support_resolved_at, updated_at, now()),
+           support_reopen_until = coalesce(support_reopen_until, coalesce(support_resolved_at, updated_at, now()) + ($1::int * interval '1 day'))
+     where request_kind = 'support' and support_status = 'resolved'`, [supportReopenWindowDays])
+    await query(`update tenant_audit_requests
+       set support_status = case
+         when status = 'pending' then 'new'
+         when status in ('closed', 'cancelled', 'expired') then 'resolved'
+         else 'in_progress'
+       end
+     where support_status is null or support_status not in ('new','in_progress','waiting_customer','waiting_internal','resolved','reopened')`)
+    await query(`do $$ begin
+      if exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_support_status_check' and conrelid = 'tenant_audit_requests'::regclass) then
+        alter table tenant_audit_requests drop constraint tenant_audit_requests_support_status_check;
+      end if;
+      alter table tenant_audit_requests add constraint tenant_audit_requests_support_status_check check (support_status in ('new','in_progress','waiting_customer','waiting_internal','resolved','reopened'));
+      if not exists (select 1 from pg_constraint where conname = 'tenant_audit_request_messages_visibility_check' and conrelid = 'tenant_audit_request_messages'::regclass) then
+        alter table tenant_audit_request_messages add constraint tenant_audit_request_messages_visibility_check check (visibility in ('public','internal'));
+      end if;
+    end $$`)
+    await query(`update tenant_audit_requests set request_kind = 'privacy' where category = 'privacy' and request_kind <> 'privacy'`)
+    await query(`do $$ begin
+      if not exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_request_kind_check' and conrelid = 'tenant_audit_requests'::regclass) then
+        alter table tenant_audit_requests add constraint tenant_audit_requests_request_kind_check check (request_kind in ('support', 'privacy'));
+      end if;
+      if not exists (select 1 from pg_constraint where conname = 'tenant_audit_requests_privacy_right_check' and conrelid = 'tenant_audit_requests'::regclass) then
+        alter table tenant_audit_requests add constraint tenant_audit_requests_privacy_right_check check (privacy_right in ('', 'access', 'correction', 'deletion', 'opposition', 'portability', 'sharing'));
+      end if;
+    end $$`)
+    await query(`do $$
+      begin
+        if exists (
+          select 1 from pg_constraint
+          where conname = 'tenant_audit_request_messages_sender_type_check'
+            and conrelid = 'tenant_audit_request_messages'::regclass
+            and pg_get_constraintdef(oid) not like '%requester%'
+        ) then
+          alter table tenant_audit_request_messages drop constraint tenant_audit_request_messages_sender_type_check;
+        end if;
+        if not exists (
+          select 1 from pg_constraint
+          where conname = 'tenant_audit_request_messages_sender_type_check'
+            and conrelid = 'tenant_audit_request_messages'::regclass
+        ) then
+          alter table tenant_audit_request_messages add constraint tenant_audit_request_messages_sender_type_check check (sender_type in ('owner','requester','superadmin'));
+        end if;
+      end $$`)
+
     // ==================================================
     // CALCULATOR SIMULATIONS
     // ==================================================
@@ -2351,6 +2907,11 @@ export const migrate =
         )
       `
     )
+    await query(`alter table calculator_simulations add column if not exists created_by text`)
+    await query(`alter table calculator_simulations add column if not exists snapshot jsonb not null default '{}'::jsonb`)
+    await query(`create index if not exists calculator_simulations_lookup_idx on calculator_simulations (tenant_id, created_at desc)`)
+
+    await query(`alter table filaments add column if not exists min_stock_weight numeric(12,2) not null default 300`)
 
     // ==================================================
     // EXPORT HISTORY
@@ -2412,6 +2973,7 @@ export const migrate =
         create table if not exists operational_notifications (
           id bigserial primary key,
           tenant_id text not null references tenants(id) on delete cascade,
+          recipient_id text,
           type text not null default 'system',
           severity text not null default 'info',
           title text not null,
@@ -2425,6 +2987,75 @@ export const migrate =
         )
       `
     )
+    await query(`alter table operational_notifications add column if not exists recipient_id text`)
+    await query(`create index if not exists operational_notifications_recipient_idx on operational_notifications (tenant_id, recipient_id, created_at desc)`)
+
+    await query(`
+      create table if not exists financial_history (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        resource text not null check (resource in ('products', 'filaments', 'printers', 'marketplaces')),
+        resource_id text not null,
+        snapshot jsonb not null default '{}'::jsonb,
+        source text not null default 'resource',
+        created_at timestamptz not null default now()
+      )
+    `)
+
+    await query(`create index if not exists financial_history_lookup_idx on financial_history (tenant_id, resource, resource_id, created_at desc)`)
+
+    await query(`
+      create table if not exists inventory_movements (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        resource text not null check (resource in ('filaments', 'products')),
+        resource_id bigint not null,
+        movement_type text not null check (movement_type in ('in', 'out', 'adjustment')),
+        quantity numeric(12,2) not null check (quantity > 0),
+        previous_quantity numeric(12,2) not null check (previous_quantity >= 0),
+        resulting_quantity numeric(12,2) not null check (resulting_quantity >= 0),
+        reason text not null default '',
+        created_by text,
+        created_at timestamptz not null default now()
+      )
+    `)
+    await query(`alter table inventory_movements drop constraint if exists inventory_movements_resource_check`)
+    await query(`alter table inventory_movements add constraint inventory_movements_resource_check check (resource in ('filaments', 'products'))`)
+    await query(`
+      create table if not exists product_inventory (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        product_id bigint not null references products(id) on delete cascade,
+        quantity numeric(12,2) not null default 0 check (quantity >= 0),
+        reserved_quantity numeric(12,2) not null default 0 check (reserved_quantity >= 0 and reserved_quantity <= quantity),
+        status text not null default 'Disponivel' check (status in ('Disponivel', 'Reservado', 'Esgotado')),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, product_id)
+      )
+    `)
+    await query(`create index if not exists product_inventory_tenant_status_idx on product_inventory (tenant_id, status, updated_at desc)`)
+    await query(`create index if not exists inventory_movements_lookup_idx on inventory_movements (tenant_id, resource, resource_id, created_at desc)`)
+    await query(`
+      create table if not exists order_inventory_fulfillments (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        order_id bigint not null references orders(id) on delete cascade,
+        product_id bigint not null references products(id) on delete restrict,
+        inventory_movement_id bigint not null references inventory_movements(id) on delete restrict,
+        quantity integer not null check (quantity > 0),
+        created_at timestamptz not null default now(),
+        unique (tenant_id, order_id)
+      )
+    `)
+    await query(`create index if not exists order_inventory_fulfillments_product_idx on order_inventory_fulfillments (tenant_id, product_id, created_at desc)`)
+
+    // Índices usados pela listagem paginada e pelos relatórios de vendas.
+    // O tenant permanece como primeira chave para preservar a separação por empresa.
+    await query(`create index if not exists orders_tenant_order_date_idx on orders (tenant_id, order_date desc)`)
+    await query(`create index if not exists tracked_sales_tenant_sold_at_idx on tracked_sales (tenant_id, sold_at desc)`)
+    await query(`create index if not exists platform_admin_audit_created_at_idx on platform_admin_audit_events (created_at desc)`)
+    await query(`create index if not exists tenant_audit_requests_created_at_idx on tenant_audit_requests (created_at desc)`)
+    await query(`create index if not exists tenant_audit_requests_kind_status_created_idx on tenant_audit_requests (request_kind, status, created_at desc)`)
 
     await query(
       `
@@ -2439,6 +3070,36 @@ export const migrate =
           details jsonb not null default '{}'::jsonb,
           created_at timestamptz not null default now()
         )
+      `
+    )
+
+    await query(`alter table agent_commands add column if not exists accepted_at timestamptz`)
+    await query(`alter table agent_commands add column if not exists lease_expires_at timestamptz`)
+    await query(`alter table agent_commands add column if not exists attempt integer not null default 0`)
+    await query(`create index if not exists agent_commands_lease_idx on agent_commands (tenant_id, agent_id, status, lease_expires_at)`)
+    await query(`alter table agents add column if not exists credential_version integer not null default 1`)
+    await query(`alter table agents add column if not exists pending_secret_hash text`)
+    await query(`alter table agents add column if not exists pending_credential_version integer`)
+    await query(`alter table agents add column if not exists pending_secret_expires_at timestamptz`)
+    await query(`alter table agents add column if not exists secret_rotated_at timestamptz`)
+
+    await query(
+      `
+        create table if not exists agent_event_receipts (
+          tenant_id text not null references tenants(id) on delete cascade,
+          agent_id text not null,
+          event_id text not null,
+          event_type text not null,
+          received_at timestamptz not null default now(),
+          primary key (tenant_id, agent_id, event_id)
+        )
+      `
+    )
+
+    await query(
+      `
+        create index if not exists agent_event_receipts_received_idx
+        on agent_event_receipts (tenant_id, received_at desc)
       `
     )
 

@@ -1,57 +1,61 @@
 <script setup lang="ts">
-type Overview = { tenants:number; activeTenants:number; suspendedTenants:number; paymentAttention:number; agents:number; onlineAgents:number; printers:number; connectedPrinters:number }
-type Tenant = { id:string; name:string; email:string; accountStatus:string; billingStatus:string; billingDueAt?:string; users:number; activeUsers:number; agents:number; onlineAgents:number; printers:number }
-type Audit = { id:string; action:string; actorType:string; entityType:string; entityId:string; createdAt:string }
-type PlatformAudit = { id:string; action:string; targetTenantId?:string; targetResource:string; targetResourceId:string; reason:string; createdAt:string }
-const session = useAdminSession()
-const overview = ref<Overview | null>(null)
-const tenants = ref<Tenant[]>([])
-const selected = ref<Tenant | null>(null)
-const audit = ref<Audit[]>([])
-const platformAudit = ref<PlatformAudit[]>([])
-const showingPlatformAudit = ref(false)
+const {
+  overview, tenants, requests, error, activeRequests, closedRequests,
+  supportMetrics, supportSlaRules, tenantFor, formatDate, isChatOpen, load, loadSupportMetrics, loadSupportSlaRules, updateSupportSlaRule
+} = usePlatformAdminWorkspace()
 const search = ref('')
-const loading = ref(false)
+const slaSaving = ref('')
+const slaError = ref('')
 
-const filtered = computed(() => tenants.value.filter((tenant) => `${tenant.name} ${tenant.email} ${tenant.id}`.toLowerCase().includes(search.value.toLowerCase())))
-const load = async () => {
-  session.restore()
-  if (!session.token.value) return navigateTo('/login')
-  loading.value = true
-  try {
-    ;[overview.value, tenants.value] = await Promise.all([session.request<Overview>('/api/platform-admin/overview'), session.request<Tenant[]>('/api/platform-admin/tenants')])
-  } catch { session.clear(); await navigateTo('/login') }
-  finally { loading.value = false }
+const recentRequests = computed(() => {
+  const term = search.value.trim().toLowerCase()
+  if (!term) return requests.value.slice(0, 5)
+  return requests.value.filter(request => `${request.id} ${request.reason} ${tenantFor(request.tenantId)?.name || ''}`.toLowerCase().includes(term)).slice(0, 5)
+})
+
+const operationalSummary = computed(() => {
+  if (!overview.value) return []
+  return [
+    { label: 'Empresas ativas', value: overview.value.activeTenants, total: overview.value.tenants },
+    { label: 'Agents online', value: overview.value.onlineAgents, total: overview.value.agents },
+    { label: 'Impressoras conectadas', value: overview.value.connectedPrinters, total: overview.value.printers }
+  ].map(item => ({ ...item, percentage: item.total > 0 ? Math.round((item.value / item.total) * 100) : 0 }))
+})
+
+const openChat = (requestId: string) => navigateTo({ path: '/solicitacoes', query: { protocolo: requestId } })
+const saveSlaRule = async (rule: any) => {
+  slaSaving.value = rule.id; slaError.value = ''
+  try { await updateSupportSlaRule(rule.id, { category: rule.category, priority: rule.priority, firstResponseMinutes: Number(rule.firstResponseMinutes), resolutionMinutes: Number(rule.resolutionMinutes), active: rule.active }) }
+  catch (cause: any) { slaError.value = cause?.data?.error || cause?.message || 'Nao foi possivel salvar a regra de SLA.' }
+  finally { slaSaving.value = '' }
 }
-const openAudit = async (tenant: Tenant) => { selected.value = tenant; audit.value = await session.request<Audit[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenant.id)}/audit?limit=100`) }
-const openPlatformAudit = async () => {
-  selected.value = null
-  platformAudit.value = await session.request<PlatformAudit[]>('/api/platform-admin/audit?limit=100')
-  showingPlatformAudit.value = true
-}
-const updateStatus = async (tenant: Tenant) => {
-  const reason = window.prompt('Motivo da alteracao (sera registrado na auditoria):') || ''
-  if (reason.trim().length < 8) return
-  const response = await session.request<Tenant>(`/api/platform-admin/tenants/${encodeURIComponent(tenant.id)}/status`, { method: 'POST', body: { accountStatus: tenant.accountStatus, billingStatus: tenant.billingStatus, reason } })
-  tenants.value = tenants.value.map((item) => item.id === response.id ? { ...item, ...response } : item)
-}
-onMounted(() => void load())
+onMounted(async () => {
+  await load({ overview: true, tenants: true, requests: true })
+  const [metricsResult, slaResult] = await Promise.allSettled([loadSupportMetrics(), loadSupportSlaRules()])
+  if (metricsResult.status === 'rejected' && !error.value) error.value = 'Nao foi possivel carregar as metricas do suporte.'
+  if (slaResult.status === 'rejected') slaError.value = 'Nao foi possivel carregar as regras de SLA.'
+})
 </script>
+
 <template>
-  <main class="admin-shell">
-    <header><div><span class="eyebrow">PRINTFLOW INTERNAL</span><h1>Administracao da plataforma</h1></div><div class="header-actions"><span>{{ session.user.value?.name }}</span><button @click="session.clear(); navigateTo('/login')">Sair</button></div></header>
-    <section v-if="overview" class="metrics">
-      <article><small>Empresas</small><strong>{{ overview.tenants }}</strong><span>{{ overview.activeTenants }} ativas</span></article>
-      <article><small>Atencao financeira</small><strong>{{ overview.paymentAttention }}</strong><span>pendentes ou atrasadas</span></article>
-      <article><small>Agents</small><strong>{{ overview.onlineAgents }}/{{ overview.agents }}</strong><span>online agora</span></article>
-      <article><small>Impressoras</small><strong>{{ overview.connectedPrinters }}/{{ overview.printers }}</strong><span>conectadas</span></article>
+  <AdminShell v-model:search="search" title="Central da plataforma" subtitle="Indicadores atuais consultados na plataforma" :request-count="activeRequests.length">
+    <p v-if="error" class="feedback feedback--error">{{ error }}</p>
+    <section v-if="overview" class="metrics-grid">
+      <article><span>Solicitacoes</span><strong>{{ requests.length }}</strong><small>{{ activeRequests.length }} aguardando acao</small></article>
+      <article><span>Em atendimento</span><strong>{{ supportMetrics?.open ?? activeRequests.length }}</strong><small>Conversas em andamento</small></article>
+      <article><span>Empresas</span><strong>{{ overview.tenants }}</strong><small>{{ overview.activeTenants }} ativas</small></article>
+      <article><span>Usuarios ativos</span><strong>{{ tenants.reduce((sum, tenant) => sum + tenant.activeUsers, 0) }}</strong><small>Em todos os tenants</small></article>
+      <article><span>Agents online</span><strong>{{ overview.onlineAgents }}</strong><small>de {{ overview.agents }} pareados</small></article>
+      <article><span>Impressoras</span><strong>{{ overview.connectedPrinters }}</strong><small>de {{ overview.printers }} conectadas</small></article>
+      <article><span>Atencao financeira</span><strong>{{ overview.paymentAttention }}</strong><small>Empresas com pendencias</small></article>
+      <article><span>Encerrados</span><strong>{{ closedRequests.length }}</strong><small>Protocolos preservados</small></article>
     </section>
-    <section class="surface"><div class="section-head"><div><h2>Empresas clientes</h2><p>Dados de plataforma. Cada acesso e alteracao e auditado.</p></div><div class="section-actions"><button @click="openPlatformAudit">Auditoria administrativa</button><input v-model="search" placeholder="Buscar empresa, e-mail ou ID"></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Empresa</th><th>Usuarios</th><th>Agents</th><th>Impressoras</th><th>Conta</th><th>Cobranca</th><th></th></tr></thead><tbody>
-        <tr v-for="tenant in filtered" :key="tenant.id"><td><strong>{{ tenant.name || 'Empresa sem nome' }}</strong><small>{{ tenant.email }}</small></td><td>{{ tenant.activeUsers }}/{{ tenant.users }}</td><td>{{ tenant.onlineAgents }}/{{ tenant.agents }}</td><td>{{ tenant.printers }}</td><td><select v-model="tenant.accountStatus" @change="updateStatus(tenant)"><option value="active">Ativa</option><option value="suspended">Suspensa</option><option value="blocked">Bloqueada</option></select></td><td><select v-model="tenant.billingStatus" @change="updateStatus(tenant)"><option value="not_configured">Nao configurada</option><option value="active">Em dia</option><option value="pending">Pendente</option><option value="overdue">Atrasada</option><option value="cancelled">Cancelada</option></select></td><td><button @click="openAudit(tenant)">Auditoria</button></td></tr>
-      </tbody></table></div>
+    <section class="dashboard-columns">
+      <article class="panel"><div class="panel-head"><div><h2>Disponibilidade operacional</h2><p>Valores retornados pela API nesta consulta</p></div></div><div class="live-summary"><div v-for="item in operationalSummary" :key="item.label" class="live-summary__row"><div><span>{{ item.label }}</span><strong>{{ item.value }} de {{ item.total }}</strong></div><div class="live-summary__track"><span :style="{ width: `${item.percentage}%` }"></span></div><small>{{ item.percentage }}%</small></div><p v-if="!operationalSummary.length" class="empty-state">Dados operacionais indisponiveis.</p></div></article>
+      <article class="panel"><div class="panel-head"><div><h2>Solicitacoes recentes</h2><p>Ultimos protocolos abertos</p></div><NuxtLink class="table-action" to="/solicitacoes">Ver todas</NuxtLink></div><button v-for="request in recentRequests" :key="request.id" class="activity-row" @click="openChat(request.id)"><span class="activity-icon">S</span><div><strong>{{ tenantFor(request.tenantId)?.name || request.tenantId }}</strong><small>{{ request.id }}</small></div><time>{{ formatDate(request.createdAt) }}</time></button><p v-if="!recentRequests.length" class="empty-state">Nenhuma solicitacao registrada.</p></article>
     </section>
-    <section v-if="selected" class="surface audit"><div class="section-head"><div><h2>Auditoria: {{ selected.name }}</h2><p>{{ selected.id }}</p></div><button @click="selected = null">Fechar</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Acao</th><th>Origem</th><th>Recurso</th></tr></thead><tbody><tr v-for="event in audit" :key="event.id"><td>{{ new Date(event.createdAt).toLocaleString('pt-BR') }}</td><td>{{ event.action }}</td><td>{{ event.actorType }}</td><td>{{ event.entityType }} {{ event.entityId }}</td></tr><tr v-if="!audit.length"><td colspan="4">Nenhum evento operacional encontrado.</td></tr></tbody></table></div></section>
-    <section v-if="showingPlatformAudit" class="surface audit"><div class="section-head"><div><h2>Auditoria administrativa</h2><p>Acoes executadas no portal interno.</p></div><button @click="showingPlatformAudit = false">Fechar</button></div><div class="table-wrap"><table><thead><tr><th>Data</th><th>Acao</th><th>Empresa</th><th>Recurso</th><th>Motivo</th></tr></thead><tbody><tr v-for="event in platformAudit" :key="event.id"><td>{{ new Date(event.createdAt).toLocaleString('pt-BR') }}</td><td>{{ event.action }}</td><td>{{ event.targetTenantId || '-' }}</td><td>{{ event.targetResource }} {{ event.targetResourceId }}</td><td>{{ event.reason || '-' }}</td></tr><tr v-if="!platformAudit.length"><td colspan="5">Nenhuma acao administrativa encontrada.</td></tr></tbody></table></div></section>
-  </main>
+    <section v-if="supportMetrics" class="dashboard-columns"><article class="panel"><div class="panel-head"><div><h2>Desempenho do suporte</h2><p>Indicadores comerciais separados do SLA de LGPD</p></div></div><div class="metrics-grid metrics-grid--compact"><article><span>1ª resposta média</span><strong>{{ Math.round(supportMetrics.averageFirstResponseMinutes) }} min</strong></article><article><span>Resolução média</span><strong>{{ Math.round(supportMetrics.averageResolutionMinutes) }} min</strong></article><article><span>Em atraso</span><strong>{{ supportMetrics.overdue }}</strong></article><article><span>Reabertos</span><strong>{{ supportMetrics.reopened }}</strong></article></div></article><article class="panel"><div class="panel-head"><div><h2>Fila e conformidade</h2><p>Distribuição atual dos protocolos</p></div></div><div class="live-summary"><div class="live-summary__row"><span>Aguardando cliente</span><strong>{{ supportMetrics.waitingCustomer }}</strong></div><div class="live-summary__row"><span>Aguardando equipe</span><strong>{{ supportMetrics.waitingInternal }}</strong></div><div class="live-summary__row"><span>LGPD dentro do prazo</span><strong>{{ supportMetrics.lgpd.withinDeadline }}</strong></div><div class="live-summary__row"><span>LGPD atrasadas</span><strong>{{ supportMetrics.lgpd.overdue }}</strong></div></div></article></section>
+    <section v-if="supportMetrics" class="dashboard-columns"><article class="panel"><div class="panel-head"><div><h2>Volume por empresa</h2><p>Tenants com maior volume de suporte</p></div></div><div class="live-summary"><div v-for="item in supportMetrics.byTenant" :key="item.tenantId" class="live-summary__row"><span>{{ tenantFor(item.tenantId)?.name || item.tenantId }}</span><strong>{{ item.total }}</strong></div><p v-if="!supportMetrics.byTenant.length" class="empty-state">Nenhum atendimento no período.</p></div></article><article class="panel"><div class="panel-head"><div><h2>Volume por responsável</h2><p>Distribuição dos atendimentos</p></div></div><div class="live-summary"><div v-for="item in supportMetrics.byAssignee" :key="item.id || item.name" class="live-summary__row"><span>{{ item.name }}</span><strong>{{ item.total }}</strong></div><p v-if="!supportMetrics.byAssignee.length" class="empty-state">Nenhum atendimento atribuído.</p></div></article></section>
+    <section class="panel"><div class="panel-head"><div><h2>Regras de SLA do suporte</h2><p>Prazos comerciais separados dos prazos legais de LGPD.</p></div></div><p v-if="slaError" class="feedback feedback--error">{{ slaError }}</p><div class="table-wrap"><table><thead><tr><th>Categoria</th><th>Prioridade</th><th>1a resposta (min)</th><th>Resolucao (min)</th><th>Ativa</th><th></th></tr></thead><tbody><tr v-for="rule in supportSlaRules" :key="rule.id"><td>{{ rule.category }}</td><td>{{ rule.priority }}</td><td><input v-model.number="rule.firstResponseMinutes" type="number" min="1" max="43200"></td><td><input v-model.number="rule.resolutionMinutes" type="number" min="1" max="43200"></td><td><input v-model="rule.active" type="checkbox"></td><td><button class="table-action" :disabled="slaSaving === rule.id" @click="saveSlaRule(rule)">{{ slaSaving === rule.id ? 'Salvando...' : 'Salvar' }}</button></td></tr><tr v-if="!supportSlaRules.length"><td colspan="6" class="empty-state">Nenhuma regra configurada.</td></tr></tbody></table></div></section>
+  </AdminShell>
 </template>

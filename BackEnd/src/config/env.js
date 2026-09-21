@@ -4,10 +4,13 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const envPath = resolve(currentDir, '../../.env')
+const localEnvPath = resolve(currentDir, '../../.env.local')
+const externallyConfiguredProduction = process.env.NODE_ENV === 'production'
+const runningTests = Boolean(process.env.NODE_TEST_CONTEXT)
 
-if (existsSync(envPath)) {
-  const envFile = readFileSync(envPath, 'utf8')
+const loadEnvFile = (filePath, overrideLocalValues = false) => {
+  if (!existsSync(filePath)) return
+  const envFile = readFileSync(filePath, 'utf8')
 
   for (const line of envFile.split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
@@ -15,9 +18,12 @@ if (existsSync(envPath)) {
 
     const [, key, rawValue] = match
     const value = rawValue.replace(/^["']|["']$/g, '')
-    process.env[key] ??= value
+    if (overrideLocalValues) process.env[key] = value
+    else process.env[key] ??= value
   }
 }
+
+if (!externallyConfiguredProduction && !runningTests) loadEnvFile(localEnvPath, true)
 
 const databaseUrl = process.env.DATABASE_URL || ''
 const isProduction = process.env.NODE_ENV === 'production'
@@ -25,6 +31,12 @@ const productionLike = isProduction || Boolean(databaseUrl)
 const authSecret = process.env.AUTH_SECRET || ''
 const dataEncryptionKey = process.env.DATA_ENCRYPTION_KEY || ''
 const webhookSharedSecret = process.env.WEBHOOK_SHARED_SECRET || ''
+const mercadoPagoAccessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || ''
+const mercadoPagoWebhookSecret = process.env.MERCADO_PAGO_WEBHOOK_SECRET || ''
+const mercadoPagoEnvironment = process.env.MERCADO_PAGO_ENVIRONMENT === 'production' ? 'production' : 'sandbox'
+const mercadoPagoTestPayerEmail = process.env.MERCADO_PAGO_TEST_PAYER_EMAIL || 'test@testuser.com'
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || ''
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || ''
 const defaultAuthTokenTtlSeconds = 15 * 60
 const defaultRefreshTokenTtlSeconds = 30 * 24 * 60 * 60
 const legacyDataEncryptionKeys = String(process.env.LEGACY_DATA_ENCRYPTION_KEYS || '')
@@ -44,28 +56,80 @@ const requireProductionSecret = (name, value, minLength = 32) => {
 requireProductionSecret('AUTH_SECRET', authSecret)
 requireProductionSecret('DATA_ENCRYPTION_KEY', dataEncryptionKey)
 requireProductionSecret('WEBHOOK_SHARED_SECRET', webhookSharedSecret)
+if (productionLike && !String(process.env.CORS_ALLOWED_ORIGINS || '').trim()) {
+  throw new Error('CORS_ALLOWED_ORIGINS obrigatorio quando o backend usa banco real.')
+}
 const developmentAuthSecret = authSecret || randomBytes(32).toString('base64url')
+const objectStorageProvider = String(process.env.OBJECT_STORAGE_PROVIDER || 'local').toLowerCase()
+if (!['local', 'r2'].includes(objectStorageProvider)) {
+  throw new Error('OBJECT_STORAGE_PROVIDER deve ser local ou r2.')
+}
+if (isProduction && objectStorageProvider !== 'r2') {
+  throw new Error('OBJECT_STORAGE_PROVIDER deve ser r2 em Production.')
+}
+if (productionLike && objectStorageProvider === 'r2') {
+  for (const name of ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY']) {
+    if (!String(process.env[name] || '').trim()) throw new Error(`${name} obrigatorio quando R2 esta habilitado.`)
+  }
+  const r2Endpoint = process.env.R2_ENDPOINT || `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+  if (!/^https:\/\/[^/]+$/i.test(r2Endpoint)) throw new Error('R2_ENDPOINT deve usar HTTPS.')
+}
 
 export const env = {
   port: Number(process.env.PORT || 3333),
   databaseUrl,
   isProduction,
+  isProductionLike: productionLike,
   allowDemoTenant: process.env.ALLOW_DEMO_TENANT === 'true' && !productionLike,
   authSecret: developmentAuthSecret,
   dataEncryptionKey,
   legacyDataEncryptionKeys,
   webhookSharedSecret,
+  mercadoPagoAccessToken,
+  mercadoPagoWebhookSecret,
+  mercadoPagoEnvironment,
+  mercadoPagoTestPayerEmail,
+  mercadoPagoApiUrl: 'https://api.mercadopago.com',
+  stripeSecretKey,
+  stripeWebhookSecret,
+  stripeApiUrl: 'https://api.stripe.com/v1',
   platformSuperAdminEmails: String(process.env.PLATFORM_SUPER_ADMIN_EMAILS || '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean),
+  platformDeveloperEmails: String(process.env.PLATFORM_DEVELOPER_EMAILS || '')
     .split(',')
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean),
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || defaultAuthTokenTtlSeconds),
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS || defaultRefreshTokenTtlSeconds),
+  authCookieSameSite: String(process.env.AUTH_COOKIE_SAME_SITE || (productionLike ? 'none' : 'lax')).toLowerCase(),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),
   rateLimitAuthMaxRequests: Number(process.env.RATE_LIMIT_AUTH_MAX_REQUESTS || 12),
+  rateLimitRefreshMaxRequests: Number(process.env.RATE_LIMIT_REFRESH_MAX_REQUESTS || 30),
+  rateLimitShared: process.env.RATE_LIMIT_SHARED === 'true',
   maxConcurrentRequestsPerIp: Number(process.env.MAX_CONCURRENT_REQUESTS_PER_IP || 25),
+  tenantDeletionGraceDays: Number(process.env.TENANT_DELETION_GRACE_DAYS || 7),
+  tenantDeletionPurgeIntervalMs: Number(process.env.TENANT_DELETION_PURGE_INTERVAL_MS || 60 * 60 * 1000),
+  privacyRequestRetentionIntervalMs: Number(process.env.PRIVACY_REQUEST_RETENTION_INTERVAL_MS || 60 * 60 * 1000),
+  supportSlaWatchdogIntervalMs: Number(process.env.SUPPORT_SLA_WATCHDOG_INTERVAL_MS || 15 * 60 * 1000),
+  supportSlaWarningMs: Number(process.env.SUPPORT_SLA_WARNING_MS || 24 * 60 * 60 * 1000),
+  supportReopenWindowDays: Number(process.env.SUPPORT_REOPEN_WINDOW_DAYS || 7),
+  supportAttachmentStorageDir: process.env.SUPPORT_ATTACHMENT_STORAGE_DIR || resolve(currentDir, '../../storage/support-attachments'),
+  supportAttachmentMaxBytes: Number(process.env.SUPPORT_ATTACHMENT_MAX_BYTES || 5 * 1024 * 1024),
+  supportAttachmentRetentionDays: Number(process.env.SUPPORT_ATTACHMENT_RETENTION_DAYS || 30),
+  supportAttachmentCleanupIntervalMs: Number(process.env.SUPPORT_ATTACHMENT_CLEANUP_INTERVAL_MS || 6 * 60 * 60 * 1000),
+  expenseRecurringIntervalMs: Number(process.env.EXPENSE_RECURRING_INTERVAL_MS || 60 * 60 * 1000),
   printFileStorageDir: process.env.PRINT_FILE_STORAGE_DIR || resolve(currentDir, '../../storage/print-files'),
+  objectStorageProvider,
+  objectStorageLocalDir: process.env.OBJECT_STORAGE_LOCAL_DIR || resolve(currentDir, '../../storage/object-storage'),
+  r2AccountId: process.env.R2_ACCOUNT_ID || '',
+  r2Bucket: process.env.R2_BUCKET || '',
+  r2AccessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+  r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+  r2Endpoint: process.env.R2_ENDPOINT || '',
+  r2PresignExpiresSeconds: Number(process.env.R2_PRESIGN_EXPIRES_SECONDS || 900),
   printFileMaxBytes: Number(process.env.PRINT_FILE_MAX_BYTES || 250 * 1024 * 1024),
   printFileStorageMaxBytes: Number(process.env.PRINT_FILE_STORAGE_MAX_BYTES || 10 * 1024 * 1024 * 1024),
   printFileStorageRetentionDays: Number(process.env.PRINT_FILE_STORAGE_RETENTION_DAYS || 30),
@@ -76,7 +140,15 @@ export const env = {
   printQueueWatchdogIntervalMs: Number(process.env.PRINT_QUEUE_WATCHDOG_INTERVAL_MS || 60 * 1000),
   agentOfflineAfterMs: Number(process.env.AGENT_OFFLINE_AFTER_MS || 90 * 1000),
   agentHealthWatchdogIntervalMs: Number(process.env.AGENT_HEALTH_WATCHDOG_INTERVAL_MS || 30 * 1000),
+  subscriptionWatchdogIntervalMs: Number(process.env.SUBSCRIPTION_WATCHDOG_INTERVAL_MS || 60 * 60 * 1000),
+  subscriptionWarningMs: Number(process.env.SUBSCRIPTION_WARNING_MS || 3 * 24 * 60 * 60 * 1000),
   appPublicUrl: process.env.APP_PUBLIC_URL || '',
+  corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',').map((value) => value.trim().replace(/\/$/, '')).filter(Boolean),
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  emailFrom: process.env.EMAIL_FROM || '',
+  authRequireEmailVerification: process.env.AUTH_REQUIRE_EMAIL_VERIFICATION === 'true',
+  authRequireMfaForPrivileged: process.env.AUTH_REQUIRE_MFA_FOR_PRIVILEGED === 'true',
   apiPublicUrl: process.env.API_PUBLIC_URL || '',
   mercadoLivreClientId: process.env.MERCADO_LIVRE_CLIENT_ID || '',
   mercadoLivreClientSecret: process.env.MERCADO_LIVRE_CLIENT_SECRET || '',

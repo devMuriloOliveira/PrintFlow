@@ -42,20 +42,108 @@ const readProducts = async (client, tenantId) => {
   return result.rows.map(mapProduct)
 }
 
+const mapOrder = (row) => ({ dbId: row.marketplace_order ? `marketplace:${row.id}` : String(row.id), id: decryptField(row.external_id), productId: row.product_id ? String(row.product_id) : '', clientId: row.client_id ? String(row.client_id) : '', date: row.date, client: decryptField(row.client), marketplace: row.marketplace,
+  product: row.product, qty: Number(row.qty), gross: number(row.gross), fee: number(row.fee), shipping: number(row.shipping),
+  net: number(row.net), profit: number(row.profit), status: row.status, trackingCode: row.delivery_tracking_code || '',
+  packedAt: row.packed_at || null, shippedAt: row.shipped_at || null, deliveredAt: row.delivered_at || null,
+  marketplaceOrder: Boolean(row.marketplace_order), salesChannel: row.sales_channel || (row.marketplace_order ? 'marketplace' : 'direct') })
+
 const readOrders = async (client, tenantId) => {
   const result = await client.query(`
-    select o.id, o.external_id, o.product_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
-      coalesce(m.name, 'Nao informado') as marketplace, o.product_name as product, o.quantity as qty,
-      o.gross, o.fee, o.shipping, o.net, o.profit, o.status
+    select o.id, o.external_id, o.product_id, o.client_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
+      coalesce(m.name, case when o.sales_channel = 'direct' then 'Venda direta' else 'Nao informado' end) as marketplace, o.product_name as product, o.quantity as qty,
+      o.gross, o.fee, o.shipping, o.net, o.profit, o.status, o.delivery_tracking_code,
+      o.packed_at, o.shipped_at, o.delivered_at, o.sales_channel, false as marketplace_order, o.order_date as sort_date
     from orders o
     left join clients c on c.id = o.client_id and c.tenant_id = o.tenant_id
     left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
-    where o.tenant_id = $1 order by o.order_date desc, o.id desc
+    where o.tenant_id = $1
+
+    union all
+
+    select s.id, s.external_order_id as external_id, null as product_id, null as client_id,
+      to_char(s.sold_at, 'DD/MM/YYYY') as date, 'Marketplace' as client,
+      coalesce(m.name, s.platform) as marketplace, s.product_name as product, s.quantity as qty,
+      s.gross, s.marketplace_fee as fee, s.shipping, s.net, s.profit, s.status, '' as delivery_tracking_code,
+      null as packed_at, null as shipped_at, null as delivered_at, 'marketplace' as sales_channel, true as marketplace_order, s.sold_at as sort_date
+    from tracked_sales s
+    left join marketplaces m on m.id = s.marketplace_id and m.tenant_id = s.tenant_id
+    where s.tenant_id = $1
+
+    order by sort_date desc, id desc
   `, [tenantId])
-  return result.rows.map((row) => ({ dbId: String(row.id), id: row.external_id, productId: row.product_id ? String(row.product_id) : '', date: row.date, client: decryptField(row.client), marketplace: row.marketplace,
-    product: row.product, qty: Number(row.qty), gross: number(row.gross), fee: number(row.fee), shipping: number(row.shipping),
-    net: number(row.net), profit: number(row.profit), status: row.status }))
+  return result.rows.map(mapOrder)
 }
+
+export const listOrdersPage = async (tenantId, options = {}) => withTenant(tenantId, async (client) => {
+  const limit = Math.min(100, Math.max(1, Number(options.limit) || 25))
+  const offset = Math.max(0, Number(options.offset) || 0)
+  const status = options.status ? String(options.status) : null
+  const salesChannel = options.salesChannel ? String(options.salesChannel) : null
+  const clientId = options.clientId ? String(options.clientId) : null
+  const search = options.search ? `%${String(options.search).slice(0, 80)}%` : null
+  const from = options.from ? String(options.from) : null
+  const to = options.to ? String(options.to) : null
+  const result = await client.query(`
+    with combined as (
+      select o.id, o.external_id, o.product_id, o.client_id, to_char(o.order_date, 'DD/MM/YYYY') as date, coalesce(c.name, 'Nao informado') as client,
+        coalesce(m.name, case when o.sales_channel = 'direct' then 'Venda direta' else 'Nao informado' end) as marketplace, o.product_name as product, o.quantity as qty,
+        o.gross, o.fee, o.shipping, o.net, o.profit, o.status, o.delivery_tracking_code,
+        o.packed_at, o.shipped_at, o.delivered_at, o.sales_channel, false as marketplace_order, o.order_date as sort_date
+      from orders o left join clients c on c.id = o.client_id and c.tenant_id = o.tenant_id left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
+      where o.tenant_id = $1
+      union all
+      select s.id, s.external_order_id as external_id, null as product_id, null as client_id, to_char(s.sold_at, 'DD/MM/YYYY') as date, 'Marketplace' as client,
+        coalesce(m.name, s.platform) as marketplace, s.product_name as product, s.quantity as qty,
+        s.gross, s.marketplace_fee as fee, s.shipping, s.net, s.profit, s.status, '' as delivery_tracking_code,
+        null as packed_at, null as shipped_at, null as delivered_at, 'marketplace' as sales_channel, true as marketplace_order, s.sold_at as sort_date
+      from tracked_sales s left join marketplaces m on m.id = s.marketplace_id and m.tenant_id = s.tenant_id
+      where s.tenant_id = $1
+    ), filtered as (
+      select * from combined
+      where ($2::text is null or status = $2::text)
+        and ($3::text is null or sales_channel = $3::text)
+        and ($4::text is null or product ilike $4::text or client ilike $4::text or marketplace ilike $4::text)
+        and ($5::date is null or sort_date >= $5::date)
+        and ($6::date is null or sort_date < ($6::date + interval '1 day'))
+        and ($9::text is null or client_id::text = $9::text)
+    )
+    select filtered.*, count(*) over()::int as total_count from filtered
+    order by sort_date desc, id desc limit $7 offset $8
+  `, [tenantId, status, salesChannel, search, from, to, limit, offset, clientId])
+  const total = result.rows.length ? Number(result.rows[0].total_count || 0) : 0
+  return { items: result.rows.map(mapOrder), total, limit, offset }
+})
+
+export const getOrdersSummary = async (tenantId) => withTenant(tenantId, async (client) => {
+  const result = await client.query(`
+    with combined as (
+      select gross, net, profit, fee, shipping, status, order_date as sold_at from orders where tenant_id = $1
+      union all
+      select gross, net, profit, marketplace_fee as fee, shipping, status, sold_at from tracked_sales where tenant_id = $1
+    )
+    select count(*)::int as order_count,
+      coalesce(sum(gross), 0) as gross, coalesce(sum(net), 0) as net,
+      coalesce(sum(profit), 0) as profit, coalesce(sum(fee), 0) as fees,
+      coalesce(sum(shipping), 0) as shipping, coalesce(avg(gross), 0) as ticket
+    from combined
+  `, [tenantId])
+  const statusResult = await client.query(`
+    with combined as (
+      select status from orders where tenant_id = $1
+      union all
+      select status from tracked_sales where tenant_id = $1
+    )
+    select coalesce(status, 'Sem status') as status, count(*)::int as count
+    from combined group by status order by count desc
+  `, [tenantId])
+  const row = result.rows[0] || {}
+  return {
+    orderCount: Number(row.order_count || 0), gross: number(row.gross), net: number(row.net), profit: number(row.profit),
+    fees: number(row.fees), shipping: number(row.shipping), ticket: number(row.ticket),
+    byStatus: statusResult.rows.map((item) => ({ status: item.status, count: Number(item.count || 0) }))
+  }
+})
 
 const readPrintJobs = async (client, tenantId) => {
   const result = await client.query(`
@@ -64,6 +152,7 @@ const readPrintJobs = async (client, tenantId) => {
       j.order_id,
       o.external_id,
       j.tracked_sale_id,
+      s.external_order_id as tracked_external_order_id,
       j.product_id,
       coalesce(p.name, j.title) as product_name,
       j.printer_id,
@@ -89,6 +178,7 @@ const readPrintJobs = async (client, tenantId) => {
       j.updated_at
     from print_jobs j
     left join orders o on o.id = j.order_id and o.tenant_id = j.tenant_id
+    left join tracked_sales s on s.id = j.tracked_sale_id and s.tenant_id = j.tenant_id
     left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id
     left join printers pr on pr.id = j.printer_id and pr.tenant_id = j.tenant_id
     left join agent_printers ap on ap.id = j.agent_printer_id and ap.tenant_id = j.tenant_id
@@ -110,7 +200,7 @@ const readPrintJobs = async (client, tenantId) => {
   return result.rows.map((row) => ({
     id: String(row.id),
     orderId: row.order_id ? String(row.order_id) : '',
-    externalOrderId: row.external_id || '',
+    externalOrderId: row.external_id || decryptField(row.tracked_external_order_id) || '',
     trackedSaleId: row.tracked_sale_id ? String(row.tracked_sale_id) : '',
     productId: row.product_id ? String(row.product_id) : '',
     productName: row.product_name || '',
@@ -141,19 +231,20 @@ const readPrintJobs = async (client, tenantId) => {
 const readExpenses = async (client, tenantId) => {
   const result = await client.query(`
     select id, description, category, supplier, amount as value, to_char(expense_date, 'DD/MM/YYYY') as date,
-      payment, recurrence, status from expenses where tenant_id = $1 order by expense_date desc, id desc
+      payment, recurrence, status, to_char(next_due_date, 'DD/MM/YYYY') as next_due_date,
+      notes from expenses where tenant_id = $1 order by expense_date desc, id desc
   `, [tenantId])
   return result.rows.map((row) => ({ ...row, id: String(row.id), value: number(row.value) }))
 }
 
 const readFilaments = async (client, tenantId) => {
   const result = await client.query(`
-    select id, name, maker, material, type, color, color_hex, initial_weight, remaining_weight, cost, supplier,
+    select id, name, maker, material, type, color, color_hex, initial_weight, remaining_weight, min_stock_weight, cost, supplier,
       to_char(purchase_date, 'DD/MM/YYYY') as date, status from filaments where tenant_id = $1 order by created_at desc
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, maker: row.maker, material: row.material, type: row.type,
     color: row.color, colorHex: row.color_hex, initial: number(row.initial_weight), remaining: number(row.remaining_weight),
-    cost: number(row.cost), supplier: row.supplier, date: row.date || '', status: row.status }))
+    minStock: number(row.min_stock_weight) || 300, cost: number(row.cost), supplier: row.supplier, date: row.date || '', status: row.status }))
 }
 
 const readPrinters = async (client, tenantId) => {
@@ -184,6 +275,7 @@ const readPrinters = async (client, tenantId) => {
       p.agent_connection_type,
       ap.status as agent_printer_status,
       ap.last_status as agent_last_status,
+      ap.metadata -> 'capabilities' as agent_capabilities,
       ap.last_connection_error as agent_last_connection_error,
       ap.last_seen_at as agent_last_seen_at
     from printers p
@@ -198,7 +290,7 @@ const readPrinters = async (client, tenantId) => {
     minLayerHeight: number(row.min_layer_height), maxLayerHeight: number(row.max_layer_height),
     agentId: row.agent_id ? String(row.agent_id) : '', agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
     agentConnectionKey: row.agent_connection_key || '', agentProtocol: row.agent_protocol || '', agentConnectionType: row.agent_connection_type || '',
-    agentPrinterStatus: row.agent_printer_status || '', agentLastStatus: row.agent_last_status || {},
+    agentPrinterStatus: row.agent_printer_status || '', agentLastStatus: row.agent_last_status || {}, agentCapabilities: row.agent_capabilities || {},
     agentLastConnectionError: row.agent_last_connection_error || '', agentLastSeenAt: row.agent_last_seen_at || null }))
 }
 
@@ -207,14 +299,15 @@ const readMarketplaces = async (client, tenantId) => {
     select m.id, m.name, m.short, m.color, m.platform, m.connection_status, m.commission, m.fixed, m.financial, m.ads, m.others, m.active,
       coalesce(o.gross, 0) + coalesce(ts.gross, 0) as gross,
       coalesce(o.net, 0) + coalesce(ts.net, 0) as net,
+      coalesce(o.fees, 0) + coalesce(ts.fees, 0) as fees,
       (coalesce(o.orders, 0) + coalesce(ts.orders, 0))::int as orders
     from marketplaces m
     left join (
-      select marketplace_id, sum(gross) as gross, sum(net) as net, count(id)::int as orders
+      select marketplace_id, sum(gross) as gross, sum(net) as net, sum(fee) as fees, count(id)::int as orders
       from orders where tenant_id = $1 group by marketplace_id
     ) o on o.marketplace_id = m.id
     left join (
-      select marketplace_id, sum(gross) as gross, sum(net) as net, count(id)::int as orders
+      select marketplace_id, sum(gross) as gross, sum(net) as net, sum(marketplace_fee) as fees, count(id)::int as orders
       from tracked_sales where tenant_id = $1 group by marketplace_id
     ) ts on ts.marketplace_id = m.id
     where m.tenant_id = $1
@@ -222,18 +315,24 @@ const readMarketplaces = async (client, tenantId) => {
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, short: row.short, color: row.color, commission: number(row.commission),
     fixed: number(row.fixed), financial: number(row.financial), ads: number(row.ads), others: number(row.others),
-    gross: number(row.gross), net: number(row.net), orders: Number(row.orders), active: row.active,
+    gross: number(row.gross), net: number(row.net), fees: number(row.fees), orders: Number(row.orders), active: row.active,
     platform: row.platform, connectionStatus: row.connection_status }))
 }
 
 const readClients = async (client, tenantId) => {
   const result = await client.query(`
-    select c.id, c.name, c.email, c.phone, count(o.id)::int as orders, coalesce(sum(o.gross), 0) as revenue,
-      coalesce(avg(o.gross), 0) as ticket, to_char(max(o.order_date), 'DD/MM/YYYY') as last
+    select c.id, c.name, c.email, c.phone, c.client_type, c.document, c.zip, c.address, c.address_number,
+      c.complement, c.district, c.city, c.state, c.origin, c.notes, c.tags, c.status,
+      count(o.id) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))::int as orders,
+      coalesce(sum(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as revenue,
+      coalesce(avg(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as ticket,
+      to_char(max(o.order_date) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 'DD/MM/YYYY') as last
     from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1
+      left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
     where c.tenant_id = $1 group by c.id order by c.created_at desc
   `, [tenantId])
-  return result.rows.map((row) => ({ id: String(row.id), name: decryptField(row.name), email: decryptField(row.email), phone: decryptField(row.phone), orders: Number(row.orders),
+  return result.rows.map((row) => ({ id: String(row.id), name: decryptField(row.name), email: decryptField(row.email), phone: decryptField(row.phone),
+    type: row.client_type || 'Pessoa Fisica', document: decryptField(row.document), zip: decryptField(row.zip), address: decryptField(row.address), number: decryptField(row.address_number), complement: decryptField(row.complement), district: decryptField(row.district), city: decryptField(row.city), state: decryptField(row.state), origin: row.origin || 'Outro', notes: decryptField(row.notes), tags: row.tags || '', status: row.status || 'active', orders: Number(row.orders),
     revenue: number(row.revenue), ticket: number(row.ticket), last: row.last || '' }))
 }
 
@@ -249,16 +348,28 @@ const readExpenseSegments = async (client, tenantId) => {
 
 const readGoals = async (client, tenantId) => {
   const result = await client.query(`
-    select id, name, current_value, target_value, color, icon, to_char(period_start, 'YYYY-MM-DD') as period_start,
-      to_char(period_end, 'YYYY-MM-DD') as period_end, status from goals where tenant_id = $1 order by created_at asc
+    select g.id, g.name, g.goal_type, g.current_value, g.target_value, g.color, g.icon,
+      to_char(g.period_start, 'YYYY-MM-DD') as period_start, to_char(g.period_end, 'YYYY-MM-DD') as period_end, g.status,
+      case when g.goal_type = 'revenue' then coalesce(k.revenue, 0) when g.goal_type = 'profit' then coalesce(k.profit, 0)
+        when g.goal_type = 'orders' then coalesce(k.orders, 0) when g.goal_type = 'average_ticket' then coalesce(k.ticket, 0)
+        else g.current_value end as calculated_current
+    from goals g
+    left join lateral (
+      select sum(s.gross) as revenue, sum(s.profit) as profit, count(*)::int as orders, avg(s.gross) as ticket
+      from (select o.gross, o.profit, o.order_date from orders o where o.tenant_id = g.tenant_id and o.status <> 'Cancelado'
+        union all select ts.gross, ts.profit, ts.sold_at as order_date from tracked_sales ts where ts.tenant_id = g.tenant_id and ts.status <> 'Cancelado') s
+      where g.period_start is not null and g.period_end is not null and s.order_date >= g.period_start and s.order_date < (g.period_end + interval '1 day')
+    ) k on true
+    where g.tenant_id = $1 order by g.created_at asc
   `, [tenantId])
-  return result.rows.map((row) => ({ id: String(row.id), name: row.name, current: number(row.current_value), target: number(row.target_value),
+  return result.rows.map((row) => ({ id: String(row.id), name: row.name, goalType: row.goal_type || 'revenue', current: number(row.calculated_current), target: number(row.target_value),
     color: row.color, icon: row.icon, periodStart: row.period_start, periodEnd: row.period_end, status: row.status }))
 }
 
 const readSettings = async (client, tenantId) => {
-  const result = await client.query(`select name, document, phone, email, address, district, city, state, zip, country,
-    currency, timezone, kwh from company_settings where tenant_id = $1`, [tenantId])
+  const result = await client.query(`select coalesce(nullif(settings.name, ''), tenant.name) as name, coalesce(nullif(settings.document, ''), tenant.document) as document, settings.phone, coalesce(nullif(settings.email, ''), tenant.email) as email, settings.address, settings.district, settings.city, settings.state, settings.zip, settings.country,
+    settings.currency, settings.timezone, settings.kwh, settings.preferences, tenant.document_locked_at, tenant.document_type
+    from company_settings settings join tenants tenant on tenant.id = settings.tenant_id where settings.tenant_id = $1`, [tenantId])
   const row = result.rows[0]
   if (!row) return null
   return {
@@ -271,14 +382,15 @@ const readSettings = async (client, tenantId) => {
     district: decryptField(row.district),
     city: decryptField(row.city),
     state: decryptField(row.state),
-    zip: decryptField(row.zip)
+    zip: decryptField(row.zip),
+    preferences: row.preferences || {}, documentLocked: Boolean(row.document_locked_at), documentType: row.document_type || ''
   }
 }
 
 const readMarketplaceIntegrations = async (client, tenantId) => {
   const result = await client.query(`
     select id, marketplace_id, platform, connection_name, account_external_id, status, scopes,
-      access_token, refresh_token, token_expires_at, last_sync_at
+      access_token, refresh_token, token_expires_at, last_sync_at, last_error
     from marketplace_integrations
     where tenant_id = $1
     order by created_at desc
@@ -294,20 +406,39 @@ const readMarketplaceIntegrations = async (client, tenantId) => {
     hasAccessToken: Boolean(row.access_token),
     hasRefreshToken: Boolean(row.refresh_token),
     tokenExpiresAt: row.token_expires_at || null,
-    lastSyncAt: row.last_sync_at || null
+    lastSyncAt: row.last_sync_at || null, lastError: row.last_error || ''
   }))
 }
 
-export const loadAppData = async (tenantId) => withTenant(tenantId, async (client) => {
+export const loadAppData = async (tenantId, requestedResources = null) => withTenant(tenantId, async (client) => {
+  const selected = requestedResources instanceof Set && requestedResources.size ? requestedResources : new Set(Object.keys(resourceReaders))
+  const read = (resource) => selected.has(resource) ? resourceReaders[resource](client, tenantId) : Promise.resolve([])
   const [products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations] = await Promise.all([
-    readProducts(client, tenantId), readOrders(client, tenantId), readPrintJobs(client, tenantId), readExpenses(client, tenantId), readFilaments(client, tenantId),
-    readPrinters(client, tenantId), readMarketplaces(client, tenantId), readClients(client, tenantId), readExpenseSegments(client, tenantId),
-    readGoals(client, tenantId), readSettings(client, tenantId), readMarketplaceIntegrations(client, tenantId)
+    read('products'), read('orders'), read('printJobs'), read('expenses'), read('filaments'), read('printers'),
+    read('marketplaces'), read('clients'), read('expenseSegments'), read('goals'),
+    selected.has('settings') ? readSettings(client, tenantId) : Promise.resolve(null),
+    read('marketplaceIntegrations')
   ])
   return { products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations }
 })
 
+const resourceReaders = {
+  products: readProducts,
+  orders: readOrders,
+  printJobs: readPrintJobs,
+  expenses: readExpenses,
+  filaments: readFilaments,
+  printers: readPrinters,
+  marketplaces: readMarketplaces,
+  clients: readClients,
+  expenseSegments: readExpenseSegments,
+  goals: readGoals,
+  settings: readSettings,
+  marketplaceIntegrations: readMarketplaceIntegrations
+}
+
 export const listResource = async (tenantId, resource) => {
-  const data = await loadAppData(tenantId)
-  return data[resource]
+  const reader = resourceReaders[resource]
+  if (!reader) return undefined
+  return withTenant(tenantId, (client) => reader(client, tenantId))
 }

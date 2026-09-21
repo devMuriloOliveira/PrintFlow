@@ -1,7 +1,8 @@
 <script setup lang="ts">
 defineEmits<{ menu: [] }>()
 
-const searchOpen = ref(false)
+const { settings } = useAppData()
+const workspaceName = computed(() => settings.value?.name || 'PrintFlow 3D')
 const notificationsOpen = ref(false)
 const auth = useAuth()
 const { notifications, unreadCount, refreshNotifications, markNotificationRead } = useOperationalNotifications()
@@ -20,8 +21,14 @@ const notificationTime = (value: string) => {
 }
 
 onMounted(() => {
-  void refreshNotifications().catch(() => {})
-  notificationTimer = setInterval(() => void refreshNotifications().catch(() => {}), 30_000)
+  const load = () => {
+    if (document.visibilityState === 'visible') void refreshNotifications().catch(() => {})
+    notificationTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshNotifications().catch(() => {})
+    }, 30_000)
+  }
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(load, { timeout: 2000 })
+  else window.setTimeout(load, 900)
 })
 
 onBeforeUnmount(() => {
@@ -45,30 +52,12 @@ const initials = computed(() =>
       <UiIcon name="menu" />
     </button>
 
-    <div class="topbar-search" :class="{ 'topbar-search--open': searchOpen }">
-      <UiIcon name="search" :size="18" />
-      <input
-        aria-label="Busca global"
-        placeholder="Buscar pedidos, clientes, produtos..."
-        @focus="searchOpen = true"
-        @blur="searchOpen = false"
-      >
-      <kbd>Ctrl K</kbd>
+    <div class="workspace-context">
+      <UiIcon name="building" :size="18" />
+      <div><small>Área de trabalho</small><strong>{{ workspaceName }}</strong></div>
     </div>
 
     <div class="topbar-actions">
-      <button class="top-control top-control--date">
-        <UiIcon name="calendar" :size="18" />
-        <span>01/05/2024 - 31/05/2024</span>
-        <UiIcon name="down" :size="15" />
-      </button>
-
-      <button class="top-control top-control--company">
-        <UiIcon name="building" :size="18" />
-        <span>PrintFlow 3D LTDA</span>
-        <UiIcon name="down" :size="15" />
-      </button>
-
       <div class="notification-wrap">
         <button
           class="icon-btn notification"
@@ -122,14 +111,14 @@ const initials = computed(() =>
         </Transition>
       </div>
 
-      <button class="profile-control" @click="auth.logout">
+      <NuxtLink class="profile-control" to="/perfil" aria-label="Abrir meu perfil">
         <span class="avatar">{{ initials }}</span>
         <span class="profile-copy">
           <strong>{{ auth.user.value?.name || 'Usuário' }}</strong>
-          <small>Sair da conta</small>
+          <small>Meu perfil</small>
         </span>
-        <UiIcon name="logout" :size="14" />
-      </button>
+        <UiIcon name="chevron" :size="14" />
+      </NuxtLink>
     </div>
   </header>
 </template>

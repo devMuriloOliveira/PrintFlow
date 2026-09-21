@@ -1,6 +1,4 @@
-import {
-  sendJson
-} from '../http/response.js'
+import { configureCors, sendJson } from '../http/response.js'
 
 import {
   enterRequest
@@ -8,10 +6,24 @@ import {
 
 import {
   handleLogin,
+  handlePasswordChange,
+  handleTenantDeletionRequest,
+  handleInvitationAccept,
+  handleSessionRevoke,
+  handleSessionsList,
+  handleSessionsRevokeAll,
   handleLogout,
   handleMe,
   handleRefresh,
   handleRegister,
+  handleEmailVerification,
+  handlePasswordResetRequest,
+  handlePasswordResetConfirm,
+  handleMfaSetup,
+  handleMfaStatus,
+  handleMfaEnable,
+  handleMfaDisable,
+  handleMfaLogin,
   getAuthUser
 } from './auth.js'
 
@@ -20,21 +32,58 @@ import {
 } from '../config/env.js'
 
 import {
+  canAccessRequest
+} from '../auth/authorization.js'
+
+import {
+  assertTenantRequestEntitlement
+} from '../services/subscriptionEntitlements.js'
+
+import {
   handleProductCreate,
   handleProductPrintFileUpload,
+  handleRecurringExpensesGenerate,
   handleResourceCreate,
   handleResourceDelete,
   handleResourceRead,
   handleResourceUpdate,
+  handleFilamentMovements,
+  handleInventoryOverview,
+  handleProductInventoryMovements,
+  handleOrderStageAdvance,
   readRoutes
 } from './resources.js'
 
 import {
+  handleSettingsExport,
+  handleSettingsExportHistory,
+  handleSettingsBackupStatus,
+  handleSettingsUpdate,
+  handleCompanyCnpjLookup
+} from './settings.js'
+
+import { handleFinancialReportExport } from './reports.js'
+import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } from './calculator.js'
+import {
+  handleMercadoPagoBillingSummary,
+  handleMercadoPagoCheckoutCreate,
+  handleMercadoPagoWebhook,
+  handleMercadoPagoWebhookProbe,
+  handleStripeBillingSummary,
+  handleStripeCheckoutCreate,
+  handleStripeSubscriptionCancellation,
+  handleStripeSubscriptionPlanChange,
+  handleStripeWebhook
+} from './billing.js'
+
+import {
   handleAmazonWebhook,
   handleIntegrationCreate,
+  handleIntegrationsOverview,
   handleIntegrationsList,
   handleMarketplaceOAuthCallback,
   handleMarketplaceOAuthStart,
+  handleMarketplaceIntegrationDisconnect,
   handleMarketplaceOrderSync,
   handleMercadoLivreWebhook,
   handleShopeeWebhook
@@ -47,17 +96,70 @@ import {
 
 import {
   handleOperationalAuditList,
+  handleOperationalHealth,
   handleOperationalNotificationRead,
   handleOperationalNotificationsList
 } from './operations.js'
 
 import {
+  handleMemberUpdate,
+  handleMembersList,
+  handleInvitationCreate,
+  handleInvitationRevoke,
+  handleInvitationResend,
+  handleInvitationsList
+} from './members.js'
+
+import {
   handlePlatformAdminAudit,
+  handlePlatformAdminAuditExport,
+  handlePlatformTenantDeletionAudit,
+  handlePlatformTenantAuditExport,
+  handleDataAccessRequest,
+  handleDataAccessVerify,
+  handlePlatformAuditDecision,
+  handlePlatformAuditChatClose,
+  handlePlatformSupportReopen,
+  handlePlatformAuditChatReport,
+  handlePlatformAuditMessageCreate,
+  handlePlatformAuditMessagesList,
+  handlePlatformAuditRequestsList,
+  handlePlatformSupportMetrics,
+  handlePlatformSupportBulkUpdate,
+  handlePlatformSupportAutoAssign,
+  handlePlatformSupportSlaRulesList,
+  handlePlatformSupportSlaRuleUpdate,
+  handlePlatformSupportHistory,
+  handlePlatformSupportAttachmentsList,
+  handlePlatformSupportAttachmentCreate,
+  handlePlatformSupportAttachmentRead,
+  handlePlatformNotificationsList,
+  handlePlatformNotificationRead,
+  handlePlatformSupportRequestsReport,
+  handlePlatformChatAssigneesList,
+  handlePlatformSupportMacrosList,
+  handlePlatformChatClaim,
+  handlePlatformChatTransfer,
+  handlePlatformChatCollaboratorAdd,
+  handlePlatformSupportMetadataUpdate,
+  handlePlatformSupportSnooze,
   handlePlatformOverview,
+      handlePlatformPrivacyRequestUpdate,
+      handlePlatformPrivacyPortabilityExport,
   handlePlatformTenantAudit,
   handlePlatformTenantsList,
+  handlePlatformPlansList,
+  handlePlatformPlanBillingConfigurationUpdate,
+  handlePlatformTenantDetails,
+  handlePlatformTenantUsers,
+  handlePlatformTenantSubscriptionEvents,
+  handlePlatformTenantBillingRecords,
+  handlePlatformTenantSubscriptionUpdate,
+  handlePlatformTenantBillingRecordCreate,
   handlePlatformTenantStatusUpdate
 } from './platformAdmin.js'
+
+import { handleTenantAuditMessageCreate, handleTenantAuditMessagesList, handleTenantAuditRequestCancel, handleTenantAuditRequestCreate, handleTenantAuditRequestsList, handleTenantSupportAttachmentCreate, handleTenantSupportAttachmentRead, handleTenantSupportAttachmentsList } from './auditRequests.js'
 
 import {
   handlePrintJobApprove,
@@ -74,6 +176,10 @@ import {
   handleAgentPairingCodeCreate,
   handleAgentVerify,
   handleAgentHeartbeat,
+  handleAgentCredentialRotate,
+  handleAgentCredentialRotateConfirm,
+  handleAgentEvents,
+  handleAgentEventSync,
   handleAgentsList,
   handleAgentRevoke,
   handleAgentDiscoverCreate,
@@ -104,6 +210,19 @@ export const handleRequest =
 
           `http://${req.headers.host}`
         )
+      const requestStartedAt = Date.now()
+      const acceptEncoding = String(req.headers['accept-encoding'] || '')
+      res.compressionEncoding = /\bbr\b/i.test(acceptEncoding) ? 'br' : /\bgzip\b/i.test(acceptEncoding) ? 'gzip' : ''
+      res.once('finish', () => {
+        const durationMs = Date.now() - requestStartedAt
+        if (durationMs >= 1000 && url.pathname.startsWith('/api/')) {
+          console.warn('Requisicao lenta', { method: req.method, url: url.pathname, status: res.statusCode, durationMs })
+        }
+      })
+
+      if (!configureCors(req, res)) {
+        return sendJson(res, 403, { error: 'Origem nao autorizada' })
+      }
 
       // ==================================================
       // CORS / OPTIONS
@@ -125,7 +244,7 @@ export const handleRequest =
       // ==================================================
 
       const limit =
-        enterRequest(
+        await enterRequest(
           req,
           url.pathname
         )
@@ -157,7 +276,7 @@ export const handleRequest =
 
       if (
         req.method ===
-          'GET' &&
+        'GET' &&
         url.pathname ===
           '/'
       ) {
@@ -171,10 +290,14 @@ export const handleRequest =
             status:
               'ok',
 
-            endpoints:
-              Object.keys(
-                readRoutes
-              )
+            endpoints: [
+              ...Object.keys(readRoutes),
+              '/api/marketplace-integrations',
+              '/api/marketplace-integrations/:platform/oauth-start',
+              '/api/marketplace-integrations/:id/sync-order',
+              '/api/marketplace-orders',
+              '/webhooks/mercadolivre'
+            ]
           }
         )
       }
@@ -213,6 +336,33 @@ export const handleRequest =
 
       if (
         req.method ===
+        'POST' &&
+        url.pathname ===
+          '/api/agents/sync-events'
+      ) {
+        return await handleAgentEventSync(
+          req,
+          res
+        )
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/agents/credential/rotate') return await handleAgentCredentialRotate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/agents/credential/rotate/confirm') return await handleAgentCredentialRotateConfirm(req, res)
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/agents/events'
+      ) {
+        return await handleAgentEvents(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
           'POST' &&
         url.pathname ===
           '/api/auth/login'
@@ -221,6 +371,31 @@ export const handleRequest =
           req,
           res
         )
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/auth/verify-email') return await handleEmailVerification(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/request') return await handlePasswordResetRequest(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/confirm') return await handlePasswordResetConfirm(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/login') return await handleMfaLogin(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/setup') return await handleMfaSetup(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/auth/mfa/status') return await handleMfaStatus(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/enable') return await handleMfaEnable(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/mfa/disable') return await handleMfaDisable(req, res)
+
+      if (
+        req.method ===
+          'POST' &&
+        url.pathname ===
+          '/api/auth/change-password'
+      ) {
+        return await handlePasswordChange(
+          req,
+          res
+        )
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/auth/tenant-deletion-request') {
+        return await handleTenantDeletionRequest(req, res)
       }
 
       if (
@@ -237,7 +412,7 @@ export const handleRequest =
 
       if (
         req.method ===
-          'POST' &&
+        'POST' &&
         url.pathname ===
           '/api/auth/logout'
       ) {
@@ -298,6 +473,18 @@ export const handleRequest =
           res
         )
       }
+
+      if (req.method === 'GET' && url.pathname === '/webhooks/mercado-pago') return handleMercadoPagoWebhookProbe(req, res)
+
+      if (req.method === 'POST' && url.pathname === '/webhooks/mercado-pago') {
+        return await handleMercadoPagoWebhook(
+          req,
+          res,
+          url
+        )
+      }
+
+      if (req.method === 'POST' && url.pathname === '/webhooks/stripe') return await handleStripeWebhook(req, res)
 
       // ==================================================
       // ROTAS PÚBLICAS DO AGENT
@@ -411,6 +598,12 @@ export const handleRequest =
           req.method ===
             'GET' &&
           url.pathname ===
+            '/api/agents/events'
+        ) ||
+        (
+          req.method ===
+            'GET' &&
+          url.pathname ===
             '/api/agents/commands/pending'
         ) ||
         (
@@ -455,11 +648,72 @@ export const handleRequest =
               'Login necessario'
           }
         )
+
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/auth/invitations/accept') {
+        return await handleInvitationAccept(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/auth/sessions') return await handleSessionsList(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/sessions/revoke-all') return await handleSessionsRevokeAll(req, res)
+      const authSessionMatch = url.pathname.match(/^\/api\/auth\/sessions\/([^/]+)$/)
+      if (req.method === 'DELETE' && authSessionMatch) return await handleSessionRevoke(req, res, authSessionMatch[1])
+
+      if (isProtectedApi && !env.allowDemoTenant) {
+        const user = await getAuthUser(req)
+        if (!canAccessRequest(user, req.method, url.pathname)) {
+          return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
+        }
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout' || url.pathname === '/api/billing/stripe/subscription/cancel' || url.pathname === '/api/billing/stripe/subscription/resume' || url.pathname === '/api/billing/stripe/subscription/change-plan'
+        if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
+          try {
+            await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname, user })
+          } catch (error) {
+            return sendJson(res, 403, { error: error.message || 'A assinatura nao permite esta operacao.' })
+          }
+        }
       }
 
       // ==================================================
       // CONSULTAR RESULTADO DE COMANDO
       // ==================================================
+
+      if (req.method === 'GET' && url.pathname === '/api/members') {
+        return await handleMembersList(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/billing/mercado-pago') {
+        return await handleMercadoPagoBillingSummary(req, res)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') {
+        return await handleMercadoPagoCheckoutCreate(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/billing/stripe') return await handleStripeBillingSummary(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/checkout') return await handleStripeCheckoutCreate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/cancel') return await handleStripeSubscriptionCancellation(req, res, true)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/resume') return await handleStripeSubscriptionCancellation(req, res, false)
+      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/change-plan') return await handleStripeSubscriptionPlanChange(req, res)
+
+      if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
+        return await handleInvitationCreate(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/members/invitations') {
+        return await handleInvitationsList(req, res)
+      }
+
+      const invitationActionMatch = url.pathname.match(/^\/api\/members\/invitations\/([^/]+)\/(resend)$/)
+      if (req.method === 'POST' && invitationActionMatch) return await handleInvitationResend(req, res, invitationActionMatch[1])
+      const invitationMatch = url.pathname.match(/^\/api\/members\/invitations\/([^/]+)$/)
+      if (req.method === 'DELETE' && invitationMatch) return await handleInvitationRevoke(req, res, invitationMatch[1])
+
+      const memberUpdateMatch = url.pathname.match(/^\/api\/members\/([^/]+)$/)
+      if (req.method === 'PATCH' && memberUpdateMatch) {
+        return await handleMemberUpdate(req, res, memberUpdateMatch[1])
+      }
 
       const agentCommandGetMatch =
         url.pathname.match(
@@ -751,6 +1005,58 @@ export const handleRequest =
       // READ ROUTES
       // ==================================================
 
+      if (req.method === 'PUT' && url.pathname === '/api/settings') {
+        return await handleSettingsUpdate(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/settings/company-lookup') {
+        return await handleCompanyCnpjLookup(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/settings/backup-status') {
+        return await handleSettingsBackupStatus(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/settings/audit-requests') return await handleTenantAuditRequestsList(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/settings/audit-requests') return await handleTenantAuditRequestCreate(req, res)
+      const tenantAuditRequestMatch = url.pathname.match(/^\/api\/settings\/audit-requests\/([^/]+)$/)
+      if (req.method === 'DELETE' && tenantAuditRequestMatch) return await handleTenantAuditRequestCancel(req, res, tenantAuditRequestMatch[1])
+      const tenantAuditMessagesMatch = url.pathname.match(/^\/api\/settings\/audit-requests\/([^/]+)\/messages$/)
+      if (req.method === 'GET' && tenantAuditMessagesMatch) return await handleTenantAuditMessagesList(req, res, tenantAuditMessagesMatch[1])
+      if (req.method === 'POST' && tenantAuditMessagesMatch) return await handleTenantAuditMessageCreate(req, res, tenantAuditMessagesMatch[1])
+
+      if (req.method === 'GET' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestsList(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/support/requests') return await handleTenantAuditRequestCreate(req, res)
+      const supportRequestMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)$/)
+      if (req.method === 'DELETE' && supportRequestMatch) return await handleTenantAuditRequestCancel(req, res, supportRequestMatch[1])
+      const supportMessagesMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/messages$/)
+      const supportAttachmentsMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/attachments$/)
+      if (req.method === 'GET' && supportAttachmentsMatch) return await handleTenantSupportAttachmentsList(req, res, supportAttachmentsMatch[1])
+      if (req.method === 'POST' && supportAttachmentsMatch) return await handleTenantSupportAttachmentCreate(req, res, supportAttachmentsMatch[1])
+      const supportAttachmentReadMatch = url.pathname.match(/^\/api\/support\/requests\/([^/]+)\/attachments\/([^/]+)$/)
+      if (req.method === 'GET' && supportAttachmentReadMatch) return await handleTenantSupportAttachmentRead(req, res, supportAttachmentReadMatch[1], supportAttachmentReadMatch[2])
+      if (req.method === 'GET' && supportMessagesMatch) return await handleTenantAuditMessagesList(req, res, supportMessagesMatch[1])
+      if (req.method === 'POST' && supportMessagesMatch) return await handleTenantAuditMessageCreate(req, res, supportMessagesMatch[1])
+
+      if (req.method === 'GET' && url.pathname === '/api/settings/export') {
+        return await handleSettingsExport(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/settings/export-history') {
+        return await handleSettingsExportHistory(req, res)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/reports/financial-export') {
+        return await handleFinancialReportExport(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/calculator/simulations') {
+        return await handleCalculatorSimulationsList(req, res)
+      }
+      if (req.method === 'POST' && url.pathname === '/api/calculator/simulations') {
+        return await handleCalculatorSimulationCreate(req, res)
+      }
+
       if (
         req.method ===
           'GET' &&
@@ -778,17 +1084,101 @@ export const handleRequest =
       }
 
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenants') {
-        return await handlePlatformTenantsList(req, res)
+        return await handlePlatformTenantsList(req, res, url)
       }
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/plans') return await handlePlatformPlansList(req, res)
+      const platformPlanBillingConfigMatch = url.pathname.match(/^\/api\/platform-admin\/plans\/([^/]+)\/billing-configuration$/)
+      if (req.method === 'POST' && platformPlanBillingConfigMatch) return await handlePlatformPlanBillingConfigurationUpdate(req, res, platformPlanBillingConfigMatch[1])
+      const platformTenantDetailsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/details$/)
+      if (req.method === 'GET' && platformTenantDetailsMatch) return await handlePlatformTenantDetails(req, res, platformTenantDetailsMatch[1])
+      const platformTenantUsersMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/users$/)
+      if (req.method === 'GET' && platformTenantUsersMatch) return await handlePlatformTenantUsers(req, res, platformTenantUsersMatch[1])
+      const platformTenantSubscriptionEventsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/subscription-events$/)
+      if (req.method === 'GET' && platformTenantSubscriptionEventsMatch) return await handlePlatformTenantSubscriptionEvents(req, res, platformTenantSubscriptionEventsMatch[1], url)
+      const platformTenantBillingRecordsMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/billing-records$/)
+      if (req.method === 'GET' && platformTenantBillingRecordsMatch) return await handlePlatformTenantBillingRecords(req, res, platformTenantBillingRecordsMatch[1], url)
+      const platformTenantSubscriptionMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/subscription$/)
+      if (req.method === 'POST' && platformTenantSubscriptionMatch) return await handlePlatformTenantSubscriptionUpdate(req, res, platformTenantSubscriptionMatch[1])
+      if (req.method === 'POST' && platformTenantBillingRecordsMatch) return await handlePlatformTenantBillingRecordCreate(req, res, platformTenantBillingRecordsMatch[1])
 
       if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit') {
         return await handlePlatformAdminAudit(req, res, url)
       }
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit-export') {
+        return await handlePlatformAdminAuditExport(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/tenant-deletions') {
+        return await handlePlatformTenantDeletionAudit(req, res, url)
+      }
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/audit-requests') return await handlePlatformAuditRequestsList(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/notifications') return await handlePlatformNotificationsList(req, res)
+      const platformNotificationReadMatch = url.pathname.match(/^\/api\/platform-admin\/notifications\/([^/]+)\/read$/)
+      if (req.method === 'POST' && platformNotificationReadMatch) return await handlePlatformNotificationRead(req, res, platformNotificationReadMatch[1])
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/chat-assignees') return await handlePlatformChatAssigneesList(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-macros') return await handlePlatformSupportMacrosList(req, res)
+      const platformAuditRequestMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/messages$/)
+      if (req.method === 'GET' && platformAuditRequestMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformAuditRequestMessagesMatch[1])
+      if (req.method === 'POST' && platformAuditRequestMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformAuditRequestMessagesMatch[1])
+      const platformAuditRequestDecisionMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/decision$/)
+      if (req.method === 'POST' && platformAuditRequestDecisionMatch) return await handlePlatformAuditDecision(req, res, platformAuditRequestDecisionMatch[1])
+      const platformAuditRequestCloseMatch = url.pathname.match(/^\/api\/platform-admin\/audit-requests\/([^/]+)\/close-chat$/)
+      if (req.method === 'POST' && platformAuditRequestCloseMatch) return await handlePlatformAuditChatClose(req, res, platformAuditRequestCloseMatch[1])
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests') return await handlePlatformAuditRequestsList(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-metrics') return await handlePlatformSupportMetrics(req, res, url)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-sla-rules') return await handlePlatformSupportSlaRulesList(req, res)
+      const platformSupportSlaRuleMatch = url.pathname.match(/^\/api\/platform-admin\/support-sla-rules\/([^/]+)$/)
+      if (req.method === 'POST' && platformSupportSlaRuleMatch) return await handlePlatformSupportSlaRuleUpdate(req, res, platformSupportSlaRuleMatch[1])
+      if (req.method === 'POST' && url.pathname === '/api/platform-admin/support-requests/bulk') return await handlePlatformSupportBulkUpdate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/platform-admin/support-requests/auto-assign') return await handlePlatformSupportAutoAssign(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/platform-admin/support-requests/report') return await handlePlatformSupportRequestsReport(req, res, url)
+      const platformSupportMessagesMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/messages$/)
+      const platformSupportHistoryMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/history$/)
+      if (req.method === 'GET' && platformSupportHistoryMatch) return await handlePlatformSupportHistory(req, res, platformSupportHistoryMatch[1])
+      const platformSupportAttachmentsMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/attachments$/)
+      if (req.method === 'GET' && platformSupportAttachmentsMatch) return await handlePlatformSupportAttachmentsList(req, res, platformSupportAttachmentsMatch[1])
+      if (req.method === 'POST' && platformSupportAttachmentsMatch) return await handlePlatformSupportAttachmentCreate(req, res, platformSupportAttachmentsMatch[1])
+      const platformSupportAttachmentReadMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/attachments\/([^/]+)$/)
+      if (req.method === 'GET' && platformSupportAttachmentReadMatch) return await handlePlatformSupportAttachmentRead(req, res, platformSupportAttachmentReadMatch[1], platformSupportAttachmentReadMatch[2])
+      if (req.method === 'GET' && platformSupportMessagesMatch) return await handlePlatformAuditMessagesList(req, res, platformSupportMessagesMatch[1])
+      if (req.method === 'POST' && platformSupportMessagesMatch) return await handlePlatformAuditMessageCreate(req, res, platformSupportMessagesMatch[1])
+      const platformSupportChatReportMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/report$/)
+      if (req.method === 'GET' && platformSupportChatReportMatch) return await handlePlatformAuditChatReport(req, res, platformSupportChatReportMatch[1], url)
+      const platformSupportDecisionMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/decision$/)
+      if (req.method === 'POST' && platformSupportDecisionMatch) return await handlePlatformAuditDecision(req, res, platformSupportDecisionMatch[1])
+      const platformSupportCloseMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/close-chat$/)
+      if (req.method === 'POST' && platformSupportCloseMatch) return await handlePlatformAuditChatClose(req, res, platformSupportCloseMatch[1])
+      const platformSupportReopenMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/reopen$/)
+      if (req.method === 'POST' && platformSupportReopenMatch) return await handlePlatformSupportReopen(req, res, platformSupportReopenMatch[1])
+      const platformSupportSnoozeMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/snooze$/)
+      if (req.method === 'POST' && platformSupportSnoozeMatch) return await handlePlatformSupportSnooze(req, res, platformSupportSnoozeMatch[1])
+      const platformChatClaimMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/claim$/)
+      if (req.method === 'POST' && platformChatClaimMatch) return await handlePlatformChatClaim(req, res, platformChatClaimMatch[1])
+      const platformChatTransferMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/transfer$/)
+      if (req.method === 'POST' && platformChatTransferMatch) return await handlePlatformChatTransfer(req, res, platformChatTransferMatch[1])
+      const platformChatCollaboratorMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/collaborators$/)
+      if (req.method === 'POST' && platformChatCollaboratorMatch) return await handlePlatformChatCollaboratorAdd(req, res, platformChatCollaboratorMatch[1])
+      const platformSupportMetadataMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/metadata$/)
+      if (req.method === 'POST' && platformSupportMetadataMatch) return await handlePlatformSupportMetadataUpdate(req, res, platformSupportMetadataMatch[1])
+      const platformPrivacyUpdateMatch = url.pathname.match(/^\/api\/platform-admin\/privacy-requests\/([^/]+)$/)
+      if (req.method === 'POST' && platformPrivacyUpdateMatch) return await handlePlatformPrivacyRequestUpdate(req, res, platformPrivacyUpdateMatch[1])
+      const platformPrivacyExportMatch = url.pathname.match(/^\/api\/platform-admin\/privacy-requests\/([^/]+)\/export$/)
+      if (req.method === 'GET' && platformPrivacyExportMatch) return await handlePlatformPrivacyPortabilityExport(req, res, platformPrivacyExportMatch[1])
 
       const platformTenantAuditMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit$/)
       if (req.method === 'GET' && platformTenantAuditMatch) {
         return await handlePlatformTenantAudit(req, res, platformTenantAuditMatch[1], url)
       }
+
+      const platformTenantAuditExportMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/audit-export$/)
+      if (req.method === 'GET' && platformTenantAuditExportMatch) {
+        return await handlePlatformTenantAuditExport(req, res, platformTenantAuditExportMatch[1], url)
+      }
+
+      const platformDataAccessMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/data-access-requests$/)
+      if (req.method === 'POST' && platformDataAccessMatch) return await handleDataAccessRequest(req, res, platformDataAccessMatch[1])
+      const platformDataAccessVerifyMatch = url.pathname.match(/^\/api\/platform-admin\/data-access-requests\/([^/]+)\/verify$/)
+      if (req.method === 'POST' && platformDataAccessVerifyMatch) return await handleDataAccessVerify(req, res, platformDataAccessVerifyMatch[1])
 
       const platformTenantStatusMatch = url.pathname.match(/^\/api\/platform-admin\/tenants\/([^/]+)\/status$/)
       if (req.method === 'POST' && platformTenantStatusMatch) {
@@ -800,6 +1190,10 @@ export const handleRequest =
         url.pathname === '/api/operational-notifications'
       ) {
         return await handleOperationalNotificationsList(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/operational-health') {
+        return await handleOperationalHealth(req, res)
       }
 
       const notificationReadMatch = url.pathname.match(/^\/api\/operational-notifications\/([^/]+)\/read$/)
@@ -817,6 +1211,10 @@ export const handleRequest =
       // ==================================================
       // INTEGRAÇÕES
       // ==================================================
+
+      if (req.method === 'GET' && url.pathname === '/api/integrations/overview') {
+        return await handleIntegrationsOverview(req, res)
+      }
 
       if (
         req.method ===
@@ -839,6 +1237,21 @@ export const handleRequest =
         return await handleIntegrationCreate(
           req,
           res
+        )
+      }
+
+      const marketplaceIntegrationDisconnectMatch =
+        url.pathname.match(/^\/api\/marketplace-integrations\/([^/]+)$/)
+
+      if (
+        req.method ===
+          'DELETE' &&
+        marketplaceIntegrationDisconnectMatch
+      ) {
+        return await handleMarketplaceIntegrationDisconnect(
+          req,
+          res,
+          marketplaceIntegrationDisconnectMatch[1]
         )
       }
 
@@ -1060,6 +1473,20 @@ export const handleRequest =
       // RESOURCES GENÉRICOS
       // ==================================================
 
+      const filamentMovementsMatch = url.pathname.match(/^\/api\/filaments\/([^/]+)\/movements$/)
+      if (filamentMovementsMatch && ['GET', 'POST'].includes(req.method)) {
+        return await handleFilamentMovements(req, res, filamentMovementsMatch[1])
+      }
+
+      if (url.pathname === '/api/inventory/overview' && req.method === 'GET') return await handleInventoryOverview(req, res)
+      const productInventoryMovementsMatch = url.pathname.match(/^\/api\/inventory\/products\/([^/]+)\/movements$/)
+      if (productInventoryMovementsMatch && ['GET', 'POST'].includes(req.method)) return await handleProductInventoryMovements(req, res, productInventoryMovementsMatch[1])
+
+      const orderStageMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/advance-stage$/)
+      if (req.method === 'POST' && orderStageMatch) return await handleOrderStageAdvance(req, res, orderStageMatch[1])
+
+      if (req.method === 'POST' && url.pathname === '/api/expenses/recurring/generate') return await handleRecurringExpensesGenerate(req, res)
+
       const resourceMatch =
         url.pathname.match(
           /^\/api\/([a-z-]+)(?:\/([^/]+))?$/
@@ -1145,14 +1572,23 @@ export const handleRequest =
       const expectedClientErrors =
         new Set([
           'Registro nao encontrado',
+          'Membro nao encontrado',
           'E-mail ou senha invalidos.',
+          'Informe a senha atual.',
+          'Senha atual invalida.',
+          'A nova senha deve ser diferente da senha atual.',
+          'A senha precisa ter pelo menos 10 caracteres.',
+          'A senha precisa conter letra minuscula.',
+          'A senha precisa conter letra maiuscula.',
+          'A senha precisa conter numero.',
+          'A senha precisa conter caractere especial.',
           'Refresh token invalido.',
           'Refresh token reutilizado.'
         ])
 
       const status =
-        error.message ===
-        'Registro nao encontrado'
+        error.message === 'Registro nao encontrado' ||
+        error.message === 'Membro nao encontrado'
           ? 404
           : 400
 

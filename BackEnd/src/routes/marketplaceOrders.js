@@ -6,8 +6,13 @@ import {
   listMarketplaceOrders
 } from '../repositories/marketplaceOrdersRepository.js'
 
-export const handleMarketplaceOrdersList = async (req, res) =>
-  sendJson(res, 200, await listMarketplaceOrders(await getTenantId(req)))
+export const handleMarketplaceOrdersList = async (req, res) => {
+  const url = new URL(req.url, 'http://localhost')
+  const paged = url.searchParams.has('limit') || url.searchParams.has('offset')
+  return sendJson(res, 200, await listMarketplaceOrders(await getTenantId(req), paged ? {
+    limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset')
+  } : {}))
+}
 
 export const handleMarketplaceOrderLinkProduct = async (req, res, saleId) => {
   const payload = await readJsonBody(req)

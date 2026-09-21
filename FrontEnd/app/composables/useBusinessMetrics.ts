@@ -73,9 +73,15 @@ export const useBusinessMetrics = () => {
   const printerHours = computed(() => sum(printers.value, (printer) => Number(printer.hours || 0) + Number(printerUsageById.value.get(String(printer.id)) || 0)))
 
   const activeMarketplaces = computed(() => marketplaces.value.filter((marketplace) => marketplace.active).length)
-  const marketplaceAverageFee = computed(() => avg(sum(marketplaces.value, (marketplace) => marketplace.commission + marketplace.financial + marketplace.ads + marketplace.others), marketplaces.value.length))
+  const configuredFeeRate = (marketplace: any) => Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0)
+  const effectiveFeeRate = (marketplace: any) => marketplace.gross > 0 && marketplace.fees !== undefined ? Number(marketplace.fees || 0) / Number(marketplace.gross) * 100 : configuredFeeRate(marketplace)
+  const marketplaceAverageFee = computed(() => {
+    const gross = sum(marketplaces.value, (marketplace) => Number(marketplace.gross || 0))
+    const fees = sum(marketplaces.value, (marketplace) => Number(marketplace.fees || 0))
+    return gross > 0 ? fees / gross * 100 : avg(sum(marketplaces.value, configuredFeeRate), marketplaces.value.length)
+  })
   const bestMarketplace = computed(() => [...marketplaces.value].sort((a, b) => b.net - a.net)[0])
-  const highestFeeMarketplace = computed(() => [...marketplaces.value].sort((a, b) => (b.commission + b.financial + b.ads + b.others) - (a.commission + a.financial + a.ads + a.others))[0])
+  const highestFeeMarketplace = computed(() => [...marketplaces.value].sort((a, b) => effectiveFeeRate(b) - effectiveFeeRate(a))[0])
 
   const bestClient = computed(() => [...clients.value].sort((a, b) => b.revenue - a.revenue)[0])
   const clientTicket = computed(() => avg(sum(clients.value, (client) => client.revenue), sum(clients.value, (client) => client.orders)))

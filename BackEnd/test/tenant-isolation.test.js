@@ -62,7 +62,8 @@ const register = async (suffix) => {
       name: `Usuario ${suffix}`,
       email: `usuario-${suffix}-${Date.now()}@example.com`,
       password: 'SenhaSegura1!',
-      company: `Tenant ${suffix}`
+      company: `Tenant ${suffix}`,
+      document: '52998224725'
     }
   })
 

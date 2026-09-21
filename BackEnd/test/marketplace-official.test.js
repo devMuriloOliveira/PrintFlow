@@ -30,8 +30,8 @@ test('state OAuth adulterado e rejeitado', () => {
   )
 })
 
-test('OAuth oficial informa quando Mercado Livre nao esta configurado', () => {
-  assert.throws(
+test('OAuth oficial informa quando Mercado Livre nao esta configurado', async () => {
+  await assert.rejects(
     () => marketplaceAuthorizationUrl({ tenantId: 'tenant-marketplace-test', platform: 'mercado_livre' }),
     /OAuth Mercado Livre nao configurado/
   )

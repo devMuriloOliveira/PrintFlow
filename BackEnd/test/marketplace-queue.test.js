@@ -82,3 +82,64 @@ test('normaliza pedido Mercado Livre com SKU do item', () => {
     3
   )
 })
+
+test('normaliza taxas detalhadas do pedido Mercado Livre', () => {
+  const sale = normalizeMarketplaceOrder('mercado_livre', {
+    id: 'order-fees-1',
+    total_amount: 149.9,
+    marketplace_fee: 23.48,
+    shipping: { id: 'shipment-1', cost: 8.5 },
+    order_items: [{
+      quantity: 2,
+      unit_price: 74.95,
+      gross_price: 149.9,
+      sale_fee: 11.74,
+      item: { id: 'MLB-1', seller_sku: 'SKU-FEES', title: 'Produto com taxas' }
+    }]
+  })
+
+  assert.equal(sale.marketplaceFee, 23.48)
+  assert.equal(sale.feeBreakdown.commission, 23.48)
+  assert.equal(sale.feeBreakdown.commissionSource, 'mercadolivre.orders.order_items')
+  assert.equal(sale.shipping, 8.5)
+  assert.equal(sale.feeBreakdown.source, 'mercadolivre.orders')
+  assert.equal(sale.feeBreakdown.shippingId, 'shipment-1')
+  assert.deepEqual(sale.feeBreakdown.itemSaleFees, [{
+    itemId: 'MLB-1',
+    sku: 'SKU-FEES',
+    quantity: 2,
+    unitPrice: 74.95,
+    grossPrice: 149.9,
+    saleFee: 11.74
+  }])
+})
+
+test('usa a comissao real por item quando o pedido nao traz taxa totalizada', () => {
+  const sale = normalizeMarketplaceOrder('mercado_livre', {
+    id: 'order-item-fee-1',
+    total_amount: 100,
+    order_items: [{ quantity: 2, sale_fee: 7.5, item: { seller_sku: 'SKU-ITEM-FEE' } }]
+  })
+
+  assert.equal(sale.marketplaceFee, 15)
+  assert.equal(sale.feeBreakdown.commission, 15)
+})
+
+test('preserva componentes de tarifa informados pelo Mercado Livre', () => {
+  const sale = normalizeMarketplaceOrder('mercado_livre', {
+    id: 'order-component-fees-1',
+    total_amount: 200,
+    sale_fee_details: [{ fixed_fee: 5, financing_add_on_fee: 3 }],
+    ads_fee: 2,
+    other_fee: 1,
+    order_items: [{ quantity: 1, sale_fee: 20, item: { seller_sku: 'SKU-COMPONENTS' } }]
+  })
+
+  assert.equal(sale.marketplaceFee, 31)
+  assert.equal(sale.feeBreakdown.commission, 20)
+  assert.equal(sale.feeBreakdown.fixed, 5)
+  assert.equal(sale.feeBreakdown.financial, 3)
+  assert.equal(sale.feeBreakdown.ads, 2)
+  assert.equal(sale.feeBreakdown.others, 1)
+  assert.equal(sale.feeBreakdown.detailSource, 'mercadolivre.orders.sale_fee_details')
+})

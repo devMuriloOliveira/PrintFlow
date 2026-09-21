@@ -4,8 +4,13 @@ import { migrate } from './db/migrate.js'
 import { startPrintFileStorageCleanup } from './jobs/printFileStorageCleanup.js'
 import { startPrintQueueWatchdog } from './jobs/printQueueWatchdog.js'
 import { startAgentHealthWatchdog } from './jobs/agentHealthWatchdog.js'
+import { startTenantDeletionPurge } from './jobs/tenantDeletionPurge.js'
+import { startExpenseRecurringGenerator } from './jobs/expenseRecurringGenerator.js'
+import { startPrivacyRequestRetention } from './jobs/privacyRequestRetention.js'
+import { startSubscriptionWatchdog } from './jobs/subscriptionWatchdog.js'
 import { syncConfiguredPlatformSuperAdmins } from './services/platformAdmin.js'
 import { handleRequest } from './routes/index.js'
+import { attachAgentWebSocket } from './services/agentWebSocket.js'
 
 process.on('uncaughtException', (error) => {
   console.error('Excecao nao capturada', error)
@@ -16,6 +21,7 @@ process.on('unhandledRejection', (error) => {
 })
 
 const server = createServer(handleRequest)
+attachAgentWebSocket(server)
 server.keepAliveTimeout = 120_000
 server.headersTimeout = 120_000
 
@@ -25,6 +31,10 @@ try {
   startPrintFileStorageCleanup()
   startPrintQueueWatchdog()
   startAgentHealthWatchdog()
+  startTenantDeletionPurge()
+  startExpenseRecurringGenerator()
+  startPrivacyRequestRetention()
+  startSubscriptionWatchdog()
 
   server.listen(env.port, '0.0.0.0', () => {
     console.log(`PrintFlow API running at http://localhost:${env.port}`)
