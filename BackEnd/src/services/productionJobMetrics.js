@@ -3,6 +3,23 @@ const finiteNonNegative = (value) => {
   return Number.isFinite(number) && number >= 0 ? number : null
 }
 
+export const normalizeAgentMetrics = (payload = {}) => {
+  const metric = (value, max) => {
+    const normalized = finiteNonNegative(value)
+    return normalized == null || normalized > max ? null : normalized
+  }
+  const status = String(payload.status || 'completed').trim().toLowerCase()
+  if (!['completed', 'failed', 'cancelled'].includes(status)) throw new Error('Status de Production Job invalido.')
+  return {
+    status,
+    idempotencyKey: String(payload.idempotencyKey || '').trim().slice(0, 160),
+    attemptNo: Number.isInteger(Number(payload.attemptNo)) && Number(payload.attemptNo) > 0 ? Number(payload.attemptNo) : 1,
+    actualPrintSeconds: metric(payload.actualPrintSeconds, 365 * 24 * 3600),
+    actualFilamentGrams: metric(payload.actualFilamentGrams, 100000),
+    actualFilamentMillimeters: metric(payload.actualFilamentMillimeters, 10000000)
+  }
+}
+
 const round = (value, digits = 3) => {
   const factor = 10 ** digits
   return Math.round(Number(value) * factor) / factor

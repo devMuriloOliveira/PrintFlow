@@ -2655,3 +2655,10 @@ Em 2026-09-21 foi preparada localmente a fundação aditiva para esses itens:
 medido, custo material/energia e horas de manutenção sem mutar estoque. A
 migration e o fluxo transacional ainda precisam ser executados em PostgreSQL
 de teste antes de qualquer publicação ou declaração de readiness Production.
+
+Também foi adicionado o endpoint autenticado pelo Agent
+`POST /api/agents/print-jobs/:id/metrics`. Ele deriva o tenant da credencial,
+exige `idempotencyKey`, valida limites, vincula o job ao `agent_printer` do
+Agent e persiste uma tentativa única antes de atualizar métricas reais. O
+Agent ainda não o chama automaticamente porque a telemetria de conclusão da
+impressora não foi implementada/validada.

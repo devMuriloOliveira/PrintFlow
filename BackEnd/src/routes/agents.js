@@ -44,6 +44,8 @@ import {
   subscribeAgentEvents
 } from '../services/agentRealtime.js'
 
+import { normalizeAgentMetrics } from '../services/productionJobMetrics.js'
+
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
 // ======================================================
@@ -1345,6 +1347,81 @@ export const handleAgentEventSync =
       }
     )
   }
+
+export const handleAgentPrintJobMetrics = async (req, res, printJobId) => {
+  const agent = await authenticateAgentRequest(req)
+  if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })
+
+  let metrics
+  try {
+    metrics = normalizeAgentMetrics(await readJsonBody(req))
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || 'Metricas invalidas.' })
+  }
+  if (!metrics.idempotencyKey) return sendJson(res, 400, { error: 'idempotencyKey obrigatoria.' })
+
+  const result = await withTenant(agent.tenant_id, async (client) => {
+    const jobResult = await client.query(
+      `select j.id, j.status
+         from print_jobs j
+         join agent_printers ap on ap.id = j.agent_printer_id and ap.tenant_id = j.tenant_id
+        where j.tenant_id = $1 and j.id = $2 and ap.agent_id = $3
+        for update`,
+      [agent.tenant_id, printJobId, agent.id]
+    )
+    if (!jobResult.rowCount) return null
+
+    const existing = await client.query(
+      `select id, print_job_id, attempt_no, status, result
+         from print_job_attempts
+        where tenant_id = $1 and idempotency_key = $2
+        limit 1`,
+      [agent.tenant_id, metrics.idempotencyKey]
+    )
+    if (existing.rowCount) {
+      const row = existing.rows[0]
+      if (String(row.print_job_id) !== String(printJobId) || Number(row.attempt_no) !== metrics.attemptNo) {
+        const conflict = new Error('idempotencyKey ja foi usada por outra tentativa.')
+        conflict.statusCode = 409
+        throw conflict
+      }
+      return { idempotent: true, attempt: row }
+    }
+
+    const resultPayload = {
+      actualPrintSeconds: metrics.actualPrintSeconds,
+      actualFilamentGrams: metrics.actualFilamentGrams,
+      actualFilamentMillimeters: metrics.actualFilamentMillimeters
+    }
+    const attempt = await client.query(
+      `insert into print_job_attempts (
+         tenant_id, print_job_id, agent_command_id, attempt_no, idempotency_key,
+         status, result, completed_at, updated_at
+       ) values ($1, $2, null, $3, $4, $5, $6::jsonb, now(), now())
+       returning id, print_job_id, attempt_no, status, result`,
+      [agent.tenant_id, printJobId, metrics.attemptNo, metrics.idempotencyKey, metrics.status, JSON.stringify(resultPayload)]
+    )
+
+    await client.query(
+      `update print_jobs
+          set status = $3,
+              actual_print_seconds = coalesce($4::numeric, actual_print_seconds),
+              actual_filament_grams = coalesce($5::numeric, actual_filament_grams),
+              actual_filament_millimeters = coalesce($6::numeric, actual_filament_millimeters),
+              metrics_source = case when $4::numeric is not null or $5::numeric is not null or $6::numeric is not null then 'agent_measured' else metrics_source end,
+              metrics_recorded_at = case when $4::numeric is not null or $5::numeric is not null or $6::numeric is not null then now() else metrics_recorded_at end,
+              completed_at = case when $3 = 'completed' then coalesce(completed_at, now()) else completed_at end,
+              cancelled_at = case when $3 in ('failed', 'cancelled') then coalesce(cancelled_at, now()) else cancelled_at end,
+              updated_at = now()
+        where tenant_id = $1 and id = $2`,
+      [agent.tenant_id, printJobId, metrics.status, metrics.actualPrintSeconds, metrics.actualFilamentGrams, metrics.actualFilamentMillimeters]
+    )
+    return { idempotent: false, attempt: attempt.rows[0] }
+  })
+
+  if (!result) return sendJson(res, 404, { error: 'Production Job nao encontrado para este Agent.' })
+  return sendJson(res, 200, result)
+}
 
 // ======================================================
 // LISTAR AGENTS
