@@ -23,9 +23,9 @@ const auth = useAuth()
 const route = useRoute()
 const config = useRuntimeConfig()
 const defaultAgentWindowsDownloadUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.1/PrintFlow-Agent-Setup.exe'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.2/PrintFlow-Agent-Setup.exe'
 const defaultAgentWindowsDevCertificateUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.1/PrintFlow-Agent-Dev-Certificate.cer'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.2/PrintFlow-Agent-Dev-Certificate.cer'
 
 const agentWindowsDownloadUrl =
   computed(() =>
