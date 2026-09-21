@@ -16,7 +16,7 @@ test('valida release por manifesto, certificado e SHA-256', async () => {
   await writeFile(path.join(directory, 'PrintFlow-Agent-Dev-Certificate.cer'), certificate)
   await writeFile(path.join(directory, 'PrintFlow-Agent-Windows.zip'), zip)
   await writeFile(path.join(directory, 'RELEASE-METADATA.json'), JSON.stringify({ version: '0.1.0', signingMode: 'DEV_SELF_SIGNED', productionTrusted: false, certificateSha256: digest(certificate) }))
-  await writeFile(path.join(directory, 'SHA256SUMS.txt'), `${digest(zip)}  ${path.join(directory, 'PrintFlow-Agent-Windows.zip')}\n${digest(certificate)}  ${path.join(directory, 'PrintFlow-Agent-Dev-Certificate.cer')}\n`)
+  await writeFile(path.join(directory, 'SHA256SUMS.txt'), `${digest(zip)}  PrintFlow-Agent-Windows.zip\n${digest(certificate)}  PrintFlow-Agent-Dev-Certificate.cer\n`)
   const result = await verifyReleaseDirectory({ directory, expectedVersion: '0.1.0' })
   assert.equal(result.entries.length, 2)
   await writeFile(path.join(directory, 'PrintFlow-Agent-Windows.zip'), Buffer.from('tampered'))
