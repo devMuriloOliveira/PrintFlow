@@ -186,6 +186,38 @@ $exitItem.Add_Click({
 })
 [void]$menu.Items.Add($exitItem)
 
+$updateScript = Join-Path $agentRoot 'scripts\check-and-update-windows-agent.ps1'
+$updateItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$updateItem.Text = 'Verificar atualizações'
+$updateItem.Add_Click({
+  try {
+    $result = & $updateScript -CurrentVersion $version -Interactive
+    if ($result -and $result.updateAvailable -and -not $result.installed) {
+      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "A atualização $($result.latestVersion) está disponível.", [System.Windows.Forms.ToolTipIcon]::Info)
+    } elseif ($result -and $result.installed) {
+      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização iniciada. O Agent será reiniciado pelo instalador.', [System.Windows.Forms.ToolTipIcon]::Info)
+    } else {
+      $notifyIcon.ShowBalloonTip(3000, 'PrintFlow Agent', 'Você já está usando a versão mais recente.', [System.Windows.Forms.ToolTipIcon]::Info)
+    }
+  } catch {
+    $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "Não foi possível verificar atualização: $($_.Exception.Message)", [System.Windows.Forms.ToolTipIcon]::Warning)
+  }
+})
+[void]$menu.Items.Insert(1, $updateItem)
+
+$updateTimer = New-Object System.Windows.Forms.Timer
+$updateTimer.Interval = 6 * 60 * 60 * 1000
+$updateTimer.Add_Tick({
+  try {
+    $result = & $updateScript -CurrentVersion $version -Interactive
+    if ($result -and $result.updateAvailable -and -not $result.installed) {
+      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "A versão $($result.latestVersion) está disponível. Use 'Verificar atualizações' para instalar.", [System.Windows.Forms.ToolTipIcon]::Info)
+    }
+  } catch {
+    # A indisponibilidade da internet não interrompe o Agent.
+  }
+})
+
 $notifyIcon.ContextMenuStrip = $menu
 $notifyIcon.Add_DoubleClick({
   $infoItem.PerformClick()
@@ -194,11 +226,14 @@ $notifyIcon.Add_DoubleClick({
 try {
   Start-AgentProcess
   $restartTimer.Start()
+  $updateTimer.Start()
   [System.Windows.Forms.Application]::Run()
 } finally {
   $script:agentClosing = $true
   $restartTimer.Stop()
+  $updateTimer.Stop()
   $restartTimer.Dispose()
+  $updateTimer.Dispose()
   Stop-AgentProcess
   $notifyIcon.Visible = $false
   $notifyIcon.Dispose()
