@@ -2700,3 +2700,8 @@ API, o SQLite do Agent foi atualizado para o schema v4 com a outbox
 `production_metrics`. O envio do monitor entra nessa outbox quando a rede
 falha e é reenviado no próximo ciclo, inclusive após reinício do Agent. A
 suíte local confirmou persistência, sincronização e remoção após confirmação.
+
+O recorte de conclusão também resolve a impressora por `printer_id` ou pelo
+`printer_id` associado ao `agent_printer_id`, e usa a tarifa `tenants.kwh_cost`
+como fallback para energia. O smoke PostgreSQL foi repetido após essa mudança
+e manteve o resultado de uma baixa e uma atualização de horas.

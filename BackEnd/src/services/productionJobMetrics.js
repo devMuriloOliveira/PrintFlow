@@ -24,12 +24,15 @@ export const normalizeAgentMetrics = (payload = {}) => {
 
 const applyCompletionEffects = async ({ client, tenantId, printJobId, metrics }) => {
   const details = await client.query(
-    `select j.quantity, j.printer_id, p.filament_id, p.weight, p.cost_breakdown,
-            f.initial_weight, f.cost, pr.power_w
+    `select j.quantity, coalesce(j.printer_id, ap.printer_id) as printer_id,
+            p.filament_id, p.weight, p.cost_breakdown, f.initial_weight, f.cost,
+            pr.power_w, t.kwh_cost
        from print_jobs j
+       join tenants t on t.id = j.tenant_id
        left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id
        left join filaments f on f.id = p.filament_id and f.tenant_id = j.tenant_id
-       left join printers pr on pr.id = j.printer_id and pr.tenant_id = j.tenant_id
+       left join agent_printers ap on ap.id = j.agent_printer_id and ap.tenant_id = j.tenant_id
+       left join printers pr on pr.id = coalesce(j.printer_id, ap.printer_id) and pr.tenant_id = j.tenant_id
       where j.tenant_id = $1 and j.id = $2
       for update of j`,
     [tenantId, printJobId]
@@ -61,7 +64,7 @@ const applyCompletionEffects = async ({ client, tenantId, printJobId, metrics })
     product,
     filament: { initial_weight: row.initial_weight, cost: row.cost },
     printer: { power_w: row.power_w },
-    energyPricePerKwh: product.cost_breakdown.energyRate ?? product.cost_breakdown.energy_rate ?? 0,
+    energyPricePerKwh: product.cost_breakdown.energyRate ?? product.cost_breakdown.energy_rate ?? row.kwh_cost ?? 0,
     metrics
   })
   await client.query(
