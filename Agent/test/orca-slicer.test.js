@@ -7,6 +7,7 @@ import { buildOrcaSlicerArgs, normalizeOrcaProfile, sliceWithOrcaSlicer } from '
 import { buildOfficialBambuP1SProfile, resolveOfficialOrcaProfileForPrinter } from '../src/slicing/orcaProfiles.js'
 import { analyzeModelFile } from '../src/slicing/modelAnalyzer.js'
 import { sliceModelWithOrcaSlicer } from '../src/slicing/sliceModel.js'
+import { parseGcodeMetrics } from '../src/slicing/gcodeMetrics.js'
 
 const storedZip = (entries) => {
   const locals = []
@@ -101,6 +102,14 @@ test('analisador local extrai geometria principal de 3MF', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('extrator de G-code preserva estimativas de tempo e filamento', () => {
+  assert.deepEqual(parseGcodeMetrics('; estimated printing time (normal mode) = 1h 2m 3s\n; total filament used [g] = 12.50\n; filament used [mm] = 3456.7'), {
+    estimatedPrintSeconds: 3723,
+    estimatedFilamentGrams: 12.5,
+    estimatedFilamentMillimeters: 3456.7
+  })
 })
 
 test('pipeline local analisa, seleciona perfil e fatia sem enviar a impressora', async () => {
