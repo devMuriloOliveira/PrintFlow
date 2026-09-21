@@ -139,6 +139,32 @@ test('persiste metricas de conclusao e sincroniza apos falha de rede', async () 
   await fs.rm(directory, { recursive: true, force: true })
 })
 
+test('persiste monitoramento de Production Job para retomar apos reinicio', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-agent-monitor-'))
+  const databasePath = path.join(directory, 'agent.sqlite')
+  const operations = createLocalOperationsDb({ databasePath })
+  operations.queueProductionJobMonitor({
+    printJobId: 'job-monitor-1',
+    commandId: 'command-monitor-1',
+    printer: { id: 'printer-1', protocol: 'bambu' },
+    startedAt: '2026-09-21T12:00:00.000Z'
+  })
+  operations.close()
+
+  const reopened = createLocalOperationsDb({ databasePath })
+  assert.deepEqual(reopened.listPendingProductionJobMonitors(), [{
+    printJobId: 'job-monitor-1',
+    commandId: 'command-monitor-1',
+    printer: { id: 'printer-1', protocol: 'bambu' },
+    startedAt: '2026-09-21T12:00:00.000Z',
+    createdAt: reopened.listPendingProductionJobMonitors()[0].createdAt
+  }])
+  reopened.acknowledgeProductionJobMonitor('job-monitor-1')
+  assert.equal(reopened.listPendingProductionJobMonitors().length, 0)
+  reopened.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
+
 test(
   'migra banco local existente para o schema versionado sem perder comando',
   async () => {
@@ -197,7 +223,7 @@ test(
 
     assert.equal(
       operations.schemaVersion,
-      4
+      5
     )
     assert.deepEqual(
       operations.begin({

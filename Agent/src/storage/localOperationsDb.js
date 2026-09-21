@@ -42,7 +42,7 @@ const now = () =>
     .toISOString()
 
 const CURRENT_SCHEMA_VERSION =
-  4
+  5
 
 const migrateSchema = (
   database
@@ -124,6 +124,16 @@ const migrateSchema = (
         on production_metrics (created_at);
 
       pragma user_version = 4;
+
+      create table if not exists production_job_monitors (
+        print_job_id text primary key,
+        command_id text not null,
+        printer_json text not null,
+        started_at text not null,
+        created_at text not null
+      );
+
+      pragma user_version = 5;
       commit;
     `
   )
@@ -306,6 +316,22 @@ export const createLocalOperationsDb = (
   `)
   const incrementProductionMetricAttempts = database.prepare('update production_metrics set attempts = attempts + 1 where id = ?')
   const deleteProductionMetric = database.prepare('delete from production_metrics where id = ?')
+  const upsertProductionJobMonitor = database.prepare(`
+    insert into production_job_monitors (
+      print_job_id, command_id, printer_json, started_at, created_at
+    ) values (?, ?, ?, ?, ?)
+    on conflict (print_job_id) do update set
+      command_id = excluded.command_id,
+      printer_json = excluded.printer_json,
+      started_at = excluded.started_at
+  `)
+  const listProductionJobMonitors = database.prepare(`
+    select print_job_id, command_id, printer_json, started_at, created_at
+      from production_job_monitors order by created_at asc
+  `)
+  const deleteProductionJobMonitor = database.prepare(
+    'delete from production_job_monitors where print_job_id = ?'
+  )
 
   const upsertLocalState =
     database.prepare(
@@ -566,6 +592,30 @@ export const createLocalOperationsDb = (
     })),
     markProductionMetricAttempted: (id) => { incrementProductionMetricAttempts.run(Number(id)) },
     acknowledgeProductionMetric: (id) => { deleteProductionMetric.run(Number(id)) },
+    queueProductionJobMonitor: ({ printJobId, commandId, printer, startedAt } = {}) => {
+      const jobId = String(printJobId || '').trim()
+      const id = requiredCommandId(commandId)
+      if (!jobId || !printer || typeof printer !== 'object') {
+        throw new Error('Monitoramento local de Production Job invalido.')
+      }
+      upsertProductionJobMonitor.run(
+        jobId,
+        id,
+        JSON.stringify(printer),
+        String(startedAt || now()),
+        now()
+      )
+    },
+    listPendingProductionJobMonitors: () => listProductionJobMonitors.all().map((item) => ({
+      printJobId: item.print_job_id,
+      commandId: item.command_id,
+      printer: parseResult(item.printer_json),
+      startedAt: item.started_at,
+      createdAt: item.created_at
+    })),
+    acknowledgeProductionJobMonitor: (printJobId) => {
+      deleteProductionJobMonitor.run(String(printJobId || '').trim())
+    },
     upsertLocalState: (
       entityType,
       entityId,
