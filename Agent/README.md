@@ -148,6 +148,27 @@ npm.cmd run start
 
 O mock permite validar descoberta, conexao, status, pausa, retomada, cancelamento, desconexao e reconexao sem impressora fisica.
 
+### OrcaSlicer local
+
+O Agent possui um contrato local para executar o OrcaSlicer em modo headless.
+O perfil precisa referenciar arquivos de máquina/processo e filamento
+exportados pelo OrcaSlicer, sempre com uma versão identificável. O helper
+`buildOfficialBambuP1SProfile()` usa os presets oficiais instalados como
+referência para smoke test; ele não representa uma impressora cadastrada e
+não envia trabalhos automaticamente.
+
+O resultado só é aceito quando o Orca termina, o G-code é novo e não vazio,
+e o Agent calcula seu tamanho e SHA-256. O caminho de produção deverá receber
+o perfil real da impressora associado ao Production Job pelo Backend.
+
+`analyzeModelFile()` valida localmente STL ASCII/binário (triângulos e limites)
+e 3MF (container e modelo principal), sem enviar o modelo para a nuvem. Essa
+análise é prévia ao slicing e não substitui a validação do Backend.
+
+Para uma impressora cadastrada, `resolveOfficialOrcaProfileForPrinter()` exige
+um modelo exato com preset oficial (P1S, P1P, X1 Carbon, A1 ou A1 mini). Nao
+ha fallback entre modelos: sem perfil correspondente o slicing e recusado.
+
 ## Scripts
 
 - `npm.cmd run start`: inicia o Agent em modo console.

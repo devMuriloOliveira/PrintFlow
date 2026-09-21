@@ -2185,16 +2185,14 @@ Limitações e riscos restantes:
 
 PRÓXIMO PASSO ATUAL:
 
-Avançar para a abstração de Object Storage no Backend, sem ativar ainda a
-implementação concreta: a documentação oficial confirma protocolo S3 e
-provisionamento por `neon.ts`, mas não confirma neste checkout o endpoint,
-credencial temporária ou fluxo de autorização adequado ao Agent. O Agent
-continua proibido de receber credenciais administrativas. A integração
-concreta permanece bloqueada até configuração Neon e validação segura do
-fluxo oficial.
+Manter o Cloudflare R2 como único Object Storage definido para o produto.
+O Backend já possui o provider S3/R2 e o smoke test remoto foi executado com
+sucesso no Render. O Agent continua proibido de receber credenciais
+administrativas; qualquer acesso futuro direto deverá usar autorização
+temporária emitida pelo Backend.
 
-O contrato mínimo `ObjectStorageProvider` (`put/get/head/delete`) já foi
-isolado e testado; nenhum SDK, bucket ou segredo do Neon foi adicionado.
+O contrato mínimo `ObjectStorageProvider` (`put/get/head/delete`) permanece
+isolado e testado. Neon Object Storage não deve ser reintroduzido nesta META.
 
 Validação de release também foi fortalecida:
 
@@ -2614,3 +2612,31 @@ hashes listados passaram e o `certificateSha256` do manifesto coincidiu com o
 certificado publicado. O manifesto registra `signingMode=DEV_SELF_SIGNED` e
 `productionTrusted=false`; nenhum certificado foi instalado como Trusted
 Root.
+
+Na validação real seguinte, o OrcaSlicer 2.4.2 instalado carregou um STL
+fixture e os presets oficiais de referência Bambu Lab P1S 0.4 mm, processo
+0.20 mm e Bambu PLA Basic. O slicing headless concluiu e produziu um G-code
+de 416.667 bytes, com SHA-256 `457b87f9d1f67007cf4280303a9c70834f7f833b18b8d8942e084432db88e24e`.
+O arquivo foi gerado apenas em diretório temporário local; nenhum trabalho
+foi enviado a impressora ou Production. O teste confirmou que o bloqueio
+restante é a seleção do perfil da impressora do usuário, não a instalação
+ou a execução do slicer.
+
+Em 2026-09-20, com P0/P1 e o pipeline Early Access validados, foi iniciado
+o primeiro recorte P2 de processamento local usando exclusivamente o
+OrcaSlicer. `Agent/src/slicing/orcaSlicer.js` valida perfil versionado e
+hash SHA-256 opcional, executa o binário com `shell=false`, timeout limitado,
+`--slice 0`, `--load-settings` e `--outputdir`, e só aceita G-code não vazio
+após calcular seu hash e tamanho. O resultado não acessa PostgreSQL, não
+altera Production Jobs e não inicia impressão automaticamente.
+
+Foram adicionados testes iniciais do contrato, execução mock sem shell e
+rejeição de perfil alterado. O registro de execução abaixo atualiza essa
+contagem e o estado do smoke test real.
+
+Atualização posterior: o smoke test real local do OrcaSlicer foi concluído com
+o perfil P1S e produziu G-code temporário. O registro estrito agora cobre P1S,
+P1P, X1 Carbon, A1 e A1 mini; modelos sem perfil oficial são recusados. A
+suite do Agent passou com 48 testes. Isso ainda não valida hardware real nem
+envio de Production Job, que dependem de uma impressora e credenciais do
+cliente.
