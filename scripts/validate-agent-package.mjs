@@ -160,6 +160,18 @@ try {
       'installer tenta copiar/sobrescrever dados locais do Agent.'
     )
   }
+
+  const updater = await fs.readFile(
+    path.join(agentRoot, 'scripts/update-windows-agent.ps1'),
+    'utf8'
+  )
+  if (
+    !updater.includes('Save-AgentBinaryBackup') ||
+    !updater.includes('Restore-AgentBinaryBackup') ||
+    !updater.includes('Rollback dos binarios concluido')
+  ) {
+    errors.push('atualizador nao possui rollback explicito dos binarios.')
+  }
 } catch (error) {
   errors.push(
     `falha ao validar política do installer: ${error.message}`
