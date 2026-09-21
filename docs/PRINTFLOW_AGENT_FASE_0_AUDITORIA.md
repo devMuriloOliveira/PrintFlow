@@ -2647,3 +2647,11 @@ análise local) estão concluídos em DEVELOPMENT. Os itens 4–8 permanecem
 pendentes porque exigem o contrato persistente de Production Job, migrações e
 validação PostgreSQL, além de hardware/credenciais para consumo real. Nenhum
 estoque, custo real ou manutenção foi inferido a partir de métricas locais.
+
+Em 2026-09-21 foi preparada localmente a fundação aditiva para esses itens:
+`print_jobs` passou a ter campos opcionais para perfil, artefato e métricas;
+`print_job_attempts` recebeu idempotência por tenant/job/tentativa; e
+`BackEnd/src/services/productionJobMetrics.js` calcula consumo estimado versus
+medido, custo material/energia e horas de manutenção sem mutar estoque. A
+migration e o fluxo transacional ainda precisam ser executados em PostgreSQL
+de teste antes de qualquer publicação ou declaração de readiness Production.

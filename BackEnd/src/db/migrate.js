@@ -14,6 +14,7 @@ const tenantTables = [
   'products',
   'orders',
   'print_jobs',
+  'print_job_attempts',
   'expenses',
   'filaments',
   'printers',
@@ -3082,6 +3083,42 @@ export const migrate =
     await query(`alter table agents add column if not exists pending_credential_version integer`)
     await query(`alter table agents add column if not exists pending_secret_expires_at timestamptz`)
     await query(`alter table agents add column if not exists secret_rotated_at timestamptz`)
+
+    // Production Job and slicing metrics are additive so existing jobs remain compatible.
+    await query(`alter table print_jobs add column if not exists slicer_profile_id text`)
+    await query(`alter table print_jobs add column if not exists slicer_profile_version text`)
+    await query(`alter table print_jobs add column if not exists slicing_artifact_sha256 text`)
+    await query(`alter table print_jobs add column if not exists slicing_artifact_size_bytes bigint`)
+    await query(`alter table print_jobs add column if not exists estimated_print_seconds numeric(12,2)`)
+    await query(`alter table print_jobs add column if not exists estimated_filament_grams numeric(12,3)`)
+    await query(`alter table print_jobs add column if not exists estimated_filament_millimeters numeric(14,3)`)
+    await query(`alter table print_jobs add column if not exists actual_print_seconds numeric(12,2)`)
+    await query(`alter table print_jobs add column if not exists actual_filament_grams numeric(12,3)`)
+    await query(`alter table print_jobs add column if not exists actual_filament_millimeters numeric(14,3)`)
+    await query(`alter table print_jobs add column if not exists metrics_source text`)
+    await query(`alter table print_jobs add column if not exists metrics_recorded_at timestamptz`)
+
+    await query(`
+      create table if not exists print_job_attempts (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        print_job_id bigint not null references print_jobs(id) on delete cascade,
+        agent_command_id bigint references agent_commands(id) on delete set null,
+        attempt_no integer not null,
+        idempotency_key text not null,
+        status text not null default 'pending',
+        result jsonb not null default '{}'::jsonb,
+        error_code text not null default '',
+        claimed_at timestamptz,
+        started_at timestamptz,
+        completed_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, print_job_id, attempt_no),
+        unique (tenant_id, idempotency_key)
+      )
+    `)
+    await query(`create index if not exists print_job_attempts_lookup_idx on print_job_attempts (tenant_id, print_job_id, attempt_no desc)`)
 
     await query(
       `
