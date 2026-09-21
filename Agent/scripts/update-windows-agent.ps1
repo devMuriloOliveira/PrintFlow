@@ -3,12 +3,60 @@ param(
   [string]$PackageDirectory,
   [string]$ExpectedVersion = "",
   [string]$ExpectedCertificateSha256 = "",
+  [string]$InstallDir = "$env:LOCALAPPDATA\PrintFlowAgent",
   [switch]$Apply
 )
 
 $ErrorActionPreference = "Stop"
 $packageRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $verifier = Join-Path $PSScriptRoot "verify-agent-update.mjs"
+$installRoot = [System.IO.Path]::GetFullPath($InstallDir)
+$rollbackRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("PrintFlowAgent-Rollback-" + [guid]::NewGuid().ToString("N"))
+$binaryItems = @(
+  "assets",
+  "node_modules",
+  "scripts",
+  "src",
+  "package.json",
+  "package-lock.json",
+  "README.md"
+)
+
+function Save-AgentBinaryBackup {
+  if (-not (Test-Path -LiteralPath $installRoot)) {
+    return $false
+  }
+
+  New-Item -ItemType Directory -Path $rollbackRoot -Force | Out-Null
+  foreach ($item in $binaryItems) {
+    $source = Join-Path $installRoot $item
+    if (Test-Path -LiteralPath $source) {
+      Copy-Item -LiteralPath $source -Destination $rollbackRoot -Recurse -Force
+    }
+  }
+
+  return $true
+}
+
+function Restore-AgentBinaryBackup {
+  if (-not (Test-Path -LiteralPath $rollbackRoot)) {
+    return
+  }
+
+  New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+  foreach ($item in $binaryItems) {
+    $target = Join-Path $installRoot $item
+    if (Test-Path -LiteralPath $target) {
+      Remove-Item -LiteralPath $target -Recurse -Force
+    }
+
+    $backup = Join-Path $rollbackRoot $item
+    if (Test-Path -LiteralPath $backup) {
+      Copy-Item -LiteralPath $backup -Destination $installRoot -Recurse -Force
+    }
+  }
+}
+
 if (-not (Test-Path -LiteralPath $verifier)) {
   throw "Verificador da atualizacao nao encontrado no pacote."
 }
@@ -58,5 +106,24 @@ if ($confirmation -cne "INSTALAR") {
   throw "Instalacao cancelada pelo operador."
 }
 
-Start-Process -FilePath $installer -Wait
-Write-Host "Instalador concluido. O estado local do Agent nao foi removido por este script."
+$backupCreated = Save-AgentBinaryBackup
+try {
+  $installerProcess = Start-Process -FilePath $installer -Wait -PassThru
+  if ($installerProcess.ExitCode -ne 0) {
+    throw "O instalador retornou exit code $($installerProcess.ExitCode)."
+  }
+
+  Write-Host "Instalador concluido. O estado local do Agent nao foi removido por este script."
+} catch {
+  if ($backupCreated) {
+    Write-Warning "Falha no upgrade; restaurando os binarios anteriores."
+    Restore-AgentBinaryBackup
+    Write-Host "Rollback dos binarios concluido. Dados locais nao foram tocados."
+  }
+
+  throw
+} finally {
+  if (Test-Path -LiteralPath $rollbackRoot) {
+    Remove-Item -LiteralPath $rollbackRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
