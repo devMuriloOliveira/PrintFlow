@@ -206,8 +206,9 @@ $updateItem.Add_Click({
 [void]$menu.Items.Insert(1, $updateItem)
 
 $updateTimer = New-Object System.Windows.Forms.Timer
-$updateTimer.Interval = 6 * 60 * 60 * 1000
+$updateTimer.Interval = 30 * 1000
 $updateTimer.Add_Tick({
+  $updateTimer.Stop()
   try {
     $result = & $updateScript -CurrentVersion $version -Interactive
     if ($result -and $result.updateAvailable -and -not $result.installed) {
@@ -215,6 +216,9 @@ $updateTimer.Add_Tick({
     }
   } catch {
     # A indisponibilidade da internet não interrompe o Agent.
+  } finally {
+    $updateTimer.Interval = 6 * 60 * 60 * 1000
+    $updateTimer.Start()
   }
 })
 
