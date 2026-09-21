@@ -23,7 +23,8 @@ import {
 } from '../services/printValidation.js'
 
 import {
-  openPrintFileReadStream
+  openPrintFileReadStream,
+  savePrintFileStream
 } from '../services/printFileStorage.js'
 
 import {
@@ -45,6 +46,7 @@ import {
 } from '../services/agentRealtime.js'
 
 import { normalizeAgentMetrics, recordProductionJobMetrics } from '../services/productionJobMetrics.js'
+import { recordProductionJobSlicingArtifact } from '../services/productionJobSlicing.js'
 
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
@@ -1375,6 +1377,66 @@ export const handleAgentPrintJobMetrics = async (req, res, printJobId) => {
 
   if (!result) return sendJson(res, 404, { error: 'Production Job nao encontrado para este Agent.' })
   return sendJson(res, 200, result)
+}
+
+export const handleAgentPrintJobSlicingArtifact = async (req, res, printJobId) => {
+  const agent = await authenticateAgentRequest(req)
+  if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })
+
+  const fileName = String(req.headers['x-printflow-file-name'] || '').trim()
+  const format = String(req.headers['x-printflow-file-format'] || '').trim().toLowerCase()
+  const profileId = String(req.headers['x-printflow-slicer-profile-id'] || '').trim()
+  const profileVersion = String(req.headers['x-printflow-slicer-profile-version'] || '').trim()
+  const idempotencyKey = String(req.headers['x-printflow-idempotency-key'] || '').trim()
+  if (!fileName || format !== 'gcode' || !profileId || !profileVersion || !idempotencyKey) {
+    return sendJson(res, 400, { error: 'Metadados do artefato de slicing invalidos.' })
+  }
+
+  const job = await tenantQuery(agent.tenant_id,
+    `select j.id
+       from print_jobs j
+       join agent_printers ap on ap.id = j.agent_printer_id and ap.tenant_id = j.tenant_id
+      where j.tenant_id = $1 and j.id = $2 and ap.agent_id = $3 and j.status in ('queued', 'awaiting_confirmation')
+      limit 1`,
+    [agent.tenant_id, printJobId, agent.id]
+  )
+  if (!job.rowCount) return sendJson(res, 404, { error: 'Production Job nao encontrado para este Agent.' })
+
+  let stored
+  try {
+    stored = await savePrintFileStream({
+      tenantId: agent.tenant_id,
+      productId: `job-${printJobId}`,
+      fileName,
+      format,
+      stream: req
+    })
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || 'Nao foi possivel armazenar o artefato.' })
+  }
+
+  try {
+    const result = await withTenant(agent.tenant_id, (client) => recordProductionJobSlicingArtifact({
+      client,
+      tenantId: agent.tenant_id,
+      agentId: agent.id,
+      printJobId,
+      payload: {
+        idempotencyKey,
+        profileId,
+        profileVersion,
+        estimatedPrintSeconds: req.headers['x-printflow-estimated-print-seconds'],
+        estimatedFilamentGrams: req.headers['x-printflow-estimated-filament-grams'],
+        estimatedFilamentMillimeters: req.headers['x-printflow-estimated-filament-millimeters'],
+        artifact: stored
+      }
+    }))
+    if (!result) return sendJson(res, 404, { error: 'Production Job nao encontrado para este Agent.' })
+    return sendJson(res, 200, result)
+  } catch (error) {
+    if (error?.statusCode === 409) return sendJson(res, 409, { error: error.message })
+    throw error
+  }
 }
 
 // ======================================================
@@ -2970,11 +3032,27 @@ export const handleAgentPrintFileGet =
           from products
           where tenant_id = $1
             and print_file_storage_key = $2
+          union all
+          select
+            j.id,
+            j.slicing_artifact_name as print_file_name,
+            j.slicing_artifact_format as print_file_format,
+            j.slicing_artifact_sha256 as print_file_hash,
+            j.slicing_artifact_size_bytes as print_file_size_bytes,
+            j.slicing_artifact_storage_key as print_file_storage_key
+          from print_jobs j
+          join agent_printers ap
+            on ap.id = j.agent_printer_id
+           and ap.tenant_id = j.tenant_id
+          where j.tenant_id = $1
+            and j.slicing_artifact_storage_key = $2
+            and ap.agent_id = $3
           limit 1
         `,
         [
           agent.tenant_id,
-          storageKey
+          storageKey,
+          agent.id
         ]
       )
 
@@ -4596,6 +4674,13 @@ export const handleAgentPrinterControlCreate =
               j.priority,
               j.status,
               j.notes,
+              j.slicer_profile_id,
+              j.slicer_profile_version,
+              j.slicing_artifact_name,
+              j.slicing_artifact_format,
+              j.slicing_artifact_sha256,
+              j.slicing_artifact_size_bytes,
+              j.slicing_artifact_storage_key,
               p.dimensions,
               p.weight,
               p.layer_height,
@@ -4799,29 +4884,25 @@ export const handleAgentPrinterControlCreate =
           storedJob.notes ||
           '',
 
-        printFile: {
-          name:
-            storedJob.print_file_name ||
-            '',
+        printFile: storedJob.slicing_artifact_storage_key
+          ? {
+              name: storedJob.slicing_artifact_name || '',
+              format: storedJob.slicing_artifact_format || 'gcode',
+              hash: storedJob.slicing_artifact_sha256 || '',
+              sizeBytes: Number(storedJob.slicing_artifact_size_bytes || 0),
+              storageKey: storedJob.slicing_artifact_storage_key
+            }
+          : {
+              name: storedJob.print_file_name || '',
+              format: storedJob.print_file_format || '',
+              hash: storedJob.print_file_hash || '',
+              sizeBytes: Number(storedJob.print_file_size_bytes || 0),
+              storageKey: storedJob.print_file_storage_key || ''
+            },
 
-          format:
-            storedJob.print_file_format ||
-            '',
-
-          hash:
-            storedJob.print_file_hash ||
-            '',
-
-          sizeBytes:
-            Number(
-              storedJob.print_file_size_bytes ||
-              0
-            ),
-
-          storageKey:
-            storedJob.print_file_storage_key ||
-            ''
-        },
+        slicerProfile: storedJob.slicer_profile_id
+          ? { id: storedJob.slicer_profile_id, version: storedJob.slicer_profile_version || '' }
+          : null,
 
         printProfile:
           storedJob.print_profile ||

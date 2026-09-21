@@ -3087,8 +3087,12 @@ export const migrate =
     // Production Job and slicing metrics are additive so existing jobs remain compatible.
     await query(`alter table print_jobs add column if not exists slicer_profile_id text`)
     await query(`alter table print_jobs add column if not exists slicer_profile_version text`)
+    await query(`alter table print_jobs add column if not exists slicing_artifact_storage_key text`)
+    await query(`alter table print_jobs add column if not exists slicing_artifact_name text`)
+    await query(`alter table print_jobs add column if not exists slicing_artifact_format text`)
     await query(`alter table print_jobs add column if not exists slicing_artifact_sha256 text`)
     await query(`alter table print_jobs add column if not exists slicing_artifact_size_bytes bigint`)
+    await query(`alter table print_jobs add column if not exists slicing_recorded_at timestamptz`)
     await query(`alter table print_jobs add column if not exists estimated_print_seconds numeric(12,2)`)
     await query(`alter table print_jobs add column if not exists estimated_filament_grams numeric(12,3)`)
     await query(`alter table print_jobs add column if not exists estimated_filament_millimeters numeric(14,3)`)

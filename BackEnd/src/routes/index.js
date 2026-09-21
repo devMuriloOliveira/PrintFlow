@@ -181,6 +181,7 @@ import {
   handleAgentEvents,
   handleAgentEventSync,
   handleAgentPrintJobMetrics,
+  handleAgentPrintJobSlicingArtifact,
   handleAgentsList,
   handleAgentRevoke,
   handleAgentDiscoverCreate,
@@ -350,6 +351,11 @@ export const handleRequest =
       const agentPrintJobMetricsMatch = url.pathname.match(/^\/api\/agents\/print-jobs\/([^/]+)\/metrics$/)
       if (req.method === 'POST' && agentPrintJobMetricsMatch) {
         return await handleAgentPrintJobMetrics(req, res, agentPrintJobMetricsMatch[1])
+      }
+
+      const agentPrintJobSlicingArtifactMatch = url.pathname.match(/^\/api\/agents\/print-jobs\/([^/]+)\/slicing-artifact$/)
+      if (req.method === 'POST' && agentPrintJobSlicingArtifactMatch) {
+        return await handleAgentPrintJobSlicingArtifact(req, res, agentPrintJobSlicingArtifactMatch[1])
       }
 
       if (req.method === 'POST' && url.pathname === '/api/agents/credential/rotate') return await handleAgentCredentialRotate(req, res)
