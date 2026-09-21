@@ -6,11 +6,15 @@ import { installFileLogger } from './logging/fileLogger.js'
 import { AGENT_VERSION, getAgentRuntimeInfo } from './agentInfo.js'
 import {
   consumePendingPairingCode,
+  clearCredentials,
   loadCredentials,
   saveCredentials
 } from './storage/credentials.js'
 import { pairAgent } from './pairing/pairing.js'
-import { verifyAgent } from './cloud/auth.js'
+import {
+  isInvalidAgentCredentialError,
+  verifyAgent
+} from './cloud/auth.js'
 
 import {
   sendHeartbeat,
@@ -211,10 +215,23 @@ const start = async () => {
     console.log('')
     console.log('Verificando credencial do Agent...')
 
-    const authResult = await verifyAgent(
-      apiUrl,
-      credentials
-    )
+    let authResult
+    try {
+      authResult = await verifyAgent(
+        apiUrl,
+        credentials
+      )
+    } catch (error) {
+      if (!isInvalidAgentCredentialError(error)) {
+        throw error
+      }
+
+      await clearCredentials()
+      console.log(
+        'Credencial do Agent recusada; aguardando novo pareamento pelo site.'
+      )
+      return start()
+    }
 
     console.log('Agent autenticado pelo PrintFlow')
     console.log('Status:', authResult.status)

@@ -64,6 +64,19 @@ if (packageJson && lockJson) {
       )
     }
   }
+
+  const agentVersionSource = await fs.readFile(
+    path.join(agentRoot, 'src/config/agentVersion.js'),
+    'utf8'
+  )
+  const declaredVersion = agentVersionSource.match(
+    /AGENT_VERSION\s*=\s*['"]([^'"]+)['"]/i
+  )?.[1]
+  if (declaredVersion !== packageJson.version) {
+    errors.push(
+      `agentVersion.js e package.json divergem (${declaredVersion || 'ausente'} vs ${packageJson.version}).`
+    )
+  }
 }
 
 for (const relativePath of [

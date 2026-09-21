@@ -25,6 +25,11 @@ const dataDirectory = process.env.PRINTFLOW_AGENT_DATA_DIR
 const credentialsFile = path.join(dataDirectory, 'agent.json')
 const pendingPairingFile = path.join(dataDirectory, 'pending-pairing.json')
 
+const parseJson = content =>
+  JSON.parse(
+    String(content).replace(/^\uFEFF/, '')
+  )
+
 const powershellScript = (operation) => `
 $inputText = [Console]::In.ReadToEnd()
 $inputBytes = [Convert]::FromBase64String($inputText)
@@ -118,7 +123,7 @@ export const getAgentDataDirectory = () =>
 export const loadCredentials = async () => {
   try {
     const content = await fs.readFile(credentialsFile, 'utf8')
-    const stored = JSON.parse(content)
+    const stored = parseJson(content)
 
     if (
       stored?.protection ===
@@ -258,7 +263,7 @@ export const consumePendingPairingCode = async () => {
       }
     )
 
-    const data = JSON.parse(content)
+    const data = parseJson(content)
 
     return String(data?.code || '')
       .trim()
