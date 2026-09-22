@@ -174,12 +174,13 @@ export const handleMercadoLivreWebhook = async (req, res) => {
 
   const resource = String(payload.resource || '')
   const externalOrderId = resource.split('/').filter(Boolean).pop() || String(payload.order_id || '')
-  await recordWebhookEvent(integration, {
+  const webhookReceipt = await recordWebhookEvent(integration, {
     platform: 'mercado_livre',
     eventType: payload.topic || 'webhook',
     externalOrderId,
     payload
   })
+  if (!webhookReceipt.inserted) return sendJson(res, 200, { status: 'duplicate' })
 
   if (externalOrderId && ['orders', 'orders_v2', 'merchant_orders'].includes(String(payload.topic))) {
     let sale
@@ -219,12 +220,13 @@ export const handleShopeeWebhook = async (req, res) => {
 
   const data = payload.data || {}
   const externalOrderId = String(data.ordersn || data.order_sn || payload.ordersn || '')
-  await recordWebhookEvent(integration, {
+  const webhookReceipt = await recordWebhookEvent(integration, {
     platform: 'shopee',
     eventType: String(payload.code || 'webhook'),
     externalOrderId,
     payload
   })
+  if (!webhookReceipt.inserted) return sendJson(res, 200, { message: 'duplicate' })
 
   if (externalOrderId) {
     const sale = await safeNormalizeOrFetch(integration, 'shopee', externalOrderId, payload)
@@ -255,12 +257,13 @@ export const handleAmazonWebhook = async (req, res) => {
   if (!integration) return ignored(res)
 
   const externalOrderId = String(payload.amazonOrderId || payload.orderId || payload.order_id || '')
-  await recordWebhookEvent(integration, {
+  const webhookReceipt = await recordWebhookEvent(integration, {
     platform: 'amazon',
     eventType: payload.notificationType || 'webhook',
     externalOrderId,
     payload
   })
+  if (!webhookReceipt.inserted) return sendJson(res, 200, { message: 'duplicate' })
 
   if (externalOrderId) {
     const sale = await safeNormalizeOrFetch(integration, 'amazon', externalOrderId, payload)

@@ -34,7 +34,7 @@ const clearMarketplaceFilters = () => { marketplaceFilter.value = 'Todos os cana
 const feeRate = (marketplace: any) => marketplace.gross > 0 && marketplace.fees !== undefined ? Number(marketplace.fees || 0) / Number(marketplace.gross) * 100 : Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0)
 const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
-const pendingMarketplaceOrders = computed(() => marketplacePageItems.value.filter((order: any) => !['completed', 'cancelled', 'canceled', 'refunded'].includes(String(order.printJobStatus || order.status || '').toLowerCase())))
+const pendingMarketplaceOrders = computed(() => marketplacePageItems.value.filter((order: any) => !['completed', 'fulfilled', 'cancelled', 'canceled', 'refunded'].includes(String(order.fulfillmentStatus || order.printJobStatus || order.status || '').toLowerCase())))
 const marketplaceConnections = computed(() => marketplaceIntegrations.value.filter((integration: any) => integration.platform === 'mercado_livre'))
 const editMarketplace = (marketplace: any) => {
   if (!marketplace.id) return
@@ -112,12 +112,20 @@ const tokenStatusClass = (integration: any) => ['connected'].includes(integratio
 const formatSyncDate = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : 'Ainda não sincronizada'
 const formatTokenExpiry = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : 'não informado'
 const marketplaceOrderLabel = (order: any) => {
+  if (order.requiresReview) return 'Revisão manual necessária'
+  if (order.fulfillmentStatus === 'fulfilled') return 'Atendimento concluído'
+  if (order.fulfillmentStatus === 'reserved') return 'Estoque reservado'
+  if (order.fulfillmentStatus === 'partial_production') return 'Aguardando produção'
+  if (order.fulfillmentStatus === 'awaiting_material') return 'Aguardando material'
   if (order.printJobStatus === 'awaiting_confirmation') return 'Aguardando confirmação'
   if (order.printJobStatus === 'queued') return 'Liberado para fila'
   if (order.printJobStatus) return order.printJobStatus
   return 'Aguardando vínculo'
 }
 const marketplaceOrderBadgeClass = (order: any) => {
+  if (order.requiresReview) return 'badge--orange'
+  if (order.fulfillmentStatus === 'fulfilled') return 'badge--green'
+  if (order.fulfillmentStatus === 'awaiting_material') return 'badge--red'
   if (order.printJobStatus === 'awaiting_confirmation') return 'badge--orange'
   if (order.printJobStatus === 'queued') return 'badge--green'
   if (order.printJobStatus === 'cancelled') return 'badge--red'
@@ -222,8 +230,8 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
               <td>{{ formatCurrency(order.gross) }}</td>
               <td>{{ formatCurrency(order.marketplaceFee) }}</td>
               <td>{{ formatCurrency(order.shipping) }}</td>
-              <td><span class="badge" :class="marketplaceOrderBadgeClass(order)">{{ marketplaceOrderLabel(order) }}</span></td>
-              <td><button v-if="!order.printJobId" type="button" class="btn btn--primary" :disabled="linkingOrderId !== '' || !(selectedProductByOrder[order.id] || order.suggestedProductId || order.mappedProductId)" @click="linkOrderProduct(order)">Vincular</button></td>
+              <td><span class="badge" :class="marketplaceOrderBadgeClass(order)" :title="order.reviewReason || ''">{{ marketplaceOrderLabel(order) }}</span></td>
+              <td><button v-if="!order.printJobId && !order.fulfillmentPlanId && !order.requiresReview" type="button" class="btn btn--primary" :disabled="linkingOrderId !== '' || !(selectedProductByOrder[order.id] || order.suggestedProductId || order.mappedProductId)" @click="linkOrderProduct(order)">Vincular</button><small v-if="order.requiresReview" style="display:block;color:var(--muted);max-width:160px">{{ order.reviewReason }}</small></td>
             </tr>
           </tbody>
         </table>

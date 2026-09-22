@@ -294,11 +294,11 @@ export const recordTrackedSale = async (integration, sale) => {
     return client.query(`
     insert into tracked_sales (
       tenant_id, integration_id, marketplace_id, platform, external_order_id, external_order_hash,
-      external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, sold_at
+      external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, requires_review, review_reason, sold_at
       , fee_breakdown
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, coalesce($18::timestamptz, now()), $19::jsonb)
-    on conflict (tenant_id, platform, external_order_hash) do update set
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, coalesce($20::timestamptz, now()), $21::jsonb)
+    on conflict (tenant_id, integration_id, platform, external_order_hash) do update set
       external_sku = excluded.external_sku,
       external_sku_hash = excluded.external_sku_hash,
       product_name = excluded.product_name,
@@ -310,6 +310,8 @@ export const recordTrackedSale = async (integration, sale) => {
       cost = excluded.cost,
       profit = excluded.profit,
       status = excluded.status,
+      requires_review = excluded.requires_review,
+      review_reason = excluded.review_reason,
       sold_at = excluded.sold_at,
       fee_breakdown = excluded.fee_breakdown,
       updated_at = now()
@@ -332,6 +334,8 @@ export const recordTrackedSale = async (integration, sale) => {
     cost,
     profit,
     text(sale.status || 'received'),
+    Boolean(sale.requiresReview),
+    text(sale.reviewReason),
     sale.soldAt || null,
     JSON.stringify(feeBreakdown)
     ])
@@ -344,19 +348,26 @@ export const recordWebhookEvent = async (integration, event) => {
   const tenantId = integration.tenant_id
   if (!tenantId) return null
   const payload = JSON.stringify(event.payload || {})
+  const eventHash = blindIndex(`${text(event.eventType)}|${text(event.externalOrderId)}|${payload}`)
 
-  return withTenant(tenantId, (client) => client.query(`
+  return withTenant(tenantId, async (client) => {
+    const result = await client.query(`
     insert into marketplace_webhook_events (
-      tenant_id, integration_id, platform, event_type, external_order_id, payload, status
+      tenant_id, integration_id, platform, event_type, external_order_id, event_hash, payload, status
     )
-    values ($1, $2, $3, $4, $5, $6, $7)
+    values ($1, $2, $3, $4, $5, $6, $7, $8)
+    on conflict (tenant_id, integration_id, event_hash) do nothing
+    returning id
   `, [
     tenantId,
     integration.id,
     platformName(event.platform || integration.platform),
     text(event.eventType),
     encryptField(event.externalOrderId || ''),
+    eventHash,
     encryptField(payload),
     text(event.status || 'received')
-  ]))
+  ])
+    return { inserted: Boolean(result.rowCount), id: result.rows[0]?.id || null }
+  })
 }

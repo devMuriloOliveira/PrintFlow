@@ -1385,6 +1385,16 @@ export const migrate =
             not null
             default 'received',
 
+          requires_review
+            boolean
+            not null
+            default false,
+
+          review_reason
+            text
+            not null
+            default '',
+
           sold_at
             timestamptz
             not null
@@ -1410,6 +1420,8 @@ export const migrate =
         "external_sku_hash text not null default ''",
         "product_name text not null default ''",
         'quantity integer not null default 1',
+        'requires_review boolean not null default false',
+        "review_reason text not null default ''",
         "fee_breakdown jsonb not null default '{}'::jsonb"
       ]
     ) {
@@ -1490,6 +1502,45 @@ export const migrate =
         )
       `
     )
+    await query(`
+      do $$
+      declare constraint_row record;
+      begin
+        for constraint_row in
+          select conname from pg_constraint
+           where conrelid = 'tracked_sales'::regclass
+             and contype = 'u'
+             and pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, platform, external_order_hash)'
+        loop
+          execute format('alter table tracked_sales drop constraint %I', constraint_row.conname);
+        end loop;
+      end $$;
+    `)
+    await query(`
+      do $$
+      begin
+        if not exists (select 1 from pg_constraint where conname = 'tracked_sales_tenant_integration_order_key') then
+          alter table tracked_sales add constraint tracked_sales_tenant_integration_order_key unique (tenant_id, integration_id, platform, external_order_hash);
+        end if;
+      end $$;
+    `)
+    await query(`
+      do $$
+      declare constraint_row record;
+      begin
+        for constraint_row in
+          select conname from pg_constraint
+           where conrelid = 'marketplace_product_links'::regclass
+             and contype = 'u'
+             and pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, platform, external_sku_hash)'
+        loop
+          execute format('alter table marketplace_product_links drop constraint %I', constraint_row.conname);
+        end loop;
+        if not exists (select 1 from pg_constraint where conname = 'marketplace_product_links_tenant_integration_sku_key') then
+          alter table marketplace_product_links add constraint marketplace_product_links_tenant_integration_sku_key unique (tenant_id, integration_id, platform, external_sku_hash);
+        end if;
+      end $$;
+    `)
 
     // ==================================================
     // MARKETPLACE WEBHOOK EVENTS
@@ -1525,6 +1576,11 @@ export const migrate =
             not null
             default '',
 
+          event_hash
+            text
+            not null
+            default '',
+
           payload
             text
             not null
@@ -1542,6 +1598,9 @@ export const migrate =
         )
       `
     )
+    await query(`alter table marketplace_webhook_events add column if not exists event_hash text not null default ''`)
+    await query(`update marketplace_webhook_events set event_hash = 'legacy-' || id::text where event_hash = ''`)
+    await query(`create unique index if not exists marketplace_webhook_events_dedupe_idx on marketplace_webhook_events (tenant_id, integration_id, event_hash)`)
 
     // ==================================================
     // ORDERS

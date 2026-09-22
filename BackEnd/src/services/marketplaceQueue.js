@@ -32,6 +32,15 @@ const firstText = (...values) => {
 
 export const normalizeMarketplaceOrder = (platform, payload = {}) => {
   const data = payload.data || payload.order || payload
+  const itemCollection = Array.isArray(data.items)
+    ? data.items
+    : Array.isArray(data.order_items)
+      ? data.order_items
+      : Array.isArray(data.products)
+        ? data.products
+        : []
+  const requiresReview = itemCollection.length > 1
+  const reviewReason = requiresReview ? 'Pedido com mais de um item/SKU; revise os itens antes de liberar.' : ''
   const item = Array.isArray(data.items)
     ? data.items[0]
     : Array.isArray(data.order_items)
@@ -99,7 +108,9 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       status:
         firstText(data.status, payload.status, 'received'),
       soldAt:
-        firstText(data.date_created, data.created_at, payload.date_created, payload.created_at) || null
+        firstText(data.date_created, data.created_at, payload.date_created, payload.created_at) || null,
+      requiresReview,
+      reviewReason
     }
   }
 
@@ -125,8 +136,9 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
           : number(data.escrow_amount_after_adjustment),
       status:
         firstText(data.status, 'received'),
-      soldAt:
-        data.create_time ? new Date(Number(data.create_time) * 1000).toISOString() : null
+      soldAt: data.create_time ? new Date(Number(data.create_time) * 1000).toISOString() : null,
+      requiresReview,
+      reviewReason
     }
   }
 
@@ -152,7 +164,9 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
     status:
       firstText(payload.status, data.status, 'received'),
     soldAt:
-      firstText(payload.purchaseDate, payload.createdAt, data.purchaseDate, data.createdAt) || null
+      firstText(payload.purchaseDate, payload.createdAt, data.purchaseDate, data.createdAt) || null,
+    requiresReview,
+    reviewReason
   }
 }
 
@@ -165,7 +179,7 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
   const sku = text(sale.sku)
   const productName = text(sale.productName)
 
-  if (!sku && !productName) {
+  if (sale.requiresReview || !sku && !productName) {
     return null
   }
 
@@ -188,13 +202,15 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
           from marketplace_product_links l
           inner join products p on p.id = l.product_id and p.tenant_id = l.tenant_id
           where l.tenant_id = $1
-            and l.platform = $2
-            and l.external_sku_hash = $3
+            and l.integration_id = $2
+            and l.platform = $3
+            and l.external_sku_hash = $4
           order by l.updated_at desc
           limit 1
         `,
         [
           tenantId,
+          integration.id,
           text(integration.platform),
           blindIndex(sku)
         ]
@@ -205,27 +221,6 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
     // SKU link can authorize inventory reservation or production.
     const product = linkedProductResult.rows[0]
     if (!product?.printer_id) {
-      return null
-    }
-
-    const printerResult = await client.query(
-      `
-        select
-          id,
-          agent_printer_id
-        from printers
-        where tenant_id = $1
-          and id = $2
-        limit 1
-      `,
-      [
-        tenantId,
-        product.printer_id
-      ]
-    )
-
-    const printer = printerResult.rows[0]
-    if (!printer) {
       return null
     }
 
