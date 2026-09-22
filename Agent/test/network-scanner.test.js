@@ -21,6 +21,32 @@ test('SSDP extrai serial Bambu e normaliza headers', () => {
   assert.equal(headers.serial, 'ABC123')
 })
 
+test('SSDP extrai serial quando a resposta usa XML de dispositivo', async () => {
+  const socket = new EventEmitter()
+  socket.bind = callback => callback()
+  socket.send = () => {
+    socket.emit(
+      'message',
+      Buffer.from([
+        'HTTP/1.1 200 OK',
+        'SERVER: Bambu Lab',
+        '',
+        '<device><serialNumber>XML123</serialNumber><model>P1P</model></device>'
+      ].join('\r\n')),
+      { address: '192.168.1.51' }
+    )
+  }
+  socket.close = () => {}
+
+  const printers = await discoverBambuSsdp({
+    socketFactory: () => socket,
+    timeoutMs: 100
+  })
+
+  assert.equal(printers[0].serial, 'XML123')
+  assert.equal(printers[0].model, 'P1P')
+})
+
 test('SSDP retorna candidato Bambu sem varredura de portas', async () => {
   const socket = new EventEmitter()
   socket.bind = callback => callback()

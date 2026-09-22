@@ -428,7 +428,7 @@ const parseSsdpBambuResponse = (
 
   if (!fingerprint.includes('bambu')) return null
 
-  const serial = firstHeader(headers, [
+  const serialHeader = firstHeader(headers, [
     'serial',
     'serial-number',
     'device-serial',
@@ -436,11 +436,26 @@ const parseSsdpBambuResponse = (
     'x-device-serial'
   ])
 
-  const model = firstHeader(headers, [
+  const serial = serialHeader ||
+    text.match(
+      /<(?:serialNumber|serial|deviceSerial)>\s*([^<\s]+)\s*<\//i
+    )?.[1] ||
+    text.match(
+      /(?:serial(?:[-_ ]?number)?|device[-_ ]?serial)\s*[:=]\s*([A-Za-z0-9._-]+)/i
+    )?.[1] ||
+    ''
+
+  const modelHeader = firstHeader(headers, [
     'model',
     'device-model',
     'x-model'
   ])
+
+  const model = modelHeader ||
+    text.match(
+      /<(?:model|deviceModel)>\s*([^<\s]+)\s*<\//i
+    )?.[1] ||
+    ''
 
   return createBambuCandidate(
     remoteAddress,
