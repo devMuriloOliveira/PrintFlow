@@ -13,7 +13,7 @@ import {
   findIntegrationByExternalAccount,
   listMarketplaceIntegrations,
   markMarketplaceIntegrationSync,
-  recordTrackedSale,
+  recordTrackedSales,
   recordWebhookEvent
 } from '../repositories/integrationsRepository.js'
 import {
@@ -35,6 +35,22 @@ const safeNormalizeOrFetch = async (integration, platform, externalOrderId, payl
   } catch {}
 
   return normalizeMarketplaceOrder(platform, payload)
+}
+
+const recordAndQueueMarketplaceSale = async (integration, sale, externalOrderId) => {
+  const trackedSales = await recordTrackedSales(integration, { ...sale, externalOrderId })
+  const items = Array.isArray(sale.items) && sale.items.length ? sale.items : [sale]
+  for (const [index, trackedSale] of trackedSales.entries()) {
+    await enqueueMarketplaceSaleForPrinting(integration, {
+      ...sale,
+      ...(items[index] || {}),
+      id: trackedSale?.id,
+      externalOrderId,
+      requiresReview: Boolean(items[index]?.requiresReview || sale.requiresReview),
+      reviewReason: items[index]?.reviewReason || sale.reviewReason || ''
+    })
+  }
+  return trackedSales
 }
 
 const ignored = (res) => sendJson(res, 200, { message: 'Conta ignorada ou nao integrada.' })
@@ -148,20 +164,14 @@ export const handleMarketplaceOrderSync = async (req, res, integrationId) => {
     await markMarketplaceIntegrationSync(tenantId, integration.id, { status: 'error', lastError: syncErrorMessage(error) })
     return sendJson(res, 502, { error: 'Nao foi possivel consultar o pedido no marketplace. Verifique a conexao da conta.' })
   }
-  const trackedSale = await recordTrackedSale(integration, {
+  const trackedSales = await recordAndQueueMarketplaceSale(integration, {
     platform: integration.platform,
     externalOrderId,
     ...sale
   })
-
-  await enqueueMarketplaceSaleForPrinting(integration, {
-    ...sale,
-    id: trackedSale?.id,
-    externalOrderId
-  })
   await markMarketplaceIntegrationSync(tenantId, integration.id)
 
-  return sendJson(res, 200, { status: 'synced', trackedSaleId: trackedSale?.id ? String(trackedSale.id) : '' })
+  return sendJson(res, 200, { status: 'synced', trackedSaleIds: trackedSales.map((row) => String(row.id)) })
 }
 
 export const handleMercadoLivreWebhook = async (req, res) => {
@@ -174,12 +184,13 @@ export const handleMercadoLivreWebhook = async (req, res) => {
 
   const resource = String(payload.resource || '')
   const externalOrderId = resource.split('/').filter(Boolean).pop() || String(payload.order_id || '')
-  await recordWebhookEvent(integration, {
+  const webhookReceipt = await recordWebhookEvent(integration, {
     platform: 'mercado_livre',
     eventType: payload.topic || 'webhook',
     externalOrderId,
     payload
   })
+  if (!webhookReceipt.inserted) return sendJson(res, 200, { status: 'duplicate' })
 
   if (externalOrderId && ['orders', 'orders_v2', 'merchant_orders'].includes(String(payload.topic))) {
     let sale
@@ -190,16 +201,10 @@ export const handleMercadoLivreWebhook = async (req, res) => {
       await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, { status: 'error', lastError: syncErrorMessage(error) })
       return sendJson(res, 200, { status: 'received', sync: 'pending' })
     }
-    const trackedSale = await recordTrackedSale(integration, {
+    await recordAndQueueMarketplaceSale(integration, {
       platform: 'mercado_livre',
       externalOrderId,
       ...sale
-    })
-
-    await enqueueMarketplaceSaleForPrinting(integration, {
-      ...sale,
-      id: trackedSale?.id,
-      externalOrderId
     })
     await markMarketplaceIntegrationSync(integration.tenant_id, integration.id)
   }
@@ -219,25 +224,20 @@ export const handleShopeeWebhook = async (req, res) => {
 
   const data = payload.data || {}
   const externalOrderId = String(data.ordersn || data.order_sn || payload.ordersn || '')
-  await recordWebhookEvent(integration, {
+  const webhookReceipt = await recordWebhookEvent(integration, {
     platform: 'shopee',
     eventType: String(payload.code || 'webhook'),
     externalOrderId,
     payload
   })
+  if (!webhookReceipt.inserted) return sendJson(res, 200, { message: 'duplicate' })
 
   if (externalOrderId) {
     const sale = await safeNormalizeOrFetch(integration, 'shopee', externalOrderId, payload)
-    const trackedSale = await recordTrackedSale(integration, {
+    await recordAndQueueMarketplaceSale(integration, {
       platform: 'shopee',
       externalOrderId,
       ...sale
-    })
-
-    await enqueueMarketplaceSaleForPrinting(integration, {
-      ...sale,
-      id: trackedSale?.id,
-      externalOrderId
     })
   }
 
@@ -255,25 +255,20 @@ export const handleAmazonWebhook = async (req, res) => {
   if (!integration) return ignored(res)
 
   const externalOrderId = String(payload.amazonOrderId || payload.orderId || payload.order_id || '')
-  await recordWebhookEvent(integration, {
+  const webhookReceipt = await recordWebhookEvent(integration, {
     platform: 'amazon',
     eventType: payload.notificationType || 'webhook',
     externalOrderId,
     payload
   })
+  if (!webhookReceipt.inserted) return sendJson(res, 200, { message: 'duplicate' })
 
   if (externalOrderId) {
     const sale = await safeNormalizeOrFetch(integration, 'amazon', externalOrderId, payload)
-    const trackedSale = await recordTrackedSale(integration, {
+    await recordAndQueueMarketplaceSale(integration, {
       platform: 'amazon',
       externalOrderId,
       ...sale
-    })
-
-    await enqueueMarketplaceSaleForPrinting(integration, {
-      ...sale,
-      id: trackedSale?.id,
-      externalOrderId
     })
   }
 

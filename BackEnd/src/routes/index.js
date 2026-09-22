@@ -49,6 +49,8 @@ import {
   handleResourceUpdate,
   handleFilamentMovements,
   handleInventoryOverview,
+  handlePendingProductionMaterial,
+  handlePendingProductionMaterialReconcile,
   handleProductInventoryMovements,
   handleOrderStageAdvance,
   readRoutes
@@ -165,6 +167,7 @@ import {
   handlePrintJobApprove,
   handlePrintJobCancel,
   handlePrintJobComplete,
+  handlePrintJobQualityApprove,
   handlePrintJobEnqueue,
   handlePrintJobMovePrinter,
   handlePrintJobReorder,
@@ -1384,7 +1387,7 @@ export const handleRequest =
 
       const printJobActionMatch =
         url.pathname.match(
-          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete)$/
+          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete|quality-approve)$/
         )
 
       if (
@@ -1409,6 +1412,8 @@ export const handleRequest =
             printJobId
           )
         }
+
+        if (action === 'quality-approve') return await handlePrintJobQualityApprove(req, res, printJobId)
 
         if (
           action ===
@@ -1510,6 +1515,9 @@ export const handleRequest =
       }
 
       if (url.pathname === '/api/inventory/overview' && req.method === 'GET') return await handleInventoryOverview(req, res)
+      if (url.pathname === '/api/inventory/production-pending' && req.method === 'GET') return await handlePendingProductionMaterial(req, res)
+      const pendingProductionReconcileMatch = url.pathname.match(/^\/api\/inventory\/production-pending\/([^/]+)\/reconcile$/)
+      if (pendingProductionReconcileMatch && req.method === 'POST') return await handlePendingProductionMaterialReconcile(req, res, pendingProductionReconcileMatch[1])
       const productInventoryMovementsMatch = url.pathname.match(/^\/api\/inventory\/products\/([^/]+)\/movements$/)
       if (productInventoryMovementsMatch && ['GET', 'POST'].includes(req.method)) return await handleProductInventoryMovements(req, res, productInventoryMovementsMatch[1])
 

@@ -8,7 +8,9 @@ import {
 } from '../printers/printerProfiles.js'
 
 import {
-  getAgentDataDirectory
+  getAgentDataDirectory,
+  protectWithWindowsDpapi,
+  unprotectWithWindowsDpapi
 } from './credentials.js'
 
 const credentialsFile =
@@ -223,8 +225,27 @@ const readStore = async () => {
         'utf8'
       )
 
-    const parsed =
-      JSON.parse(content)
+    const parsed = JSON.parse(content)
+
+    if (
+      parsed?.protection ===
+        'windows-dpapi' &&
+      parsed.payload
+    ) {
+      const plaintext =
+        await unprotectWithWindowsDpapi(
+          Buffer.from(parsed.payload, 'base64')
+        )
+
+      const protectedStore =
+        JSON.parse(plaintext.toString('utf8'))
+
+      return {
+        version: 2,
+        salt: protectedStore.salt || createSalt(),
+        printers: protectedStore.printers || {}
+      }
+    }
 
     return {
       version:
@@ -263,10 +284,38 @@ const writeStore = async (
     }
   )
 
+  const serialized =
+    JSON.stringify(store, null, 2)
+
+  if (process.platform === 'win32') {
+    try {
+      const protectedValue =
+        await protectWithWindowsDpapi(
+          Buffer.from(serialized, 'utf8')
+        )
+
+      await fs.writeFile(
+        credentialsFile,
+        JSON.stringify({
+          version: 2,
+          protection: 'windows-dpapi',
+          payload: protectedValue.toString('base64')
+        }, null, 2),
+        'utf8'
+      )
+      return
+    } catch {
+      // Fallback AES-GCM para ambientes Windows sem DPAPI disponivel.
+    }
+  }
+
   await fs.writeFile(
     credentialsFile,
-    JSON.stringify(store, null, 2),
-    'utf8'
+    serialized,
+    {
+      encoding: 'utf8',
+      mode: 0o600
+    }
   )
 }
 

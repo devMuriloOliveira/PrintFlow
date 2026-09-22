@@ -1,4 +1,5 @@
 import http from 'node:http'
+import os from 'node:os'
 import { URL } from 'node:url'
 
 import { AGENT_VERSION } from './agentInfo.js'
@@ -88,10 +89,88 @@ const getLocalStatus = async (
   }
 }
 
+const redactAddress = value => {
+  const address = String(value || '')
+  if (address.includes('.')) {
+    const parts = address.split('.')
+    if (parts.length === 4) {
+      parts[3] = 'x'
+      return parts.join('.')
+    }
+  }
+  if (address.includes(':')) return '[ipv6-redacted]'
+  return address
+}
+
+const sanitizeDiagnostics = value => {
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizeDiagnostics(item))
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  const sanitized = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (/(?:secret|token|password|access.?code|authorization|credential|api.?key)/i.test(key)) {
+      continue
+    }
+    sanitized[key] = sanitizeDiagnostics(item)
+  }
+  return sanitized
+}
+
+const getLocalDiagnostics = async ({
+  getRuntimeStatus,
+  getDiagnostics
+}) => {
+  const status = await getLocalStatus(getRuntimeStatus)
+  const interfaces = []
+
+  for (const [name, addresses] of Object.entries(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      interfaces.push({
+        name,
+        family: address.family,
+        internal: Boolean(address.internal),
+        address: redactAddress(address.address)
+      })
+    }
+  }
+
+  const extra = typeof getDiagnostics === 'function'
+    ? await getDiagnostics()
+    : {}
+
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    agent: {
+      version: status.version,
+      paired: status.paired,
+      uptimeSeconds: Math.floor(process.uptime()),
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch
+    },
+    runtime: {
+      updateBlocked: status.updateBlocked,
+      updateBlockedReason: status.updateBlockedReason,
+      activePrintJobs: status.activePrintJobs
+    },
+    network: {
+      interfaces
+    },
+    ...sanitizeDiagnostics(extra)
+  }
+}
+
 export const startLocalServer = ({
   port = process.env.PRINTFLOW_AGENT_LOCAL_PORT ||
     DEFAULT_LOCAL_PORT,
-  getRuntimeStatus
+  getRuntimeStatus,
+  getDiagnostics
 } = {}) => {
   const parsedPort = Number(port)
   const localPort =
@@ -123,6 +202,21 @@ export const startLocalServer = ({
           await getLocalStatus(
             getRuntimeStatus
           )
+        )
+        return
+      }
+
+      if (
+        request.method === 'GET' &&
+        requestUrl.pathname === '/diagnostics'
+      ) {
+        json(
+          response,
+          200,
+          await getLocalDiagnostics({
+            getRuntimeStatus,
+            getDiagnostics
+          })
         )
         return
       }

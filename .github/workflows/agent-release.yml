@@ -53,6 +53,9 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($apiUrl)) {
             throw 'Configure a variavel de repositorio PRINTFLOW_API_URL antes de publicar uma release.'
           }
+          if (-not (Test-Path Agent/scripts/install-windows-agent-from-package.ps1)) {
+            throw 'Bootstrap do instalador de transicao ausente.'
+          }
           ./scripts/build-windows-package.ps1 -ApiUrl $apiUrl -SignDev -SkipInstall
 
       - name: Hash release artifacts

@@ -86,6 +86,8 @@ export const requiredPermissionForRequest = (method, pathname) => {
   if (pathname.startsWith('/api/integrations/')) return 'integrations.read'
 
   if (pathname.startsWith('/api/marketplaces')) return accessForMethod(method, 'marketplaces')
+  if (pathname === '/api/inventory/production-pending') return 'production.read'
+  if (pathname.startsWith('/api/inventory/production-pending/') && pathname.endsWith('/reconcile')) return 'production.manage'
   if (pathname === '/api/inventory/overview' || (pathname.startsWith('/api/inventory/products/') && pathname.endsWith('/movements'))) return accessForMethod(method, 'catalog')
   if (pathname.startsWith('/api/filaments/') && pathname.endsWith('/movements')) return accessForMethod(method, 'catalog')
   if (pathname.startsWith('/api/orders')) return accessForMethod(method, 'orders')

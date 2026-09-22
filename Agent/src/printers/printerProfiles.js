@@ -100,6 +100,43 @@ const PROFILES = {
   }
 }
 
+const CONNECTION_PRESETS = Object.freeze({
+  'creality ender 3 v3 se': {
+    id: 'creality-ender-3-v3-se',
+    label: 'Creality Ender-3 V3 SE',
+    protocol: 'marlin',
+    connectionType: 'usb',
+    baudRate: 115200
+  },
+  'creality ender 3 v3 ke': {
+    id: 'creality-ender-3-v3-ke',
+    label: 'Creality Ender-3 V3 KE',
+    protocol: 'moonraker',
+    connectionType: 'network',
+    port: 7125
+  }
+})
+
+const normalizePresetText = value =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+
+export const getPrinterConnectionPreset = (
+  printer = {}
+) => {
+  const key = normalizePresetText(
+    `${printer.manufacturer || printer.maker || ''} ${printer.model || printer.name || ''}`
+  )
+
+  return CONNECTION_PRESETS[key] || null
+}
+
+export const getPrinterConnectionPresets = () =>
+  Object.values(CONNECTION_PRESETS)
+
 const normalizeText = (
   value
 ) =>
@@ -185,17 +222,23 @@ export const normalizePrinterConfig = (
   printer,
   options = {}
 ) => {
+  const preset = getPrinterConnectionPreset(printer)
   const profile =
     getPrinterProfile(
-      printer?.protocol
+      printer?.protocol ||
+      preset?.protocol
     )
 
   const normalizedPrinter = {
+    ...(printer?.protocol
+      ? {}
+      : preset || {}),
     ...printer,
     protocol:
       profile.protocol,
     connectionType:
       printer?.connectionType ||
+      preset?.connectionType ||
       profile.connectionType
   }
 
@@ -237,7 +280,7 @@ export const normalizePrinterConfig = (
 
     normalizedPrinter.baudRate =
       normalizeBaudRate(
-        printer?.baudRate ||
+        normalizedPrinter.baudRate ||
           options.baudRate,
         profile.defaultBaudRate
       )

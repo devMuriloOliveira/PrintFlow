@@ -30,6 +30,12 @@ const publicOrder = (row) => ({
   soldAt: row.sold_at || null,
   printJobId: row.print_job_id ? String(row.print_job_id) : '',
   printJobStatus: row.print_job_status || '',
+  fulfillmentPlanId: row.fulfillment_plan_id ? String(row.fulfillment_plan_id) : '',
+  fulfillmentStatus: row.fulfillment_status || '',
+  fulfillmentReservedQuantity: Number(row.fulfillment_reserved_quantity || 0),
+  fulfillmentProductionQuantity: Number(row.fulfillment_production_quantity || 0),
+  requiresReview: Boolean(row.requires_review),
+  reviewReason: row.review_reason || '',
   mappedProductId: row.mapped_product_id ? String(row.mapped_product_id) : '',
   mappedProductName: row.mapped_product_name || '',
   suggestedProductId: row.suggested_product_id ? String(row.suggested_product_id) : '',
@@ -62,17 +68,35 @@ export const listMarketplaceOrders = async (tenantId, options = {}) => {
       s.net,
       s.profit,
       s.status,
+      s.requires_review,
+      s.review_reason,
       s.sold_at,
       j.id as print_job_id,
       j.status as print_job_status,
+      fp.id as fulfillment_plan_id,
+      fp.status as fulfillment_status,
+      fp.reserved_quantity as fulfillment_reserved_quantity,
+      fp.production_quantity as fulfillment_production_quantity,
       linked.id as mapped_product_id,
       linked.name as mapped_product_name,
       suggested.id as suggested_product_id,
       suggested.name as suggested_product_name
     from tracked_sales s
-    left join print_jobs j on j.tracked_sale_id = s.id and j.tenant_id = s.tenant_id
+    left join lateral (
+      select j1.*
+        from print_jobs j1
+       where j1.tracked_sale_id = s.id
+         and j1.tenant_id = s.tenant_id
+       order by j1.id desc
+       limit 1
+    ) j on true
+    left join sales_fulfillment_plans fp
+      on fp.tenant_id = s.tenant_id
+     and fp.source_type = 'tracked_sale'
+     and fp.source_id = s.id
     left join marketplace_product_links l
       on l.tenant_id = s.tenant_id
+     and l.integration_id = s.integration_id
      and l.platform = s.platform
      and l.external_sku_hash = s.external_sku_hash
     left join products linked on linked.id = l.product_id and linked.tenant_id = s.tenant_id
@@ -125,6 +149,8 @@ export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => 
           s.fee_breakdown,
           s.net,
           s.profit,
+          s.requires_review,
+          s.review_reason,
           i.id as integration_id,
           i.tenant_id as integration_tenant_id,
           i.marketplace_id as integration_marketplace_id,
@@ -140,6 +166,9 @@ export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => 
 
     const sale = saleResult.rows[0]
     if (!sale) throw new Error('Registro nao encontrado')
+    if (sale.requires_review) {
+      throw new Error(sale.review_reason || 'Pedido com multiplos itens precisa ser revisado antes do vinculo.')
+    }
     if (['cancelled', 'canceled', 'refunded'].includes(String(sale.status || '').toLowerCase())) {
       throw new Error('Pedido cancelado ou estornado nao pode ser liberado para impressao.')
     }
@@ -159,7 +188,7 @@ export const linkMarketplaceOrderProduct = async (tenantId, saleId, payload) => 
            external_sku_hash, external_name, product_id
          )
          values ($1, $2, $3, $4, $5, $6, $7, $8)
-         on conflict (tenant_id, platform, external_sku_hash) do update set
+         on conflict (tenant_id, integration_id, platform, external_sku_hash) do update set
            integration_id = excluded.integration_id,
            marketplace_id = excluded.marketplace_id,
            external_sku = excluded.external_sku,

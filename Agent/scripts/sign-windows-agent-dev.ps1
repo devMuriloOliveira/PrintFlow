@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$FilePath = "dist\PrintFlow-Agent-Setup.exe",
   [string]$CertificateSubject = "CN=PrintFlow 3D Local Dev",
   # O signtool do Windows requer o endpoint RFC 3161 DigiCert neste formato
@@ -59,12 +59,16 @@ if (-not $signTool) {
 $certificate = $null
 
 if (Test-Path $pfxPath) {
-  Import-PfxCertificate `
-    -FilePath $pfxPath `
-    -CertStoreLocation Cert:\CurrentUser\My `
-    -Password $pfxPassword | Out-Null
+  try {
+    Import-PfxCertificate `
+      -FilePath $pfxPath `
+      -CertStoreLocation Cert:\CurrentUser\My `
+      -Password $pfxPassword | Out-Null
 
-  Write-Host "Certificado local de desenvolvimento importado do PFX persistido."
+    Write-Host "Certificado local de desenvolvimento importado do PFX persistido."
+  } catch {
+    Write-Warning ("PFX local nao pode ser importado; continuando com certificado existente ou novo: " + $_.Exception.Message)
+  }
 }
 
 $certificate = Get-ChildItem Cert:\CurrentUser\My |

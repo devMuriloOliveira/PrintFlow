@@ -42,6 +42,8 @@ test('simulação Agent -> Cloud persiste conclusão uma única vez', async () =
   const state = { attempts: [], updates: 0 }
   const client = {
     async query(sql, params) {
+      if (sql.includes('select id, quantity from print_jobs')) return { rowCount: 1, rows: [{ id: 88, quantity: 1 }] }
+      if (sql.includes('insert into production_outputs')) return { rowCount: 1, rows: [{ id: 1, expected_quantity: 1, approved_quantity: 0, rejected_quantity: 0, status: 'pending_quality' }] }
       if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
       if (sql.includes('from print_job_attempts')) {
         const row = state.attempts.find((item) => item.idempotencyKey === params[1])
@@ -73,6 +75,8 @@ test('conclusão medida baixa estoque e horas uma única vez', async () => {
   const client = {
     async query(sql, params) {
       if (/^(savepoint|release savepoint|rollback to savepoint)/i.test(sql.trim())) return { rowCount: 0, rows: [] }
+      if (sql.includes('select id, quantity from print_jobs')) return { rowCount: 1, rows: [{ id: 88, quantity: 1 }] }
+      if (sql.includes('insert into production_outputs')) return { rowCount: 1, rows: [{ id: 1, expected_quantity: 1, approved_quantity: 0, rejected_quantity: 0, status: 'pending_quality' }] }
       if (sql.includes('from print_jobs j') && sql.includes('left join products')) return { rowCount: 1, rows: [{ quantity: 1, printer_id: 9, filament_id: 4, weight: 10, cost_breakdown: { energyRate: 1 }, initial_weight: 1000, cost: 20, power_w: 100 }] }
       if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
       if (sql.includes('from print_job_attempts')) return { rowCount: 0, rows: [] }
@@ -81,6 +85,7 @@ test('conclusão medida baixa estoque e horas uma única vez', async () => {
         state.attempts.push(row)
         return { rowCount: 1, rows: [row] }
       }
+      if (sql.includes('from print_job_material_reservations')) return { rowCount: 0, rows: [] }
       if (sql.includes('select id, remaining_weight')) return { rowCount: 1, rows: [{ id: 4, remaining_weight: 100, min_stock_weight: 10 }] }
       if (sql.includes('insert into inventory_movements')) { state.movements += 1; return { rowCount: 1, rows: [{ id: 1 }] } }
       if (sql.includes('update filaments')) return { rowCount: 1, rows: [{ status: 'Em estoque' }] }

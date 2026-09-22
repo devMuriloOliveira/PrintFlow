@@ -8,6 +8,8 @@ import { createProduct, listProducts } from '../repositories/productsRepository.
 import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
 import { createFilamentMovement, listFilamentMovements, createProductMovement, createProductMovementWithClient, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
+import { listPendingProductionMaterial, reconcilePendingProductionMaterial } from '../services/productionInventory.js'
+import { fulfillSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from '../services/salesFulfillment.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
 import {
   resolvePrintFilePath,
@@ -336,9 +338,38 @@ export const handleProductInventoryMovements = async (req, res, productId) => {
   return sendJson(res, 405, { error: 'Metodo nao permitido' })
 }
 
+export const handlePendingProductionMaterial = async (req, res) => {
+  if (req.method !== 'GET') return sendJson(res, 405, { error: 'Metodo nao permitido' })
+  if (!hasDatabase) return sendJson(res, 200, [])
+  const tenantId = await getTenantId(req)
+  return withTenant(tenantId, async (client) =>
+    sendJson(res, 200, await listPendingProductionMaterial({ client, tenantId }))
+  )
+}
+
+export const handlePendingProductionMaterialReconcile = async (req, res, printJobId) => {
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Metodo nao permitido' })
+  const tenantId = await getTenantId(req)
+  const audit = await auditActor(req)
+  if (!hasDatabase) return sendJson(res, 409, { error: 'A reconciliacao requer o banco de dados configurado.' })
+  const result = await withTenant(tenantId, async (client) => {
+    const reconciled = await reconcilePendingProductionMaterial({ client, tenantId, printJobId, audit })
+    if (reconciled.reconciled === false || reconciled.consumed === false) return reconciled
+    await writeAuditEvent(tenantId, {
+      action: 'inventory.production_reconciled', actorType: audit.actorType, actorId: audit.actorId,
+      entityType: 'print_job', entityId: String(printJobId),
+      details: { movementId: reconciled.movement?.id || null }
+    }, client)
+    return { reconciled: true, movement: reconciled.movement }
+  })
+  if (!result.reconciled) return sendJson(res, 404, { error: 'Nenhum consumo pendente foi encontrado para esta impressao.' })
+  return sendJson(res, 200, result)
+}
+
 const orderStages = ['Novo', 'Producao', 'Impresso', 'Embalando', 'Enviado', 'Entregue']
 
 const orderStageError = (currentStatus, nextStatus, trackingCode) => {
+  if (nextStatus === 'Cancelado') return ['Novo', 'Producao', 'Impresso', 'Embalando'].includes(String(currentStatus || '')) ? '' : 'Pedido enviado ou entregue nao pode ser cancelado por esta acao.'
   const currentIndex = orderStages.indexOf(String(currentStatus || 'Novo'))
   const nextIndex = orderStages.indexOf(String(nextStatus || ''))
   if (currentIndex < 0 || nextIndex < 0 || nextIndex !== currentIndex + 1) {
@@ -362,6 +393,17 @@ export const fulfillShippedOrderInventory = async (client, tenantId, order, audi
 
   const quantity = Number(order.quantity || 0)
   if (!Number.isInteger(quantity) || quantity <= 0) throw new Error('O pedido possui uma quantidade invalida para baixa de estoque.')
+
+  const planned = await fulfillSalesFulfillmentPlan({ client, tenantId, orderId: order.id, audit })
+  if (planned) {
+    if (planned.alreadyFulfilled) return { alreadyFulfilled: true }
+    await client.query(
+      `insert into order_inventory_fulfillments (tenant_id, order_id, product_id, inventory_movement_id, quantity)
+       values ($1, $2, $3, $4, $5)`,
+      [tenantId, order.id, order.product_id, planned.movementId, planned.quantity]
+    )
+    return { movementId: planned.movementId, quantity: planned.quantity }
+  }
 
   const movement = await createProductMovementWithClient(client, tenantId, order.product_id, {
     type: 'out',
@@ -396,6 +438,9 @@ const stageOrder = async (tenantId, orderId, payload, audit) => {
 
     const inventoryFulfillment = nextStatus === 'Enviado'
       ? await fulfillShippedOrderInventory(client, tenantId, order, audit)
+      : null
+    const inventoryRelease = nextStatus === 'Cancelado'
+      ? await releaseSalesFulfillmentPlan({ client, tenantId, sourceType: 'order', sourceId: order.id })
       : null
 
     const updated = await client.query(
@@ -441,7 +486,7 @@ const stageOrder = async (tenantId, orderId, payload, audit) => {
       }, client)
     }
 
-    return { order: { id: String(saved.id), status: saved.status, trackingCode: saved.delivery_tracking_code, packedAt: saved.packed_at, shippedAt: saved.shipped_at, deliveredAt: saved.delivered_at }, inventoryFulfillment }
+    return { order: { id: String(saved.id), status: saved.status, trackingCode: saved.delivery_tracking_code, packedAt: saved.packed_at, shippedAt: saved.shipped_at, deliveredAt: saved.delivered_at }, inventoryFulfillment, inventoryRelease }
   })
 }
 

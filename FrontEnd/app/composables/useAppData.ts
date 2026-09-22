@@ -170,6 +170,7 @@ export type CalculatorSimulation = { id: string; name: string; pricePerKg: numbe
 export type InventoryMovement = { id: string; type: 'in' | 'out' | 'adjustment'; quantity: number; previousQuantity: number; resultingQuantity: number; reason: string; createdAt: string }
 export type ProductInventory = { id: string; name: string; sku: string; price: number; cost: number; weight: number; quantity: number; reservedQuantity: number; status: string; updatedAt?: string | null }
 export type InventoryOverview = { products: ProductInventory[]; movements: Array<InventoryMovement & { resource: 'filaments' | 'products'; resourceId: string; resourceName?: string; productName?: string; sku?: string }>; total: number; limit: number; offset: number }
+export type PendingProductionMaterial = { printJobId: string; filamentId: string; filamentName: string; title: string; reservedGrams: number; consumptionGrams: number; lastError: string; updatedAt: string }
 export type FinancialHistoryPage = { items: FinancialHistoryEntry[]; total: number; limit: number; offset: number }
 export const formatCurrency = (value: number) => {
   const settings = useState<AppData>('app-data', emptyData).value.settings
@@ -372,6 +373,11 @@ export const useAppData = () => {
   const completeQueuedPrintJob = (id: string) =>
     requestPrintJobAction(`/api/print-jobs/${id}/complete`, {}, 'Nao foi possivel concluir o item da fila.')
 
+  const approveProductionOutput = async (id: string, approvedQuantity: number, rejectedQuantity: number) => {
+    await $fetch(apiUrl(`/api/print-jobs/${id}/quality-approve`), { method: 'POST', body: { approvedQuantity, rejectedQuantity }, headers: resourceHeaders() })
+    await loadAppData(true)
+  }
+
   const createProduct = async (product: Product) => {
     const created = await $fetch<Product>(apiUrl('/api/products'), {
       method: 'POST',
@@ -544,6 +550,8 @@ export const useAppData = () => {
   const listFilamentMovements = (filamentId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
   const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
   const loadInventoryOverview = (options: { from?: string; to?: string; resource?: string; type?: string; search?: string; limit?: number; offset?: number } = {}) => $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { query: options, headers: resourceHeaders() })
+  const listPendingProductionMaterial = () => $fetch<PendingProductionMaterial[]>(apiUrl('/api/inventory/production-pending'), { headers: resourceHeaders() })
+  const reconcilePendingProductionMaterial = (printJobId: string) => $fetch(apiUrl(`/api/inventory/production-pending/${encodeURIComponent(printJobId)}/reconcile`), { method: 'POST', headers: resourceHeaders() })
   const listProductInventoryMovements = (productId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/inventory/products/${productId}/movements`), { headers: resourceHeaders() })
   const createProductInventoryMovement = (productId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/inventory/products/${productId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
 
@@ -593,7 +601,7 @@ export const useAppData = () => {
     createProduct
     , uploadProductPrintFile, generateRecurringExpenses
     , createMarketplaceIntegration
-    , loadInventoryOverview, listProductInventoryMovements, createProductInventoryMovement
+    , loadInventoryOverview, listPendingProductionMaterial, reconcilePendingProductionMaterial, listProductInventoryMovements, createProductInventoryMovement
     , advanceOrderStage
     , startMarketplaceOAuth
     , disconnectMarketplaceIntegration
@@ -631,6 +639,7 @@ export const useAppData = () => {
     , approveMarketplacePrintJob
     , startManualPrintJob
     , completeQueuedPrintJob
+    , approveProductionOutput
     , createItem
     , updateItem
     , deleteItem

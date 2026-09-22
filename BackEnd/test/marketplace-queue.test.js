@@ -143,3 +143,20 @@ test('preserva componentes de tarifa informados pelo Mercado Livre', () => {
   assert.equal(sale.feeBreakdown.others, 1)
   assert.equal(sale.feeBreakdown.detailSource, 'mercadolivre.orders.sale_fee_details')
 })
+
+test('normaliza pedido com multiplos itens como linhas independentes', () => {
+  const sale = normalizeMarketplaceOrder('mercado_livre', {
+    id: 'order-multi-item-1',
+    total_amount: 140,
+    order_items: [
+      { quantity: 1, item: { seller_sku: 'SKU-A', title: 'Peca A' } },
+      { quantity: 2, item: { seller_sku: 'SKU-B', title: 'Peca B' } }
+    ]
+  })
+
+  assert.equal(sale.requiresReview, false)
+  assert.equal(sale.items.length, 2)
+  assert.equal(sale.items[1].sku, 'SKU-B')
+  assert.equal(sale.sku, 'SKU-A')
+  assert.equal(sale.quantity, 1)
+})

@@ -1,5 +1,5 @@
 ﻿import {
-  discoverPrinters
+  discoverPrintersWithDiagnostics
 } from '../discovery/scanner.js'
 
 import {
@@ -160,12 +160,15 @@ export const handleCommand = async (
     command.type ===
     'discover_printers'
   ) {
-    const printers =
-      await discoverPrinters()
+    const discovery =
+      await discoverPrintersWithDiagnostics()
 
     return {
       success: true,
-      printers
+      printers:
+        discovery.printers,
+      diagnostics:
+        discovery.diagnostics
     }
   }
 

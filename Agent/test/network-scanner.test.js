@@ -1,9 +1,109 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import test from 'node:test'
 
 import {
+  discoverBambuSsdp,
+  parseSsdpHeaders,
   getNetworkHostRange
 } from '../src/discovery/networkScanner.js'
+
+test('SSDP extrai serial Bambu e normaliza headers', () => {
+  const headers = parseSsdpHeaders([
+    'HTTP/1.1 200 OK',
+    'Server: Bambu Lab X1C',
+    'Serial: ABC123',
+    'Model: X1 Carbon',
+    ''
+  ].join('\r\n'))
+
+  assert.equal(headers.server, 'Bambu Lab X1C')
+  assert.equal(headers.serial, 'ABC123')
+})
+
+test('SSDP extrai serial quando a resposta usa XML de dispositivo', async () => {
+  const socket = new EventEmitter()
+  socket.bind = callback => callback()
+  socket.send = () => {
+    socket.emit(
+      'message',
+      Buffer.from([
+        'HTTP/1.1 200 OK',
+        'SERVER: Bambu Lab',
+        '',
+        '<device><serialNumber>XML123</serialNumber><model>P1P</model></device>'
+      ].join('\r\n')),
+      { address: '192.168.1.51' }
+    )
+  }
+  socket.close = () => {}
+
+  const printers = await discoverBambuSsdp({
+    socketFactory: () => socket,
+    timeoutMs: 100
+  })
+
+  assert.equal(printers[0].serial, 'XML123')
+  assert.equal(printers[0].model, 'P1P')
+})
+
+test('SSDP retorna candidato Bambu sem varredura de portas', async () => {
+  const socket = new EventEmitter()
+  socket.bind = callback => callback()
+  socket.send = () => {
+    socket.emit(
+      'message',
+      Buffer.from([
+        'HTTP/1.1 200 OK',
+        'SERVER: Bambu Lab P1S',
+        'SERIAL: 01P00A123456789',
+        'MODEL: P1S',
+        ''
+      ].join('\r\n')),
+      { address: '192.168.1.50' }
+    )
+  }
+  socket.close = () => {}
+
+  const printers = await discoverBambuSsdp({
+    socketFactory: () => socket,
+    timeoutMs: 100
+  })
+
+  assert.deepEqual(printers, [
+    {
+      connectionType: 'network',
+      protocol: 'bambu',
+      software: 'Bambu Lab',
+      manufacturer: 'Bambu Lab',
+      ip: '192.168.1.50',
+      port: 8883,
+      name: 'Bambu Lab',
+      serial: '01P00A123456789',
+      model: 'P1S',
+      requiresCredentials: true,
+      requiredCredentials: ['serial', 'accessCode'],
+      mock: false
+    }
+  ])
+})
+
+test('SSDP falhando em VLAN/firewall retorna vazio para permitir fallback manual', async () => {
+  const socket = new EventEmitter()
+  socket.bind = callback => {
+    callback()
+    queueMicrotask(() => socket.emit('error', new Error('multicast blocked')))
+  }
+  socket.send = () => {}
+  socket.close = () => {}
+
+  const printers = await discoverBambuSsdp({
+    socketFactory: () => socket,
+    timeoutMs: 100
+  })
+
+  assert.deepEqual(printers, [])
+})
 
 test('descoberta calcula faixa pela netmask e exclui rede/broadcast', () => {
   assert.deepEqual(

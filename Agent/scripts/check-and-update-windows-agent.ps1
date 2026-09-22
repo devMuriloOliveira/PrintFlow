@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$CurrentVersion = '',
   [string]$InstallDir = "$env:LOCALAPPDATA\PrintFlowAgent",
   [string]$LocalHealthUrl = 'http://127.0.0.1:17873/healthz',

@@ -14,6 +14,8 @@ test('financeiro nao pode operar producao e producao nao pode alterar financeiro
   assert.equal(canAccessRequest({ role: 'producao' }, 'POST', '/api/expenses'), false)
   assert.equal(canAccessRequest({ role: 'financeiro' }, 'PUT', '/api/expenses/10'), true)
   assert.equal(canAccessRequest({ role: 'producao' }, 'POST', '/api/print-jobs/enqueue'), true)
+  assert.equal(canAccessRequest({ role: 'financeiro' }, 'GET', '/api/inventory/production-pending'), false)
+  assert.equal(canAccessRequest({ role: 'producao' }, 'POST', '/api/inventory/production-pending/88/reconcile'), true)
 })
 
 test('dados agregados e auditoria ficam restritos a administracao do tenant', () => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { filaments, loadInventoryOverview, createFilamentMovement, createProductInventoryMovement, refreshAppData } = useAppData()
+const { filaments, loadInventoryOverview, listPendingProductionMaterial, reconcilePendingProductionMaterial, createFilamentMovement, createProductInventoryMovement, refreshAppData } = useAppData()
 const { notify } = useUi()
 const route = useRoute()
 type MovementType = 'in' | 'out' | 'adjustment'
@@ -7,7 +7,9 @@ type MovementType = 'in' | 'out' | 'adjustment'
 const loading = ref(true)
 const savingProduct = ref(false)
 const savingFilament = ref(false)
+const reconcilingPrintJobId = ref('')
 const inventory = ref<any>({ products: [], movements: [] })
+const pendingProductionMaterial = ref<any[]>([])
 const selectedProductId = ref('')
 const selectedFilamentId = ref('')
 const filamentSearch = ref('')
@@ -50,9 +52,20 @@ const refresh = async () => {
   try {
     await refreshAppData(true)
     inventory.value = await loadInventoryOverview()
+    pendingProductionMaterial.value = await listPendingProductionMaterial().catch(() => [])
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Não foi possível carregar o estoque.', 'info')
   } finally { loading.value = false }
+}
+const reconcilePendingMaterial = async (item: any) => {
+  if (!item?.printJobId || reconcilingPrintJobId.value) return
+  reconcilingPrintJobId.value = String(item.printJobId)
+  try {
+    await reconcilePendingProductionMaterial(String(item.printJobId))
+    await refresh()
+    notify('Consumo pendente conciliado e estoque atualizado.')
+  } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel conciliar o consumo.', 'info') }
+  finally { reconcilingPrintJobId.value = '' }
 }
 const reasonText = (reason: string, notes: string) => notes.trim() ? `${reason}: ${notes.trim()}`.slice(0, 240) : reason
 const saveProductMovement = async () => {
@@ -129,6 +142,9 @@ onMounted(async () => {
           </div></PanelCard>
           <PanelCard title="Alertas de reposição" subtitle="Filamentos que chegaram ao estoque mínimo."><div v-if="!lowFilaments.length" class="empty-state stock-empty"><div><span class="stock-empty__icon"><UiIcon name="check" /></span><h3>Estoque em dia</h3><p>Nenhum filamento precisa de reposição.</p></div></div><div v-else class="alerts-list"><div v-for="item in lowFilaments.slice(0, 5)" :key="item.id" class="alert-row"><span class="alert-row__icon"><UiIcon name="alert" /></span><div><strong>{{ item.name }}</strong><small>{{ formatNumber(item.remaining) }} g restantes · mínimo {{ formatNumber(item.minStock ?? 300) }} g</small></div><button class="btn" type="button" @click="selectFilament(item); navigateTo('/estoque?secao=filamentos')">Repor</button></div></div></PanelCard>
         </div>
+        <PanelCard v-if="pendingProductionMaterial.length" title="Consumos de produção pendentes" subtitle="A impressão terminou, mas a baixa aguardou saldo ou conferência.">
+          <div class="alerts-list"><div v-for="item in pendingProductionMaterial" :key="item.printJobId" class="alert-row"><span class="alert-row__icon"><UiIcon name="alert" /></span><div><strong>{{ item.title || `Impressão #${item.printJobId}` }}</strong><small>{{ item.filamentName }} · {{ formatNumber(item.consumptionGrams) }} g · {{ item.lastError || 'Aguardando reconciliação' }}</small></div><button class="btn btn--primary" type="button" :disabled="reconcilingPrintJobId === item.printJobId" @click="reconcilePendingMaterial(item)">{{ reconcilingPrintJobId === item.printJobId ? 'Conciliando...' : 'Conciliar' }}</button></div></div>
+        </PanelCard>
       </section>
 
       <section v-else-if="section === 'filamentos'">
