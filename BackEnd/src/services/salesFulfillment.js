@@ -1,4 +1,4 @@
-import { reserveProductionMaterial } from './productionInventory.js'
+import { releaseProductionMaterialReservation, reserveProductionMaterial } from './productionInventory.js'
 import { createProductMovementWithClient } from '../repositories/inventoryRepository.js'
 
 const quantity = (value) => {
@@ -89,6 +89,73 @@ export const releaseSalesFulfillmentPlan = async ({ client, tenantId, sourceType
   await client.query(`update product_inventory set reserved_quantity = $3, status = case when quantity = 0 then 'Esgotado' when $3 >= quantity then 'Reservado' else 'Disponivel' end, updated_at = now() where tenant_id = $1 and product_id = $2`, [tenantId, row.product_id, nextReserved])
   await client.query(`update sales_fulfillment_plans set status = 'cancelled', updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, row.id])
   return { released: true }
+}
+
+export const reduceSalesFulfillmentPlan = async ({ client, tenantId, sourceType, sourceId, requestedQuantity }) => {
+  const requested = Math.max(0, Math.floor(Number(requestedQuantity)))
+  const plan = await client.query(
+    `select id, product_id, requested_quantity, reserved_quantity, production_quantity, status
+       from sales_fulfillment_plans
+      where tenant_id = $1 and source_type = $2 and source_id = $3
+      for update`,
+    [tenantId, sourceType, sourceId]
+  )
+  if (!plan.rowCount || !plan.rows[0]) return { reduced: false }
+  const row = plan.rows[0]
+  if (requested >= Number(row.requested_quantity) || ['cancelled', 'fulfilled'].includes(row.status)) return { reduced: false, unchanged: true }
+
+  const inventory = await client.query(
+    `select p.id, coalesce(i.quantity, 0) as quantity, coalesce(i.reserved_quantity, 0) as reserved_quantity
+       from products p left join product_inventory i on i.tenant_id = p.tenant_id and i.product_id = p.id
+      where p.tenant_id = $1 and p.id = $2
+      for update of p`,
+    [tenantId, row.product_id]
+  )
+  if (!inventory.rowCount) throw new Error('Produto reservado nao encontrado.')
+
+  const nextReserved = Math.min(Number(row.reserved_quantity), requested)
+  const released = Math.max(0, Number(row.reserved_quantity) - nextReserved)
+  const resultingReserved = Math.max(0, Number(inventory.rows[0].reserved_quantity) - released)
+  await client.query(
+    `update product_inventory
+        set reserved_quantity = $3,
+            status = case when quantity = 0 then 'Esgotado' when $3 >= quantity then 'Reservado' else 'Disponivel' end,
+            updated_at = now()
+      where tenant_id = $1 and product_id = $2`,
+    [tenantId, row.product_id, resultingReserved]
+  )
+
+  const jobs = await client.query(
+    `select id, product_id, quantity, status
+       from print_jobs
+      where tenant_id = $1 and fulfillment_plan_id = $2
+      order by id desc
+      limit 1
+      for update`,
+    [tenantId, row.id]
+  )
+  const nextProduction = Math.max(0, requested - nextReserved)
+  const job = jobs.rows[0]
+  if (job && ['queued', 'awaiting_confirmation'].includes(String(job.status || ''))) {
+    await releaseProductionMaterialReservation({ client, tenantId, printJobId: job.id, reason: 'Quantidade do marketplace reduzida.' })
+    if (nextProduction > 0) {
+      await client.query(`update print_jobs set quantity = $3, updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, job.id, nextProduction])
+      await reserveProductionMaterial({ client, tenantId, printJobId: job.id, productId: job.product_id, quantity: nextProduction })
+    } else {
+      await client.query(`update print_jobs set status = 'cancelled', updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, job.id])
+    }
+  }
+  await client.query(
+    `update sales_fulfillment_plans
+        set requested_quantity = $3,
+            reserved_quantity = $4,
+            production_quantity = $5,
+            status = case when $3 = 0 then 'cancelled' when $5 > 0 then 'partial_production' else 'reserved' end,
+            updated_at = now()
+      where tenant_id = $1 and id = $2`,
+    [tenantId, row.id, requested, nextReserved, nextProduction]
+  )
+  return { reduced: true, requestedQuantity: requested, releasedQuantity: released, productionQuantity: nextProduction }
 }
 
 export const fulfillSalesFulfillmentPlan = async ({ client, tenantId, orderId = null, sourceType = 'order', sourceId = orderId, audit = null }) => {

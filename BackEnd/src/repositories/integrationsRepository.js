@@ -253,7 +253,7 @@ export const findIntegrationById = async (tenantId, integrationId) => {
   return result.rows[0] || null
 }
 
-export const recordTrackedSale = async (integration, sale) => {
+export const recordTrackedSale = async (integration, sale, lineKey = 'default') => {
   const tenantId = integration.tenant_id
   const platform = platformName(sale.platform || integration.platform)
   const externalOrderId = text(sale.externalOrderId)
@@ -294,11 +294,11 @@ export const recordTrackedSale = async (integration, sale) => {
     return client.query(`
     insert into tracked_sales (
       tenant_id, integration_id, marketplace_id, platform, external_order_id, external_order_hash,
-      external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, requires_review, review_reason, sold_at
+      external_sku, external_sku_hash, product_name, quantity, gross, marketplace_fee, shipping, net, cost, profit, status, requires_review, review_reason, line_key, last_synced_at, sold_at
       , fee_breakdown
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, coalesce($20::timestamptz, now()), $21::jsonb)
-    on conflict (tenant_id, integration_id, platform, external_order_hash) do update set
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, now(), coalesce($21::timestamptz, now()), $22::jsonb)
+    on conflict (tenant_id, integration_id, platform, external_order_hash, line_key) do update set
       external_sku = excluded.external_sku,
       external_sku_hash = excluded.external_sku_hash,
       product_name = excluded.product_name,
@@ -312,6 +312,8 @@ export const recordTrackedSale = async (integration, sale) => {
       status = excluded.status,
       requires_review = excluded.requires_review,
       review_reason = excluded.review_reason,
+      line_key = excluded.line_key,
+      last_synced_at = now(),
       sold_at = excluded.sold_at,
       fee_breakdown = excluded.fee_breakdown,
       updated_at = now()
@@ -336,12 +338,48 @@ export const recordTrackedSale = async (integration, sale) => {
     text(sale.status || 'received'),
     Boolean(sale.requiresReview),
     text(sale.reviewReason),
+    text(lineKey || 'default'),
     sale.soldAt || null,
     JSON.stringify(feeBreakdown)
     ])
   })
 
   return result.rows[0]
+}
+
+const distributeLineAmount = (total, item, items, key) => {
+  const numericTotal = number(total)
+  if (!numericTotal) return 0
+  const explicit = number(item?.[key])
+  const explicitTotal = items.reduce((sum, value) => sum + Math.max(0, number(value?.[key])), 0)
+  if (explicit > 0 && explicitTotal > 0) return numericTotal * explicit / explicitTotal
+  const totalQuantity = items.reduce((sum, value) => sum + Math.max(1, Math.floor(Number(value.quantity || 1))), 0)
+  return numericTotal * Math.max(1, Math.floor(Number(item.quantity || 1))) / totalQuantity
+}
+
+export const recordTrackedSales = async (integration, sale) => {
+  const items = Array.isArray(sale?.items) && sale.items.length ? sale.items : [sale]
+  const rows = []
+  for (const [index, item] of items.entries()) {
+    const quantity = Math.max(1, Math.floor(Number(item.quantity || sale.quantity || 1)))
+    const gross = distributeLineAmount(sale.gross, item, items, 'gross')
+    const marketplaceFee = distributeLineAmount(sale.marketplaceFee, item, items, 'marketplaceFee')
+    const shipping = index === 0 ? number(sale.shipping) : 0
+    const net = item.net === undefined ? gross - marketplaceFee - shipping : number(item.net)
+    rows.push(await recordTrackedSale(integration, {
+      ...sale,
+      ...item,
+      quantity,
+      gross,
+      marketplaceFee,
+      shipping,
+      net,
+      profit: net - number(item.cost ?? sale.cost),
+      requiresReview: Boolean(item.requiresReview || sale.requiresReview),
+      reviewReason: item.reviewReason || sale.reviewReason || ''
+    }, text(item.lineKey || (items.length === 1 ? 'default' : item.id || `line-${index}`))))
+  }
+  return rows.filter(Boolean)
 }
 
 export const recordWebhookEvent = async (integration, event) => {

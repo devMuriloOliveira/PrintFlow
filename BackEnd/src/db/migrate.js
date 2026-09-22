@@ -1330,6 +1330,11 @@ export const migrate =
             not null
             default '',
 
+          line_key
+            text
+            not null
+            default 'default',
+
           external_sku
             text
             not null
@@ -1395,6 +1400,9 @@ export const migrate =
             not null
             default '',
 
+          last_synced_at
+            timestamptz,
+
           sold_at
             timestamptz
             not null
@@ -1418,10 +1426,12 @@ export const migrate =
       const columnDefinition of [
         "external_sku text not null default ''",
         "external_sku_hash text not null default ''",
+        "line_key text not null default 'default'",
         "product_name text not null default ''",
         'quantity integer not null default 1',
         'requires_review boolean not null default false',
         "review_reason text not null default ''",
+        'last_synced_at timestamptz',
         "fee_breakdown jsonb not null default '{}'::jsonb"
       ]
     ) {
@@ -1510,7 +1520,10 @@ export const migrate =
           select conname from pg_constraint
            where conrelid = 'tracked_sales'::regclass
              and contype = 'u'
-             and pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, platform, external_order_hash)'
+             and (
+               pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, platform, external_order_hash)'
+               or pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, integration_id, platform, external_order_hash)'
+             )
         loop
           execute format('alter table tracked_sales drop constraint %I', constraint_row.conname);
         end loop;
@@ -1520,7 +1533,7 @@ export const migrate =
       do $$
       begin
         if not exists (select 1 from pg_constraint where conname = 'tracked_sales_tenant_integration_order_key') then
-          alter table tracked_sales add constraint tracked_sales_tenant_integration_order_key unique (tenant_id, integration_id, platform, external_order_hash);
+          alter table tracked_sales add constraint tracked_sales_tenant_integration_order_key unique (tenant_id, integration_id, platform, external_order_hash, line_key);
         end if;
       end $$;
     `)

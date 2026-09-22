@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createSalesFulfillmentPlan, fulfillSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from '../src/services/salesFulfillment.js'
+import { createSalesFulfillmentPlan, fulfillSalesFulfillmentPlan, reduceSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from '../src/services/salesFulfillment.js'
 import { approveProductionOutput } from '../src/services/productionOutput.js'
 
 test('plano reserva estoque pronto e cria job somente para a falta no mesmo tenant', async () => {
@@ -79,5 +79,26 @@ test('expedicao da venda vinculada baixa uma vez o estoque reservado', async () 
   assert.equal(result.quantity, 5)
   const completed = calls.find((call) => call.sql.includes("set status = 'fulfilled'"))
   assert.deepEqual(completed.params, ['tenant-a', 9])
+  assert.ok(calls.every((call) => !call.params.length || call.params[0] === 'tenant-a'))
+})
+
+test('redução parcial do marketplace libera somente a reserva devolvida', async () => {
+  const calls = []
+  const client = { async query(sql, params = []) {
+    calls.push({ sql, params })
+    if (sql.includes('from sales_fulfillment_plans')) return { rowCount: 1, rows: [{ id: 9, product_id: 4, requested_quantity: 5, reserved_quantity: 3, production_quantity: 2, status: 'partial_production' }] }
+    if (sql.includes('from products p')) return { rowCount: 1, rows: [{ id: 4, quantity: 5, reserved_quantity: 3 }] }
+    if (sql.includes('from print_jobs')) return { rowCount: 1, rows: [{ id: 44, product_id: 4, quantity: 2, status: 'queued' }] }
+    if (sql.includes('from print_job_material_reservations')) return { rowCount: 0, rows: [] }
+    if (sql.includes('from products where')) return { rowCount: 1, rows: [{ filament_id: null, weight: 0, cost_breakdown: {} }] }
+    return { rowCount: 1, rows: [] }
+  } }
+
+  const result = await reduceSalesFulfillmentPlan({ client, tenantId: 'tenant-a', sourceType: 'tracked_sale', sourceId: 10, requestedQuantity: 2 })
+  assert.deepEqual(result, { reduced: true, requestedQuantity: 2, releasedQuantity: 1, productionQuantity: 0 })
+  const inventory = calls.find((call) => call.sql.includes('update product_inventory'))
+  assert.deepEqual(inventory.params, ['tenant-a', 4, 2])
+  const plan = calls.find((call) => call.sql.includes('update sales_fulfillment_plans'))
+  assert.deepEqual(plan.params, ['tenant-a', 9, 2, 2, 0])
   assert.ok(calls.every((call) => !call.params.length || call.params[0] === 'tenant-a'))
 })

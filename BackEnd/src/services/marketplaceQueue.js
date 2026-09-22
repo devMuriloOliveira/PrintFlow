@@ -1,6 +1,6 @@
 import { hasDatabase, withTenant } from '../db/pool.js'
 import { blindIndex } from '../security/crypto.js'
-import { createSalesFulfillmentPlan, fulfillSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from './salesFulfillment.js'
+import { createSalesFulfillmentPlan, fulfillSalesFulfillmentPlan, reduceSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from './salesFulfillment.js'
 
 const text = (value) =>
   String(value || '')
@@ -39,8 +39,8 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       : Array.isArray(data.products)
         ? data.products
         : []
-  const requiresReview = itemCollection.length > 1
-  const reviewReason = requiresReview ? 'Pedido com mais de um item/SKU; revise os itens antes de liberar.' : ''
+  const requiresReview = false
+  const reviewReason = ''
   const item = Array.isArray(data.items)
     ? data.items[0]
     : Array.isArray(data.order_items)
@@ -101,16 +101,30 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
         shippingId: firstText(data.shipping?.id, payload.shipping_id),
         discounts: data.discounts || payload.discounts || null
       },
+      items: orderItems.map((orderItem, index) => ({
+        lineKey: firstText(orderItem.item?.id, orderItem.item_id, `line-${index}`),
+        sku: firstText(orderItem.item?.seller_sku, orderItem.seller_sku, orderItem.item?.id),
+        productName: firstText(orderItem.item?.title, orderItem.title),
+        quantity: quantity(orderItem.quantity),
+        gross: number(orderItem.gross_price || orderItem.unit_price * quantity(orderItem.quantity)),
+        marketplaceFee: number(orderItem.sale_fee) * quantity(orderItem.quantity)
+      })),
       net:
         data.net_amount === undefined && payload.net_amount === undefined
           ? undefined
-          : number(data.net_amount ?? payload.net_amount),
+        : number(data.net_amount ?? payload.net_amount),
       status:
         firstText(data.status, payload.status, 'received'),
       soldAt:
         firstText(data.date_created, data.created_at, payload.date_created, payload.created_at) || null,
       requiresReview,
-      reviewReason
+      reviewReason,
+      ...(data.refunded_quantity !== undefined || payload.refunded_quantity !== undefined
+        ? {
+            refundedQuantity: number(data.refunded_quantity ?? payload.refunded_quantity),
+            remainingQuantity: Math.max(0, quantity(item.quantity || data.quantity || payload.quantity) - number(data.refunded_quantity ?? payload.refunded_quantity))
+          }
+        : {})
     }
   }
 
@@ -130,6 +144,14 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
         number(data.escrow_amount_after_adjustment ? data.total_amount - data.escrow_amount_after_adjustment : data.marketplace_fee),
       shipping:
         number(data.shipping_fee),
+      items: itemCollection.map((rawItem, index) => ({
+        lineKey: firstText(rawItem.item_id, rawItem.item_sku, `line-${index}`),
+        sku: firstText(rawItem.item_sku, rawItem.model_sku, rawItem.sku),
+        productName: firstText(rawItem.item_name, rawItem.name),
+        quantity: quantity(rawItem.model_quantity_purchased || rawItem.quantity),
+        gross: number(rawItem.item_price || rawItem.model_price || rawItem.price),
+        marketplaceFee: number(rawItem.marketplace_fee)
+      })),
       net:
         data.escrow_amount_after_adjustment === undefined
           ? undefined
@@ -138,7 +160,13 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
         firstText(data.status, 'received'),
       soldAt: data.create_time ? new Date(Number(data.create_time) * 1000).toISOString() : null,
       requiresReview,
-      reviewReason
+      reviewReason,
+      ...(data.refunded_quantity !== undefined || payload.refunded_quantity !== undefined
+        ? {
+            refundedQuantity: number(data.refunded_quantity ?? payload.refunded_quantity),
+            remainingQuantity: Math.max(0, quantity(item.model_quantity_purchased || item.quantity || data.quantity) - number(data.refunded_quantity ?? payload.refunded_quantity))
+          }
+        : {})
     }
   }
 
@@ -157,6 +185,14 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
       number(payload.marketplaceFee || data.marketplace_fee),
     shipping:
       number(payload.shipping || data.shipping),
+    items: itemCollection.map((rawItem, index) => ({
+      lineKey: firstText(rawItem.orderItemId, rawItem.order_item_id, rawItem.sellerSKU, `line-${index}`),
+      sku: firstText(rawItem.sellerSKU, rawItem.seller_sku, rawItem.sku),
+      productName: firstText(rawItem.title, rawItem.name),
+      quantity: quantity(rawItem.quantityOrdered || rawItem.quantity),
+      gross: number(rawItem.itemPrice || rawItem.price),
+      marketplaceFee: number(rawItem.marketplaceFee)
+    })),
     net:
       payload.netAmount === undefined && data.net_amount === undefined
         ? undefined
@@ -166,7 +202,13 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
     soldAt:
       firstText(payload.purchaseDate, payload.createdAt, data.purchaseDate, data.createdAt) || null,
     requiresReview,
-    reviewReason
+    reviewReason,
+    ...(data.refunded_quantity !== undefined || payload.refunded_quantity !== undefined
+      ? {
+          refundedQuantity: number(data.refunded_quantity ?? payload.refunded_quantity),
+          remainingQuantity: Math.max(0, quantity(item.quantityOrdered || item.quantity || data.quantity || payload.quantity) - number(data.refunded_quantity ?? payload.refunded_quantity))
+        }
+      : {})
   }
 }
 
@@ -185,6 +227,13 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
 
   return withTenant(tenantId, async (client) => {
     if (['cancelled', 'canceled', 'refunded'].includes(String(sale.status || '').toLowerCase())) {
+      if (String(sale.status || '').toLowerCase() === 'refunded' && sale.refundedQuantity !== undefined) {
+        await reduceSalesFulfillmentPlan({
+          client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id,
+          requestedQuantity: Math.max(0, Number(sale.remainingQuantity ?? sale.quantity ?? 0))
+        })
+        return null
+      }
       await releaseSalesFulfillmentPlan({ client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id })
       return null
     }
