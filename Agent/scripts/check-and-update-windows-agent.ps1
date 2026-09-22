@@ -120,11 +120,14 @@ foreach ($name in $hashedArtifacts) {
   if (-not $verifiedNames.ContainsKey($name)) { throw "Hash ausente: $name" }
 }
 $signature = Get-AuthenticodeSignature (Join-Path $packageRoot 'PrintFlow-Agent-Setup.exe')
-if ($signature.Status -eq 'NotSigned' -or -not $signature.SignerCertificate) { throw 'Installer sem assinatura.' }
+if (-not $signature.SignerCertificate -and $metadata.signingMode -ne 'DEV_SELF_SIGNED') { throw 'Installer sem assinatura.' }
 if ($metadata.signingMode -eq 'PRODUCTION_TRUSTED' -and $signature.Status -ne 'Valid') { throw 'Assinatura Production Trusted invalida.' }
-$signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
 $certificateHash = (Get-FileHash (Join-Path $packageRoot 'PrintFlow-Agent-Dev-Certificate.cer') -Algorithm SHA256).Hash
-if (($metadata.certificateSha256 -and $certificateHash -ne [string]$metadata.certificateSha256) -or $signerHash -ne $certificateHash) { throw 'Certificado do instalador nao corresponde ao manifesto.' }
+if ($metadata.certificateSha256 -and $certificateHash -ne [string]$metadata.certificateSha256) { throw 'Certificado do instalador nao corresponde ao manifesto.' }
+if ($signature.SignerCertificate) {
+  $signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
+  if ($signerHash -ne $certificateHash) { throw 'Certificado do instalador nao corresponde ao manifesto.' }
+}
 
 if ($VerifyOnly) {
   return [pscustomobject]@{ updateAvailable = $true; verified = $true; installed = $false; currentVersion = $CurrentVersion; latestVersion = $latestVersion }

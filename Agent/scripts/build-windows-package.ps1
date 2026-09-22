@@ -4,6 +4,7 @@ param(
   [string]$InstallerName = "PrintFlow-Agent-Setup",
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
   [switch]$SignDev,
+  [switch]$SkipOuterSignature,
   [switch]$SkipInstall
 )
 
@@ -160,31 +161,46 @@ $iexpressProcess = Start-Process `
 
 $buildDeadline = [DateTime]::UtcNow.AddMinutes(3)
 while (
-  -not $iexpressProcess.HasExited -and
-  -not (Test-Path $installerPath) -and
-  [DateTime]::UtcNow -lt $buildDeadline
+  [DateTime]::UtcNow -lt $buildDeadline -and
+  (
+    -not (Test-Path $installerPath) -or
+    (Get-Item -LiteralPath $installerPath -ErrorAction SilentlyContinue).Length -lt 1048576
+  )
 ) {
   Start-Sleep -Milliseconds 500
 }
 
-if (-not (Test-Path $installerPath)) {
+if (-not (Test-Path $installerPath) -or (Get-Item -LiteralPath $installerPath).Length -lt 1048576) {
   if (-not $iexpressProcess.HasExited) {
     Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
   }
-  throw "IExpress nao gerou o instalador dentro do prazo."
+  throw "IExpress nao concluiu o payload do instalador dentro do prazo."
 }
 
-# Algumas versoes do IExpress deixam o processo vivo depois de escrever o
-# artefato. O processo foi iniciado por este script e pode ser encerrado com
-# seguranca agora que o .exe existe.
 if (-not $iexpressProcess.HasExited) {
+  # O arquivo ja atingiu o tamanho esperado; o IExpress pode permanecer vivo
+  # depois de escrever o artefato, entao encerramos apenas agora.
   Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
 }
 
 if ($SignDev) {
+  # IExpress stores the payload in an overlay. Some signtool versions
+  # truncate that overlay when signing the outer self-extracting executable.
+  # Keep the complete unsigned package if signing would destroy the payload.
+  $unsignedInstallerPath = "$installerPath.unsigned"
+  Copy-Item -LiteralPath $installerPath -Destination $unsignedInstallerPath -Force
   & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
     -FilePath (Join-Path $OutputDir "$InstallerName.exe") `
-    -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer")
+    -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer") `
+    -ExportOnly:$SkipOuterSignature
+
+  $unsignedSize = (Get-Item -LiteralPath $unsignedInstallerPath).Length
+  $signedSize = (Get-Item -LiteralPath $installerPath).Length
+  if ($signedSize -lt [Math]::Max(1048576, [Math]::Floor($unsignedSize * 0.8))) {
+    Write-Warning "A assinatura truncou o payload do IExpress; mantendo o instalador completo sem assinatura externa."
+    Copy-Item -LiteralPath $unsignedInstallerPath -Destination $installerPath -Force
+  }
+  Remove-Item -LiteralPath $unsignedInstallerPath -Force -ErrorAction SilentlyContinue
 
   Write-Host "Certificado publico de teste:"
   Write-Host $devCertificatePath

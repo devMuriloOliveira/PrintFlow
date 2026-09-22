@@ -6,7 +6,8 @@
   # API, que continua obrigatoriamente HTTPS.
   [string]$TimestampUrl = "http://timestamp.digicert.com",
   [string]$ExportPublicCertificatePath = "",
-  [string]$CertificatePfxPath = "certs\PrintFlow-Agent-Dev-CodeSigning.pfx"
+  [string]$CertificatePfxPath = "certs\PrintFlow-Agent-Dev-CodeSigning.pfx",
+  [switch]$ExportOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,7 +53,7 @@ if (-not (Test-Path $targetPath)) {
 
 $signTool = Find-SignTool
 
-if (-not $signTool) {
+if (-not $signTool -and -not $ExportOnly) {
   throw "signtool.exe nao encontrado. Instale o Windows SDK e selecione o componente Windows SDK Signing Tools for Desktop Apps."
 }
 
@@ -130,28 +131,30 @@ if ($ExportPublicCertificatePath) {
   Write-Host $exportPath
 }
 
-& $signTool sign `
-  /sha1 $certificate.Thumbprint `
-  /fd SHA256 `
-  /tr $TimestampUrl `
-  /td SHA256 `
-  $targetPath
+if (-not $ExportOnly) {
+  & $signTool sign `
+    /sha1 $certificate.Thumbprint `
+    /fd SHA256 `
+    /tr $TimestampUrl `
+    /td SHA256 `
+    $targetPath
 
-$signExitCode = $LASTEXITCODE
-if ($signExitCode -ne 0) {
-  throw "signtool nao conseguiu assinar o instalador (exit code $signExitCode)."
+  $signExitCode = $LASTEXITCODE
+  if ($signExitCode -ne 0) {
+    throw "signtool nao conseguiu assinar o instalador (exit code $signExitCode)."
+  }
+
+  & $signTool verify `
+    /pa `
+    /v `
+    $targetPath
+
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "A assinatura DEV_SELF_SIGNED foi criada, mas o Windows nao confia na cadeia self-signed sem uma acao explicita do usuario."
+  }
 }
 
-& $signTool verify `
-  /pa `
-  /v `
-  $targetPath
-
-if ($LASTEXITCODE -ne 0) {
-  Write-Warning "A assinatura DEV_SELF_SIGNED foi criada, mas o Windows nao confia na cadeia self-signed sem uma acao explicita do usuario."
-}
-
-Write-Host "Instalador assinado para teste local:"
+Write-Host $(if ($ExportOnly) { "Certificado de desenvolvimento exportado; instalador mantido sem assinatura externa para preservar o payload IExpress:" } else { "Instalador assinado para teste local:" })
 Write-Host $targetPath
 Write-Host "Thumbprint:"
 Write-Host $certificate.Thumbprint
