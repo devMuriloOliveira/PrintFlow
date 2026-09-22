@@ -191,7 +191,7 @@ startLocalServer({
         port: item.printer?.port || null
       }
     }))
-  }
+  })
 })
 
 // Atualiza periodicamente conexoes abertas para detectar
