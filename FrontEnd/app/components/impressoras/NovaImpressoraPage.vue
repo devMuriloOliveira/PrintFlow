@@ -2764,137 +2764,211 @@ const cancel = () => {
         <div>
           <span class="printer-agent-panel__eyebrow">Conexão automática</span>
           <h2>PrintFlow Agent</h2>
-          <p>Conecte este computador e encontre impressoras na rede local ou por USB.</p>
+          <p>Siga as etapas para conectar este computador e localizar suas impressoras.</p>
         </div>
         <span
           class="printer-agent-panel__status"
           :class="{ 'printer-agent-panel__status--online': agentLocalAvailable }"
         >
-          {{ agentLocalAvailable ? 'Agent detectado' : 'Agent não detectado' }}
+          {{ agentLocalChecking ? 'Verificando Agent...' : agentLocalAvailable ? 'Agent detectado' : 'Agent não detectado' }}
         </span>
       </div>
 
       <div
         class="printer-agent-connect"
       >
-        <p
-          v-if="agentNeedsTransitionUpdate"
-          class="printer-agent-notice"
-        >
-          <strong>Atualização única necessária</strong>
-          Este Agent é anterior ao atualizador automático. Instale a versão de transição uma vez; as próximas atualizações aparecerão no próprio Agent.
-        </p>
+        <div class="printer-agent-overview">
+          <div>
+            <span class="printer-agent-overview__label">Status neste computador</span>
+            <strong>
+              {{
+                agentNeedsTransitionUpdate
+                  ? 'Atualização necessária'
+                  : agentLocalAvailable
+                    ? 'Agent instalado e respondendo'
+                    : 'Agent ainda não encontrado'
+              }}
+            </strong>
+            <p>
+              {{
+                agentNeedsTransitionUpdate
+                  ? 'Instale a versão de transição uma vez para habilitar as próximas atualizações automáticas.'
+                  : agentLocalAvailable
+                    ? 'Agora conecte o Agent à sua conta para procurar impressoras.'
+                    : 'Comece instalando o aplicativo do PrintFlow neste computador.'
+              }}
+            </p>
+          </div>
 
-        <p
-          v-else-if="!agentLocalAvailable"
-          class="printer-agent-notice"
-        >
-          <strong>Primeiro acesso neste computador</strong>
-          Baixe o Agent para começar. O certificado é opcional e serve apenas para reduzir avisos nas versões Early Access.
-        </p>
-
-        <p
-          v-else
-          class="printer-agent-notice printer-agent-notice--success"
-        >
-          <strong>Agent pronto para conectar</strong>
-          Encontramos o Agent neste computador. Agora vincule-o à sua conta PrintFlow.
-        </p>
-
-        <div
-          class="printer-agent-actions"
-        >
-          <button
-            v-if="agentNeedsTransitionUpdate"
-            type="button"
-            class="btn btn--primary"
-            @click="downloadAgentTransition"
+          <div
+            v-if="agentLocalAvailable"
+            class="printer-agent-overview__version"
           >
-            Atualizar Agent antigo
-          </button>
-
-          <button
-            v-if="
-              !agentLocalAvailable
-            "
-            type="button"
-            class="btn"
-            @click="
-              downloadAgentWindowsDevCertificate
-            "
-          >
-            Baixar certificado de teste
-          </button>
-
-          <button
-            v-if="
-              !agentLocalAvailable
-            "
-            type="button"
-            class="btn btn--primary"
-            @click="
-              downloadAgentWindows
-            "
-          >
-            Baixar Agent Windows
-          </button>
-
-          <button
-            type="button"
-            class="btn"
-            :class="{
-              'btn--primary':
-                agentLocalAvailable
-            }"
-            :disabled="
-              openingAgent ||
-              agentLocalChecking
-            "
-            @click="
-              openInstalledAgent
-            "
-          >
-            {{
-              agentInstalledButtonLabel
-            }}
-          </button>
-
-          <button
-            type="button"
-            class="btn"
-            :disabled="
-              agentLoading
-            "
-            @click="
-              refreshAgentState
-            "
-          >
-            {{
-              agentLoading
-                ? 'Atualizando...'
-                : 'Atualizar'
-            }}
-          </button>
+            <span>Versão instalada</span>
+            <strong>v{{ agentLocalStatus?.version || 'desconhecida' }}</strong>
+          </div>
         </div>
 
-        <p
-          v-if="
-            agentOpenMessage
-          "
-          class="printer-agent-message"
-        >
-          {{
-            agentOpenMessage
-          }}
-        </p>
+        <div class="printer-agent-steps">
+          <section
+            class="printer-agent-step"
+            :class="{
+              'printer-agent-step--done': agentLocalAvailable && !agentNeedsTransitionUpdate,
+              'printer-agent-step--active': !agentLocalAvailable || agentNeedsTransitionUpdate
+            }"
+          >
+            <div class="printer-agent-step__head">
+              <span class="printer-agent-step__number">
+                <UiIcon
+                  v-if="agentLocalAvailable && !agentNeedsTransitionUpdate"
+                  name="check"
+                  :size="16"
+                />
+                <template v-else>1</template>
+              </span>
+              <div>
+                <span>Etapa 1</span>
+                <h3>Instale o Agent</h3>
+              </div>
+            </div>
+            <p>Baixe o aplicativo responsável por conectar o PrintFlow às impressoras deste computador.</p>
+
+            <button
+              v-if="agentNeedsTransitionUpdate"
+              type="button"
+              class="btn btn--primary printer-agent-step__action"
+              @click="downloadAgentTransition"
+            >
+              <UiIcon name="download" :size="16" />
+              Atualizar Agent antigo
+            </button>
+
+            <button
+              v-else-if="!agentLocalAvailable"
+              type="button"
+              class="btn btn--primary printer-agent-step__action"
+              @click="downloadAgentWindows"
+            >
+              <UiIcon name="download" :size="16" />
+              Baixar para Windows
+            </button>
+
+            <span
+              v-else
+              class="printer-agent-step__complete"
+            >
+              <UiIcon name="check" :size="15" />
+              Instalação detectada
+            </span>
+
+            <button
+              v-if="!agentLocalAvailable"
+              type="button"
+              class="printer-agent-certificate"
+              @click="downloadAgentWindowsDevCertificate"
+            >
+              <UiIcon name="shield" :size="14" />
+              Certificado Early Access (opcional)
+            </button>
+          </section>
+
+          <section
+            class="printer-agent-step"
+            :class="{
+              'printer-agent-step--active': agentLocalAvailable && !agents.length,
+              'printer-agent-step--done': agents.length
+            }"
+          >
+            <div class="printer-agent-step__head">
+              <span class="printer-agent-step__number">
+                <UiIcon
+                  v-if="agents.length"
+                  name="check"
+                  :size="16"
+                />
+                <template v-else>2</template>
+              </span>
+              <div>
+                <span>Etapa 2</span>
+                <h3>Conecte sua conta</h3>
+              </div>
+            </div>
+            <p>Abra o Agent instalado e autorize este computador na sua conta PrintFlow.</p>
+
+            <button
+              type="button"
+              class="btn printer-agent-step__action"
+              :class="{
+                'btn--primary': agentLocalAvailable && !agents.length
+              }"
+              :disabled="openingAgent || agentLocalChecking"
+              @click="openInstalledAgent"
+            >
+              <UiIcon name="settings" :size="16" />
+              {{ agentInstalledButtonLabel }}
+            </button>
+          </section>
+
+          <section
+            class="printer-agent-step"
+            :class="{
+              'printer-agent-step--active': agents.length
+            }"
+          >
+            <div class="printer-agent-step__head">
+              <span class="printer-agent-step__number">3</span>
+              <div>
+                <span>Etapa 3</span>
+                <h3>Localize a impressora</h3>
+              </div>
+            </div>
+            <p v-if="agents.length">Escolha abaixo um computador online e inicie a busca na rede local ou por USB.</p>
+            <p v-else>Depois de conectar o Agent, os computadores disponíveis aparecerão aqui.</p>
+
+            <span
+              v-if="agents.length"
+              class="printer-agent-step__ready"
+            >
+              {{ agents.length }} {{ agents.length === 1 ? 'computador conectado' : 'computadores conectados' }}
+            </span>
+          </section>
+        </div>
+
+        <div class="printer-agent-connect__footer">
+          <p
+            v-if="agentOpenMessage"
+            class="printer-agent-message"
+          >
+            <UiIcon name="info" :size="16" />
+            {{ agentOpenMessage }}
+          </p>
+          <span v-else class="printer-agent-connect__hint">
+            O Agent precisa permanecer aberto para detectar e controlar impressoras.
+          </span>
+
+          <button
+            type="button"
+            class="btn printer-agent-refresh"
+            :disabled="agentLoading || agentLocalChecking"
+            @click="refreshAgentState"
+          >
+            <UiIcon name="refresh" :size="15" />
+            {{ agentLoading || agentLocalChecking ? 'Verificando...' : 'Verificar novamente' }}
+          </button>
+        </div>
       </div>
 
       <div
         v-if="
           agentLoading
         "
+        class="printer-agent-loading"
       >
-        Verificando Agents...
+        <span class="printer-agent-loading__icon"><UiIcon name="refresh" :size="18" /></span>
+        <div>
+          <strong>Verificando computadores conectados</strong>
+          <p>Isso deve levar apenas alguns segundos.</p>
+        </div>
       </div>
 
       <template v-else>
@@ -2902,14 +2976,15 @@ const cancel = () => {
           v-if="
             agents.length
           "
+          class="printer-agent-list"
         >
-          <p
-            style="
-              margin-bottom: 14px;
-            "
-          >
-            Estes computadores estão conectados à sua conta PrintFlow.
-          </p>
+          <div class="printer-agent-list__head">
+            <div>
+              <span>Computadores conectados</span>
+              <h3>Escolha onde procurar impressoras</h3>
+            </div>
+            <strong>{{ onlineAgents.length }} online</strong>
+          </div>
 
           <!-- =========================================== -->
           <!-- CADA AGENT                                  -->
@@ -2922,10 +2997,10 @@ const cancel = () => {
             :key="
               agent.id
             "
-            class="summary-box"
-            style="
-              margin-bottom: 14px;
-            "
+            class="summary-box printer-agent-machine"
+            :class="{
+              'printer-agent-machine--online': agentIsOnline(agent)
+            }"
           >
             <div class="detail-list__row">
               <span>
@@ -3777,18 +3852,12 @@ const cancel = () => {
           <!-- SEM AGENT                                     -->
           <!-- ============================================= -->
 
-          <div v-else>
-            <p>
-              Nenhum PrintFlow Agent está conectado a esta conta.
-            </p>
-
-            <p
-              style="
-                margin-top: 6px;
-              "
-            >
-              Baixe o Agent Windows ou abra o Agent já instalado pelos botões acima. A conexão com esta conta será preparada automaticamente.
-            </p>
+          <div v-else class="printer-agent-empty">
+            <span><UiIcon name="settings" :size="20" /></span>
+            <div>
+              <strong>Aguardando a conexão deste computador</strong>
+              <p>Conclua as etapas 1 e 2 acima. Assim que o Agent for vinculado, a busca de impressoras será liberada automaticamente.</p>
+            </div>
           </div>
       </template>
     </div>
