@@ -5,6 +5,7 @@ import { blindIndex, encryptField } from '../security/crypto.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { recordFinancialSnapshot } from './financialHistoryRepository.js'
 import { assertTenantResourceLimit } from '../services/subscriptionEntitlements.js'
+import { createSalesFulfillmentPlan } from '../services/salesFulfillment.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
@@ -396,6 +397,20 @@ export const createResource = async (tenantId, resource, item, audit = null) => 
   await withTenant(tenantId, async (client) => {
     await client.query('insert into tenants (id, name) values ($1, $1) on conflict (id) do nothing', [tenantId])
     const result = await writePatch(client, tenantId, resource, item)
+    if (resource === 'orders') {
+      const order = await client.query(
+        'select id, product_id, quantity, product_name from orders where tenant_id = $1 and id = $2',
+        [tenantId, result.id]
+      )
+      const row = order.rows[0]
+      if (row?.product_id) {
+        await createSalesFulfillmentPlan({
+          client, tenantId, sourceType: 'order', sourceId: row.id,
+          productId: row.product_id, requestedQuantity: row.quantity,
+          title: row.product_name || 'Pedido manual', notes: 'Atendimento criado para pedido manual.'
+        })
+      }
+    }
     await writeResourceAudit(client, tenantId, { ...audit, operation: 'created' }, resource, result.id, result.changedFields)
     await writeRelatedAudits(client, tenantId, audit, result.relatedCreated)
   })

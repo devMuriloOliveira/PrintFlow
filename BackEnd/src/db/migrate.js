@@ -3149,6 +3149,43 @@ export const migrate =
     `)
     await query(`create index if not exists print_job_material_reservations_lookup_idx on print_job_material_reservations (tenant_id, status, filament_id, created_at)`)
 
+    // A plan is the tenant-scoped source of truth that links an incoming sale
+    // to ready-product reservations and, when needed, a production job.
+    await query(`
+      create table if not exists sales_fulfillment_plans (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        source_type text not null check (source_type in ('order', 'tracked_sale')),
+        source_id bigint not null,
+        product_id bigint not null references products(id) on delete restrict,
+        requested_quantity integer not null check (requested_quantity > 0),
+        reserved_quantity integer not null default 0 check (reserved_quantity >= 0),
+        production_quantity integer not null default 0 check (production_quantity >= 0),
+        status text not null default 'reserved' check (status in ('reserved', 'partial_production', 'awaiting_material', 'cancelled', 'fulfilled')),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, source_type, source_id)
+      )
+    `)
+    await query(`create index if not exists sales_fulfillment_plans_lookup_idx on sales_fulfillment_plans (tenant_id, status, product_id, created_at desc)`)
+    await query(`alter table print_jobs add column if not exists fulfillment_plan_id bigint references sales_fulfillment_plans(id) on delete set null`)
+    await query(`
+      create table if not exists production_outputs (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        print_job_id bigint not null references print_jobs(id) on delete cascade,
+        expected_quantity integer not null check (expected_quantity > 0),
+        approved_quantity integer not null default 0 check (approved_quantity >= 0),
+        rejected_quantity integer not null default 0 check (rejected_quantity >= 0),
+        status text not null default 'pending_quality' check (status in ('pending_quality', 'approved')),
+        created_at timestamptz not null default now(),
+        approved_at timestamptz,
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, print_job_id),
+        check (approved_quantity + rejected_quantity <= expected_quantity)
+      )
+    `)
+
     await query(
       `
         create table if not exists agent_event_receipts (

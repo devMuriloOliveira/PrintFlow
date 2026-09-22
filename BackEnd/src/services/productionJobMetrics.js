@@ -4,6 +4,7 @@ import {
   markProductionMaterialPending,
   releaseProductionMaterialReservation
 } from './productionInventory.js'
+import { createPendingProductionOutput } from './productionOutput.js'
 
 const finiteNonNegative = (value) => {
   const number = Number(value)
@@ -165,6 +166,7 @@ export const recordProductionJobMetrics = async ({ client, tenantId, agentId, pr
         client, tenantId, printJobId,
         reason: `Impressão ${metrics.status}; reserva liberada.`
       }) }
+  if (metrics.status === 'completed') await createPendingProductionOutput({ client, tenantId, printJobId })
   return { idempotent: false, attempt: attempt.rows[0], effects }
 }
 

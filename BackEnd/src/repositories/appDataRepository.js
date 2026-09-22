@@ -158,6 +158,13 @@ const readPrintJobs = async (client, tenantId) => {
       j.printer_id,
       pr.name as printer_name,
       j.agent_printer_id,
+      j.fulfillment_plan_id,
+      fp.status as fulfillment_status,
+      fp.reserved_quantity as fulfillment_reserved_quantity,
+      fp.production_quantity as fulfillment_production_quantity,
+      po.status as production_output_status,
+      po.approved_quantity as approved_quantity,
+      po.rejected_quantity as rejected_quantity,
       ap.status as agent_printer_status,
       ap.last_status as agent_last_status,
       p.print_file_name,
@@ -201,6 +208,8 @@ const readPrintJobs = async (client, tenantId) => {
     left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id
     left join printers pr on pr.id = j.printer_id and pr.tenant_id = j.tenant_id
     left join agent_printers ap on ap.id = j.agent_printer_id and ap.tenant_id = j.tenant_id
+    left join sales_fulfillment_plans fp on fp.id = j.fulfillment_plan_id and fp.tenant_id = j.tenant_id
+    left join production_outputs po on po.print_job_id = j.id and po.tenant_id = j.tenant_id
     where j.tenant_id = $1
     order by
       case j.status
@@ -226,6 +235,13 @@ const readPrintJobs = async (client, tenantId) => {
     printerId: row.printer_id ? String(row.printer_id) : '',
     printerName: row.printer_name || '',
     agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
+    fulfillmentPlanId: row.fulfillment_plan_id ? String(row.fulfillment_plan_id) : '',
+    fulfillmentStatus: row.fulfillment_status || '',
+    fulfillmentReservedQuantity: Number(row.fulfillment_reserved_quantity || 0),
+    fulfillmentProductionQuantity: Number(row.fulfillment_production_quantity || 0),
+    productionOutputStatus: row.production_output_status || '',
+    approvedQuantity: Number(row.approved_quantity || 0),
+    rejectedQuantity: Number(row.rejected_quantity || 0),
     agentPrinterStatus: row.agent_printer_status || '',
     agentLastStatus: row.agent_last_status || {},
     printFileName: row.print_file_name || '',

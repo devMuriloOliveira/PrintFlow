@@ -1,5 +1,6 @@
 import { hasDatabase, withTenant } from '../db/pool.js'
 import { blindIndex } from '../security/crypto.js'
+import { createSalesFulfillmentPlan, fulfillSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from './salesFulfillment.js'
 
 const text = (value) =>
   String(value || '')
@@ -169,6 +170,14 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
   }
 
   return withTenant(tenantId, async (client) => {
+    if (['cancelled', 'canceled', 'refunded'].includes(String(sale.status || '').toLowerCase())) {
+      await releaseSalesFulfillmentPlan({ client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id })
+      return null
+    }
+    if (['shipped', 'delivered'].includes(String(sale.status || '').toLowerCase())) {
+      await fulfillSalesFulfillmentPlan({ client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id })
+      return null
+    }
     const linkedProductResult = sku
       ? await client.query(
         `
@@ -192,36 +201,9 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
       )
       : { rows: [] }
 
-    const productResult = linkedProductResult.rows[0]
-      ? linkedProductResult
-      : await client.query(
-      `
-        select
-          id,
-          name,
-          printer_id
-        from products
-        where tenant_id = $1
-          and (
-            ($2 <> '' and lower(sku) = lower($2))
-            or ($3 <> '' and lower(name) = lower($3))
-          )
-        order by
-          case
-            when $2 <> '' and lower(sku) = lower($2) then 0
-            else 1
-          end,
-          created_at desc
-        limit 1
-      `,
-      [
-        tenantId,
-        sku,
-        productName
-      ]
-    )
-
-    const product = productResult.rows[0]
+    // A marketplace item is never matched by name. Only an explicit, hashed
+    // SKU link can authorize inventory reservation or production.
+    const product = linkedProductResult.rows[0]
     if (!product?.printer_id) {
       return null
     }
@@ -247,66 +229,12 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
       return null
     }
 
-    const priorityResult = await client.query(
-      `
-        select coalesce(max(priority), 0) + 1 as next_priority
-        from print_jobs
-        where tenant_id = $1
-          and printer_id is not distinct from $2::bigint
-            and status = 'queued'
-      `,
-      [
-        tenantId,
-        printer.id
-      ]
-    )
-
-    const result = await client.query(
-      `
-        insert into print_jobs (
-          tenant_id,
-          tracked_sale_id,
-          product_id,
-          printer_id,
-          agent_printer_id,
-          source,
-          title,
-          quantity,
-          priority,
-          status,
-          notes
-        )
-        values (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          'marketplace',
-          $6,
-          $7,
-          $8,
-          'awaiting_confirmation',
-          $9
-        )
-        on conflict (tenant_id, tracked_sale_id)
-        where tracked_sale_id is not null
-        do nothing
-        returning id
-      `,
-      [
-        tenantId,
-        sale.id,
-        product.id,
-        printer.id,
-        printer.agent_printer_id || null,
-        product.name,
-        quantity(sale.quantity),
-        Number(priorityResult.rows[0]?.next_priority || 1),
-        `Pedido ${text(sale.externalOrderId) || String(sale.id)} recebido via marketplace. Confirme antes de liberar para impressao.`
-      ]
-    )
-
-    return result.rows[0] || null
+    const fulfillment = await createSalesFulfillmentPlan({
+      client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id,
+      productId: product.id, requestedQuantity: quantity(sale.quantity), title: product.name,
+      notes: `Pedido ${text(sale.externalOrderId) || String(sale.id)} recebido via marketplace.`,
+      awaitingConfirmation: true
+    })
+    return fulfillment.productionJobId ? { id: fulfillment.productionJobId } : null
   })
 }

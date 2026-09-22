@@ -373,6 +373,11 @@ export const useAppData = () => {
   const completeQueuedPrintJob = (id: string) =>
     requestPrintJobAction(`/api/print-jobs/${id}/complete`, {}, 'Nao foi possivel concluir o item da fila.')
 
+  const approveProductionOutput = async (id: string, approvedQuantity: number, rejectedQuantity: number) => {
+    await $fetch(apiUrl(`/api/print-jobs/${id}/quality-approve`), { method: 'POST', body: { approvedQuantity, rejectedQuantity }, headers: resourceHeaders() })
+    await loadAppData(true)
+  }
+
   const createProduct = async (product: Product) => {
     const created = await $fetch<Product>(apiUrl('/api/products'), {
       method: 'POST',
@@ -634,6 +639,7 @@ export const useAppData = () => {
     , approveMarketplacePrintJob
     , startManualPrintJob
     , completeQueuedPrintJob
+    , approveProductionOutput
     , createItem
     , updateItem
     , deleteItem

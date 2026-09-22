@@ -167,6 +167,7 @@ import {
   handlePrintJobApprove,
   handlePrintJobCancel,
   handlePrintJobComplete,
+  handlePrintJobQualityApprove,
   handlePrintJobEnqueue,
   handlePrintJobMovePrinter,
   handlePrintJobReorder,
@@ -1386,7 +1387,7 @@ export const handleRequest =
 
       const printJobActionMatch =
         url.pathname.match(
-          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete)$/
+          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete|quality-approve)$/
         )
 
       if (
@@ -1411,6 +1412,8 @@ export const handleRequest =
             printJobId
           )
         }
+
+        if (action === 'quality-approve') return await handlePrintJobQualityApprove(req, res, printJobId)
 
         if (
           action ===

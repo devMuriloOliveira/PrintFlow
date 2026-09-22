@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, printers, printJobs, filaments, deleteItem, refreshAppData, enqueuePrintJob, reorderPrintJob, movePrintJobPrinter, cancelQueuedPrintJob, approveMarketplacePrintJob, startManualPrintJob, completeQueuedPrintJob } = useAppData()
+const { products, printers, printJobs, filaments, deleteItem, refreshAppData, enqueuePrintJob, reorderPrintJob, movePrintJobPrinter, cancelQueuedPrintJob, approveMarketplacePrintJob, startManualPrintJob, completeQueuedPrintJob, approveProductionOutput } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -37,6 +37,7 @@ const statusRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const queueProductId = ref('')
 const queueQuantity = ref(1)
 const queueLoadingId = ref('')
+const qualityApproved = reactive<Record<string, number>>({})
 const displayStatus=(s:string)=>s.replace('Disponivel', 'Disponível').replace('Em Impressao', 'Em Impressão').replace('Em Manutencao', 'Em Manutenção')
 const badgeClass=(s:string)=>/Disponivel|Disponível/.test(s)?'badge--green':/Em Manutencao|Em Manutenção/.test(s)?'badge--orange':''
 const agentIsOnline = (agent: any) => {
@@ -54,8 +55,9 @@ const selectedAgentStatus = computed(() => {
   return agentIsOnline(selectedAgent.value) ? 'Agent online' : 'Agent offline'
 })
 const selectedPrinterJobs = computed(() => printJobs.value
-  .filter((job: any) => String(job.printerId || '') === String((selected.value as any).id || '') && !['completed', 'cancelled'].includes(String(job.status || '')))
+  .filter((job: any) => String(job.printerId || '') === String((selected.value as any).id || '') && (String(job.status || '') !== 'cancelled') && (String(job.status || '') !== 'completed' || String(job.productionOutputStatus || '') === 'pending_quality'))
   .sort((a: any, b: any) => Number(b.priority || 0) - Number(a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
+const pendingQualityJobs = computed(() => printJobs.value.filter((job: any) => String(job.productionOutputStatus || '') === 'pending_quality'))
 const printerCountPoints = computed(() => printers.value.map(printer => Number(/disponivel|impressao|impressão/i.test(String(printer.status || '')))))
 const printingPoints = computed(() => printers.value.map(printer => Number(Boolean(activeJobForPrinter(printer)))))
 const maintenancePoints = computed(() => printers.value.map(printer => Number(/manutenc/i.test(String(printer.status || '')))))
@@ -166,6 +168,16 @@ const printReadinessError = (job: any) => {
 }
 const printJobStatusLabel = (status: string) => ({ awaiting_confirmation: 'Aguardando confirmação', queued: 'Na fila', starting: 'Iniciando', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluído', cancelled: 'Cancelado' }[status] || status || '-')
 const printJobBadgeClass = (status: string) => ({ awaiting_confirmation: 'badge--orange', queued: '', starting: 'badge--orange', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', cancelled: 'badge--red' }[status] || '')
+const qualityApprovedFor = (job: any) => qualityApproved[String(job.id)] ?? Number(job.quantity || 0)
+const approveQuality = async (job: any) => {
+  const approved = Number(qualityApprovedFor(job))
+  const rejected = Number(job.quantity || 0) - approved
+  if (!Number.isInteger(approved) || approved < 0 || rejected < 0) return notify('Informe uma quantidade aprovada válida.', 'info')
+  queueLoadingId.value = `quality:${job.id}`
+  try { await approveProductionOutput(String(job.id), approved, rejected); notify(`Lote conferido: ${approved} aprovada(s) e ${rejected} refugada(s).`) }
+  catch (error: any) { notify(error?.message || 'Não foi possível registrar a conferência.', 'info') }
+  finally { queueLoadingId.value = '' }
+}
 const editPrinter = (printer: any) => {
   if (!printer.id) return
   router.push(`/impressoras/nova?id=${printer.id}`)
@@ -524,6 +536,9 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <PageHeader title="Impressoras" subtitle="Cadastre impressoras manualmente no FREE ou conecte e automatize com o PrintFlow Agent no PRO."><NuxtLink class="btn btn--primary" :to="newPrinterPath"><UiIcon name="plus" />Nova Impressora</NuxtLink></PageHeader>
+    <PanelCard v-if="pendingQualityJobs.length" title="Conferência de lotes concluídos" subtitle="Somente peças aprovadas entram no estoque de produto.">
+      <div class="alerts-list"><div v-for="job in pendingQualityJobs" :key="job.id" class="alert-row"><span class="alert-row__icon"><UiIcon name="alert" /></span><div style="flex:1"><strong>{{ job.title || job.productName }}</strong><small>{{ job.quantity }} produzida(s) · {{ job.fulfillmentStatus || 'produção avulsa' }}</small><div style="display:flex;gap:8px;align-items:center;margin-top:7px"><label>Boas</label><input v-model.number="qualityApproved[String(job.id)]" type="number" min="0" :max="job.quantity" style="width:72px"><span>Refugo: {{ Math.max(0, Number(job.quantity || 0) - Number(qualityApprovedFor(job))) }}</span></div></div><button type="button" class="btn btn--primary" :disabled="queueLoadingId !== ''" @click="approveQuality(job)">{{ queueLoadingId === `quality:${job.id}` ? 'Salvando...' : 'Conferir lote' }}</button></div></div>
+    </PanelCard>
     <div class="metrics-grid metrics-grid--5"><MetricCard label="Impressoras Ativas" :value="formatNumber(metrics.activePrinters.value)" icon="printer" note="Dados do banco" color="green" :points="printerCountPoints" /><MetricCard label="Em Impressão" :value="formatNumber(metrics.printingPrinters.value)" icon="play" note="Filas ativas" :points="printingPoints" /><MetricCard label="Em Manutenção" :value="formatNumber(metrics.maintenancePrinters.value)" icon="wrench" note="Dados do banco" color="orange" negative :points="maintenancePoints" /><MetricCard label="Horas Acumuladas" :value="`${formatNumber(metrics.printerHours.value)} h`" icon="clock" note="Horas registradas" color="purple" :points="printerHoursPoints" /><MetricCard label="Custo do kWh" :value="formatCurrency(0.68)" icon="bolt" note="Config. do sistema" color="cyan" negative :points="[0.68]" /></div>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 390px">
       <div>

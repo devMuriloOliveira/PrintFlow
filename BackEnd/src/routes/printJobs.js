@@ -11,6 +11,8 @@ import {
   releaseProductionMaterialReservation,
   reserveProductionMaterial
 } from '../services/productionInventory.js'
+import { createPendingProductionOutput } from '../services/productionOutput.js'
+import { approveProductionOutput } from '../services/productionOutput.js'
 import { getAuthUser } from './auth.js'
 import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
@@ -611,6 +613,7 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
           entityType: 'print_job', entityId: String(printJobId), dedupeKey: `inventory-consumption-pending:${printJobId}`
         }, client)
       }
+      await createPendingProductionOutput({ client, tenantId, printJobId })
     })
 
     return sendPrintJobs(req, res)
@@ -633,4 +636,17 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
     filament.remaining = Number(filament.remaining || 0) - usage.grams
   }
   return sendPrintJobs(req, res)
+}
+
+export const handlePrintJobQualityApprove = async (req, res, printJobId) => {
+  const tenantId = await getTenantId(req)
+  const user = await getAuthUser(req)
+  const body = await readJsonBody(req)
+  if (!hasDatabase) return sendJson(res, 409, { error: 'A conferencia exige banco de dados.' })
+  const result = await withTenant(tenantId, (client) => approveProductionOutput({
+    client, tenantId, printJobId, approvedQuantity: body?.approvedQuantity,
+    rejectedQuantity: body?.rejectedQuantity,
+    audit: user ? { actorId: user.id, actorType: 'user' } : null
+  }))
+  return sendJson(res, 200, result)
 }
