@@ -182,9 +182,22 @@ if (-not $iexpressProcess.HasExited) {
 }
 
 if ($SignDev) {
+  # IExpress stores the payload in an overlay. Some signtool versions
+  # truncate that overlay when signing the outer self-extracting executable.
+  # Keep the complete unsigned package if signing would destroy the payload.
+  $unsignedInstallerPath = "$installerPath.unsigned"
+  Copy-Item -LiteralPath $installerPath -Destination $unsignedInstallerPath -Force
   & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
     -FilePath (Join-Path $OutputDir "$InstallerName.exe") `
     -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer")
+
+  $unsignedSize = (Get-Item -LiteralPath $unsignedInstallerPath).Length
+  $signedSize = (Get-Item -LiteralPath $installerPath).Length
+  if ($signedSize -lt [Math]::Max(1048576, [Math]::Floor($unsignedSize * 0.8))) {
+    Write-Warning "A assinatura truncou o payload do IExpress; mantendo o instalador completo sem assinatura externa."
+    Copy-Item -LiteralPath $unsignedInstallerPath -Destination $installerPath -Force
+  }
+  Remove-Item -LiteralPath $unsignedInstallerPath -Force -ErrorAction SilentlyContinue
 
   Write-Host "Certificado publico de teste:"
   Write-Host $devCertificatePath
