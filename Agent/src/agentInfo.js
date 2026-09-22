@@ -5,7 +5,8 @@ import {
 } from './config/agentVersion.js'
 
 import {
-  getPrinterProfiles
+  getPrinterProfiles,
+  getPrinterConnectionPresets
 } from './printers/printerProfiles.js'
 
 export {
@@ -23,6 +24,8 @@ export const getAgentRuntimeInfo = () => ({
     os.arch(),
   nodeVersion:
     process.version,
+  printerConnectionPresets:
+    getPrinterConnectionPresets(),
   printerProfiles:
     getPrinterProfiles()
       .map(

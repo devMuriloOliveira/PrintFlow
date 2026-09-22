@@ -1,17 +1,20 @@
-import { scanNetwork } from './networkScanner.js'
+import {
+  scanNetworkWithDiagnostics
+} from './networkScanner.js'
 import { scanUsb } from './usbScanner.js'
 
-export const discoverPrinters = async () => {
+export const discoverPrintersWithDiagnostics = async () => {
   console.log('')
   console.log('=================================')
   console.log('     DESCOBERTA DE IMPRESSORAS')
   console.log('=================================')
 
-  const networkPrinters = await scanNetwork()
+  const networkDiscovery =
+    await scanNetworkWithDiagnostics()
   const usbPrinters = await scanUsb()
 
   const printers = [
-    ...networkPrinters,
+    ...networkDiscovery.printers,
     ...usbPrinters
   ]
 
@@ -20,5 +23,14 @@ export const discoverPrinters = async () => {
     `[Discovery] ${printers.length} impressora(s) encontrada(s).`
   )
 
-  return printers
+  return {
+    printers,
+    diagnostics: {
+      warnings:
+        networkDiscovery.warnings || []
+    }
+  }
 }
+
+export const discoverPrinters = async () =>
+  (await discoverPrintersWithDiagnostics()).printers

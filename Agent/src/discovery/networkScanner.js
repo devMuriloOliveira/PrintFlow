@@ -949,7 +949,9 @@ const addMockBambu = (
 // SCANNER PRINCIPAL
 // ======================================================
 
-export const scanNetwork = async () => {
+export const scanNetworkWithDiagnostics = async () => {
+  const warnings = []
+
   if (
     isMockBambuEnabled()
   ) {
@@ -959,7 +961,10 @@ export const scanNetwork = async () => {
       printers
     )
 
-    return printers
+    return {
+      printers,
+      warnings
+    }
   }
 
   const networks =
@@ -976,6 +981,9 @@ export const scanNetwork = async () => {
   ) {
     console.log(
       '[Discovery] Nenhuma interface IPv4 disponivel.'
+    )
+    warnings.push(
+      'Nenhuma interface IPv4 ativa foi encontrada. Conecte o computador à mesma rede da impressora ou cadastre o IP manualmente.'
     )
   }
 
@@ -1008,6 +1016,9 @@ export const scanNetwork = async () => {
     console.warn(
       `[Discovery] SSDP indisponivel; usando varredura de portas. ${error.message}`
     )
+    warnings.push(
+      'A descoberta multicast (SSDP) foi bloqueada ou indisponivel. Em VLANs, redes de convidados ou firewalls, cadastre a impressora pelo IP manualmente.'
+    )
   }
 
   // ====================================================
@@ -1018,6 +1029,16 @@ export const scanNetwork = async () => {
     const network
     of networks
   ) {
+    const range = getNetworkHostRange(
+      network.address,
+      network.netmask
+    )
+    if (range?.truncated) {
+      warnings.push(
+        `A rede ${network.interface} possui muitos dispositivos; a busca foi limitada. Se nao encontrar a impressora, cadastre o IP manualmente.`
+      )
+    }
+
     const found =
       await scanNetworkRange(
         network
@@ -1036,5 +1057,17 @@ export const scanNetwork = async () => {
     printers
   )
 
-  return printers
+  if (printers.length === 0 && warnings.length === 0) {
+    warnings.push(
+      'Nenhuma impressora respondeu na rede local. Verifique se computador e impressora estao na mesma rede, se o firewall permite a conexao e tente cadastrar o IP manualmente.'
+    )
+  }
+
+  return {
+    printers,
+    warnings: [...new Set(warnings)]
+  }
 }
+
+export const scanNetwork = async () =>
+  (await scanNetworkWithDiagnostics()).printers

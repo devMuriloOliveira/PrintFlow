@@ -5,7 +5,8 @@ process.env.PRINTFLOW_DEV_MOCK_BAMBU =
   'true'
 
 const {
-  scanNetwork
+  scanNetwork,
+  scanNetworkWithDiagnostics
 } = await import(
   '../src/discovery/networkScanner.js'
 )
@@ -40,4 +41,11 @@ test('modo mock Bambu retorna descoberta sem scan de rede real', async () => {
     elapsedMs < 1000,
     `descoberta mock demorou ${elapsedMs}ms`
   )
+})
+
+test('modo mock retorna diagnostico compativel com a descoberta', async () => {
+  const result = await scanNetworkWithDiagnostics()
+
+  assert.equal(result.printers.length, 1)
+  assert.deepEqual(result.warnings, [])
 })

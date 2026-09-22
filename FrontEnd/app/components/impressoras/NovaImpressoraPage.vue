@@ -1354,15 +1354,25 @@ const discoverPrinters =
       discoveryStatus.value =
         'completed'
 
+      const warnings = Array.isArray(
+        result?.diagnostics?.warnings
+      )
+        ? result.diagnostics.warnings
+            .filter((warning: unknown) =>
+              typeof warning === 'string'
+            )
+        : []
+
       if (
         found.length ===
         0
       ) {
         discoveryMessage.value =
-          'Nenhuma impressora foi encontrada.'
+          warnings[0] ||
+          'Nenhuma impressora foi encontrada. Em redes isoladas, VLANs ou firewalls, cadastre o IP manualmente.'
       } else {
         discoveryMessage.value =
-          `${found.length} impressora(s) encontrada(s).`
+          `${found.length} impressora(s) encontrada(s).${warnings.length ? ` ${warnings[0]}` : ''}`
       }
     } catch (error) {
       discoveryStatus.value =
