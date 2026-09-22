@@ -7,6 +7,7 @@
   [string]$TimestampUrl = "http://timestamp.digicert.com",
   [string]$ExportPublicCertificatePath = "",
   [string]$CertificatePfxPath = "certs\PrintFlow-Agent-Dev-CodeSigning.pfx",
+  [switch]$RequirePersistedCertificate,
   [switch]$ExportOnly
 )
 
@@ -59,6 +60,10 @@ if (-not $signTool -and -not $ExportOnly) {
 
 $certificate = $null
 
+if ($RequirePersistedCertificate -and -not (Test-Path $pfxPath)) {
+  throw "PFX persistido obrigatorio para a release Early Access."
+}
+
 if (Test-Path $pfxPath) {
   try {
     Import-PfxCertificate `
@@ -68,6 +73,10 @@ if (Test-Path $pfxPath) {
 
     Write-Host "Certificado local de desenvolvimento importado do PFX persistido."
   } catch {
+    if ($RequirePersistedCertificate) {
+      throw "PFX persistido nao pode ser importado com a senha configurada."
+    }
+
     Write-Warning ("PFX local nao pode ser importado; continuando com certificado existente ou novo: " + $_.Exception.Message)
   }
 }
@@ -80,6 +89,10 @@ $certificate = Get-ChildItem Cert:\CurrentUser\My |
   } |
   Sort-Object NotAfter -Descending |
   Select-Object -First 1
+
+if (-not $certificate -and $RequirePersistedCertificate) {
+  throw "Certificado persistido com chave privada nao foi encontrado."
+}
 
 if (-not $certificate) {
   $certificate = New-SelfSignedCertificate `
@@ -142,6 +155,17 @@ if (-not $ExportOnly) {
   $signExitCode = $LASTEXITCODE
   if ($signExitCode -ne 0) {
     throw "signtool nao conseguiu assinar o instalador (exit code $signExitCode)."
+  }
+
+  $signature = Get-AuthenticodeSignature -LiteralPath $targetPath
+  if (-not $signature.SignerCertificate) {
+    throw "O instalador permaneceu sem assinatura Authenticode."
+  }
+  if ($signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
+    throw "O instalador foi assinado por um certificado diferente do PFX configurado."
+  }
+  if ($signature.Status -in @('HashMismatch', 'NotSigned')) {
+    throw "A assinatura Authenticode do instalador e invalida: $($signature.Status)."
   }
 
   & $signTool verify `

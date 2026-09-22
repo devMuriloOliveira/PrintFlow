@@ -43,11 +43,35 @@ jobs:
         working-directory: Agent
         run: npm test
 
+      - name: Prepare Early Access signing certificate
+        shell: pwsh
+        env:
+          PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64: ${{ secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 }}
+          PRINTFLOW_AGENT_DEV_CERT_PASSWORD: ${{ secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64)) {
+            throw 'Configure o secret PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 antes de publicar o Agent.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:PRINTFLOW_AGENT_DEV_CERT_PASSWORD)) {
+            throw 'Configure o secret PRINTFLOW_AGENT_DEV_CERT_PASSWORD antes de publicar o Agent.'
+          }
+          New-Item -ItemType Directory -Force -Path 'Agent/certs' | Out-Null
+          try {
+            $bytes = [Convert]::FromBase64String($env:PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64)
+          } catch {
+            throw 'PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 nao contem um PFX Base64 valido.'
+          }
+          [IO.File]::WriteAllBytes(
+            (Join-Path $PWD 'Agent/certs/PrintFlow-Agent-Dev-CodeSigning.pfx'),
+            $bytes
+          )
+
       - name: Build Early Access package
         working-directory: Agent
         shell: pwsh
         env:
           PRINTFLOW_API_URL: ${{ vars.PRINTFLOW_API_URL }}
+          PRINTFLOW_AGENT_DEV_CERT_PASSWORD: ${{ secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
         run: |
           $apiUrl = $env:PRINTFLOW_API_URL.Trim()
           if ([string]::IsNullOrWhiteSpace($apiUrl)) {
@@ -57,11 +81,27 @@ jobs:
             throw 'Bootstrap do instalador de transicao ausente.'
           }
           New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
-          Copy-Item '../FrontEnd/public/downloads/PrintFlow-Agent-Dev-Certificate.cer' 'dist/PrintFlow-Agent-Dev-Certificate.cer' -Force
-          ./scripts/build-windows-package.ps1 -ApiUrl $apiUrl -SkipInstall
+          ./scripts/build-windows-package.ps1 `
+            -ApiUrl $apiUrl `
+            -SkipInstall `
+            -SignDev `
+            -RequirePersistedCertificate
           $installerSize = (Get-Item 'dist/PrintFlow-Agent-Setup.exe').Length
           if ($installerSize -lt 1048576) {
             throw "Instalador IExpress truncado: $installerSize bytes."
+          }
+          $signature = Get-AuthenticodeSignature 'dist/PrintFlow-Agent-Setup.exe'
+          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            (Resolve-Path 'dist/PrintFlow-Agent-Dev-Certificate.cer')
+          )
+          if (-not $signature.SignerCertificate) {
+            throw 'Instalador Early Access permaneceu sem assinatura.'
+          }
+          if ($signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
+            throw 'Instalador Early Access nao foi assinado pelo certificado publicado.'
+          }
+          if ($signature.Status -in @('HashMismatch', 'NotSigned')) {
+            throw "Assinatura Early Access invalida: $($signature.Status)."
           }
 
       - name: Hash release artifacts
@@ -75,6 +115,22 @@ jobs:
           $certificatePath = 'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer'
           if (-not (Test-Path $certificatePath)) { throw "Certificado ausente: $certificatePath" }
           $certificateSha256 = (Get-FileHash $certificatePath -Algorithm SHA256).Hash
+          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            (Resolve-Path $certificatePath)
+          )
+          foreach ($installerPath in @(
+            'Agent/dist/PrintFlow-Agent-Setup.exe',
+            'Agent/dist/PrintFlow-Agent-Transition-Setup.exe'
+          )) {
+            $signature = Get-AuthenticodeSignature $installerPath
+            if (-not $signature.SignerCertificate) { throw "Instalador sem assinatura: $installerPath" }
+            if ($signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
+              throw "Certificado divergente no instalador: $installerPath"
+            }
+            if ($signature.Status -in @('HashMismatch', 'NotSigned')) {
+              throw "Assinatura invalida em $installerPath`: $($signature.Status)"
+            }
+          }
           [ordered]@{
             tag = '${{ github.ref_name }}'
             version = $package.version
@@ -111,4 +167,9 @@ jobs:
             Agent/dist/RELEASE-METADATA.json `
             Agent/dist/SHA256SUMS.txt `
             --title "PrintFlow Agent ${{ github.ref_name }} — Early Access / Pilot" `
-            --notes "signingMode=DEV_SELF_SIGNED. Certificado self-signed nao e publicamente confiavel; nao instalar automaticamente em Trusted Root. PRODUCTION_TRUSTED permanece pendente de certificado Code Signing confiavel."
+            --notes "signingMode=DEV_SELF_SIGNED. Instale conscientemente PrintFlow-Agent-Dev-Certificate.cer em Trusted Root e Trusted Publishers antes do instalador. O certificado permanece o mesmo entre atualizacoes Early Access. PRODUCTION_TRUSTED permanece pendente de certificado Code Signing confiavel."
+
+      - name: Remove private signing material
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath 'Agent/certs/PrintFlow-Agent-Dev-CodeSigning.pfx' -Force -ErrorAction SilentlyContinue

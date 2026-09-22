@@ -415,9 +415,25 @@ input, select, textarea { color: var(--ink); }
 .printer-agent-step__action { align-self: flex-start; margin-top: auto; }
 .printer-agent-step__complete,.printer-agent-step__ready { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; margin-top: auto; border-radius: 999px; background: #e8f8f0; padding: 7px 10px; color: #08784a; font-size: 9px; font-weight: 750; }
 .printer-agent-step__ready { color: #175dab; background: #eaf2ff; }
-.printer-agent-certificate { display: inline-flex; align-items: center; align-self: flex-start; gap: 5px; margin-top: 9px; border: 0; background: transparent; padding: 2px 0; color: #5e6e84; font-size: 9px; font-weight: 650; text-align: left; cursor: pointer; }
-.printer-agent-certificate:hover { color: var(--blue); text-decoration: underline; }
-.printer-agent-certificate:focus-visible { border-radius: 4px; outline: 2px solid rgba(23,104,242,.32); outline-offset: 3px; }
+.printer-agent-certificate-guide { margin-bottom: 16px; border: 1px solid #f0c97b; border-radius: 13px; background: linear-gradient(145deg,#fffdf7 0%,#fff8e9 100%); padding: 16px; }
+.printer-agent-certificate-guide__head { display: flex; align-items: flex-start; gap: 10px; }
+.printer-agent-certificate-guide__head > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 10px; color: #9a6100; background: #ffedc2; }
+.printer-agent-certificate-guide__head strong { color: #563b0d; font-size: 12px; }
+.printer-agent-certificate-guide__head p { margin: 3px 0 0; color: #765b2c; font-size: 10px; line-height: 1.5; }
+.printer-agent-certificate-guide__steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin: 14px 0; padding: 0; list-style: none; counter-reset: agent-certificate-step; }
+.printer-agent-certificate-guide__steps li { position: relative; display: grid; gap: 3px; min-width: 0; border: 1px solid rgba(184,126,25,.2); border-radius: 10px; background: rgba(255,255,255,.72); padding: 11px 11px 11px 38px; counter-increment: agent-certificate-step; }
+.printer-agent-certificate-guide__steps li::before { position: absolute; top: 10px; left: 10px; display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; color: #fff; background: #b8790c; font-size: 9px; font-weight: 800; content: counter(agent-certificate-step); }
+.printer-agent-certificate-guide__steps strong { color: #563b0d; font-size: 9px; }
+.printer-agent-certificate-guide__steps span { color: #7a653f; font-size: 9px; line-height: 1.45; }
+.printer-agent-certificate-guide__security { display: grid; grid-template-columns: auto minmax(0,1fr) auto minmax(220px,1.4fr); align-items: center; gap: 7px 10px; border-radius: 9px; background: rgba(104,71,13,.065); padding: 10px 12px; }
+.printer-agent-certificate-guide__security span { color: #80683c; font-size: 8px; font-weight: 700; text-transform: uppercase; }
+.printer-agent-certificate-guide__security strong { color: #563b0d; font-size: 9px; }
+.printer-agent-certificate-guide__security code { overflow-wrap: anywhere; color: #563b0d; font-family: Consolas,monospace; font-size: 8px; }
+.printer-agent-certificate-guide__actions { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.printer-agent-certificate-confirmation { display: inline-flex; align-items: center; gap: 8px; color: #563b0d; font-size: 9px; font-weight: 700; cursor: pointer; }
+.printer-agent-certificate-confirmation input { width: 16px; height: 16px; margin: 0; accent-color: var(--blue); }
+.printer-agent-certificate-guide__warning { margin: 10px 0 0; color: #8a3e19; font-size: 8px; line-height: 1.45; }
+.printer-agent-step__blocked { margin-top: 8px; color: #9a6100; font-size: 8px; line-height: 1.4; }
 .printer-agent-connect__footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; border-top: 1px solid #e5eaf1; padding-top: 14px; }
 .printer-agent-connect__hint { color: var(--muted); font-size: 9px; line-height: 1.45; }
 .printer-agent-message { display: flex; align-items: center; gap: 8px; margin: 0; border-radius: 8px; background: #eef5ff; padding: 9px 11px; color: #365675; font-size: 10px; line-height: 1.45; }
@@ -892,6 +908,8 @@ input, select, textarea { color: var(--ink); }
   .printer-agent-panel__icon { width: 42px; height: 42px; }
   .printer-agent-panel__status { grid-column: 1 / -1; justify-self: start; }
   .printer-agent-connect { padding: 17px; }
+  .printer-agent-certificate-guide__steps { grid-template-columns: 1fr; }
+  .printer-agent-certificate-guide__security { grid-template-columns: auto minmax(0,1fr); }
   .printer-agent-steps { grid-template-columns: 1fr; }
   .printer-agent-step { min-height: 0; }
   .printer-agent-step > p { min-height: 0; }
@@ -911,6 +929,8 @@ input, select, textarea { color: var(--ink); }
   .printer-agent-overview { align-items: flex-start; flex-direction: column; }
   .printer-agent-overview__version { width: 100%; border-top: 1px solid #e4eaf2; border-left: 0; padding-top: 11px; padding-left: 0; }
   .printer-agent-connect__footer { align-items: stretch; flex-direction: column; }
+  .printer-agent-certificate-guide__actions { align-items: stretch; flex-direction: column; }
+  .printer-agent-certificate-guide__actions .btn { justify-content: center; width: 100%; }
   .printer-agent-refresh,.printer-agent-step__action { justify-content: center; width: 100%; }
   .printer-agent-list__head { align-items: flex-start; flex-direction: column; }
   .result-card { min-height: 110px; }.result-card strong { margin-top: 14px; }

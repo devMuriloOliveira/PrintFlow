@@ -23,13 +23,19 @@ const auth = useAuth()
 const route = useRoute()
 const config = useRuntimeConfig()
 const defaultAgentWindowsDownloadUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.9/PrintFlow-Agent-Setup.exe'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Setup.exe'
 const defaultAgentWindowsDevCertificateUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.9/PrintFlow-Agent-Dev-Certificate.cer'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Dev-Certificate.cer'
 const agentTransitionDownloadUrl =
   'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Transition-Setup.exe'
 const firstSelfUpdatingAgentVersion =
   '0.1.4'
+const agentDevCertificateThumbprint =
+  '43A798A610B5F9A814C104BEC417A0E9B248EC3E'
+const agentCertificateStorageKey =
+  `printflow-agent-certificate-${agentDevCertificateThumbprint}`
+const agentCertificateAcknowledged =
+  ref(false)
 
 const agentWindowsDownloadUrl =
   computed(() =>
@@ -67,6 +73,15 @@ const agentLocalUrl =
   )
 
 const downloadAgentWindows = () => {
+  if (!agentCertificateAcknowledged.value) {
+    notify(
+      'Confirme primeiro a instalação do certificado Early Access neste computador.',
+      'info'
+    )
+
+    return
+  }
+
   if (!agentWindowsDownloadUrl.value) {
     notify(
       'Link de download do Agent ainda não configurado. Configure NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL.',
@@ -83,7 +98,7 @@ const downloadAgentWindows = () => {
   )
 
   agentOpenMessage.value =
-    'Download iniciado. Execute o instalador e, quando o Agent abrir, ele ficará disponível para conectar por esta tela.'
+    'Download iniciado. O instalador deve exibir PrintFlow 3D Local Dev como fornecedor. Depois da instalação, volte para conectar o Agent.'
 }
 
 const downloadAgentWindowsDevCertificate = () => {
@@ -103,10 +118,19 @@ const downloadAgentWindowsDevCertificate = () => {
   )
 
   agentOpenMessage.value =
-    'Certificado de teste baixado. Instale-o no Windows como Autoridade Raiz Confiável e Editor Confiável antes de executar o instalador do Agent.'
+    'Certificado baixado. Siga as instruções desta tela e confirme a instalação antes de baixar o Agent.'
 }
 
 const downloadAgentTransition = () => {
+  if (!agentCertificateAcknowledged.value) {
+    notify(
+      'Confirme primeiro a instalação do certificado Early Access neste computador.',
+      'info'
+    )
+
+    return
+  }
+
   window.open(
     withDownloadCacheBust(
       agentTransitionDownloadUrl
@@ -117,6 +141,23 @@ const downloadAgentTransition = () => {
 
   agentOpenMessage.value =
     'Baixe e execute esta atualização única. Depois dela, o Agent poderá receber as próximas versões pelo próprio aplicativo.'
+}
+
+const persistAgentCertificateAcknowledgement = () => {
+  if (!import.meta.client) {
+    return
+  }
+
+  if (agentCertificateAcknowledged.value) {
+    localStorage.setItem(
+      agentCertificateStorageKey,
+      'confirmed'
+    )
+  } else {
+    localStorage.removeItem(
+      agentCertificateStorageKey
+    )
+  }
 }
 
 // ======================================================
@@ -2222,6 +2263,10 @@ const controlPrinter =
 // ======================================================
 
 onMounted(() => {
+  agentCertificateAcknowledged.value =
+    localStorage.getItem(
+      agentCertificateStorageKey
+    ) === 'confirmed'
   checkLocalAgent()
   loadAgents()
 })
@@ -2809,6 +2854,65 @@ const cancel = () => {
           </div>
         </div>
 
+        <section
+          v-if="!agentLocalAvailable || agentNeedsTransitionUpdate"
+          class="printer-agent-certificate-guide"
+        >
+          <div class="printer-agent-certificate-guide__head">
+            <span><UiIcon name="shield" :size="19" /></span>
+            <div>
+              <strong>Prepare o Windows antes de instalar</strong>
+              <p>Esta versão Early Access usa um certificado próprio do PrintFlow. A instalação é manual, transparente e necessária apenas uma vez neste computador.</p>
+            </div>
+          </div>
+
+          <ol class="printer-agent-certificate-guide__steps">
+            <li>
+              <strong>Baixe e abra o certificado</strong>
+              <span>Clique em “Instalar Certificado” e escolha “Usuário Atual”.</span>
+            </li>
+            <li>
+              <strong>Confie nos dois repositórios</strong>
+              <span>Instale uma vez em “Autoridades de Certificação Raiz Confiáveis” e repita em “Editores Confiáveis”.</span>
+            </li>
+            <li>
+              <strong>Confirme antes do Agent</strong>
+              <span>Confira o fornecedor e marque a confirmação abaixo para liberar o instalador.</span>
+            </li>
+          </ol>
+
+          <div class="printer-agent-certificate-guide__security">
+            <span>Fornecedor esperado</span>
+            <strong>PrintFlow 3D Local Dev</strong>
+            <span>Impressão digital</span>
+            <code>{{ agentDevCertificateThumbprint }}</code>
+          </div>
+
+          <div class="printer-agent-certificate-guide__actions">
+            <button
+              type="button"
+              class="btn"
+              @click="downloadAgentWindowsDevCertificate"
+            >
+              <UiIcon name="shield" :size="15" />
+              Baixar certificado
+            </button>
+
+            <label class="printer-agent-certificate-confirmation">
+              <input
+                v-model="agentCertificateAcknowledged"
+                type="checkbox"
+                @change="persistAgentCertificateAcknowledgement"
+              >
+              <span>Instalei e conferi este certificado neste computador</span>
+            </label>
+          </div>
+
+          <p class="printer-agent-certificate-guide__warning">
+            Não prossiga se o nome ou a impressão digital forem diferentes. O PrintFlow nunca desativa as proteções do Windows nem instala certificados sem sua confirmação.
+          </p>
+        </section>
+
         <div class="printer-agent-steps">
           <section
             class="printer-agent-step"
@@ -2837,6 +2941,7 @@ const cancel = () => {
               v-if="agentNeedsTransitionUpdate"
               type="button"
               class="btn btn--primary printer-agent-step__action"
+              :disabled="!agentCertificateAcknowledged"
               @click="downloadAgentTransition"
             >
               <UiIcon name="download" :size="16" />
@@ -2847,6 +2952,7 @@ const cancel = () => {
               v-else-if="!agentLocalAvailable"
               type="button"
               class="btn btn--primary printer-agent-step__action"
+              :disabled="!agentCertificateAcknowledged"
               @click="downloadAgentWindows"
             >
               <UiIcon name="download" :size="16" />
@@ -2861,15 +2967,12 @@ const cancel = () => {
               Instalação detectada
             </span>
 
-            <button
-              v-if="!agentLocalAvailable"
-              type="button"
-              class="printer-agent-certificate"
-              @click="downloadAgentWindowsDevCertificate"
+            <span
+              v-if="(!agentLocalAvailable || agentNeedsTransitionUpdate) && !agentCertificateAcknowledged"
+              class="printer-agent-step__blocked"
             >
-              <UiIcon name="shield" :size="14" />
-              Certificado Early Access (opcional)
-            </button>
+              Instale e confirme o certificado acima para liberar este download.
+            </span>
           </section>
 
           <section

@@ -224,7 +224,16 @@ Para uma maquina de teste confiar nesse certificado antes de executar o instalad
 powershell -ExecutionPolicy Bypass -File scripts/trust-windows-agent-dev-certificate.ps1 -CertificatePath "dist\PrintFlow-Agent-Dev-Certificate.cer"
 ```
 
-Use esse certificado somente para desenvolvimento/testes internos. Para distribuicao publica, use um certificado real de assinatura de codigo.
+Esse comando e exclusivo para uma maquina de desenvolvimento controlada. No fluxo do cliente, o sistema apresenta as instrucoes e o usuario instala conscientemente o certificado em `CurrentUser\Root` e `CurrentUser\TrustedPublisher`; o instalador nunca altera as protecoes do Windows nem confia um certificado silenciosamente.
+
+As releases Early Access reutilizam o mesmo PFX para que o certificado precise ser instalado somente uma vez. O workflow exige estes GitHub Actions secrets:
+
+- `PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64`: PFX persistente codificado em Base64.
+- `PRINTFLOW_AGENT_DEV_CERT_PASSWORD`: senha do PFX persistente.
+
+O pipeline falha se o PFX estiver ausente, se a assinatura nao existir, se o certificado do instalador divergir do `.cer` publicado ou se o IExpress truncar o payload. Nunca salve o PFX, a senha ou seu Base64 no Git.
+
+Este canal continua sendo self-signed e adequado somente ao Early Access com consentimento explicito. Para distribuicao publica sem instalacao manual de certificado, use Microsoft Store/MSIX ou Code Signing confiavel.
 
 Depois de extraido, o instalador copia o Agent para `%LOCALAPPDATA%\PrintFlowAgent`, registra a inicializacao no login, cria atalhos e registra o protocolo local.
 

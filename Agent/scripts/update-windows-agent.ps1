@@ -85,22 +85,20 @@ if (-not (Test-Path -LiteralPath $installer)) {
 
 $metadata = Get-Content -LiteralPath (Join-Path $packageRoot "RELEASE-METADATA.json") -Raw | ConvertFrom-Json
 $signature = Get-AuthenticodeSignature -FilePath $installer
-if (-not $signature.SignerCertificate -and $metadata.signingMode -ne "DEV_SELF_SIGNED") {
+if (-not $signature.SignerCertificate) {
   throw "O instalador nao possui assinatura Authenticode verificavel."
 }
-if ($metadata.signingMode -eq "PRODUCTION_TRUSTED" -and $signature.Status -ne "Valid") {
-  throw "A release PRODUCTION_TRUSTED nao possui assinatura confiavel."
+if ($signature.Status -ne "Valid") {
+  throw "A assinatura do instalador nao e confiavel neste computador. Instale o certificado oficial do Early Access antes de atualizar."
 }
 $certificatePath = Join-Path $packageRoot "PrintFlow-Agent-Dev-Certificate.cer"
 if (-not (Test-Path -LiteralPath $certificatePath)) {
   throw "Certificado publico da release nao encontrado."
 }
 $certificateHash = (Get-FileHash -LiteralPath $certificatePath -Algorithm SHA256).Hash.ToUpperInvariant()
-if ($signature.SignerCertificate) {
-  $signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
-  if ($certificateHash -ne $signerHash) {
-    throw "O certificado do instalador nao corresponde ao certificado publicado."
-  }
+$signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
+if ($certificateHash -ne $signerHash) {
+  throw "O certificado do instalador nao corresponde ao certificado publicado."
 }
 
 $confirmation = Read-Host "Digite INSTALAR para abrir o instalador validado"

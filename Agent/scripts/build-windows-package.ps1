@@ -4,6 +4,7 @@ param(
   [string]$InstallerName = "PrintFlow-Agent-Setup",
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
   [switch]$SignDev,
+  [switch]$RequirePersistedCertificate,
   [switch]$SkipOuterSignature,
   [switch]$SkipInstall
 )
@@ -192,15 +193,31 @@ if ($SignDev) {
   & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
     -FilePath (Join-Path $OutputDir "$InstallerName.exe") `
     -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer") `
+    -RequirePersistedCertificate:$RequirePersistedCertificate `
     -ExportOnly:$SkipOuterSignature
 
   $unsignedSize = (Get-Item -LiteralPath $unsignedInstallerPath).Length
   $signedSize = (Get-Item -LiteralPath $installerPath).Length
   if ($signedSize -lt [Math]::Max(1048576, [Math]::Floor($unsignedSize * 0.8))) {
-    Write-Warning "A assinatura truncou o payload do IExpress; mantendo o instalador completo sem assinatura externa."
     Copy-Item -LiteralPath $unsignedInstallerPath -Destination $installerPath -Force
+    Remove-Item -LiteralPath $unsignedInstallerPath -Force -ErrorAction SilentlyContinue
+    throw "A assinatura truncou o payload do IExpress; a release sem assinatura foi bloqueada."
   }
   Remove-Item -LiteralPath $unsignedInstallerPath -Force -ErrorAction SilentlyContinue
+
+  if (-not $SkipOuterSignature) {
+    $signature = Get-AuthenticodeSignature -LiteralPath $installerPath
+    $publicCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($devCertificatePath)
+    if (-not $signature.SignerCertificate) {
+      throw "Instalador permaneceu sem assinatura Authenticode."
+    }
+    if ($signature.SignerCertificate.Thumbprint -ne $publicCertificate.Thumbprint) {
+      throw "Assinatura do instalador nao corresponde ao certificado publico exportado."
+    }
+    if ($signature.Status -in @('HashMismatch', 'NotSigned')) {
+      throw "Assinatura Authenticode invalida: $($signature.Status)."
+    }
+  }
 
   Write-Host "Certificado publico de teste:"
   Write-Host $devCertificatePath

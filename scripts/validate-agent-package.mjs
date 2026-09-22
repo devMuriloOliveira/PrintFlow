@@ -144,6 +144,12 @@ try {
   if (!packageBuilder.includes('apiUri.Scheme -ne "https"') || !packageBuilder.includes('localhost')) {
     errors.push('builder do pacote nao bloqueia endpoint local/inseguro em Production.')
   }
+  if (
+    !packageBuilder.includes('RequirePersistedCertificate') ||
+    !packageBuilder.includes('Instalador permaneceu sem assinatura Authenticode')
+  ) {
+    errors.push('builder Early Access nao exige PFX persistente e assinatura Authenticode.')
+  }
 
   const devSigner = await fs.readFile(
     path.join(agentRoot, 'scripts/sign-windows-agent-dev.ps1'),
@@ -184,6 +190,24 @@ try {
     !updater.includes('Rollback dos binarios concluido')
   ) {
     errors.push('atualizador nao possui rollback explicito dos binarios.')
+  }
+  if (
+    !updater.includes('if (-not $signature.SignerCertificate)') ||
+    !updater.includes('$signature.Status -ne "Valid"')
+  ) {
+    errors.push('atualizador aceita instalador sem assinatura confiavel.')
+  }
+
+  const releaseWorkflow = await fs.readFile(
+    path.join(root, '.github/workflows/agent-release.yml'),
+    'utf8'
+  )
+  if (
+    !releaseWorkflow.includes('PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64') ||
+    !releaseWorkflow.includes('-SignDev') ||
+    !releaseWorkflow.includes('-RequirePersistedCertificate')
+  ) {
+    errors.push('workflow de release nao exige assinatura Early Access persistente.')
   }
 } catch (error) {
   errors.push(
