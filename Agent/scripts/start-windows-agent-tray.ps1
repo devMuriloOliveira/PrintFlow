@@ -187,15 +187,30 @@ $exitItem.Add_Click({
 [void]$menu.Items.Add($exitItem)
 
 $updateScript = Join-Path $agentRoot 'scripts\check-and-update-windows-agent.ps1'
+$updateHistoryPath = Join-Path $env:APPDATA 'PrintFlow Agent\updates\update-history.jsonl'
+
+function Stop-AgentForUpdate {
+  $script:agentClosing = $true
+  $restartTimer.Stop()
+  $updateTimer.Stop()
+  $statusItem.Text = 'PrintFlow Agent atualizando...'
+  Stop-AgentProcess
+  $notifyIcon.Visible = $false
+  [System.Windows.Forms.Application]::Exit()
+}
+
 $updateItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $updateItem.Text = 'Verificar atualizações'
 $updateItem.Add_Click({
   try {
     $result = & $updateScript -CurrentVersion $version -Interactive
-    if ($result -and $result.updateAvailable -and -not $result.installed) {
+    if ($result -and $result.deferred) {
+      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização programada para o próximo período sem impressão ativa.', [System.Windows.Forms.ToolTipIcon]::Info)
+    } elseif ($result -and $result.updateAvailable -and -not $result.installed) {
       $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "A atualização $($result.latestVersion) está disponível.", [System.Windows.Forms.ToolTipIcon]::Info)
     } elseif ($result -and $result.installed) {
-      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização iniciada. O Agent será reiniciado pelo instalador.', [System.Windows.Forms.ToolTipIcon]::Info)
+      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização iniciada. A versão anterior será restaurada automaticamente se a nova não iniciar.', [System.Windows.Forms.ToolTipIcon]::Info)
+      Stop-AgentForUpdate
     } else {
       $notifyIcon.ShowBalloonTip(3000, 'PrintFlow Agent', 'Você já está usando a versão mais recente.', [System.Windows.Forms.ToolTipIcon]::Info)
     }
@@ -205,20 +220,39 @@ $updateItem.Add_Click({
 })
 [void]$menu.Items.Insert(1, $updateItem)
 
+$updateHistoryItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$updateHistoryItem.Text = 'Histórico de atualizações'
+$updateHistoryItem.Add_Click({
+  if (Test-Path -LiteralPath $updateHistoryPath) {
+    Start-Process -FilePath 'notepad.exe' -ArgumentList $updateHistoryPath
+  } else {
+    [System.Windows.Forms.MessageBox]::Show('Ainda não há atualizações registradas.', 'PrintFlow Agent', 'OK', 'Information') | Out-Null
+  }
+})
+[void]$menu.Items.Insert(2, $updateHistoryItem)
+
 $updateTimer = New-Object System.Windows.Forms.Timer
 $updateTimer.Interval = 30 * 1000
 $updateTimer.Add_Tick({
   $updateTimer.Stop()
+  $result = $null
   try {
     $result = & $updateScript -CurrentVersion $version -Interactive
-    if ($result -and $result.updateAvailable -and -not $result.installed) {
+    if ($result -and $result.installed) {
+      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização iniciada com proteção de rollback.', [System.Windows.Forms.ToolTipIcon]::Info)
+      Stop-AgentForUpdate
+      return
+    }
+    if ($result -and $result.updateAvailable -and -not $result.installed -and -not $result.deferred) {
       $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "A versão $($result.latestVersion) está disponível. Use 'Verificar atualizações' para instalar.", [System.Windows.Forms.ToolTipIcon]::Info)
     }
   } catch {
     # A indisponibilidade da internet não interrompe o Agent.
   } finally {
-    $updateTimer.Interval = 6 * 60 * 60 * 1000
-    $updateTimer.Start()
+    if (-not $script:agentClosing) {
+      $updateTimer.Interval = if ($result -and $result.deferred) { 5 * 60 * 1000 } else { 6 * 60 * 60 * 1000 }
+      $updateTimer.Start()
+    }
   }
 })
 

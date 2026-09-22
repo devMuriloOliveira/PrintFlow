@@ -96,7 +96,7 @@ if (-not (Test-Path -LiteralPath $certificatePath)) {
   throw "Certificado publico da release nao encontrado."
 }
 $certificateHash = (Get-FileHash -LiteralPath $certificatePath -Algorithm SHA256).Hash.ToUpperInvariant()
-$signerHash = [Convert]::ToHexString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))
+$signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
 if ($certificateHash -ne $signerHash) {
   throw "O certificado do instalador nao corresponde ao certificado publicado."
 }

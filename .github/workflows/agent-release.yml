@@ -59,6 +59,10 @@ jobs:
         shell: pwsh
         run: |
           $package = Get-Content Agent/package.json -Raw | ConvertFrom-Json
+          Copy-Item `
+            Agent/dist/PrintFlow-Agent-Setup.exe `
+            Agent/dist/PrintFlow-Agent-Transition-Setup.exe `
+            -Force
           $certificatePath = 'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer'
           if (-not (Test-Path $certificatePath)) { throw "Certificado ausente: $certificatePath" }
           $certificateSha256 = (Get-FileHash $certificatePath -Algorithm SHA256).Hash
@@ -73,6 +77,7 @@ jobs:
           $artifacts = @(
             'Agent/dist/PrintFlow-Agent-Windows.zip',
             'Agent/dist/PrintFlow-Agent-Setup.exe',
+            'Agent/dist/PrintFlow-Agent-Transition-Setup.exe',
             'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer',
             'Agent/dist/RELEASE-METADATA.json'
           )
@@ -92,6 +97,7 @@ jobs:
           gh release create "${{ github.ref_name }}" `
             Agent/dist/PrintFlow-Agent-Windows.zip `
             Agent/dist/PrintFlow-Agent-Setup.exe `
+            Agent/dist/PrintFlow-Agent-Transition-Setup.exe `
             Agent/dist/PrintFlow-Agent-Dev-Certificate.cer `
             Agent/dist/RELEASE-METADATA.json `
             Agent/dist/SHA256SUMS.txt `

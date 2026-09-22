@@ -45,6 +45,7 @@ import {
   startAgentWebSocket
 } from './cloud/websocket.js'
 import { monitorPrintJobCompletion } from './printing/productionJobMonitor.js'
+import { getCachedActivePrintCount } from './printers/printerManager.js'
 
 const logger =
   installFileLogger()
@@ -143,11 +144,34 @@ process.on('unhandledRejection', error => {
   )
 })
 
-startLocalServer()
 startCacheCleanup()
 
 const localOperations =
   createLocalOperationsDb()
+
+startLocalServer({
+  getRuntimeStatus: () => {
+    const monitoredPrintJobs =
+      localOperations
+        .listPendingProductionJobMonitors()
+        .length
+    const activePrintJobs =
+      Math.max(
+        monitoredPrintJobs,
+        getCachedActivePrintCount()
+      )
+
+    return {
+      updateBlocked:
+        activePrintJobs > 0,
+      updateBlockedReason:
+        activePrintJobs > 0
+          ? 'active_print'
+          : null,
+      activePrintJobs
+    }
+  }
+})
 
 const recoveredCommands =
   localOperations.recoverInterruptedCommands()

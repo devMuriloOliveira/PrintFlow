@@ -62,22 +62,44 @@ const readJsonBody = request =>
     request.on('error', reject)
   })
 
-const getLocalStatus = async () => {
+const getLocalStatus = async (
+  getRuntimeStatus
+) => {
   const credentials = await loadCredentials()
+  const runtimeStatus =
+    typeof getRuntimeStatus === 'function'
+      ? await getRuntimeStatus()
+      : {}
 
   return {
     ok: true,
     app: 'printflow-agent',
     version: AGENT_VERSION,
-    paired: Boolean(credentials?.agentId)
+    paired: Boolean(credentials?.agentId),
+    updateBlocked:
+      Boolean(runtimeStatus?.updateBlocked),
+    updateBlockedReason:
+      runtimeStatus?.updateBlockedReason || null,
+    activePrintJobs:
+      Math.max(
+        0,
+        Number(runtimeStatus?.activePrintJobs) || 0
+      )
   }
 }
 
 export const startLocalServer = ({
   port = process.env.PRINTFLOW_AGENT_LOCAL_PORT ||
-    DEFAULT_LOCAL_PORT
+    DEFAULT_LOCAL_PORT,
+  getRuntimeStatus
 } = {}) => {
-  const localPort = Number(port) || DEFAULT_LOCAL_PORT
+  const parsedPort = Number(port)
+  const localPort =
+    Number.isInteger(parsedPort) &&
+    parsedPort >= 0 &&
+    parsedPort <= 65535
+      ? parsedPort
+      : DEFAULT_LOCAL_PORT
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -95,7 +117,13 @@ export const startLocalServer = ({
         request.method === 'GET' &&
         requestUrl.pathname === '/healthz'
       ) {
-        json(response, 200, await getLocalStatus())
+        json(
+          response,
+          200,
+          await getLocalStatus(
+            getRuntimeStatus
+          )
+        )
         return
       }
 

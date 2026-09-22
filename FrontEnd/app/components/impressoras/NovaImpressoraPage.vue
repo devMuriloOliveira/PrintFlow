@@ -23,9 +23,13 @@ const auth = useAuth()
 const route = useRoute()
 const config = useRuntimeConfig()
 const defaultAgentWindowsDownloadUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.4/PrintFlow-Agent-Setup.exe'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.5/PrintFlow-Agent-Setup.exe'
 const defaultAgentWindowsDevCertificateUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.4/PrintFlow-Agent-Dev-Certificate.cer'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/download/agent-v0.1.5/PrintFlow-Agent-Dev-Certificate.cer'
+const agentTransitionDownloadUrl =
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Transition-Setup.exe'
+const firstSelfUpdatingAgentVersion =
+  '0.1.4'
 
 const agentWindowsDownloadUrl =
   computed(() =>
@@ -102,6 +106,19 @@ const downloadAgentWindowsDevCertificate = () => {
     'Certificado de teste baixado. Instale-o no Windows como Autoridade Raiz Confiável e Editor Confiável antes de executar o instalador do Agent.'
 }
 
+const downloadAgentTransition = () => {
+  window.open(
+    withDownloadCacheBust(
+      agentTransitionDownloadUrl
+    ),
+    '_blank',
+    'noopener'
+  )
+
+  agentOpenMessage.value =
+    'Baixe e execute esta atualização única. Depois dela, o Agent poderá receber as próximas versões pelo próprio aplicativo.'
+}
+
 // ======================================================
 // PRINTFLOW AGENT
 // ======================================================
@@ -163,6 +180,43 @@ const agentLocalAvailable =
     Boolean(
       agentLocalStatus.value?.ok
     )
+  )
+
+const compareAgentVersions = (
+  left: string,
+  right: string
+) => {
+  const normalize = (value: string) =>
+    String(value || '')
+      .split('.')
+      .map(part => Number(part) || 0)
+
+  const leftParts = normalize(left)
+  const rightParts = normalize(right)
+
+  for (let index = 0; index < 3; index++) {
+    const difference =
+      (leftParts[index] || 0) -
+      (rightParts[index] || 0)
+
+    if (difference !== 0) {
+      return difference
+    }
+  }
+
+  return 0
+}
+
+const agentNeedsTransitionUpdate =
+  computed(() =>
+    agentLocalAvailable.value &&
+    compareAgentVersions(
+      String(
+        agentLocalStatus.value?.version ||
+          '0.0.0'
+      ),
+      firstSelfUpdatingAgentVersion
+    ) < 0
   )
 
 const agentInstalledButtonLabel =
@@ -277,7 +331,11 @@ const getPrinterConnectionOptions = (
     !printerConnectionOptions[key]
   ) {
     printerConnectionOptions[key] = {
-      serial: '',
+      serial:
+        String(
+          printer.serial ||
+            ''
+        ).trim(),
       accessCode: '',
       apiKey: '',
       username:
@@ -2710,9 +2768,15 @@ const cancel = () => {
         class="printer-agent-connect"
       >
         <p
-          v-if="
-            !agentLocalAvailable
-          "
+          v-if="agentNeedsTransitionUpdate"
+          class="printer-agent-notice"
+        >
+          <strong>Atualização única necessária</strong>
+          Este Agent é anterior ao atualizador automático. Instale a versão de transição uma vez; as próximas atualizações aparecerão no próprio Agent.
+        </p>
+
+        <p
+          v-else-if="!agentLocalAvailable"
           class="printer-agent-notice"
         >
           <strong>Primeiro acesso neste computador</strong>
@@ -2730,6 +2794,15 @@ const cancel = () => {
         <div
           class="printer-agent-actions"
         >
+          <button
+            v-if="agentNeedsTransitionUpdate"
+            type="button"
+            class="btn btn--primary"
+            @click="downloadAgentTransition"
+          >
+            Atualizar Agent antigo
+          </button>
+
           <button
             v-if="
               !agentLocalAvailable
@@ -3277,7 +3350,16 @@ const cancel = () => {
                         "
                         placeholder="Serial da Bambu"
                         autocomplete="off"
+                        :readonly="Boolean(printer.serial)"
                       >
+
+                      <small>
+                        {{
+                          printer.serial
+                            ? 'Serial identificado automaticamente na rede.'
+                            : 'Informe somente se a descoberta não identificar o serial.'
+                        }}
+                      </small>
                     </div>
 
                     <div class="field">
@@ -3295,6 +3377,10 @@ const cancel = () => {
                         placeholder="Código LAN"
                         autocomplete="off"
                       >
+
+                      <small>
+                        Necessário para autenticar a conexão local. O Agent não tenta descobrir nem exibir esse segredo.
+                      </small>
                     </div>
                   </div>
 

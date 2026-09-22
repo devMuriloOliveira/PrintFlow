@@ -65,6 +65,47 @@ const adapters = {
 const activeConnections =
   new Map()
 
+const activePrintStates =
+  new Set([
+    'printing',
+    'running',
+    'pause',
+    'paused',
+    'pausing',
+    'resuming',
+    'prepare',
+    'preparing'
+  ])
+
+export const isActivePrinterStatus = (
+  status
+) =>
+  activePrintStates.has(
+    String(
+      status?.state ||
+        status?.status ||
+        ''
+    )
+      .trim()
+      .toLowerCase()
+  )
+
+export const getCachedActivePrintCount =
+  () => {
+    let count = 0
+
+    for (const entry of activeConnections.values()) {
+      if (
+        isConnectionEntryActive(entry) &&
+        isActivePrinterStatus(entry.lastStatus)
+      ) {
+        count += 1
+      }
+    }
+
+    return count
+  }
+
 // ======================================================
 // NORMALIZAR PROTOCOLO
 // ======================================================
