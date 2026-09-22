@@ -21,6 +21,7 @@ type AuthResponse = {
 export type AuthSession = { sessionId: string; createdAt: string; expiresAt: string; lastSeenAt: string; deviceLabel: string; ipMasked: string }
 
 let logoutTimer: ReturnType<typeof setTimeout> | undefined
+let restoreInFlight: Promise<void> | null = null
 
 const decodeTokenExpiresAt = (token: string) => {
   try {
@@ -90,10 +91,11 @@ export const useAuth = () => {
     }
   }
 
-  const refreshSession = async () => {
+  const refreshSession = async (options: { timeout?: number } = {}) => {
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/refresh'), {
       method: 'POST',
-      credentials: 'include'
+      credentials: 'include',
+      timeout: options.timeout
     })
     setSession(session)
     return session.user
@@ -118,13 +120,22 @@ export const useAuth = () => {
       return
     }
 
-    try {
-      await refreshSession()
-    } catch {
-      clearSession()
-    }
+    if (restoreInFlight) return restoreInFlight
 
-    ready.value = true
+    restoreInFlight = (async () => {
+      try {
+        // Render can take a few seconds to wake on the first request. Keep the
+        // shell visible while waiting, but do not leave navigation hanging.
+        await refreshSession({ timeout: 12_000 })
+      } catch {
+        clearSession()
+      } finally {
+        ready.value = true
+        restoreInFlight = null
+      }
+    })()
+
+    return restoreInFlight
   }
 
   const login = async (email: string, password: string) => {

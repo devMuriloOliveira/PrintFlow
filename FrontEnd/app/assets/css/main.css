@@ -31,6 +31,13 @@ input, select, textarea { color: var(--ink); }
 ::selection { background: #cde1ff; }
 
 .app-shell { min-height: 100vh; }
+.app-bootstrap { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(circle at 20% 15%, #e7f1ff 0, transparent 32%), linear-gradient(135deg, #f5f8fc 0%, #eef4fb 52%, #f8fbf8 100%); }
+.app-bootstrap__card { display: grid; justify-items: center; gap: 10px; width: min(360px, 100%); border: 1px solid rgba(151,164,185,.35); border-radius: 16px; background: rgba(255,255,255,.9); box-shadow: 0 18px 55px rgba(25,44,84,.12); padding: 30px 24px; text-align: center; }
+.app-bootstrap__card .brand { margin-bottom: 4px; }
+.app-bootstrap__card strong { color: var(--ink); font-size: 16px; }
+.app-bootstrap__card small { color: var(--muted); font-size: 11px; }
+.app-bootstrap__spinner { width: 24px; height: 24px; border: 3px solid #dce8fb; border-top-color: var(--blue); border-radius: 50%; animation: app-bootstrap-spin .8s linear infinite; }
+@keyframes app-bootstrap-spin { to { transform: rotate(360deg); } }
 .app-body { min-width: 0; margin-left: 240px; transition: margin .22s var(--ease-out); }
 .page-loading-hint { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
 .page-shell { min-height: calc(100vh - 70px); max-width: 1760px; margin-inline: auto; padding: 28px 32px 40px; }
