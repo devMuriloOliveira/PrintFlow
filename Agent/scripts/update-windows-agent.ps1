@@ -85,7 +85,7 @@ if (-not (Test-Path -LiteralPath $installer)) {
 
 $metadata = Get-Content -LiteralPath (Join-Path $packageRoot "RELEASE-METADATA.json") -Raw | ConvertFrom-Json
 $signature = Get-AuthenticodeSignature -FilePath $installer
-if ($signature.Status -eq "NotSigned" -or -not $signature.SignerCertificate) {
+if (-not $signature.SignerCertificate -and $metadata.signingMode -ne "DEV_SELF_SIGNED") {
   throw "O instalador nao possui assinatura Authenticode verificavel."
 }
 if ($metadata.signingMode -eq "PRODUCTION_TRUSTED" -and $signature.Status -ne "Valid") {
@@ -96,9 +96,11 @@ if (-not (Test-Path -LiteralPath $certificatePath)) {
   throw "Certificado publico da release nao encontrado."
 }
 $certificateHash = (Get-FileHash -LiteralPath $certificatePath -Algorithm SHA256).Hash.ToUpperInvariant()
-$signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
-if ($certificateHash -ne $signerHash) {
-  throw "O certificado do instalador nao corresponde ao certificado publicado."
+if ($signature.SignerCertificate) {
+  $signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
+  if ($certificateHash -ne $signerHash) {
+    throw "O certificado do instalador nao corresponde ao certificado publicado."
+  }
 }
 
 $confirmation = Read-Host "Digite INSTALAR para abrir o instalador validado"
