@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
   [string]$PairingCode = ""
 )

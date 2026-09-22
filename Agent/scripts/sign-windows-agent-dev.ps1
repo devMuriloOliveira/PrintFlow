@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$FilePath = "dist\PrintFlow-Agent-Setup.exe",
   [string]$CertificateSubject = "CN=PrintFlow 3D Local Dev",
   # O signtool do Windows requer o endpoint RFC 3161 DigiCert neste formato
