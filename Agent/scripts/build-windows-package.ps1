@@ -161,24 +161,25 @@ $iexpressProcess = Start-Process `
 
 $buildDeadline = [DateTime]::UtcNow.AddMinutes(3)
 while (
-  -not $iexpressProcess.HasExited -and
-  -not (Test-Path $installerPath) -and
-  [DateTime]::UtcNow -lt $buildDeadline
+  [DateTime]::UtcNow -lt $buildDeadline -and
+  (
+    -not (Test-Path $installerPath) -or
+    (Get-Item -LiteralPath $installerPath -ErrorAction SilentlyContinue).Length -lt 1048576
+  )
 ) {
   Start-Sleep -Milliseconds 500
 }
 
-if (-not (Test-Path $installerPath)) {
+if (-not (Test-Path $installerPath) -or (Get-Item -LiteralPath $installerPath).Length -lt 1048576) {
   if (-not $iexpressProcess.HasExited) {
     Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
   }
-  throw "IExpress nao gerou o instalador dentro do prazo."
+  throw "IExpress nao concluiu o payload do instalador dentro do prazo."
 }
 
-# Algumas versoes do IExpress deixam o processo vivo depois de escrever o
-# artefato. O processo foi iniciado por este script e pode ser encerrado com
-# seguranca agora que o .exe existe.
 if (-not $iexpressProcess.HasExited) {
+  # O arquivo ja atingiu o tamanho esperado; o IExpress pode permanecer vivo
+  # depois de escrever o artefato, entao encerramos apenas agora.
   Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
 }
 

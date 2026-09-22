@@ -1,2 +1,2 @@
 export const AGENT_VERSION =
-  '0.1.8'
+  '0.1.9'
