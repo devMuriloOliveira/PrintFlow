@@ -56,7 +56,9 @@ jobs:
           if (-not (Test-Path scripts/install-windows-agent-from-package.ps1)) {
             throw 'Bootstrap do instalador de transicao ausente.'
           }
-          ./scripts/build-windows-package.ps1 -ApiUrl $apiUrl -SignDev -SkipOuterSignature -SkipInstall
+          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
+          Copy-Item '../FrontEnd/public/downloads/PrintFlow-Agent-Dev-Certificate.cer' 'dist/PrintFlow-Agent-Dev-Certificate.cer' -Force
+          ./scripts/build-windows-package.ps1 -ApiUrl $apiUrl -SkipInstall
           $installerSize = (Get-Item 'dist/PrintFlow-Agent-Setup.exe').Length
           if ($installerSize -lt 1048576) {
             throw "Instalador IExpress truncado: $installerSize bytes."
