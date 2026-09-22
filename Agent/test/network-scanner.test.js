@@ -88,6 +88,23 @@ test('SSDP retorna candidato Bambu sem varredura de portas', async () => {
   ])
 })
 
+test('SSDP falhando em VLAN/firewall retorna vazio para permitir fallback manual', async () => {
+  const socket = new EventEmitter()
+  socket.bind = callback => {
+    callback()
+    queueMicrotask(() => socket.emit('error', new Error('multicast blocked')))
+  }
+  socket.send = () => {}
+  socket.close = () => {}
+
+  const printers = await discoverBambuSsdp({
+    socketFactory: () => socket,
+    timeoutMs: 100
+  })
+
+  assert.deepEqual(printers, [])
+})
+
 test('descoberta calcula faixa pela netmask e exclui rede/broadcast', () => {
   assert.deepEqual(
     getNetworkHostRange(

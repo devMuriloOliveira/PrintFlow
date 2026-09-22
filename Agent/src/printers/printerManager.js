@@ -65,6 +65,9 @@ const adapters = {
 const activeConnections =
   new Map()
 
+let statusPollingTimer = null
+let statusPollingInFlight = false
+
 const activePrintStates =
   new Set([
     'printing',
@@ -105,6 +108,72 @@ export const getCachedActivePrintCount =
 
     return count
   }
+
+export const refreshActivePrinterStatuses = async () => {
+  if (statusPollingInFlight) {
+    return {
+      refreshed: 0,
+      failed: 0,
+      skipped: true
+    }
+  }
+
+  statusPollingInFlight = true
+  let refreshed = 0
+  let failed = 0
+
+  try {
+    for (const [key, entry] of activeConnections.entries()) {
+      if (!isConnectionEntryActive(entry)) {
+        removeStaleConnection(key)
+        continue
+      }
+
+      if (typeof entry.adapter?.getStatus !== 'function') {
+        continue
+      }
+
+      try {
+        entry.lastStatus = await entry.adapter.getStatus(entry.connection)
+        entry.lastStatusAt = new Date()
+        refreshed += 1
+      } catch (error) {
+        failed += 1
+        if (entry.connection?.connected !== true) {
+          removeStaleConnection(key)
+        }
+      }
+    }
+  } finally {
+    statusPollingInFlight = false
+  }
+
+  return { refreshed, failed, skipped: false }
+}
+
+export const startPrinterStatusPolling = ({
+  intervalMs = Number(process.env.PRINTFLOW_PRINTER_STATUS_POLL_MS || 15000)
+} = {}) => {
+  if (statusPollingTimer) {
+    return () => stopPrinterStatusPolling()
+  }
+
+  const delay = Math.max(5000, Number(intervalMs) || 15000)
+  statusPollingTimer = setInterval(() => {
+    refreshActivePrinterStatuses().catch(error => {
+      console.log(`[PrinterManager] Falha ao atualizar estados: ${error.message}`)
+    })
+  }, delay)
+  statusPollingTimer.unref?.()
+
+  return () => stopPrinterStatusPolling()
+}
+
+export const stopPrinterStatusPolling = () => {
+  if (!statusPollingTimer) return
+  clearInterval(statusPollingTimer)
+  statusPollingTimer = null
+}
 
 // ======================================================
 // NORMALIZAR PROTOCOLO

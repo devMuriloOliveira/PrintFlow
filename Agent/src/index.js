@@ -45,7 +45,11 @@ import {
   startAgentWebSocket
 } from './cloud/websocket.js'
 import { monitorPrintJobCompletion } from './printing/productionJobMonitor.js'
-import { getCachedActivePrintCount } from './printers/printerManager.js'
+import {
+  getCachedActivePrintCount,
+  listActiveConnections,
+  startPrinterStatusPolling
+} from './printers/printerManager.js'
 
 const logger =
   installFileLogger()
@@ -170,8 +174,30 @@ startLocalServer({
           : null,
       activePrintJobs
     }
+  },
+  getDiagnostics: () => ({
+    connections: listActiveConnections().map(item => ({
+      key: item.key,
+      protocol: item.protocol,
+      connected: item.connected,
+      connectedAt: item.connectedAt,
+      lastStatusAt: item.lastStatusAt,
+      printer: {
+        protocol: item.printer?.protocol || null,
+        manufacturer: item.printer?.manufacturer || null,
+        model: item.printer?.model || null,
+        serial: item.printer?.serial || null,
+        ip: item.printer?.ip || null,
+        port: item.printer?.port || null
+      }
+    }))
   }
 })
+
+// Atualiza periodicamente conexoes abertas para detectar
+// impressoes iniciadas fora do Agent e bloquear atualizacoes
+// durante o trabalho ativo.
+startPrinterStatusPolling()
 
 const recoveredCommands =
   localOperations.recoverInterruptedCommands()

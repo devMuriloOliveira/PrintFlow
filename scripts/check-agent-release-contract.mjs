@@ -18,7 +18,10 @@ const required = [
   'validate-agent-release-artifacts.mjs',
   'DEV_SELF_SIGNED',
   'PRODUCTION_TRUSTED',
-  'gh release create'
+  'gh release create',
+  'PrintFlow-Agent-Transition-Setup.exe',
+  'Copy-Item',
+  'install-windows-agent-from-package.ps1'
 ]
 
 const missing = required.filter(fragment => !workflow.includes(fragment))

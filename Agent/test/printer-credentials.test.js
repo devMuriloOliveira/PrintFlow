@@ -83,4 +83,10 @@ test('salva e carrega credenciais sem texto puro no arquivo', async () => {
     ),
     false
   )
+
+  if (process.platform === 'win32') {
+    const stored = JSON.parse(fileContent)
+    assert.equal(stored.protection, 'windows-dpapi')
+    assert.ok(stored.payload)
+  }
 })

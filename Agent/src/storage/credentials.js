@@ -117,6 +117,22 @@ const runPowerShellDpapi = async (
   })
 }
 
+export const protectWithWindowsDpapi = async value =>
+  runPowerShellDpapi(
+    'protect',
+    Buffer.isBuffer(value)
+      ? value
+      : Buffer.from(String(value), 'utf8')
+  )
+
+export const unprotectWithWindowsDpapi = async value =>
+  runPowerShellDpapi(
+    'unprotect',
+    Buffer.isBuffer(value)
+      ? value
+      : Buffer.from(String(value), 'base64')
+  )
+
 export const getAgentDataDirectory = () =>
   dataDirectory
 
