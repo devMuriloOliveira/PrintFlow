@@ -4,6 +4,7 @@ param(
   [string]$InstallerName = "PrintFlow-Agent-Setup",
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
   [switch]$SignDev,
+  [switch]$SkipOuterSignature,
   [switch]$SkipInstall
 )
 
@@ -189,7 +190,8 @@ if ($SignDev) {
   Copy-Item -LiteralPath $installerPath -Destination $unsignedInstallerPath -Force
   & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
     -FilePath (Join-Path $OutputDir "$InstallerName.exe") `
-    -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer")
+    -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer") `
+    -ExportOnly:$SkipOuterSignature
 
   $unsignedSize = (Get-Item -LiteralPath $unsignedInstallerPath).Length
   $signedSize = (Get-Item -LiteralPath $installerPath).Length
