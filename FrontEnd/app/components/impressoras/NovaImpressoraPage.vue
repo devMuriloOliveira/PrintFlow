@@ -3,6 +3,7 @@ import {
   computed,
   nextTick,
   onMounted,
+  onUnmounted,
   reactive,
   ref,
   watchEffect
@@ -395,7 +396,11 @@ const getPrinterConnectionOptions = (
 // CARREGAR AGENTS
 // ======================================================
 
-const loadAgents = async () => {
+const loadAgents = async (
+  options: {
+    silent?: boolean
+  } = {}
+) => {
   agentLoading.value =
     true
 
@@ -432,12 +437,14 @@ const loadAgents = async () => {
     agents.value =
       data.agents || []
   } catch (error) {
-    notify(
-      error instanceof Error
-        ? error.message
-        : 'Não foi possível carregar os Agents.',
-      'info'
-    )
+    if (!options.silent) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar os Agents.',
+        'info'
+      )
+    }
   } finally {
     agentLoading.value =
       false
@@ -703,6 +710,14 @@ const refreshAgentState =
     checkLocalAgent()
     loadAgents()
   }
+
+let agentLocalStatusPollTimer:
+  ReturnType<typeof setInterval> |
+  null = null
+
+let agentsPollTimer:
+  ReturnType<typeof setInterval> |
+  null = null
 
 const openInstalledAgent =
   async () => {
@@ -2269,6 +2284,36 @@ onMounted(() => {
     ) === 'confirmed'
   checkLocalAgent()
   loadAgents()
+
+  agentLocalStatusPollTimer =
+    window.setInterval(
+      () => {
+        checkLocalAgent()
+      },
+      5000
+    )
+
+  agentsPollTimer =
+    window.setInterval(
+      () => {
+        loadAgents({ silent: true })
+      },
+      30000
+    )
+})
+
+onUnmounted(() => {
+  if (agentLocalStatusPollTimer) {
+    window.clearInterval(
+      agentLocalStatusPollTimer
+    )
+  }
+
+  if (agentsPollTimer) {
+    window.clearInterval(
+      agentsPollTimer
+    )
+  }
 })
 
 // ======================================================
