@@ -8,6 +8,7 @@ import { createProduct, listProducts } from '../repositories/productsRepository.
 import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
 import { createFilamentMovement, listFilamentMovements, createProductMovement, createProductMovementWithClient, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
+import { listPendingProductionMaterial, reconcilePendingProductionMaterial } from '../services/productionInventory.js'
 import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
 import {
   resolvePrintFilePath,
@@ -334,6 +335,34 @@ export const handleProductInventoryMovements = async (req, res, productId) => {
   if (req.method === 'GET') return sendJson(res, 200, await listProductMovements(tenantId, productId))
   if (req.method === 'POST') return sendJson(res, 201, await createProductMovement(tenantId, productId, await readJsonBody(req), await auditActor(req)))
   return sendJson(res, 405, { error: 'Metodo nao permitido' })
+}
+
+export const handlePendingProductionMaterial = async (req, res) => {
+  if (req.method !== 'GET') return sendJson(res, 405, { error: 'Metodo nao permitido' })
+  if (!hasDatabase) return sendJson(res, 200, [])
+  const tenantId = await getTenantId(req)
+  return withTenant(tenantId, async (client) =>
+    sendJson(res, 200, await listPendingProductionMaterial({ client, tenantId }))
+  )
+}
+
+export const handlePendingProductionMaterialReconcile = async (req, res, printJobId) => {
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Metodo nao permitido' })
+  const tenantId = await getTenantId(req)
+  const audit = await auditActor(req)
+  if (!hasDatabase) return sendJson(res, 409, { error: 'A reconciliacao requer o banco de dados configurado.' })
+  const result = await withTenant(tenantId, async (client) => {
+    const reconciled = await reconcilePendingProductionMaterial({ client, tenantId, printJobId, audit })
+    if (reconciled.reconciled === false || reconciled.consumed === false) return reconciled
+    await writeAuditEvent(tenantId, {
+      action: 'inventory.production_reconciled', actorType: audit.actorType, actorId: audit.actorId,
+      entityType: 'print_job', entityId: String(printJobId),
+      details: { movementId: reconciled.movement?.id || null }
+    }, client)
+    return { reconciled: true, movement: reconciled.movement }
+  })
+  if (!result.reconciled) return sendJson(res, 404, { error: 'Nenhum consumo pendente foi encontrado para esta impressao.' })
+  return sendJson(res, 200, result)
 }
 
 const orderStages = ['Novo', 'Producao', 'Impresso', 'Embalando', 'Enviado', 'Entregue']

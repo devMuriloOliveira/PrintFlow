@@ -5,6 +5,12 @@ import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { listResource } from '../repositories/appDataRepository.js'
 import { createFilamentMovementWithClient } from '../repositories/inventoryRepository.js'
+import {
+  consumeProductionMaterialReservation,
+  markProductionMaterialPending,
+  releaseProductionMaterialReservation,
+  reserveProductionMaterial
+} from '../services/productionInventory.js'
 import { getAuthUser } from './auth.js'
 import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
@@ -135,7 +141,7 @@ export const handlePrintJobEnqueue = async (req, res) => {
         [tenantId, printerId]
       )
 
-      await client.query(
+      const inserted = await client.query(
         `insert into print_jobs (
            tenant_id,
            product_id,
@@ -158,7 +164,7 @@ export const handlePrintJobEnqueue = async (req, res) => {
            $8,
            'queued',
            $9
-         )`,
+         ) returning id`,
         [
           tenantId,
           productId,
@@ -171,6 +177,20 @@ export const handlePrintJobEnqueue = async (req, res) => {
           String(body?.notes || 'Adicionado manualmente pela tela de impressoras')
         ]
       )
+      const reservation = await reserveProductionMaterial({
+        client,
+        tenantId,
+        printJobId: inserted.rows[0].id,
+        productId,
+        quantity: normalizeQuantity(body?.quantity)
+      })
+      if (!reservation.reserved && reservation.reason === 'recipe_missing') {
+        await writeOperationalNotification(tenantId, {
+          type: 'inventory.production_recipe_missing', severity: 'warning', title: 'Reserva de material pendente',
+          message: 'O trabalho entrou na fila sem filamento ou peso validos para reservar material.',
+          entityType: 'print_job', entityId: String(inserted.rows[0].id), dedupeKey: `inventory-reservation-recipe-missing:${inserted.rows[0].id}`
+        }, client)
+      }
     })
 
     return sendPrintJobs(req, res, 201)
@@ -391,6 +411,10 @@ export const handlePrintJobCancel = async (req, res, printJobId) => {
       )
 
       if (!result.rowCount) throw new Error('Registro nao encontrado')
+      await releaseProductionMaterialReservation({
+        client, tenantId, printJobId,
+        reason: 'Trabalho cancelado antes da conclusao.'
+      })
     })
 
     return sendPrintJobs(req, res)
@@ -568,11 +592,19 @@ export const handlePrintJobComplete = async (req, res, printJobId) => {
       }
 
       try {
-        await createFilamentMovementWithClient(client, tenantId, usage.filamentId, {
-          type: 'out', quantity: usage.grams,
-          reason: `Consumo confirmado pela conclusão da impressão #${printJobId}`
-        }, user ? { actorId: user.id, actorType: 'user' } : null)
+        const reservation = await consumeProductionMaterialReservation({
+          client, tenantId, printJobId, grams: usage.grams,
+          reason: `Consumo confirmado pela conclusão da impressão #${printJobId}`,
+          audit: user ? { actorId: user.id, actorType: 'user' } : null
+        })
+        if (!reservation.consumed && reservation.reason === 'reservation_missing') {
+          await createFilamentMovementWithClient(client, tenantId, usage.filamentId, {
+            type: 'out', quantity: usage.grams,
+            reason: `Consumo confirmado pela conclusão da impressão #${printJobId}`
+          }, user ? { actorId: user.id, actorType: 'user' } : null)
+        }
       } catch (error) {
+        await markProductionMaterialPending({ client, tenantId, printJobId, grams: usage.grams, error })
         await writeOperationalNotification(tenantId, {
           type: 'inventory.production_consumption_pending', severity: 'warning', title: 'Consumo de material pendente',
           message: `A impressão foi concluída, mas o estoque não foi baixado: ${String(error.message || 'verifique o filamento').slice(0, 260)}`,

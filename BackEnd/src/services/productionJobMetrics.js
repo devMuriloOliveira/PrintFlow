@@ -1,4 +1,9 @@
 import { createFilamentMovementWithClient } from '../repositories/inventoryRepository.js'
+import {
+  consumeProductionMaterialReservation,
+  markProductionMaterialPending,
+  releaseProductionMaterialReservation
+} from './productionInventory.js'
 
 const finiteNonNegative = (value) => {
   const number = Number(value)
@@ -47,15 +52,22 @@ const applyCompletionEffects = async ({ client, tenantId, printJobId, metrics })
   if (materialGrams != null && materialGrams > 0 && row.filament_id) {
     try {
       await client.query('savepoint production_inventory_effect')
-      await createFilamentMovementWithClient(client, tenantId, row.filament_id, {
-        type: 'out', quantity: materialGrams,
+      const reservation = await consumeProductionMaterialReservation({
+        client, tenantId, printJobId, grams: materialGrams,
         reason: `Consumo medido pela conclusão da impressão #${printJobId}`
       })
+      if (!reservation.consumed && reservation.reason === 'reservation_missing') {
+        await createFilamentMovementWithClient(client, tenantId, row.filament_id, {
+          type: 'out', quantity: materialGrams,
+          reason: `Consumo medido pela conclusão da impressão #${printJobId}`
+        })
+      }
       await client.query('release savepoint production_inventory_effect')
       inventory = 'deducted'
     } catch (error) {
       await client.query('rollback to savepoint production_inventory_effect')
       await client.query('release savepoint production_inventory_effect')
+      await markProductionMaterialPending({ client, tenantId, printJobId, grams: materialGrams, error })
       inventory = 'pending'
     }
   }
@@ -147,7 +159,12 @@ export const recordProductionJobMetrics = async ({ client, tenantId, agentId, pr
   )
   const effects = metrics.status === 'completed' && applyEffects
     ? await applyCompletionEffects({ client, tenantId, printJobId, metrics })
-    : null
+    : metrics.status === 'completed'
+      ? null
+      : { reservation: await releaseProductionMaterialReservation({
+        client, tenantId, printJobId,
+        reason: `Impressão ${metrics.status}; reserva liberada.`
+      }) }
   return { idempotent: false, attempt: attempt.rows[0], effects }
 }
 

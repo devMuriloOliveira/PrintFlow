@@ -3128,6 +3128,27 @@ export const migrate =
     `)
     await query(`create index if not exists print_job_attempts_lookup_idx on print_job_attempts (tenant_id, print_job_id, attempt_no desc)`)
 
+    // Reservations keep material committed to a queued job visible without
+    // changing the physical filament balance before printing is complete.
+    await query(`
+      create table if not exists print_job_material_reservations (
+        id bigserial primary key,
+        tenant_id text not null references tenants(id) on delete cascade,
+        print_job_id bigint not null references print_jobs(id) on delete cascade,
+        filament_id bigint not null references filaments(id) on delete restrict,
+        reserved_grams numeric(12,3) not null check (reserved_grams > 0),
+        consumed_grams numeric(12,3),
+        status text not null default 'active' check (status in ('active', 'pending', 'released', 'consumed')),
+        last_error text not null default '',
+        released_at timestamptz,
+        consumed_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (tenant_id, print_job_id)
+      )
+    `)
+    await query(`create index if not exists print_job_material_reservations_lookup_idx on print_job_material_reservations (tenant_id, status, filament_id, created_at)`)
+
     await query(
       `
         create table if not exists agent_event_receipts (

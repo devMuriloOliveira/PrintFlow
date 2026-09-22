@@ -49,6 +49,8 @@ import {
   handleResourceUpdate,
   handleFilamentMovements,
   handleInventoryOverview,
+  handlePendingProductionMaterial,
+  handlePendingProductionMaterialReconcile,
   handleProductInventoryMovements,
   handleOrderStageAdvance,
   readRoutes
@@ -1510,6 +1512,9 @@ export const handleRequest =
       }
 
       if (url.pathname === '/api/inventory/overview' && req.method === 'GET') return await handleInventoryOverview(req, res)
+      if (url.pathname === '/api/inventory/production-pending' && req.method === 'GET') return await handlePendingProductionMaterial(req, res)
+      const pendingProductionReconcileMatch = url.pathname.match(/^\/api\/inventory\/production-pending\/([^/]+)\/reconcile$/)
+      if (pendingProductionReconcileMatch && req.method === 'POST') return await handlePendingProductionMaterialReconcile(req, res, pendingProductionReconcileMatch[1])
       const productInventoryMovementsMatch = url.pathname.match(/^\/api\/inventory\/products\/([^/]+)\/movements$/)
       if (productInventoryMovementsMatch && ['GET', 'POST'].includes(req.method)) return await handleProductInventoryMovements(req, res, productInventoryMovementsMatch[1])
 

@@ -81,6 +81,7 @@ test('conclusão medida baixa estoque e horas uma única vez', async () => {
         state.attempts.push(row)
         return { rowCount: 1, rows: [row] }
       }
+      if (sql.includes('from print_job_material_reservations')) return { rowCount: 0, rows: [] }
       if (sql.includes('select id, remaining_weight')) return { rowCount: 1, rows: [{ id: 4, remaining_weight: 100, min_stock_weight: 10 }] }
       if (sql.includes('insert into inventory_movements')) { state.movements += 1; return { rowCount: 1, rows: [{ id: 1 }] } }
       if (sql.includes('update filaments')) return { rowCount: 1, rows: [{ status: 'Em estoque' }] }
