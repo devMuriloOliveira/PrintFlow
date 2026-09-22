@@ -1,5 +1,6 @@
 import os from 'node:os'
 import net from 'node:net'
+import dgram from 'node:dgram'
 import axios from 'axios'
 
 import {
@@ -337,7 +338,8 @@ const detectPrusaLink = async (
 // ======================================================
 
 const createBambuCandidate = (
-  ip
+  ip,
+  details = {}
 ) => {
   return {
     connectionType:
@@ -353,6 +355,14 @@ const createBambuCandidate = (
       'Bambu Lab',
 
     ip,
+
+    serial:
+      details.serial ||
+      undefined,
+
+    model:
+      details.model ||
+      undefined,
 
     port:
       8883,
@@ -372,6 +382,123 @@ const createBambuCandidate = (
       false
   }
 }
+
+const SSDP_ADDRESS = '239.255.255.250'
+const SSDP_PORT = 1990
+
+export const parseSsdpHeaders = (
+  message
+) => {
+  const lines = String(message || '').split(/\r?\n/)
+  const headers = {}
+
+  for (const line of lines.slice(1)) {
+    const separator = line.indexOf(':')
+    if (separator <= 0) continue
+
+    const key = line.slice(0, separator).trim().toLowerCase()
+    const value = line.slice(separator + 1).trim()
+    if (key && value) headers[key] = value
+  }
+
+  return headers
+}
+
+const firstHeader = (
+  headers,
+  names
+) => names
+  .map(name => headers[name])
+  .find(value => String(value || '').trim()) || ''
+
+const parseSsdpBambuResponse = (
+  message,
+  remoteAddress
+) => {
+  const text = String(message || '')
+  const headers = parseSsdpHeaders(text)
+  const fingerprint = [
+    text,
+    headers.server,
+    headers.location,
+    headers.st,
+    headers.usn,
+    headers['device-type']
+  ].join(' ').toLowerCase()
+
+  if (!fingerprint.includes('bambu')) return null
+
+  const serial = firstHeader(headers, [
+    'serial',
+    'serial-number',
+    'device-serial',
+    'x-serial',
+    'x-device-serial'
+  ])
+
+  const model = firstHeader(headers, [
+    'model',
+    'device-model',
+    'x-model'
+  ])
+
+  return createBambuCandidate(
+    remoteAddress,
+    {
+      serial,
+      model
+    }
+  )
+}
+
+export const discoverBambuSsdp = ({
+  socketFactory = () => dgram.createSocket('udp4'),
+  timeoutMs = Number(process.env.PRINTFLOW_BAMBU_SSDP_TIMEOUT_MS || 1200)
+} = {}) => new Promise((resolve) => {
+  const socket = socketFactory()
+  const found = new Map()
+  let settled = false
+
+  const finish = () => {
+    if (settled) return
+    settled = true
+    clearTimeout(timer)
+    try { socket.close() } catch { /* socket already closed */ }
+    resolve([...found.values()])
+  }
+
+  const timer = setTimeout(finish, Math.max(100, timeoutMs))
+  const request = Buffer.from([
+    'M-SEARCH * HTTP/1.1',
+    `HOST: ${SSDP_ADDRESS}:${SSDP_PORT}`,
+    'MAN: "ssdp:discover"',
+    'MX: 1',
+    'ST: ssdp:all',
+    '',
+    ''
+  ].join('\r\n'))
+
+  socket.on('message', (message, remote) => {
+    const candidate = parseSsdpBambuResponse(
+      message.toString('utf8'),
+      remote?.address
+    )
+    if (!candidate?.ip) return
+
+    const existing = found.get(candidate.ip)
+    found.set(candidate.ip, {
+      ...(existing || {}),
+      ...candidate,
+      serial: candidate.serial || existing?.serial,
+      model: candidate.model || existing?.model
+    })
+  })
+
+  socket.once('error', finish)
+  socket.bind(() => {
+    socket.send(request, 0, request.length, SSDP_PORT, SSDP_ADDRESS)
+  })
+})
 
 // ======================================================
 // IDENTIFICAR SERVICO EM UM IP
@@ -849,7 +976,27 @@ export const scanNetwork = async () => {
   const printers = []
 
   // ====================================================
-  // DESCOBERTA REAL
+  // DESCOBERTA REAL POR SSDP (BAMBU)
+  // ====================================================
+
+  try {
+    const ssdpPrinters = await discoverBambuSsdp()
+    printers.push(...ssdpPrinters)
+
+    for (const result of ssdpPrinters) {
+      console.log('')
+      console.log('[Discovery] Bambu encontrada por SSDP.')
+      console.log(`- IP: ${result.ip}`)
+      console.log(`- Serial: ${result.serial || 'nao informado'}`)
+    }
+  } catch (error) {
+    console.warn(
+      `[Discovery] SSDP indisponivel; usando varredura de portas. ${error.message}`
+    )
+  }
+
+  // ====================================================
+  // DESCOBERTA REAL POR VARREDURA DE PORTAS (FALLBACK)
   // ====================================================
 
   for (

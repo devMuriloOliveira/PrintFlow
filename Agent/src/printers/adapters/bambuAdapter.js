@@ -26,6 +26,27 @@ const FTPS_TIMEOUT =
 const MOCK_BAMBU_IP =
   '192.168.2.250'
 
+export const getBambuTlsOptions = (
+  environment = process.env
+) => {
+  const explicitlyAllowed =
+    String(
+      environment.PRINTFLOW_BAMBU_ALLOW_INSECURE_TLS ||
+      ''
+    ).toLowerCase() === 'true'
+
+  const isProduction =
+    String(
+      environment.NODE_ENV ||
+      ''
+    ).toLowerCase() === 'production'
+
+  return {
+    rejectUnauthorized:
+      !(explicitlyAllowed && !isProduction)
+  }
+}
+
 // ======================================================
 // AUXILIARES
 // ======================================================
@@ -804,18 +825,12 @@ const createClient = (
             .slice(2)}`,
 
         /*
-         * A Bambu utiliza MQTT sobre TLS.
-         *
-         * Para o nosso MVP local estamos
-         * permitindo certificado nao
-         * reconhecido pela trust store.
-         *
-         * Antes de producao devemos
-         * implementar validacao/pinning.
+         * O certificado LAN da Bambu pode ser
+         * autoassinado. A excecao fica restrita
+         * ao desenvolvimento local e precisa ser
+         * opt-in; nunca e permitida em producao.
          */
-
-        rejectUnauthorized:
-          false
+        ...getBambuTlsOptions()
       }
     )
 
