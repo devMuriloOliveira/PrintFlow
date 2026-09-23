@@ -76,9 +76,13 @@ export const readRoutes = {
     return loadAppData(tenantId, requested)
   },
   '/api/financial-history': async (req) => {
-    if (!hasDatabase) return []
-    const tenantId = await getTenantId(req)
     const url = new URL(req.url, 'http://localhost')
+    if (!hasDatabase) {
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 100))
+      const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0)
+      return { items: [], total: 0, limit, offset }
+    }
+    const tenantId = await getTenantId(req)
     return listFinancialHistory(tenantId, url.searchParams.get('resource'), url.searchParams.get('resourceId'), {
       from: url.searchParams.get('from'), to: url.searchParams.get('to'), limit: url.searchParams.get('limit'), offset: url.searchParams.get('offset')
     })

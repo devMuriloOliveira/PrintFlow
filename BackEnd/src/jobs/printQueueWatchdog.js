@@ -108,6 +108,17 @@ export const runPrintQueueWatchdog = async ({
       )
 
       restoredJobs += restored.rowCount
+      for (const job of restored.rows) {
+        const printJobId = String(job.id)
+        await writeOperationalNotification(tenant.id, {
+          type: 'print.start_timeout', severity: 'warning', title: 'Impressao travada devolvida para a fila',
+          message: 'O inicio da impressao nao tinha comando ativo e excedeu o prazo. O item voltou para a fila para revisao.',
+          entityType: 'print_job', entityId: printJobId, dedupeKey: `print-job-recovered:${printJobId}`
+        }, client)
+        await writeAuditEvent(tenant.id, {
+          action: 'print_job.recovered_stuck', actorType: 'system', entityType: 'print_job', entityId: printJobId
+        }, client)
+      }
     })
   }
 

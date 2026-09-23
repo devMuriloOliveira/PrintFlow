@@ -9,7 +9,9 @@ const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""').replace(/
 const dateValue = (value, fallback) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : fallback
 const filenameDate = () => new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
 
-const loadReport = async (tenantId, filters) => withTenant(tenantId, async (client) => {
+const loadReport = async (tenantId, filters, section = 'complete') => withTenant(tenantId, async (client) => {
+  const selected = (name) => section === 'complete' || section === name
+  const queryWhen = (enabled, text, params) => enabled ? client.query(text, params) : Promise.resolve({ rows: [] })
   const ordersParams = [tenantId, filters.from, filters.to]
   const orderWhere = ['sr.tenant_id = $1', 'sr.order_date >= $2', "sr.order_date < ($3::date + interval '1 day')"]
   if (filters.marketplace) { ordersParams.push(filters.marketplace); orderWhere.push(`sr.marketplace = $${ordersParams.length}`) }
@@ -19,7 +21,7 @@ const loadReport = async (tenantId, filters) => withTenant(tenantId, async (clie
   const expenseWhere = ['e.tenant_id = $1', "coalesce(e.status, '') <> 'Cancelado'", 'e.expense_date >= $2', 'e.expense_date <= $3']
   if (filters.category) { expensesParams.push(filters.category); expenseWhere.push(`e.category = $${expensesParams.length}`) }
   const [orders, expenses, products, filaments, printers, marketplaces, clients, goals, printJobs, integrations, movements, simulations, history] = await Promise.all([
-    client.query(`
+    queryWhen(selected('financeiro') || selected('produtos'), `
       with sales_rows as (
         select o.tenant_id, o.id, o.order_date, coalesce(m.name, case when o.sales_channel = 'direct' then 'Venda direta' else 'Sem marketplace' end) as marketplace,
           coalesce(o.sales_channel, case when lower(coalesce(m.name, '')) = 'manual' then 'direct' else 'marketplace' end) as channel,
@@ -42,23 +44,23 @@ const loadReport = async (tenantId, filters) => withTenant(tenantId, async (clie
       where ${orderWhere.join(' and ')}
       order by sr.order_date, sr.id
     `, ordersParams),
-    client.query(`select to_char(e.expense_date, 'YYYY-MM-DD') as date, e.description, e.category, e.supplier, e.amount, e.payment, e.recurrence, e.status, to_char(e.next_due_date, 'YYYY-MM-DD') as next_due_date, e.notes from expenses e where ${expenseWhere.join(' and ')} order by e.expense_date, e.id`, expensesParams),
-    client.query(`select name, sku, category, price, cost, profit, margin from products where tenant_id = $1 order by name`, [tenantId]),
-    client.query(`select name, maker, material, type, color, initial_weight, remaining_weight, min_stock_weight, cost, supplier, purchase_date, status from filaments where tenant_id = $1 order by name`, [tenantId]),
-    client.query(`select name, code, maker, model, power_w, accumulated_hours, status, location, volume, default_filament from printers where tenant_id = $1 order by name`, [tenantId]),
-    client.query(`select name, platform, commission, fixed, financial, ads, others, active, connection_status from marketplaces where tenant_id = $1 order by name`, [tenantId]),
-    client.query(`select c.name, c.email, c.phone, c.origin, c.status, count(o.id) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))::int as orders, coalesce(sum(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as revenue, coalesce(avg(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as ticket, max(o.order_date) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')) as last_order from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1 and coalesce(o.status, '') <> 'Cancelado' left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id where c.tenant_id = $1 group by c.id order by c.name`, [tenantId]),
-    client.query(`select name, current_value, target_value, status, period_start, period_end from goals where tenant_id = $1 order by created_at`, [tenantId]),
-    client.query(`select j.title, j.source, j.quantity, j.priority, j.status, j.scheduled_at, j.started_at, j.completed_at, coalesce(p.name, j.title) as product from print_jobs j left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id where j.tenant_id = $1 order by j.created_at`, [tenantId]),
-    client.query(`select platform, connection_name, status, token_expires_at, last_sync_at, last_error from marketplace_integrations where tenant_id = $1 order by created_at`, [tenantId]),
-    client.query(`select coalesce(f.name, p.name, '') as resource_name, im.resource, im.movement_type, im.quantity, im.previous_quantity, im.resulting_quantity, im.reason, im.created_at from inventory_movements im left join filaments f on im.resource = 'filaments' and f.id = im.resource_id and f.tenant_id = im.tenant_id left join products p on im.resource = 'products' and p.id = im.resource_id and p.tenant_id = im.tenant_id where im.tenant_id = $1 and im.created_at >= $2::date and im.created_at < ($3::date + interval '1 day') order by im.created_at`, [tenantId, filters.from, filters.to]),
-    client.query(`select name, price_per_kg, weight, duration_minutes, energy_enabled, energy_rate, watts, margin, direct_cost, suggested_price, created_at from calculator_simulations where tenant_id = $1 and created_at >= $2::date and created_at < ($3::date + interval '1 day') order by created_at`, [tenantId, filters.from, filters.to]),
-    client.query(`select resource, resource_id, snapshot, source, created_at from financial_history where tenant_id = $1 and created_at >= $2::date and created_at < ($3::date + interval '1 day') order by created_at`, [tenantId, filters.from, filters.to])
+    queryWhen(selected('financeiro'), `select to_char(e.expense_date, 'YYYY-MM-DD') as date, e.description, e.category, e.supplier, e.amount, e.payment, e.recurrence, e.status, to_char(e.next_due_date, 'YYYY-MM-DD') as next_due_date, e.notes from expenses e where ${expenseWhere.join(' and ')} order by e.expense_date, e.id`, expensesParams),
+    queryWhen(selected('produtos'), `select name, sku, category, price, cost, profit, margin from products where tenant_id = $1 order by name`, [tenantId]),
+    queryWhen(section === 'complete', `select name, maker, material, type, color, initial_weight, remaining_weight, min_stock_weight, cost, supplier, purchase_date, status from filaments where tenant_id = $1 order by name`, [tenantId]),
+    queryWhen(section === 'complete', `select name, code, maker, model, power_w, accumulated_hours, status, location, volume, default_filament from printers where tenant_id = $1 order by name`, [tenantId]),
+    queryWhen(section === 'complete', `select name, platform, commission, fixed, financial, ads, others, active, connection_status from marketplaces where tenant_id = $1 order by name`, [tenantId]),
+    queryWhen(section === 'complete', `select c.name, c.email, c.phone, c.origin, c.status, count(o.id) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))::int as orders, coalesce(sum(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as revenue, coalesce(avg(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as ticket, max(o.order_date) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')) as last_order from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1 and coalesce(o.status, '') <> 'Cancelado' left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id where c.tenant_id = $1 group by c.id order by c.name`, [tenantId]),
+    queryWhen(section === 'complete', `select name, current_value, target_value, status, period_start, period_end from goals where tenant_id = $1 order by created_at`, [tenantId]),
+    queryWhen(section === 'complete', `select j.title, j.source, j.quantity, j.priority, j.status, j.scheduled_at, j.started_at, j.completed_at, coalesce(p.name, j.title) as product from print_jobs j left join products p on p.id = j.product_id and p.tenant_id = j.tenant_id where j.tenant_id = $1 order by j.created_at`, [tenantId]),
+    queryWhen(section === 'complete', `select platform, connection_name, status, token_expires_at, last_sync_at, last_error from marketplace_integrations where tenant_id = $1 order by created_at`, [tenantId]),
+    queryWhen(selected('estoque'), `select coalesce(f.name, p.name, '') as resource_name, im.resource, im.movement_type, im.quantity, im.previous_quantity, im.resulting_quantity, im.reason, im.created_at from inventory_movements im left join filaments f on im.resource = 'filaments' and f.id = im.resource_id and f.tenant_id = im.tenant_id left join products p on im.resource = 'products' and p.id = im.resource_id and p.tenant_id = im.tenant_id where im.tenant_id = $1 and im.created_at >= $2::date and im.created_at < ($3::date + interval '1 day') order by im.created_at`, [tenantId, filters.from, filters.to]),
+    queryWhen(section === 'complete', `select name, price_per_kg, weight, duration_minutes, energy_enabled, energy_rate, watts, margin, direct_cost, suggested_price, created_at from calculator_simulations where tenant_id = $1 and created_at >= $2::date and created_at < ($3::date + interval '1 day') order by created_at`, [tenantId, filters.from, filters.to]),
+    queryWhen(selected('historico'), `select resource, resource_id, snapshot, source, created_at from financial_history where tenant_id = $1 and created_at >= $2::date and created_at < ($3::date + interval '1 day') order by created_at`, [tenantId, filters.from, filters.to])
   ])
   return {
     orders: orders.rows,
     expenses: expenses.rows,
-    products: products.rows,
+    products: filters.product ? products.rows.filter((row) => row.name === filters.product) : products.rows,
     filaments: filaments.rows,
     printers: printers.rows,
     marketplaces: marketplaces.rows,
@@ -79,37 +81,57 @@ const summaryRows = (report) => {
   return [['Indicador', 'Valor'], ['Faturamento bruto', gross], ['Receita liquida', net], ['Taxas', fees], ['Frete', shipping], ['Despesas operacionais', expenses], ['Lucro liquido', profit], ['Margem liquida', gross ? `${(profit / gross * 100).toFixed(2)}%` : '0%'], ['Pedidos', report.orders.length]]
 }
 
-const csvReport = (report, filters) => {
-  const lines = [['Relatorio financeiro PrintFlow'], ['Periodo', filters.from, filters.to], ['Filtros', filters.marketplace || 'Todos', filters.product || 'Todos', filters.channel || 'Todos'], [], ...summaryRows(report), [], ['Vendas'], ['Data', 'Canal', 'Marketplace', 'Produto', 'Quantidade', 'Bruto', 'Taxas', 'Frete', 'Liquido', 'Lucro']]
-  for (const row of report.orders) lines.push([row.date, row.channel, row.marketplace, row.product, row.quantity, row.gross, row.fee, row.shipping, row.net, row.profit])
-  lines.push([], ['Despesas'], ['Data', 'Descricao', 'Categoria', 'Fornecedor', 'Valor', 'Pagamento', 'Recorrencia', 'Status', 'Proximo vencimento', 'Observacoes'])
-  for (const row of report.expenses) lines.push([row.date, row.description, row.category, row.supplier, row.amount, row.payment, row.recurrence, row.status, row.next_due_date, row.notes])
-  lines.push([], ['Produtos'], ['Nome', 'SKU', 'Categoria', 'Preco', 'Custo', 'Lucro', 'Margem'])
-  for (const row of report.products) lines.push([row.name, row.sku, row.category, row.price, row.cost, row.profit, row.margin])
-  lines.push([], ['Filamentos'], ['Nome', 'Fabricante', 'Material', 'Tipo', 'Cor', 'Peso inicial', 'Peso restante', 'Estoque minimo', 'Custo', 'Fornecedor', 'Data compra', 'Status'])
-  for (const row of report.filaments) lines.push([row.name, row.maker, row.material, row.type, row.color, row.initial_weight, row.remaining_weight, row.min_stock_weight, row.cost, row.supplier, row.purchase_date, row.status])
-  lines.push([], ['Impressoras'], ['Nome', 'Codigo', 'Fabricante', 'Modelo', 'Potencia W', 'Horas acumuladas', 'Status', 'Localizacao', 'Volume', 'Filamento padrao'])
-  for (const row of report.printers) lines.push([row.name, row.code, row.maker, row.model, row.power_w, row.accumulated_hours, row.status, row.location, row.volume, row.default_filament])
-  lines.push([], ['Marketplaces'], ['Nome', 'Plataforma', 'Comissao %', 'Tarifa fixa', 'Financeira %', 'Anuncios %', 'Outras %', 'Ativo', 'Status conexao'])
-  for (const row of report.marketplaces) lines.push([row.name, row.platform, row.commission, row.fixed, row.financial, row.ads, row.others, row.active, row.connection_status])
-  lines.push([], ['Clientes'], ['Nome', 'Email', 'Telefone', 'Pedidos', 'Faturamento', 'Ticket medio', 'Ultimo pedido'])
-  for (const row of report.clients) lines.push([row.name, row.email, row.phone, row.orders, row.revenue, row.ticket, row.last_order])
-  lines.push([], ['Metas'], ['Nome', 'Atual', 'Alvo', 'Status', 'Inicio', 'Fim'])
-  for (const row of report.goals) lines.push([row.name, row.current_value, row.target_value, row.status, row.period_start, row.period_end])
-  lines.push([], ['Producao'], ['Titulo', 'Produto', 'Origem', 'Quantidade', 'Prioridade', 'Status', 'Agendada', 'Iniciada', 'Concluida'])
-  for (const row of report.printJobs) lines.push([row.title, row.product, row.source, row.quantity, row.priority, row.status, row.scheduled_at, row.started_at, row.completed_at])
-  lines.push([], ['Conexoes de marketplace'], ['Plataforma', 'Conexao', 'Status', 'Token expira em', 'Ultima sincronizacao', 'Ultimo erro'])
-  for (const row of report.integrations) lines.push([row.platform, row.connection_name, row.status, row.token_expires_at, row.last_sync_at, row.last_error])
-  lines.push([], ['Movimentacoes de estoque'], ['Recurso', 'Tipo de recurso', 'Movimento', 'Quantidade', 'Saldo anterior', 'Saldo resultante', 'Motivo', 'Data'])
-  for (const row of report.movements) lines.push([row.resource_name, row.resource, row.movement_type, row.quantity, row.previous_quantity, row.resulting_quantity, row.reason, row.created_at])
-  lines.push([], ['Simulacoes da calculadora'], ['Nome', 'Preco por kg', 'Peso', 'Duracao minutos', 'Energia ativa', 'Tarifa energia', 'Watts', 'Margem', 'Custo direto', 'Preco sugerido', 'Criada em'])
-  for (const row of report.simulations) lines.push([row.name, row.price_per_kg, row.weight, row.duration_minutes, row.energy_enabled, row.energy_rate, row.watts, row.margin, row.direct_cost, row.suggested_price, row.created_at])
-  lines.push([], ['Historico financeiro'], ['Recurso', 'ID recurso', 'Origem', 'Snapshot', 'Data'])
-  for (const row of report.history) lines.push([row.resource, row.resource_id, row.source, JSON.stringify(row.snapshot || {}), row.created_at])
+export const csvReport = (report, filters, section = 'complete') => {
+  const titles = { financeiro: 'Resultado financeiro', produtos: 'Produtos e vendas', estoque: 'Movimentacoes de estoque', historico: 'Registro de custos e precos', complete: 'Relatorio completo' }
+  const lines = [[`PrintFlow - ${titles[section] || titles.complete}`], ['Periodo', filters.from, filters.to]]
+  const appendSales = () => {
+    lines.push([], ['Vendas'], ['Data', 'Canal', 'Marketplace', 'Produto', 'Quantidade', 'Bruto', 'Taxas', 'Frete', 'Liquido', 'Lucro'])
+    for (const row of report.orders) lines.push([row.date, row.channel, row.marketplace, row.product, row.quantity, row.gross, row.fee, row.shipping, row.net, row.profit])
+  }
+  const appendProducts = () => {
+    lines.push([], ['Produtos'], ['Nome', 'SKU', 'Categoria', 'Preco', 'Custo', 'Lucro', 'Margem'])
+    for (const row of report.products) lines.push([row.name, row.sku, row.category, row.price, row.cost, row.profit, row.margin])
+  }
+  if (section === 'financeiro' || section === 'complete') {
+    lines.push(['Filtros comerciais', filters.marketplace || 'Todos', filters.product || 'Todos', filters.channel || 'Todos'], ['Categoria de despesa', filters.category || 'Todas'], [], ...summaryRows(report))
+    appendSales()
+    lines.push([], ['Despesas'], ['Data', 'Descricao', 'Categoria', 'Fornecedor', 'Valor', 'Pagamento', 'Recorrencia', 'Status', 'Proximo vencimento', 'Observacoes'])
+    for (const row of report.expenses) lines.push([row.date, row.description, row.category, row.supplier, row.amount, row.payment, row.recurrence, row.status, row.next_due_date, row.notes])
+  }
+  if (section === 'produtos' || section === 'complete') {
+    if (section === 'produtos') appendSales()
+    appendProducts()
+  }
+  if (section === 'estoque' || section === 'complete') {
+    lines.push([], ['Movimentacoes de estoque'], ['Recurso', 'Tipo de recurso', 'Movimento', 'Quantidade', 'Saldo anterior', 'Saldo resultante', 'Motivo', 'Data'])
+    for (const row of report.movements) lines.push([row.resource_name, row.resource, row.movement_type, row.quantity, row.previous_quantity, row.resulting_quantity, row.reason, row.created_at])
+  }
+  if (section === 'historico' || section === 'complete') {
+    lines.push([], ['Registro de custos e precos'], ['Recurso', 'ID recurso', 'Origem', 'Valores registrados', 'Data'])
+    for (const row of report.history) lines.push([row.resource, row.resource_id, row.source, JSON.stringify(row.snapshot || {}), row.created_at])
+  }
+  if (section === 'complete') {
+    lines.push([], ['Filamentos'], ['Nome', 'Fabricante', 'Material', 'Tipo', 'Cor', 'Peso inicial', 'Peso restante', 'Estoque minimo', 'Custo', 'Fornecedor', 'Data compra', 'Status'])
+    for (const row of report.filaments) lines.push([row.name, row.maker, row.material, row.type, row.color, row.initial_weight, row.remaining_weight, row.min_stock_weight, row.cost, row.supplier, row.purchase_date, row.status])
+    lines.push([], ['Impressoras'], ['Nome', 'Codigo', 'Fabricante', 'Modelo', 'Potencia W', 'Horas acumuladas', 'Status', 'Localizacao', 'Volume', 'Filamento padrao'])
+    for (const row of report.printers) lines.push([row.name, row.code, row.maker, row.model, row.power_w, row.accumulated_hours, row.status, row.location, row.volume, row.default_filament])
+    lines.push([], ['Marketplaces'], ['Nome', 'Plataforma', 'Comissao %', 'Tarifa fixa', 'Financeira %', 'Anuncios %', 'Outras %', 'Ativo', 'Status conexao'])
+    for (const row of report.marketplaces) lines.push([row.name, row.platform, row.commission, row.fixed, row.financial, row.ads, row.others, row.active, row.connection_status])
+    lines.push([], ['Clientes'], ['Nome', 'Email', 'Telefone', 'Pedidos', 'Faturamento', 'Ticket medio', 'Ultimo pedido'])
+    for (const row of report.clients) lines.push([row.name, row.email, row.phone, row.orders, row.revenue, row.ticket, row.last_order])
+    lines.push([], ['Metas'], ['Nome', 'Atual', 'Alvo', 'Status', 'Inicio', 'Fim'])
+    for (const row of report.goals) lines.push([row.name, row.current_value, row.target_value, row.status, row.period_start, row.period_end])
+    lines.push([], ['Producao'], ['Titulo', 'Produto', 'Origem', 'Quantidade', 'Prioridade', 'Status', 'Agendada', 'Iniciada', 'Concluida'])
+    for (const row of report.printJobs) lines.push([row.title, row.product, row.source, row.quantity, row.priority, row.status, row.scheduled_at, row.started_at, row.completed_at])
+    lines.push([], ['Conexoes de marketplace'], ['Plataforma', 'Conexao', 'Status', 'Token expira em', 'Ultima sincronizacao', 'Ultimo erro'])
+    for (const row of report.integrations) lines.push([row.platform, row.connection_name, row.status, row.token_expires_at, row.last_sync_at, row.last_error])
+    lines.push([], ['Simulacoes da calculadora'], ['Nome', 'Preco por kg', 'Peso', 'Duracao minutos', 'Energia ativa', 'Tarifa energia', 'Watts', 'Margem', 'Custo direto', 'Preco sugerido', 'Criada em'])
+    for (const row of report.simulations) lines.push([row.name, row.price_per_kg, row.weight, row.duration_minutes, row.energy_enabled, row.energy_rate, row.watts, row.margin, row.direct_cost, row.suggested_price, row.created_at])
+  }
   return `\ufeff${lines.map((line) => line.map(csvCell).join(';')).join('\r\n')}\r\n`
 }
 
-export const workbookReport = async (report, filters) => {
+export const workbookReport = async (report, filters, section = 'complete') => {
   const workbook = new ExcelJS.Workbook(); workbook.creator = 'PrintFlow'; workbook.created = new Date()
   const currencyKeys = new Set(['gross', 'fee', 'shipping', 'net', 'profit', 'amount', 'price', 'cost', 'revenue', 'ticket', 'current_value', 'target_value', 'price_per_kg', 'energy_rate', 'direct_cost', 'suggested_price', 'fixed'])
   const percentKeys = new Set(['margin', 'commission', 'financial', 'ads', 'others'])
@@ -125,23 +147,32 @@ export const workbookReport = async (report, filters) => {
     rows.forEach((source, index) => { const row = sheet.addRow(Object.fromEntries(columns.map(([, key]) => [key, asDate(source[key])]))) ; row.eachCell((cell, column) => { const key = columns[column - 1][1]; cell.alignment = { vertical: 'top', wrapText: key === 'notes' || key === 'reason' || key === 'snapshot' || key === 'last_error' }; if (index % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF6F8FC' } }; if (currencyKeys.has(key)) cell.numFmt = 'R$ #,##0.00'; if (percentKeys.has(key)) cell.numFmt = '0.00"%"'; if (dateKeys.has(key)) cell.numFmt = 'dd/mm/yyyy'; if (dateTimeKeys.has(key)) cell.numFmt = 'dd/mm/yyyy hh:mm'; if (key === 'profit' && Number(cell.value || 0) < 0) cell.font = { color: { argb: 'FFB42318' } }; if (key === 'profit' && Number(cell.value || 0) > 0) cell.font = { color: { argb: 'FF087443' } } }) })
     sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: columns.length } }; sheet.getRow(4).height = 24
   }
-  const summary = summaryRows(report).slice(1).map(([label, value]) => ({ Indicador: label, Valor: value }))
-  addSheet('Resumo', [['Indicador', 'Indicador'], ['Valor', 'Valor']], summary)
-  const summarySheet = workbook.getWorksheet('Resumo')
-  summary.forEach((item, index) => { if (['Faturamento bruto', 'Receita liquida', 'Taxas', 'Frete', 'Despesas operacionais', 'Lucro liquido'].includes(item.Indicador)) summarySheet.getCell(index + 5, 2).numFmt = 'R$ #,##0.00' })
-  addSheet('Vendas', [['Data', 'date'], ['Canal', 'channel'], ['Marketplace', 'marketplace'], ['Produto', 'product'], ['Quantidade', 'quantity'], ['Bruto', 'gross'], ['Taxas', 'fee'], ['Frete', 'shipping'], ['Liquido', 'net'], ['Lucro', 'profit']], report.orders)
-  addSheet('Despesas', [['Data', 'date'], ['Descricao', 'description'], ['Categoria', 'category'], ['Fornecedor', 'supplier'], ['Valor', 'amount'], ['Pagamento', 'payment'], ['Recorrencia', 'recurrence'], ['Status', 'status'], ['Proximo vencimento', 'next_due_date'], ['Observacoes', 'notes']], report.expenses)
-  addSheet('Produtos', [['Nome', 'name'], ['SKU', 'sku'], ['Categoria', 'category'], ['Preco', 'price'], ['Custo', 'cost'], ['Lucro', 'profit'], ['Margem', 'margin']], report.products)
-  addSheet('Filamentos', [['Nome', 'name'], ['Fabricante', 'maker'], ['Material', 'material'], ['Tipo', 'type'], ['Cor', 'color'], ['Peso inicial', 'initial_weight'], ['Peso restante', 'remaining_weight'], ['Estoque minimo', 'min_stock_weight'], ['Custo', 'cost'], ['Fornecedor', 'supplier'], ['Data compra', 'purchase_date'], ['Status', 'status']], report.filaments)
-  addSheet('Impressoras', [['Nome', 'name'], ['Codigo', 'code'], ['Fabricante', 'maker'], ['Modelo', 'model'], ['Potencia W', 'power_w'], ['Horas', 'accumulated_hours'], ['Status', 'status'], ['Localizacao', 'location'], ['Volume', 'volume'], ['Filamento padrao', 'default_filament']], report.printers)
-  addSheet('Marketplaces', [['Nome', 'name'], ['Plataforma', 'platform'], ['Comissao %', 'commission'], ['Tarifa fixa', 'fixed'], ['Financeira %', 'financial'], ['Anuncios %', 'ads'], ['Outras %', 'others'], ['Ativo', 'active'], ['Status conexao', 'connection_status']], report.marketplaces)
-  addSheet('Clientes', [['Nome', 'name'], ['Email', 'email'], ['Telefone', 'phone'], ['Pedidos', 'orders'], ['Faturamento', 'revenue'], ['Ticket medio', 'ticket'], ['Ultimo pedido', 'last_order']], report.clients)
-  addSheet('Metas', [['Nome', 'name'], ['Atual', 'current_value'], ['Alvo', 'target_value'], ['Status', 'status'], ['Inicio', 'period_start'], ['Fim', 'period_end']], report.goals)
-  addSheet('Producao', [['Titulo', 'title'], ['Produto', 'product'], ['Origem', 'source'], ['Quantidade', 'quantity'], ['Prioridade', 'priority'], ['Status', 'status'], ['Agendada', 'scheduled_at'], ['Iniciada', 'started_at'], ['Concluida', 'completed_at']], report.printJobs)
-  addSheet('Conexoes', [['Plataforma', 'platform'], ['Conexao', 'connection_name'], ['Status', 'status'], ['Token expira em', 'token_expires_at'], ['Ultima sincronizacao', 'last_sync_at'], ['Ultimo erro', 'last_error']], report.integrations)
-  addSheet('Estoque', [['Recurso', 'resource_name'], ['Tipo de recurso', 'resource'], ['Movimento', 'movement_type'], ['Quantidade', 'quantity'], ['Saldo anterior', 'previous_quantity'], ['Saldo resultante', 'resulting_quantity'], ['Motivo', 'reason'], ['Data', 'created_at']], report.movements)
-  addSheet('Calculadora', [['Nome', 'name'], ['Preco por kg', 'price_per_kg'], ['Peso', 'weight'], ['Duracao minutos', 'duration_minutes'], ['Energia ativa', 'energy_enabled'], ['Tarifa energia', 'energy_rate'], ['Watts', 'watts'], ['Margem', 'margin'], ['Custo direto', 'direct_cost'], ['Preco sugerido', 'suggested_price'], ['Criada em', 'created_at']], report.simulations)
-  addSheet('Historico financeiro', [['Recurso', 'resource'], ['ID recurso', 'resource_id'], ['Origem', 'source'], ['Snapshot', 'snapshot'], ['Data', 'created_at']], report.history.map((row) => ({ ...row, snapshot: JSON.stringify(row.snapshot || {}) })))
+  const addSalesSheet = () => addSheet('Vendas', [['Data', 'date'], ['Canal', 'channel'], ['Marketplace', 'marketplace'], ['Produto', 'product'], ['Quantidade', 'quantity'], ['Bruto', 'gross'], ['Taxas', 'fee'], ['Frete', 'shipping'], ['Liquido', 'net'], ['Lucro', 'profit']], report.orders)
+  const addProductsSheet = () => addSheet('Produtos', [['Nome', 'name'], ['SKU', 'sku'], ['Categoria', 'category'], ['Preco', 'price'], ['Custo', 'cost'], ['Lucro', 'profit'], ['Margem', 'margin']], report.products)
+  if (section === 'financeiro' || section === 'complete') {
+    const summary = summaryRows(report).slice(1).map(([label, value]) => ({ Indicador: label, Valor: value }))
+    addSheet('Resumo', [['Indicador', 'Indicador'], ['Valor', 'Valor']], summary)
+    const summarySheet = workbook.getWorksheet('Resumo')
+    summary.forEach((item, index) => { if (['Faturamento bruto', 'Receita liquida', 'Taxas', 'Frete', 'Despesas operacionais', 'Lucro liquido'].includes(item.Indicador)) summarySheet.getCell(index + 5, 2).numFmt = 'R$ #,##0.00' })
+    addSalesSheet()
+    addSheet('Despesas', [['Data', 'date'], ['Descricao', 'description'], ['Categoria', 'category'], ['Fornecedor', 'supplier'], ['Valor', 'amount'], ['Pagamento', 'payment'], ['Recorrencia', 'recurrence'], ['Status', 'status'], ['Proximo vencimento', 'next_due_date'], ['Observacoes', 'notes']], report.expenses)
+  }
+  if (section === 'produtos' || section === 'complete') {
+    if (section === 'produtos') addSalesSheet()
+    addProductsSheet()
+  }
+  if (section === 'estoque' || section === 'complete') addSheet('Estoque', [['Recurso', 'resource_name'], ['Tipo de recurso', 'resource'], ['Movimento', 'movement_type'], ['Quantidade', 'quantity'], ['Saldo anterior', 'previous_quantity'], ['Saldo resultante', 'resulting_quantity'], ['Motivo', 'reason'], ['Data', 'created_at']], report.movements)
+  if (section === 'historico' || section === 'complete') addSheet('Registro de custos', [['Recurso', 'resource'], ['ID recurso', 'resource_id'], ['Origem', 'source'], ['Valores registrados', 'snapshot'], ['Data', 'created_at']], report.history.map((row) => ({ ...row, snapshot: JSON.stringify(row.snapshot || {}) })))
+  if (section === 'complete') {
+    addSheet('Filamentos', [['Nome', 'name'], ['Fabricante', 'maker'], ['Material', 'material'], ['Tipo', 'type'], ['Cor', 'color'], ['Peso inicial', 'initial_weight'], ['Peso restante', 'remaining_weight'], ['Estoque minimo', 'min_stock_weight'], ['Custo', 'cost'], ['Fornecedor', 'supplier'], ['Data compra', 'purchase_date'], ['Status', 'status']], report.filaments)
+    addSheet('Impressoras', [['Nome', 'name'], ['Codigo', 'code'], ['Fabricante', 'maker'], ['Modelo', 'model'], ['Potencia W', 'power_w'], ['Horas', 'accumulated_hours'], ['Status', 'status'], ['Localizacao', 'location'], ['Volume', 'volume'], ['Filamento padrao', 'default_filament']], report.printers)
+    addSheet('Marketplaces', [['Nome', 'name'], ['Plataforma', 'platform'], ['Comissao %', 'commission'], ['Tarifa fixa', 'fixed'], ['Financeira %', 'financial'], ['Anuncios %', 'ads'], ['Outras %', 'others'], ['Ativo', 'active'], ['Status conexao', 'connection_status']], report.marketplaces)
+    addSheet('Clientes', [['Nome', 'name'], ['Email', 'email'], ['Telefone', 'phone'], ['Pedidos', 'orders'], ['Faturamento', 'revenue'], ['Ticket medio', 'ticket'], ['Ultimo pedido', 'last_order']], report.clients)
+    addSheet('Metas', [['Nome', 'name'], ['Atual', 'current_value'], ['Alvo', 'target_value'], ['Status', 'status'], ['Inicio', 'period_start'], ['Fim', 'period_end']], report.goals)
+    addSheet('Producao', [['Titulo', 'title'], ['Produto', 'product'], ['Origem', 'source'], ['Quantidade', 'quantity'], ['Prioridade', 'priority'], ['Status', 'status'], ['Agendada', 'scheduled_at'], ['Iniciada', 'started_at'], ['Concluida', 'completed_at']], report.printJobs)
+    addSheet('Conexoes', [['Plataforma', 'platform'], ['Conexao', 'connection_name'], ['Status', 'status'], ['Token expira em', 'token_expires_at'], ['Ultima sincronizacao', 'last_sync_at'], ['Ultimo erro', 'last_error']], report.integrations)
+    addSheet('Calculadora', [['Nome', 'name'], ['Preco por kg', 'price_per_kg'], ['Peso', 'weight'], ['Duracao minutos', 'duration_minutes'], ['Energia ativa', 'energy_enabled'], ['Tarifa energia', 'energy_rate'], ['Watts', 'watts'], ['Margem', 'margin'], ['Custo direto', 'direct_cost'], ['Preco sugerido', 'suggested_price'], ['Criada em', 'created_at']], report.simulations)
+  }
   return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 
@@ -153,12 +184,14 @@ export const handleFinancialReportExport = async (req, res, url) => {
   const filters = { from: dateValue(url.searchParams.get('from'), `${currentYear}-01-01`), to: dateValue(url.searchParams.get('to'), now.toISOString().slice(0, 10)), marketplace: String(url.searchParams.get('marketplace') || ''), product: String(url.searchParams.get('product') || ''), category: String(url.searchParams.get('category') || ''), channel: ['direct', 'marketplace'].includes(url.searchParams.get('channel')) ? url.searchParams.get('channel') : '' }
   if (filters.from > filters.to) return sendJson(res, 400, { error: 'Periodo invalido' })
   const format = url.searchParams.get('format') === 'xlsx' ? 'xlsx' : 'csv'
-  const report = await loadReport(user.tenantId, filters)
-  const filename = `Relatorio_Financeiro_${filenameDate()}.${format}`
-  const recordCount = Object.values(report).reduce((total, rows) => total + (Array.isArray(rows) ? rows.length : 0), 0)
+  const section = ['financeiro', 'produtos', 'estoque', 'historico'].includes(url.searchParams.get('section')) ? url.searchParams.get('section') : 'financeiro'
+  const report = await loadReport(user.tenantId, filters, section)
+  const sectionRows = { financeiro: ['orders', 'expenses'], produtos: ['orders', 'products'], estoque: ['movements'], historico: ['history'] }[section]
+  const filename = `Relatorio_${section}_${filenameDate()}.${format}`
+  const recordCount = sectionRows.reduce((total, key) => total + report[key].length, 0)
   await withTenant(user.tenantId, (client) => client.query('insert into export_history (tenant_id, file_name, export_type, file_format, period_start, period_end, record_count) values ($1, $2, $3, $4, $5, $6, $7)', [user.tenantId, filename, 'financial_report', format, filters.from, filters.to, recordCount]))
-  await withTenant(user.tenantId, (client) => writeAuditEvent(user.tenantId, { action: 'reports.financial_exported', actorType: 'user', actorId: user.id, entityType: 'financial_report', entityId: filename, details: { format, recordCount, ...filters } }, client))
+  await withTenant(user.tenantId, (client) => writeAuditEvent(user.tenantId, { action: 'reports.financial_exported', actorType: 'user', actorId: user.id, entityType: 'financial_report', entityId: filename, details: { format, section, recordCount, ...filters } }, client))
   const headers = { 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' }
-  if (format === 'xlsx') return sendBuffer(res, 200, await workbookReport(report, filters), { ...headers, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  return sendText(res, 200, csvReport(report, filters), { ...headers, 'Content-Type': 'text/csv; charset=utf-8' })
+  if (format === 'xlsx') return sendBuffer(res, 200, await workbookReport(report, filters, section), { ...headers, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  return sendText(res, 200, csvReport(report, filters, section), { ...headers, 'Content-Type': 'text/csv; charset=utf-8' })
 }

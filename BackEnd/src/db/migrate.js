@@ -3078,6 +3078,20 @@ export const migrate =
 
     await query(`create index if not exists financial_history_lookup_idx on financial_history (tenant_id, resource, resource_id, created_at desc)`)
 
+    // O historico de backup e global da plataforma. Ele nao contem o arquivo,
+    // caminho, credenciais ou conteudo do banco; serve apenas para monitoramento.
+    await query(`
+      create table if not exists backup_runs (
+        id bigserial primary key,
+        status text not null check (status in ('success', 'failed')),
+        size_bytes bigint,
+        error_message text not null default '',
+        started_at timestamptz not null default now(),
+        completed_at timestamptz
+      )
+    `)
+    await query(`create index if not exists backup_runs_started_idx on backup_runs (started_at desc)`)
+
     await query(`
       create table if not exists inventory_movements (
         id bigserial primary key,

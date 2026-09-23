@@ -142,6 +142,8 @@ export const env = {
   agentHealthWatchdogIntervalMs: Number(process.env.AGENT_HEALTH_WATCHDOG_INTERVAL_MS || 30 * 1000),
   subscriptionWatchdogIntervalMs: Number(process.env.SUBSCRIPTION_WATCHDOG_INTERVAL_MS || 60 * 60 * 1000),
   marketplaceReconciliationIntervalMs: Number(process.env.MARKETPLACE_RECONCILIATION_INTERVAL_MS || 15 * 60 * 1000),
+  backupMaxAgeMs: Number(process.env.BACKUP_MAX_AGE_MS || 26 * 60 * 60 * 1000),
+  backupHealthWatchdogIntervalMs: Number(process.env.BACKUP_HEALTH_WATCHDOG_INTERVAL_MS || 60 * 60 * 1000),
   subscriptionWarningMs: Number(process.env.SUBSCRIPTION_WARNING_MS || 3 * 24 * 60 * 60 * 1000),
   subscriptionGraceMs: Number(process.env.SUBSCRIPTION_GRACE_MS || 3 * 24 * 60 * 60 * 1000),
   appPublicUrl: process.env.APP_PUBLIC_URL || '',

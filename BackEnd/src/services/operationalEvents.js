@@ -84,7 +84,9 @@ const actionLabels = {
   'support.request.reopened_as_new': 'Novo protocolo criado a partir de suporte encerrado',
   'support.request.cancelled': 'Solicitacao de suporte cancelada',
   'agent.offline': 'Agent ficou offline',
-  'print_job.start_timeout': 'Inicio da impressao excedeu o prazo'
+  'print_job.start_timeout': 'Inicio da impressao excedeu o prazo',
+  'print_job.recovered_stuck': 'Impressao travada devolvida para a fila',
+  'marketplace.sync_failed': 'Sincronizacao de marketplace falhou'
 }
 
 const fieldLabels = {

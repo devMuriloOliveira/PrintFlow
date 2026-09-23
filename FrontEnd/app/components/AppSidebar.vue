@@ -54,7 +54,7 @@ const sections = [
   {
     label: 'ANÁLISES',
     items: [
-      { label: 'Relatórios', to: '/relatorios?secao=financeiro', icon: 'chart', children: [{ label: 'Financeiro', to: '/relatorios?secao=financeiro' }, { label: 'Produtos e vendas', to: '/relatorios?secao=produtos' }, { label: 'Movimentações de estoque', to: '/relatorios?secao=estoque' }, { label: 'Histórico financeiro', to: '/relatorios?secao=historico' }] },
+      { label: 'Relatórios', to: '/relatorios?secao=financeiro', icon: 'chart', children: [{ label: 'Resultado financeiro', to: '/relatorios?secao=financeiro' }, { label: 'Produtos e vendas', to: '/relatorios?secao=produtos' }, { label: 'Movimentações de estoque', to: '/relatorios?secao=estoque' }, { label: 'Registro de custos e preços', to: '/relatorios?secao=historico' }] },
       { label: 'Metas', to: '/metas', icon: 'target' }
     ]
   },

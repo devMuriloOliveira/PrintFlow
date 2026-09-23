@@ -1,6 +1,9 @@
 <script setup lang="ts">
 const { products, orders, expenses, expenseSegments, filaments, goals, printers, printJobs, pending } = useAppData()
 const metrics = useBusinessMetrics()
+const { unreadCount, refreshNotifications } = useOperationalNotifications()
+
+onMounted(() => { void refreshNotifications() })
 
 const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 const monthlyRevenue = computed(() => {
@@ -91,6 +94,7 @@ const operationalAlerts = computed(() => [
           <NuxtLink class="operational-summary__item" to="/vendas?status=Acompanhar%20pedido"><span class="operational-summary__icon operational-summary__icon--blue"><UiIcon name="bag" :size="18" /></span><div><strong>{{ activePrintJobs.length + queuedPrintJobs.length }}</strong><small>Itens na produção</small></div></NuxtLink>
           <NuxtLink class="operational-summary__item" to="/impressoras"><span class="operational-summary__icon operational-summary__icon--green"><UiIcon name="printer" :size="18" /></span><div><strong>{{ activePrinterIds.size }}/{{ printers.length }}</strong><small>Impressoras ocupadas</small></div></NuxtLink>
           <NuxtLink class="operational-summary__item" to="/estoque?secao=filamentos"><span class="operational-summary__icon operational-summary__icon--orange"><UiIcon name="spool" :size="18" /></span><div><strong>{{ lowStockItems.length }}</strong><small>Alertas de estoque</small></div></NuxtLink>
+          <NuxtLink class="operational-summary__item" to="/notificacoes"><span class="operational-summary__icon operational-summary__icon--red"><UiIcon name="bell" :size="18" /></span><div><strong>{{ unreadCount }}</strong><small>Alertas operacionais</small></div></NuxtLink>
         </div>
         <div class="stage-list">
           <div v-for="stage in orderStageSummary" :key="stage.label" class="stage-row"><span class="stage-row__dot" :style="{ background: stage.color }"/><span>{{ stage.label }}</span><strong>{{ stage.count }}</strong></div>
@@ -145,6 +149,7 @@ const operationalAlerts = computed(() => [
 .operational-summary__item small { display: block; color: var(--muted); font-size: 12px; }
 .operational-summary__icon, .printer-queue-row__icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 8px; }
 .operational-summary__icon--blue { color: var(--blue); background: var(--blue-soft); }.operational-summary__icon--green { color: var(--green); background: #e6f8ef; }.operational-summary__icon--orange { color: var(--orange); background: #fff2e5; }
+.operational-summary__icon--red { color: var(--red); background: #fff0f0; }
 .stage-list { display: grid; gap: 2px; margin-top: 14px; }.stage-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #edf1f6; font-size: 10px; }.stage-row__dot { width: 7px; height: 7px; border-radius: 50%; }.stage-row strong { font-size: 11px; }
 .printer-queue-list { display: grid; gap: 5px; }.printer-queue-row { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid #edf1f6; color: inherit; text-decoration: none; }.printer-queue-row__icon { color: var(--blue); background: var(--blue-soft); }.printer-queue-row__body { flex: 1; min-width: 0; }.printer-queue-row__body > div:first-child { display: flex; justify-content: space-between; gap: 8px; }.printer-queue-row strong, .printer-queue-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.printer-queue-row small { margin-top: 2px; color: var(--muted); font-size: 8px; }.printer-queue-row .progress { margin-top: 6px; height: 5px; }.empty-state--compact { min-height: 185px; }.alert-row { color: inherit; text-decoration: none; }
 @media (max-width: 1150px) { .operational-board { grid-template-columns: 1fr 1fr; }.operational-board > :last-child { grid-column: span 2; } }

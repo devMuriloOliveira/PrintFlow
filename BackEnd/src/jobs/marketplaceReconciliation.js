@@ -8,6 +8,7 @@ import {
 import { enqueueMarketplaceSaleForPrinting } from '../services/marketplaceQueue.js'
 import { fetchMarketplaceOrderDetails } from '../services/marketplaceOfficial.js'
 import { env } from '../config/env.js'
+import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
 const reconcileOne = async (tenantId, candidate) => {
   const integration = await findIntegrationById(tenantId, candidate.integration_id)
@@ -59,9 +60,21 @@ export const runMarketplaceReconciliation = async ({ limit = 40 } = {}) => {
         if (outcome.reconciled) result.reconciled += 1
       } catch (error) {
         result.failed += 1
+        const message = String(error?.message || 'Falha na reconciliacao do marketplace').slice(0, 500)
         await markMarketplaceIntegrationSync(tenant.tenant_id, candidate.integration_id, {
           status: 'error',
-          lastError: String(error?.message || 'Falha na reconciliacao do marketplace').slice(0, 500)
+          lastError: message
+        })
+        const period = Math.floor(Date.now() / (6 * 60 * 60 * 1000))
+        await writeOperationalNotification(tenant.tenant_id, {
+          type: 'marketplace.sync_failed', severity: 'error', title: 'Falha na sincronizacao do marketplace',
+          message: 'Nao foi possivel atualizar uma venda do marketplace. Confira a conexao antes de processar novos pedidos.',
+          entityType: 'marketplace_integration', entityId: String(candidate.integration_id),
+          dedupeKey: `marketplace-sync-failed:${candidate.integration_id}:${period}`
+        })
+        await writeAuditEvent(tenant.tenant_id, {
+          action: 'marketplace.sync_failed', actorType: 'system', entityType: 'marketplace_integration', entityId: String(candidate.integration_id),
+          details: { error: message }
         })
       }
     }

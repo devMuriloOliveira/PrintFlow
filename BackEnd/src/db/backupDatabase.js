@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import pg from 'pg'
 import { env } from '../config/env.js'
 
 const run = (command, args, options = {}) => new Promise((resolve, reject) => {
@@ -9,7 +10,24 @@ const run = (command, args, options = {}) => new Promise((resolve, reject) => {
   process.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`${command} terminou com codigo ${code}`)))
 })
 
-const main = async () => {
+const recordRun = async ({ status, startedAt, size = null, error = '' }) => {
+  if (!env.databaseUrl) return
+  const client = new pg.Client({ connectionString: env.databaseUrl })
+  try {
+    await client.connect()
+    await client.query(
+      `insert into backup_runs (status, size_bytes, error_message, started_at, completed_at)
+       values ($1, $2, $3, $4, now())`,
+      [status, size, String(error || '').slice(0, 500), startedAt]
+    )
+  } catch (recordError) {
+    console.error(`Nao foi possivel registrar a execucao do backup: ${recordError.message}`)
+  } finally {
+    await client.end().catch(() => {})
+  }
+}
+
+const main = async (startedAt) => {
   if (!env.databaseUrl) throw new Error('DATABASE_URL obrigatoria para backup.')
   const backupDir = path.resolve(process.env.BACKUP_DIR || path.resolve('backups'))
   await mkdir(backupDir, { recursive: true })
@@ -18,6 +36,7 @@ const main = async () => {
   await run(process.env.PG_DUMP_BIN || 'pg_dump', ['--format=custom', '--no-owner', '--file', target, env.databaseUrl])
   const info = await stat(target)
   if (!info.size) throw new Error('Backup gerado esta vazio.')
+  await recordRun({ status: 'success', startedAt, size: info.size })
   console.log(`Backup concluido: ${target} (${info.size} bytes)`)
 
   const keep = Math.max(1, Number(process.env.BACKUP_RETENTION_COUNT || 14))
@@ -27,4 +46,9 @@ const main = async () => {
   await Promise.all(files.slice(keep).map((name) => rm(path.join(backupDir, name), { force: true })))
 }
 
-main().catch((error) => { console.error(`Falha no backup: ${error.message}`); process.exit(1) })
+const startedAt = new Date()
+main(startedAt).catch(async (error) => {
+  await recordRun({ status: 'failed', startedAt, error: error.message })
+  console.error(`Falha no backup: ${error.message}`)
+  process.exit(1)
+})
