@@ -1,9 +1,7 @@
 <script setup lang="ts">
 const { products, orders, expenses, expenseSegments, filaments, goals, printers, printJobs, pending } = useAppData()
 const metrics = useBusinessMetrics()
-const { unreadCount, refreshNotifications } = useOperationalNotifications()
-
-onMounted(() => { void refreshNotifications() })
+const { unreadCount } = useOperationalNotifications()
 
 const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 const monthlyRevenue = computed(() => {

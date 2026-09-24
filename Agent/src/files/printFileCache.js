@@ -328,6 +328,10 @@ export const ensurePrintFileCached =
       )
     }
 
+    if (!String(printFile.printJobId || '').trim()) {
+      throw new Error('Arquivo de impressao sem Production Job autorizado.')
+    }
+
     if (
       !printFile.hash
     ) {
@@ -445,7 +449,7 @@ export const ensurePrintFileCached =
 
     const response =
       await axios.get(
-        `${apiUrl}/api/agents/print-file?key=${encodeURIComponent(printFile.storageKey)}`,
+        `${apiUrl}/api/agents/print-file?key=${encodeURIComponent(printFile.storageKey)}&printJobId=${encodeURIComponent(printFile.printJobId)}`,
         {
           responseType:
             'stream',

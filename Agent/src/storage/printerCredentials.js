@@ -288,25 +288,25 @@ const writeStore = async (
     JSON.stringify(store, null, 2)
 
   if (process.platform === 'win32') {
-    try {
-      const protectedValue =
-        await protectWithWindowsDpapi(
-          Buffer.from(serialized, 'utf8')
-        )
-
-      await fs.writeFile(
-        credentialsFile,
-        JSON.stringify({
-          version: 2,
-          protection: 'windows-dpapi',
-          payload: protectedValue.toString('base64')
-        }, null, 2),
-        'utf8'
+    const protectedValue =
+      await protectWithWindowsDpapi(
+        Buffer.from(serialized, 'utf8')
       )
-      return
-    } catch {
-      // Fallback AES-GCM para ambientes Windows sem DPAPI disponivel.
+
+    if (!protectedValue) {
+      throw new Error('DPAPI indisponivel; credenciais da impressora nao foram gravadas.')
     }
+
+    await fs.writeFile(
+      credentialsFile,
+      JSON.stringify({
+        version: 2,
+        protection: 'windows-dpapi',
+        payload: protectedValue.toString('base64')
+      }, null, 2),
+      'utf8'
+    )
+    return
   }
 
   await fs.writeFile(

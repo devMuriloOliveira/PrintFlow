@@ -42,6 +42,7 @@ test('simulação Agent -> Cloud persiste conclusão uma única vez', async () =
   const state = { attempts: [], updates: 0 }
   const client = {
     async query(sql, params) {
+      if (sql.includes('select id, order_id, fulfillment_plan_id')) return { rowCount: 1, rows: [{ id: 88, order_id: null, fulfillment_plan_id: null }] }
       if (sql.includes('select id, quantity from print_jobs')) return { rowCount: 1, rows: [{ id: 88, quantity: 1 }] }
       if (sql.includes('insert into production_outputs')) return { rowCount: 1, rows: [{ id: 1, expected_quantity: 1, approved_quantity: 0, rejected_quantity: 0, status: 'pending_quality' }] }
       if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
@@ -71,14 +72,15 @@ test('simulação Agent -> Cloud persiste conclusão uma única vez', async () =
 })
 
 test('conclusão medida baixa estoque e horas uma única vez', async () => {
-  const state = { attempts: [], movements: 0, printerUpdates: 0, effectUpdates: 0 }
+  const state = { attempts: [], movements: 0, printerUpdates: 0, effectUpdates: 0, jobStatus: 'printing' }
   const client = {
     async query(sql, params) {
+      if (sql.includes('select id, order_id, fulfillment_plan_id')) return { rowCount: 1, rows: [{ id: 88, order_id: null, fulfillment_plan_id: null }] }
       if (/^(savepoint|release savepoint|rollback to savepoint)/i.test(sql.trim())) return { rowCount: 0, rows: [] }
       if (sql.includes('select id, quantity from print_jobs')) return { rowCount: 1, rows: [{ id: 88, quantity: 1 }] }
       if (sql.includes('insert into production_outputs')) return { rowCount: 1, rows: [{ id: 1, expected_quantity: 1, approved_quantity: 0, rejected_quantity: 0, status: 'pending_quality' }] }
       if (sql.includes('from print_jobs j') && sql.includes('left join products')) return { rowCount: 1, rows: [{ quantity: 1, printer_id: 9, filament_id: 4, weight: 10, cost_breakdown: { energyRate: 1 }, initial_weight: 1000, cost: 20, power_w: 100 }] }
-      if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: 'printing' }] }
+      if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 88, status: state.jobStatus }] }
       if (sql.includes('from print_job_attempts')) return { rowCount: 0, rows: [] }
       if (sql.includes('insert into print_job_attempts')) {
         const row = { id: 1, print_job_id: params[1], attempt_no: params[2], status: params[4], result: JSON.parse(params[5]) }
@@ -101,4 +103,40 @@ test('conclusão medida baixa estoque e horas uma única vez', async () => {
   assert.equal(state.movements, 1)
   assert.equal(state.printerUpdates, 1)
   assert.equal(state.effectUpdates, 1)
+
+  state.jobStatus = 'completed'
+  const crossChannelReplay = await recordProductionJobMetrics({
+    client, tenantId: 'tenant-a', agentId: 7, printJobId: 88,
+    payload: { status: 'completed', idempotencyKey: 'manual-then-agent-88', actualFilamentGrams: 10 }
+  })
+  assert.equal(crossChannelReplay.effects.skipped, 'job_already_terminal')
+  assert.equal(state.movements, 1)
+  assert.equal(state.printerUpdates, 1)
+  assert.equal(state.effectUpdates, 1)
+})
+
+test('conclusão sem telemetria baixa o consumo estimado pela receita', async () => {
+  let consumedGrams = null
+  let pendingError = null
+  const client = { async query(sql, params) {
+    if (sql.includes('select id, order_id, fulfillment_plan_id')) return { rowCount: 1, rows: [{ id: 90, order_id: null, fulfillment_plan_id: null }] }
+    if (/^(savepoint|release savepoint|rollback to savepoint)/i.test(sql.trim())) return { rowCount: 0, rows: [] }
+    if (sql.includes('select id, quantity from print_jobs')) return { rowCount: 1, rows: [{ id: 90, quantity: 2 }] }
+    if (sql.includes('insert into production_outputs')) return { rowCount: 1, rows: [{ id: 2 }] }
+    if (sql.includes('from print_jobs j') && sql.includes('left join products')) return { rowCount: 1, rows: [{ quantity: 2, printer_id: 9, filament_id: 4, weight: 10, cost_breakdown: { wastePercent: 10 }, initial_weight: 1000, cost: 20, power_w: 100 }] }
+    if (sql.includes('from print_jobs j')) return { rowCount: 1, rows: [{ id: 90, status: 'printing' }] }
+    if (sql.includes('from print_job_attempts')) return { rowCount: 0, rows: [] }
+    if (sql.includes('insert into print_job_attempts')) return { rowCount: 1, rows: [{ id: 2, print_job_id: 90, attempt_no: 1, status: 'completed' }] }
+    if (sql.includes('from print_job_material_reservations')) return { rowCount: 1, rows: [{ id: 3, filament_id: 4, reserved_grams: 22, status: 'active' }] }
+    if (sql.includes('update print_job_material_reservations')) { if (sql.includes("status = 'consumed'")) consumedGrams = Number(params[2]); else pendingError = params[3]; return { rowCount: 1, rows: [] } }
+    if (sql.includes('select id, remaining_weight')) return { rowCount: 1, rows: [{ id: 4, remaining_weight: 100, min_stock_weight: 10 }] }
+    if (sql.includes('insert into inventory_movements')) return { rowCount: 1, rows: [{ id: 5 }] }
+    if (sql.includes('update filaments')) return { rowCount: 1, rows: [{ status: 'Em estoque' }] }
+    if (sql.includes('update printers') || sql.includes('update print_jobs')) return { rowCount: 1, rows: [] }
+    throw new Error(`SQL inesperado: ${sql}`)
+  } }
+  const result = await recordProductionJobMetrics({ client, tenantId: 'tenant-a', agentId: 7, printJobId: 90, payload: { status: 'completed', idempotencyKey: 'agent-job-90-recipe' } })
+  assert.equal(result.effects.inventory, 'deducted', pendingError || 'sem erro')
+  assert.equal(consumedGrams, 22)
+  assert.equal(pendingError, null)
 })

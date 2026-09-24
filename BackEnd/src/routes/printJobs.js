@@ -68,6 +68,29 @@ const materialUsageForJob = (product, quantity) => {
 
 const syncOrderStatusFromPrintJob = async (client, tenantId, orderId, nextStatus, printJobId) => {
   if (!orderId) return
+  if (nextStatus === 'Impresso') {
+    const job = await client.query(
+      'select fulfillment_plan_id from print_jobs where tenant_id = $1 and id = $2 limit 1',
+      [tenantId, printJobId]
+    )
+    if (job.rows[0]?.fulfillment_plan_id) {
+      const pending = await client.query(
+        `select 1 from print_jobs
+          where tenant_id = $1 and fulfillment_plan_id = $2
+            and status not in ('completed', 'cancelled')
+            and not (
+              status = 'failed' and exists (
+                select 1 from print_jobs retry
+                 where retry.tenant_id = print_jobs.tenant_id
+                   and retry.retry_of_job_id = print_jobs.id
+              )
+            )
+          limit 1`,
+        [tenantId, job.rows[0].fulfillment_plan_id]
+      )
+      if (pending.rowCount) return
+    }
+  }
   const current = await client.query(
     'select id, status from orders where tenant_id = $1 and id = $2 for update',
     [tenantId, orderId]
@@ -432,6 +455,57 @@ export const handlePrintJobCancel = async (req, res, printJobId) => {
   job.cancelledAt ||= new Date().toISOString()
   job.updatedAt = new Date().toISOString()
   return sendPrintJobs(req, res)
+}
+
+export const createPrintJobRetry = async ({ client, tenantId, printJobId }) => {
+  const source = await client.query(
+      `select j.*, coalesce(po.rejected_quantity, 0) as rejected_quantity
+         from print_jobs j
+         left join production_outputs po on po.tenant_id = j.tenant_id and po.print_job_id = j.id
+        where j.tenant_id = $1 and j.id = $2
+        limit 1
+        for update of j`,
+      [tenantId, printJobId]
+    )
+  const job = source.rows[0]
+  const retryQuantity = Number(job?.quantity || 0)
+  const hasRejectedOutput = job?.status === 'completed' && Number(job.rejected_quantity || 0) > 0
+  if (!job || (!['failed', 'cancelled'].includes(String(job.status)) && !hasRejectedOutput)) {
+    throw new Error('Somente uma impressao falha, cancelada ou um lote refugado pode ser tentado novamente.')
+  }
+  const existing = await client.query(
+      `select id from print_jobs
+        where tenant_id = $1 and retry_of_job_id = $2
+          and status in ('awaiting_confirmation', 'queued', 'starting', 'printing', 'paused')
+        limit 1`,
+      [tenantId, printJobId]
+    )
+  if (existing.rowCount) throw new Error('Ja existe uma nova tentativa ativa para este trabalho.')
+
+  const priority = await client.query(
+      `select coalesce(max(priority), 0) + 1 as next_priority
+         from print_jobs where tenant_id = $1 and printer_id is not distinct from $2::bigint and status = 'queued'`,
+      [tenantId, job.printer_id]
+    )
+  const inserted = await client.query(
+      `insert into print_jobs (
+         tenant_id, order_id, tracked_sale_id, product_id, printer_id, agent_printer_id,
+         fulfillment_plan_id, retry_of_job_id, source, title, quantity, priority, status, notes
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, 'retry', $9, $10, $11, 'queued', $12)
+       returning id`,
+      [tenantId, job.order_id, job.tracked_sale_id, job.product_id, job.printer_id, job.agent_printer_id,
+        job.fulfillment_plan_id, job.id, job.title, retryQuantity, Number(priority.rows[0]?.next_priority || 1),
+        `Nova tentativa do trabalho #${job.id}. ${String(job.notes || '').trim()}`.trim()]
+    )
+  await reserveProductionMaterial({ client, tenantId, printJobId: inserted.rows[0].id, productId: job.product_id, quantity: retryQuantity })
+  return { printJobId: inserted.rows[0].id, retryOfJobId: job.id, quantity: retryQuantity }
+}
+
+export const handlePrintJobRetry = async (req, res, printJobId) => {
+  const tenantId = await getTenantId(req)
+  if (!hasDatabase) return sendJson(res, 409, { error: 'A nova tentativa exige banco de dados.' })
+  await withTenant(tenantId, (client) => createPrintJobRetry({ client, tenantId, printJobId }))
+  return sendPrintJobs(req, res, 201)
 }
 
 export const handlePrintJobApprove = async (req, res, printJobId) => {

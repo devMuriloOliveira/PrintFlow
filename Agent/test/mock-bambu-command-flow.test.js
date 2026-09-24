@@ -414,7 +414,7 @@ test(
 
       assert.equal(
         requests[0].url,
-        'http://printflow-api.test/api/agents/print-file?key=mock%2Ftenant%2Fproduto-mock.3mf'
+        'http://printflow-api.test/api/agents/print-file?key=mock%2Ftenant%2Fproduto-mock.3mf&printJobId=job-file-flow-1'
       )
 
       assert.equal(

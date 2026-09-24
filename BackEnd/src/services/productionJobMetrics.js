@@ -5,8 +5,10 @@ import {
   releaseProductionMaterialReservation
 } from './productionInventory.js'
 import { createPendingProductionOutput } from './productionOutput.js'
+import { syncOrderStatusFromProductionJob } from './productionOrderStatus.js'
 
 const finiteNonNegative = (value) => {
+  if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) && number >= 0 ? number : null
 }
@@ -48,19 +50,19 @@ const applyCompletionEffects = async ({ client, tenantId, printJobId, metrics })
   const product = { weight: row.weight, cost_breakdown: row.cost_breakdown || {} }
   const measuredGrams = finiteNonNegative(metrics.actualFilamentGrams)
   const measuredSeconds = finiteNonNegative(metrics.actualPrintSeconds)
-  const materialGrams = measuredGrams != null ? measuredGrams : null
-  let inventory = 'not_measured'
+  const materialGrams = measuredGrams ?? recipeMaterialGrams(product, row.quantity)
+  let inventory = materialGrams == null ? 'recipe_unavailable' : 'estimated'
   if (materialGrams != null && materialGrams > 0 && row.filament_id) {
     try {
       await client.query('savepoint production_inventory_effect')
       const reservation = await consumeProductionMaterialReservation({
         client, tenantId, printJobId, grams: materialGrams,
-        reason: `Consumo medido pela conclusão da impressão #${printJobId}`
+        reason: `Consumo ${measuredGrams != null ? 'medido' : 'estimado pela receita'} na conclusão da impressão #${printJobId}`
       })
       if (!reservation.consumed && reservation.reason === 'reservation_missing') {
         await createFilamentMovementWithClient(client, tenantId, row.filament_id, {
           type: 'out', quantity: materialGrams,
-          reason: `Consumo medido pela conclusão da impressão #${printJobId}`
+          reason: `Consumo ${measuredGrams != null ? 'medido' : 'estimado pela receita'} na conclusão da impressão #${printJobId}`
         })
       }
       await client.query('release savepoint production_inventory_effect')
@@ -113,6 +115,8 @@ export const recordProductionJobMetrics = async ({ client, tenantId, agentId, pr
     [tenantId, printJobId, agentId]
   )
   if (!jobResult.rowCount) return null
+  const currentJobStatus = String(jobResult.rows[0].status || '').toLowerCase()
+  const jobAlreadyTerminal = ['completed', 'cancelled', 'failed'].includes(currentJobStatus)
 
   const existing = await client.query(
     `select id, print_job_id, attempt_no, status, result
@@ -156,17 +160,20 @@ export const recordProductionJobMetrics = async ({ client, tenantId, agentId, pr
             cancelled_at = case when $3 in ('failed', 'cancelled') then coalesce(cancelled_at, now()) else cancelled_at end,
             updated_at = now()
       where tenant_id = $1 and id = $2`,
-    [tenantId, printJobId, metrics.status, metrics.actualPrintSeconds, metrics.actualFilamentGrams, metrics.actualFilamentMillimeters]
+    [tenantId, printJobId, jobAlreadyTerminal ? currentJobStatus : metrics.status, metrics.actualPrintSeconds, metrics.actualFilamentGrams, metrics.actualFilamentMillimeters]
   )
-  const effects = metrics.status === 'completed' && applyEffects
+  const effects = metrics.status === 'completed' && applyEffects && !jobAlreadyTerminal
     ? await applyCompletionEffects({ client, tenantId, printJobId, metrics })
-    : metrics.status === 'completed'
-      ? null
+    : metrics.status === 'completed' || jobAlreadyTerminal
+      ? { skipped: jobAlreadyTerminal ? 'job_already_terminal' : 'effects_disabled' }
       : { reservation: await releaseProductionMaterialReservation({
         client, tenantId, printJobId,
         reason: `Impressão ${metrics.status}; reserva liberada.`
       }) }
-  if (metrics.status === 'completed') await createPendingProductionOutput({ client, tenantId, printJobId })
+  if (metrics.status === 'completed' && !jobAlreadyTerminal) await createPendingProductionOutput({ client, tenantId, printJobId })
+  if (metrics.status === 'completed' && !jobAlreadyTerminal) {
+    await syncOrderStatusFromProductionJob({ client, tenantId, printJobId, nextStatus: 'Impresso' })
+  }
   return { idempotent: false, attempt: attempt.rows[0], effects }
 }
 

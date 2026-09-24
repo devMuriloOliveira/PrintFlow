@@ -1,4 +1,5 @@
 import { configureCors, sendJson } from '../http/response.js'
+import { randomUUID } from 'node:crypto'
 
 import {
   enterRequest
@@ -41,6 +42,8 @@ import {
 
 import {
   handleProductCreate,
+  handleProductImageRead,
+  handleProductImageUpload,
   handleProductPrintFileUpload,
   handleRecurringExpensesGenerate,
   handleResourceCreate,
@@ -141,6 +144,7 @@ import {
   handlePlatformChatAssigneesList,
   handlePlatformSupportMacrosList,
   handlePlatformChatClaim,
+  handlePlatformSupportContact,
   handlePlatformChatTransfer,
   handlePlatformChatCollaboratorAdd,
   handlePlatformSupportMetadataUpdate,
@@ -171,6 +175,7 @@ import {
   handlePrintJobEnqueue,
   handlePrintJobMovePrinter,
   handlePrintJobReorder,
+  handlePrintJobRetry,
   handlePrintJobStartManual
 } from './printJobs.js'
 
@@ -213,15 +218,18 @@ export const handleRequest =
           req.url ||
             '/',
 
-          `http://${req.headers.host}`
+            `http://${req.headers.host}`
         )
+      const requestId = String(req.headers['x-request-id'] || '').trim() || randomUUID()
       const requestStartedAt = Date.now()
+      const slowRequestThresholdMs = Math.max(200, Number(process.env.API_SLOW_REQUEST_MS) || 500)
+      if (typeof res.setHeader === 'function') res.setHeader('X-Request-Id', requestId)
       const acceptEncoding = String(req.headers['accept-encoding'] || '')
       res.compressionEncoding = /\bbr\b/i.test(acceptEncoding) ? 'br' : /\bgzip\b/i.test(acceptEncoding) ? 'gzip' : ''
       res.once('finish', () => {
         const durationMs = Date.now() - requestStartedAt
-        if (durationMs >= 1000 && url.pathname.startsWith('/api/')) {
-          console.warn('Requisicao lenta', { method: req.method, url: url.pathname, status: res.statusCode, durationMs })
+        if (durationMs >= slowRequestThresholdMs && url.pathname.startsWith('/api/')) {
+          console.warn('Requisicao lenta', { requestId, method: req.method, route: url.pathname, status: res.statusCode, durationMs })
         }
       })
 
@@ -1188,6 +1196,8 @@ export const handleRequest =
       if (req.method === 'POST' && platformSupportSnoozeMatch) return await handlePlatformSupportSnooze(req, res, platformSupportSnoozeMatch[1])
       const platformChatClaimMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/claim$/)
       if (req.method === 'POST' && platformChatClaimMatch) return await handlePlatformChatClaim(req, res, platformChatClaimMatch[1])
+      const platformSupportContactMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/contact$/)
+      if (req.method === 'GET' && platformSupportContactMatch) return await handlePlatformSupportContact(req, res, platformSupportContactMatch[1])
       const platformChatTransferMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/transfer$/)
       if (req.method === 'POST' && platformChatTransferMatch) return await handlePlatformChatTransfer(req, res, platformChatTransferMatch[1])
       const platformChatCollaboratorMatch = url.pathname.match(/^\/api\/platform-admin\/support-requests\/([^/]+)\/collaborators$/)
@@ -1387,7 +1397,7 @@ export const handleRequest =
 
       const printJobActionMatch =
         url.pathname.match(
-          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete|quality-approve)$/
+          /^\/api\/print-jobs\/([^/]+)\/(approve|reorder|move-printer|start-manual|cancel|complete|quality-approve|retry)$/
         )
 
       if (
@@ -1414,6 +1424,7 @@ export const handleRequest =
         }
 
         if (action === 'quality-approve') return await handlePrintJobQualityApprove(req, res, printJobId)
+        if (action === 'retry') return await handlePrintJobRetry(req, res, printJobId)
 
         if (
           action ===
@@ -1503,6 +1514,16 @@ export const handleRequest =
           productPrintFileMatch[1],
           url
         )
+      }
+
+      const productImageMatch =
+        url.pathname.match(
+          /^\/api\/products\/([^/]+)\/image$/
+        )
+
+      if (productImageMatch) {
+        if (req.method === 'GET') return await handleProductImageRead(req, res, productImageMatch[1])
+        if (req.method === 'PUT') return await handleProductImageUpload(req, res, productImageMatch[1])
       }
 
       // ==================================================

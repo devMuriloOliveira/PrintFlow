@@ -44,6 +44,29 @@ test('conferencia de lote reserva somente as pecas aprovadas para a venda vincul
   assert.ok(calls.every((call) => !call.params.length || call.params[0] === 'tenant-a'))
 })
 
+test('receita com varias pecas cria uma execucao fisica por lote e preserva excedente', async () => {
+  const calls = []
+  let jobId = 40
+  const client = { async query(sql, params = []) {
+    calls.push({ sql, params })
+    if (sql.includes('from sales_fulfillment_plans')) return { rowCount: 0, rows: [] }
+    if (sql.includes('from products p')) return { rowCount: 1, rows: [{ id: 4, name: 'Kit', printer_id: 2, agent_printer_id: 7, quantity: 0, reserved_quantity: 0, cost_breakdown: { batchQuantity: 2 } }] }
+    if (sql.includes('insert into sales_fulfillment_plans')) return { rowCount: 1, rows: [{ id: 9, reserved_quantity: 0, production_quantity: 5, status: 'partial_production' }] }
+    if (sql.includes('max(priority)')) return { rowCount: 1, rows: [{ next_priority: 1 }] }
+    if (sql.includes('insert into print_jobs')) return { rowCount: 1, rows: [{ id: ++jobId }] }
+    if (sql.includes('from print_job_material_reservations')) return { rowCount: 0, rows: [] }
+    if (sql.includes('from products where')) return { rowCount: 1, rows: [{ filament_id: null, weight: 0, cost_breakdown: {} }] }
+    return { rowCount: 1, rows: [] }
+  } }
+  const result = await createSalesFulfillmentPlan({ client, tenantId: 'tenant-a', sourceType: 'order', sourceId: 10, productId: 4, requestedQuantity: 5 })
+  assert.deepEqual(result.productionJobIds, [41, 42, 43])
+  assert.equal(result.unitsPerRun, 2)
+  assert.equal(result.runsRequired, 3)
+  const jobs = calls.filter((call) => call.sql.includes('insert into print_jobs'))
+  assert.deepEqual(jobs.map((call) => call.params[7]), [2, 2, 2])
+  assert.match(jobs[2].params[10], /Execucao 3\/3/)
+})
+
 test('cancelamento da venda vinculada libera a reserva sem cruzar tenant', async () => {
   const calls = []
   const client = { async query(sql, params = []) {

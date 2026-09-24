@@ -3,16 +3,16 @@ const props = withDefaults(defineProps<{ initialActive?: string; standalone?: bo
 const { notify } = useUi()
 const auth = useAuth()
 const route = useRoute()
-const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, cancelStripeSubscription, resumeStripeSubscription } = useAppData()
+const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, cancelStripeSubscription, resumeStripeSubscription, createSupportRequest } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
-const { requests: supportRequests, refresh: refreshSupportRequests, createRequest: createSupportRequest, cancelRequest: cancelSupportRequest, selectRequest: selectSupportRequest } = useSupportRequests()
 
 const active = ref(String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
 const savingMemberId = ref('')
 const inviting = ref(false)
 const invitationActionId = ref('')
-const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string }[]>([])
+const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string; lastSeenAt: string; deviceLabel: string; ipMasked: string }[]>([])
 const sessionsLoading = ref(false)
+const endingSessionGroupKey = ref('')
 const changingPassword = ref(false)
 const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '' })
 const mfaLoading = ref(false)
@@ -28,13 +28,13 @@ const exportHistory = ref<Array<{ id: string; fileName: string; format: string; 
 const backupLoading = ref(false)
 const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
 const submittingSupport = ref(false)
+const submittedSupportProtocol = ref('')
 const supportDraft = reactive({
   subject: props.initialActive === 'Ajuda e Suporte' ? String(route.query.assunto || '') : '',
   category: props.initialActive === 'Ajuda e Suporte' && ['privacy', 'account'].includes(String(route.query.categoria || '')) ? String(route.query.categoria) : 'technical',
   privacyRight: props.initialActive === 'Ajuda e Suporte' ? String(route.query.direito || '') : '',
-  priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: ''
+  reason: ''
 })
-const supportFilter = ref<'open' | 'closed' | 'all'>('open')
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const billingLoading = ref(false)
@@ -55,14 +55,15 @@ const sectionPresentation: Record<string, { title: string; subtitle: string; asi
   'Usuarios e Permissoes': { title: 'Usuários e permissões', subtitle: 'Gerencie a equipe, os perfis de acesso e os convites da empresa.', asideTitle: 'Governança de acesso', asideDescription: 'Cada pessoa recebe apenas as permissões necessárias para sua função.', checks: ['Papéis separados por responsabilidade.', 'Mudanças de acesso encerram sessões anteriores.', 'Convites possuem prazo de validade.'] },
   Seguranca: { title: 'Segurança da conta', subtitle: 'Proteja sua senha, segundo fator e sessões conectadas.', asideTitle: 'Proteção da conta', asideDescription: 'Controles para reduzir acessos indevidos e recuperar o controle da conta.', checks: ['Senhas protegidas e sessões revogáveis.', 'MFA disponível para perfis privilegiados.', 'Dispositivos podem ser encerrados individualmente.'] },
   Integracoes: { title: 'Integrações', subtitle: 'Acompanhe marketplaces, agentes e serviços conectados.', asideTitle: 'Conexões protegidas', asideDescription: 'A tela mostra o estado das integrações sem revelar credenciais.', checks: ['Tokens e segredos não são exibidos.', 'Conexões permanecem isoladas por empresa.', 'Última sincronização visível para diagnóstico.'] },
-  'Backup e Dados': { title: 'Backup e dados', subtitle: 'Exporte os dados da empresa e acompanhe o histórico de arquivos.', asideTitle: 'Portabilidade e segurança', asideDescription: 'As exportações preservam a rastreabilidade sem incluir credenciais.', checks: ['Arquivos gerados ficam registrados.', 'Credenciais e sessões são excluídas.', 'Restauração permanece controlada.'] },
-  'Privacidade e LGPD': { title: 'Privacidade e LGPD', subtitle: 'Acompanhe direitos dos titulares, exportações e solicitações.', asideTitle: 'Privacidade por padrão', asideDescription: 'Os controles preservam protocolo, finalidade e isolamento da empresa.', checks: ['Solicitações possuem protocolo e prazo.', 'Ações sensíveis exigem confirmação.', 'Histórico mínimo é preservado para auditoria.'] },
-  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Abra solicitações e acompanhe cada atendimento pelo protocolo.', asideTitle: 'Atendimento seguro', asideDescription: 'O suporte funciona dentro da conta autenticada e mantém o histórico da conversa.', checks: ['Conversas vinculadas ao solicitante.', 'Status e responsável ficam visíveis.', 'Atendimentos encerrados permanecem separados.'] }
+  'Backup e Dados': { title: 'Backup e dados', subtitle: 'Gere cópias operacionais e acompanhe cada exportação da empresa.', asideTitle: 'Cópias rastreáveis', asideDescription: 'Esta área separa exportação, restauração e exclusão para evitar ações ambíguas.', checks: ['Arquivos gerados ficam registrados.', 'Credenciais e sessões não são exportadas.', 'Exclusão permanece restrita ao Owner.'] },
+  'Privacidade e LGPD': { title: 'Privacidade e LGPD', subtitle: 'Exporte dados da empresa e registre solicitações de titulares no fluxo correto.', asideTitle: 'Fluxos separados e rastreáveis', asideDescription: 'Exportações operacionais, direitos do titular e exclusão da empresa seguem controles próprios.', checks: ['Exportações respeitam a seleção informada.', 'Direitos são registrados com protocolo.', 'Exclusão da empresa exige confirmação do Owner.'] },
+  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Envie uma mensagem diretamente para a equipe do PrintFlow.', asideTitle: 'Contato protegido', asideDescription: 'Sua mensagem permanece vinculada à sua conta e chega ao painel administrativo da equipe.', checks: ['Identidade confirmada pela conta.', 'Mensagem registrada com protocolo.', 'Nenhum aplicativo externo é aberto.'] }
 }
 const currentPresentation = computed(() => sectionPresentation[active.value])
 const pageTitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.title : 'Configurações')
 const pageSubtitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.subtitle : 'Gerencie os dados essenciais da empresa e da plataforma.')
-const showContextExport = computed(() => ['Backup e Dados', 'Privacidade e LGPD'].includes(active.value))
+const canExportCompanyData = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
+const latestExport = computed(() => exportHistory.value[0] || null)
 const privacyExportGroups = ref<string[]>(['company', 'customers', 'catalog', 'production', 'financial', 'marketplaces'])
 const privacyExportOptions = [
   { value: 'company', label: 'Cadastro e configurações da empresa', description: 'Dados cadastrais e preferências.' },
@@ -72,14 +73,19 @@ const privacyExportOptions = [
   { value: 'financial', label: 'Financeiro', description: 'Despesas, metas e divisões financeiras.' },
   { value: 'marketplaces', label: 'Marketplaces', description: 'Canais e conexões autorizadas, sem credenciais.' }
 ]
-const privacyRequestRight = ref('correction')
+const privacyRequestRight = ref('access')
 const privacyRequestOptions = [
-  { value: 'correction', label: 'Corrigir dados', subject: 'Solicitação de correção de dados' },
-  { value: 'deletion', label: 'Solicitar eliminação', subject: 'Solicitação de eliminação de dados' },
-  { value: 'opposition', label: 'Registrar oposição', subject: 'Solicitação de oposição ao tratamento' },
-  { value: 'sharing', label: 'Consultar compartilhamentos', subject: 'Informações sobre compartilhamento de dados' }
+  { value: 'access', label: 'Confirmar e acessar', description: 'Confirmar o tratamento e solicitar acesso aos dados pessoais.', subject: 'Solicitação de confirmação e acesso a dados', icon: 'eye' },
+  { value: 'correction', label: 'Corrigir dados', description: 'Atualizar dados incompletos, incorretos ou desatualizados.', subject: 'Solicitação de correção de dados', icon: 'edit' },
+  { value: 'deletion', label: 'Eliminar ou anonimizar', description: 'Pedir análise de eliminação, bloqueio ou anonimização.', subject: 'Solicitação de eliminação ou anonimização de dados', icon: 'close' },
+  { value: 'opposition', label: 'Registrar oposição', description: 'Questionar um tratamento realizado em situação específica.', subject: 'Solicitação de oposição ao tratamento', icon: 'alert' },
+  { value: 'portability', label: 'Solicitar portabilidade', description: 'Pedir uma cópia portável dos dados pessoais aplicáveis.', subject: 'Solicitação de portabilidade de dados pessoais', icon: 'download' },
+  { value: 'sharing', label: 'Consultar compartilhamentos', description: 'Saber com quais entidades os dados foram compartilhados.', subject: 'Informações sobre compartilhamento de dados', icon: 'users' }
 ]
 const selectedPrivacyRequest = computed(() => privacyRequestOptions.find((option) => option.value === privacyRequestRight.value) || privacyRequestOptions[0])
+const allPrivacyExportGroupsSelected = computed(() => privacyExportGroups.value.length === privacyExportOptions.length)
+const selectAllPrivacyExportGroups = () => { privacyExportGroups.value = privacyExportOptions.map(option => option.value) }
+const clearPrivacyExportGroups = () => { privacyExportGroups.value = [] }
 const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0, documentLocked: false, documentType: '' })
 const companyDocumentKind = ref<'cpf' | 'cnpj'>('cnpj')
 const companyDocumentLabel = computed(() => companyDocumentKind.value === 'cpf' ? 'CPF' : 'CNPJ')
@@ -109,7 +115,78 @@ const roles = [
 
 const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
 const isOwner = computed(() => auth.user.value?.role === 'owner')
+const activeMemberCount = computed(() => members.value.filter(member => member.status === 'active').length)
+const suspendedMemberCount = computed(() => members.value.filter(member => member.status === 'suspended').length)
+const ownerCount = computed(() => members.value.filter(member => member.role === 'owner' && member.status === 'active').length)
+const roleLabel = (value: string) => roles.find(role => role.value === value)?.label || value
+const availableRolesFor = (member: { role: string }) => isOwner.value || member.role === 'owner' ? roles : roles.filter(role => role.value !== 'owner')
+const memberHasChanges = (member: { userId: string; role: string; status: string }) => {
+  const draft = memberDrafts[member.userId]
+  return Boolean(draft && (draft.role !== member.role || draft.status !== member.status))
+}
+const memberInitials = (name: string) => String(name || '?').trim().split(/\s+/).slice(0, 2).map(part => part[0] || '').join('').toUpperCase()
+const formatMemberDate = (value?: string) => value ? new Date(value).toLocaleDateString('pt-BR') : 'Não registrado'
 const isPrivileged = computed(() => ['owner', 'platform_super_admin'].includes(String(auth.user.value?.role || auth.user.value?.platformRole || '')))
+const currentSessionId = computed(() => {
+  try {
+    const payload = String(auth.token.value || '').split('.')[1]
+    if (!payload) return ''
+    const parsed = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')))
+    return String(parsed.sid || '')
+  } catch { return '' }
+})
+const groupedSessions = computed(() => {
+  const groups = new Map<string, {
+    key: string
+    sessionIds: string[]
+    deviceLabel: string
+    ipMasked: string
+    createdAt: string
+    lastSeenAt: string
+    expiresAt: string
+    containsCurrent: boolean
+  }>()
+
+  for (const session of sessions.value) {
+    const device = sessionDevice(session.deviceLabel)
+    const key = `${device.browser}|${device.system}|${session.ipMasked || 'unknown'}`
+    const existing = groups.get(key)
+    if (!existing) {
+      groups.set(key, {
+        key,
+        sessionIds: [session.sessionId],
+        deviceLabel: session.deviceLabel,
+        ipMasked: session.ipMasked,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        expiresAt: session.expiresAt,
+        containsCurrent: session.sessionId === currentSessionId.value
+      })
+      continue
+    }
+
+    existing.sessionIds.push(session.sessionId)
+    existing.containsCurrent ||= session.sessionId === currentSessionId.value
+    if (new Date(session.lastSeenAt).getTime() > new Date(existing.lastSeenAt).getTime()) {
+      existing.lastSeenAt = session.lastSeenAt
+      existing.deviceLabel = session.deviceLabel
+    }
+    if (new Date(session.createdAt).getTime() < new Date(existing.createdAt).getTime()) existing.createdAt = session.createdAt
+    if (new Date(session.expiresAt).getTime() > new Date(existing.expiresAt).getTime()) existing.expiresAt = session.expiresAt
+  }
+
+  return [...groups.values()].sort((left, right) => new Date(right.lastSeenAt).getTime() - new Date(left.lastSeenAt).getTime())
+})
+const passwordRules = computed(() => [
+  { label: '10 caracteres ou mais', met: passwordForm.newPassword.length >= 10 },
+  { label: 'Letra maiúscula e minúscula', met: /[A-Z]/.test(passwordForm.newPassword) && /[a-z]/.test(passwordForm.newPassword) },
+  { label: 'Número', met: /[0-9]/.test(passwordForm.newPassword) },
+  { label: 'Caractere especial', met: /[^A-Za-z0-9]/.test(passwordForm.newPassword) }
+])
+const passwordReady = computed(() => Boolean(passwordForm.currentPassword) && passwordRules.value.every(rule => rule.met) && passwordForm.newPassword === passwordForm.confirmation)
+const securityStatus = computed(() => isPrivileged.value && mfaEnabled.value
+  ? { label: 'Proteção reforçada', detail: 'MFA ativo', tone: 'success' }
+  : { label: 'Proteção básica', detail: isPrivileged.value ? 'MFA recomendado' : 'Senha e sessões ativas', tone: 'warning' })
 const selectedBillingPlan = computed(() => stripeBilling.value?.plans[0] || null)
 const billingActionLoading = computed(() => creatingBillingLink.value || subscriptionActionLoading.value)
 const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -120,11 +197,6 @@ const fixedCostPerUnitPreview = computed(() => {
 })
 const subscriptionStatus = (status: string) => ({ trial: 'Trial histórico', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carência', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
 const hasProSubscription = computed(() => stripeBilling.value?.subscription?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'courtesy'].includes(stripeBilling.value?.subscription?.status || ''))
-const supportCategoryLabel = (category: string) => ({ technical: 'Suporte tecnico', financial: 'Financeiro', integration: 'Integracoes', account: 'Conta e permissoes', data_backup: 'Backup e dados', privacy: 'Privacidade e LGPD', audit: 'Auditoria excepcional' }[category] || category)
-const supportStatusLabel = (status: string) => ({ pending: 'Aberta', under_review: 'Em atendimento', approved: 'Aprovada', rejected: 'Rejeitada', cancelled: 'Cancelada', closed: 'Encerrada', expired: 'Expirada' }[status] || status)
-const supportStatusClass = (status: string) => ['closed', 'cancelled', 'expired'].includes(status) ? 'badge badge--gray' : status === 'pending' ? 'badge badge--orange' : 'badge'
-const filteredSupportRequests = computed(() => supportRequests.value.filter((request) => supportFilter.value === 'all' || (supportFilter.value === 'open' ? !['closed', 'cancelled', 'expired'].includes(request.status) : ['closed', 'cancelled', 'expired'].includes(request.status))))
-const supportStats = computed(() => ({ open: supportRequests.value.filter((request) => !['closed', 'cancelled', 'expired'].includes(request.status)).length, waiting: supportRequests.value.filter((request) => request.status === 'pending').length, closed: supportRequests.value.filter((request) => ['closed', 'cancelled', 'expired'].includes(request.status)).length }))
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
 const memberBadge = (status: string) => status === 'active' ? 'badge badge--green' : 'badge badge--orange'
 const memberStatusLabel = (status: string) => status === 'active' ? 'Ativo' : 'Suspenso'
@@ -150,7 +222,11 @@ const saveMember = async (userId: string) => {
   const draft = memberDrafts[userId]
   if (!draft) return
   const member = members.value.find((item) => item.userId === userId)
-  if (member?.status === 'active' && draft.status === 'suspended' && !window.confirm(`Suspender ${member.name}? As sessoes ativas serao encerradas.`)) return
+  if (!member || !memberHasChanges(member)) return
+  const action = member.status === 'active' && draft.status === 'suspended'
+    ? `Suspender ${member.name}?`
+    : `Atualizar o acesso de ${member.name}?`
+  if (!window.confirm(`${action} As sessões ativas desta pessoa serão encerradas.`)) return
 
   savingMemberId.value = userId
   try {
@@ -158,7 +234,7 @@ const saveMember = async (userId: string) => {
       role: draft.role as 'owner' | 'admin' | 'financeiro' | 'producao' | 'usuario',
       status: draft.status as 'active' | 'suspended'
     })
-    notify('Acesso do usuario atualizado. As sessoes dele foram encerradas.')
+    notify('Acesso do usuário atualizado. As sessões anteriores foram encerradas.')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar o acesso.')
     await loadMembers()
@@ -195,12 +271,37 @@ const loadSessions = async () => {
   sessionsLoading.value = true
   try { sessions.value = await auth.listSessions() } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel carregar as sessoes.') } finally { sessionsLoading.value = false }
 }
-const endSession = async (sessionId: string) => {
-  try { await auth.revokeSession(sessionId); sessions.value = sessions.value.filter((session) => session.sessionId !== sessionId); notify('Sessao encerrada.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel encerrar a sessao.') }
+const endSessionGroup = async (group: typeof groupedSessions.value[number]) => {
+  const hiddenSessions = group.sessionIds.length - 1
+  const message = group.containsCurrent
+    ? `Encerrar este dispositivo${hiddenSessions ? ` e suas ${group.sessionIds.length} sessões` : ''}? Você precisará entrar novamente.`
+    : `Encerrar este dispositivo${hiddenSessions ? ` e suas ${group.sessionIds.length} sessões` : ''}?`
+  if (!window.confirm(message)) return
+  endingSessionGroupKey.value = group.key
+  try {
+    const orderedIds = [...group.sessionIds].sort((left, right) => Number(left === currentSessionId.value) - Number(right === currentSessionId.value))
+    for (const sessionId of orderedIds) await auth.revokeSession(sessionId)
+    if (group.containsCurrent) { auth.clearSession(); await navigateTo('/login'); return }
+    const removed = new Set(group.sessionIds)
+    sessions.value = sessions.value.filter(session => !removed.has(session.sessionId))
+    notify(group.sessionIds.length > 1 ? 'Sessões deste dispositivo encerradas.' : 'Sessão encerrada.')
+  } catch (error: any) {
+    await loadSessions()
+    notify(error?.data?.error || 'Não foi possível encerrar todas as sessões deste dispositivo.')
+  } finally { endingSessionGroupKey.value = '' }
 }
 const endAllSessions = async () => {
-  try { await auth.revokeAllSessions(); auth.clearSession(); await navigateTo('/login') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel encerrar as sessoes.') }
+  if (!window.confirm('Encerrar todas as sessões, inclusive esta? Você precisará entrar novamente.')) return
+  try { await auth.revokeAllSessions(); auth.clearSession(); await navigateTo('/login') } catch (error: any) { notify(error?.data?.error || 'Não foi possível encerrar as sessões.') }
 }
+
+function sessionDevice(label: string) {
+  const value = String(label || '')
+  const browser = value.includes('Edg/') ? 'Microsoft Edge' : value.includes('Firefox/') ? 'Firefox' : value.includes('Chrome/') ? 'Google Chrome' : value.includes('Safari/') ? 'Safari' : 'Navegador'
+  const system = value.includes('Windows') ? 'Windows' : value.includes('Android') ? 'Android' : /iPhone|iPad/.test(value) ? 'iOS' : value.includes('Mac OS') ? 'macOS' : value.includes('Linux') ? 'Linux' : 'Sistema não identificado'
+  return { browser, system }
+}
+const formatSecurityDate = (value?: string | null) => value ? new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : 'Não registrado'
 
 const submitPasswordChange = async () => {
   if (passwordForm.newPassword !== passwordForm.confirmation) {
@@ -292,31 +393,27 @@ const loadBackup = async () => {
     notify(error?.data?.error || 'Nao foi possivel verificar a disponibilidade do backup.')
   } finally { backupLoading.value = false }
 }
-const loadSupport = async () => {
-  try {
-    await refreshSupportRequests()
-  } catch (error: any) {
-    notify(error?.data?.error || 'Nao foi possivel carregar suas solicitacoes.')
-  }
-}
 const submitSupportRequest = async () => {
   submittingSupport.value = true
+  submittedSupportProtocol.value = ''
   try {
     const created = await createSupportRequest({
-      subject: supportDraft.subject, category: supportDraft.category, privacyRight: supportDraft.category === 'privacy' ? supportDraft.privacyRight : undefined, priority: supportDraft.priority, reason: supportDraft.reason,
-      currentPassword: supportDraft.category === 'audit' ? supportDraft.currentPassword : undefined,
-      scope: supportDraft.category === 'audit' ? { entityType: supportDraft.entityType, entityId: supportDraft.entityId } : {}
+      subject: supportDraft.subject,
+      category: supportDraft.category,
+      privacyRight: supportDraft.category === 'privacy' ? supportDraft.privacyRight : undefined,
+      priority: 'normal',
+      reason: supportDraft.reason,
+      scope: {}
     })
-    Object.assign(supportDraft, { subject: '', category: 'technical', privacyRight: '', priority: 'normal', reason: '', entityType: '', entityId: '', currentPassword: '' })
-    notify(`Solicitacao criada. Protocolo ${created.id}`)
+    submittedSupportProtocol.value = created.protocolNumber || created.id
+    supportDraft.subject = ''
+    supportDraft.reason = ''
+    notify('Mensagem enviada para a equipe de suporte.')
   } catch (error: any) {
-    notify(error?.data?.error || 'Nao foi possivel criar a solicitacao.')
+    notify(error?.data?.error || 'Nao foi possivel enviar a mensagem.')
   } finally { submittingSupport.value = false }
 }
-const cancelSupport = async (request: any) => {
-  if (!window.confirm(`Cancelar a solicitacao ${request.id}?`)) return
-  try { await cancelSupportRequest(request.id); notify('Solicitacao cancelada.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel cancelar a solicitacao.') }
-}
+const formatSupportProtocol = (value: string) => String(value || '').replace(/(\d{4})(?=\d)/g, '$1 ')
 
 const loadIntegrations = async () => {
   integrationsLoading.value = true
@@ -387,8 +484,13 @@ const confirmMfaSetup = async () => {
 }
 const turnOffMfa = async () => {
   if (!mfaDisablePassword.value) return notify('Informe sua senha atual para desativar o MFA.')
+  if (!window.confirm('Desativar a verificação em duas etapas reduzirá a proteção desta conta. Deseja continuar?')) return
   mfaLoading.value = true
   try { await auth.disableMfa(mfaDisablePassword.value); mfaEnabled.value = false; mfaDisablePassword.value = ''; notify('MFA desativado.') } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel desativar o MFA.') } finally { mfaLoading.value = false }
+}
+const copyMfaSecret = async () => {
+  if (!mfaSetup.value?.secret) return
+  try { await navigator.clipboard.writeText(mfaSetup.value.secret); notify('Chave de configuração copiada.') } catch { notify('Não foi possível copiar. Selecione a chave manualmente.') }
 }
 const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
   if (!stripeBilling.value?.subscription || subscriptionActionLoading.value) return
@@ -405,8 +507,24 @@ const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
   } finally { subscriptionActionLoading.value = false }
 }
 
-const integrationStatus = (status: string) => ({ connected: 'Conectado', active: 'Conectado', online: 'Online', not_configured: 'Nao configurado', offline: 'Offline', revoked: 'Revogado' }[status] || status)
-const integrationBadge = (status: string) => ['connected', 'active', 'online'].includes(status) ? 'badge badge--green' : status === 'not_configured' || status === 'revoked' ? 'badge badge--orange' : 'badge badge--gray'
+const integrationStatus = (status: string) => ({ connected: 'Conectado', active: 'Conectado', online: 'Online', pending: 'Pendente', error: 'Com falha', disconnected: 'Desconectado', not_configured: 'Não configurado', offline: 'Offline', revoked: 'Revogado' }[status] || status)
+const integrationBadge = (status: string) => ['connected', 'active', 'online'].includes(status) ? 'badge badge--green' : ['pending', 'error', 'disconnected', 'not_configured', 'revoked'].includes(status) ? 'badge badge--orange' : 'badge badge--gray'
+const healthyIntegrationStatus = (status: string) => ['connected', 'active', 'online'].includes(String(status || '').toLowerCase())
+const connectedMarketplaceCount = computed(() => integrationsOverview.value.marketplaces.filter(item => healthyIntegrationStatus(item.status)).length)
+const onlineAgentCount = computed(() => integrationsOverview.value.agents.filter(item => healthyIntegrationStatus(item.status)).length)
+const integrationsAttentionCount = computed(() =>
+  integrationsOverview.value.marketplaces.filter(item => !healthyIntegrationStatus(item.status)).length +
+  integrationsOverview.value.agents.filter(item => !healthyIntegrationStatus(item.status)).length
+)
+const integrationOverviewStatus = computed(() => {
+  if (integrationsAttentionCount.value) return { label: `${integrationsAttentionCount.value} ${integrationsAttentionCount.value === 1 ? 'conexão requer' : 'conexões requerem'} atenção`, tone: 'warning' }
+  if (!integrationsOverview.value.marketplaces.length && !integrationsOverview.value.agents.length) return { label: 'Nenhuma conexão configurada', tone: 'neutral' }
+  return { label: 'Conexões operacionais', tone: 'success' }
+})
+const formatIntegrationDate = (value?: string | null) => value
+  ? new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+  : 'Ainda não registrado'
+const marketplaceName = (integration: { platform: string; connectionName: string }) => integration.connectionName || ({ mercado_livre: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon' }[integration.platform] || integration.platform)
 const openPrivacySupport = (subject = 'Solicitacao de privacidade e LGPD', privacyRight = 'access') => {
   if (props.standalone) {
     void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'privacy', direito: privacyRight, assunto: subject } })
@@ -414,7 +532,6 @@ const openPrivacySupport = (subject = 'Solicitacao de privacidade e LGPD', priva
   }
   supportDraft.category = 'privacy'
   supportDraft.privacyRight = privacyRight
-  supportDraft.priority = 'normal'
   supportDraft.subject = subject
   supportDraft.reason = ''
   active.value = 'Ajuda e Suporte'
@@ -436,21 +553,22 @@ const loadSectionOnce = (key: string, loader: () => Promise<unknown>, force = fa
 const openDocumentChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: 'Solicitação de troca de CPF para CNPJ' } })
 
 watch(active, (tab) => {
-  if (tab === 'Usuarios e Permissoes') void loadSectionOnce('members', loadMembers)
+  if (tab === 'Usuarios e Permissoes' && canManageMembers.value) void loadSectionOnce('members', loadMembers)
   if (tab === 'Seguranca') {
     void loadSectionOnce('sessions', loadSessions)
     if (isPrivileged.value) void loadSectionOnce('mfa-status', async () => { mfaEnabled.value = (await auth.mfaStatus()).enabled })
   }
-  if (tab === 'Backup e Dados') void loadSectionOnce('backup', loadBackup)
+  if (tab === 'Backup e Dados' && canExportCompanyData.value) void loadSectionOnce('backup', loadBackup)
   if (tab === 'Integracoes') void loadSectionOnce('integrations', loadIntegrations)
   if (tab === 'Assinatura') void loadSectionOnce('billing', loadStripeBilling)
-  if (tab === 'Ajuda e Suporte') void loadSectionOnce('support', loadSupport)
 }, { immediate: true })
+watch(canExportCompanyData, (allowed) => {
+  if (allowed && active.value === 'Backup e Dados') void loadSectionOnce('backup', loadBackup)
+})
 
 watch(members, syncMemberDrafts, { immediate: true })
 watch(settings, syncSettings, { immediate: true })
 watch(() => supportDraft.category, (category) => {
-  if (category === 'audit') supportDraft.priority = 'high'
   if (category === 'privacy' && !supportDraft.privacyRight) supportDraft.privacyRight = 'access'
   if (category !== 'privacy') supportDraft.privacyRight = ''
 })
@@ -562,113 +680,220 @@ watch(() => supportDraft.category, (category) => {
           </template>
         </div>
 
-        <div v-else-if="active === 'Usuarios e Permissoes'">
-          <div class="settings-section-heading">
-            <div><h2>Usuarios e Permissoes</h2><p>Altere o acesso de membros ja cadastrados nesta empresa.</p></div>
-            <button class="btn" :disabled="membersLoading" @click="loadMembers">Atualizar</button>
-          </div>
+        <div v-else-if="active === 'Usuarios e Permissoes'" class="members-page">
+          <header class="members-hero">
+            <span class="members-hero__icon"><UiIcon name="users" :size="23" /></span>
+            <div><span class="members-hero__eyebrow">Equipe e acesso</span><h2>Usuários e permissões</h2><p>Defina quem pode acessar a empresa e qual responsabilidade cada pessoa terá no sistema.</p></div>
+            <div v-if="canManageMembers" class="members-hero__actions"><span><i></i>{{ activeMemberCount }} {{ activeMemberCount === 1 ? 'acesso ativo' : 'acessos ativos' }}</span><button class="btn" type="button" :disabled="membersLoading" @click="loadMembers"><UiIcon name="refresh" :size="14" />{{ membersLoading ? 'Atualizando...' : 'Atualizar equipe' }}</button></div>
+            <span v-else class="members-hero__restricted"><UiIcon name="lock" :size="14" /> Acesso restrito</span>
+          </header>
 
-          <div v-if="!canManageMembers" class="info-note"><UiIcon name="shield" />Somente Owner e Administrador podem gerenciar acessos.</div>
-          <form v-if="canManageMembers" class="filters" style="margin-top:16px" @submit.prevent="sendInvitation"><label class="field field--search"><span>E-mail do novo usuario</span><input v-model="invite.email" type="email" required placeholder="usuario@empresa.com"></label><label class="field"><span>Perfil inicial</span><select v-model="invite.role"><option value="admin">Administrador</option><option value="financeiro">Financeiro</option><option value="producao">Producao</option><option value="usuario">Usuario</option></select></label><button class="btn btn--primary" type="submit" :disabled="inviting">{{ inviting ? 'Enviando...' : 'Convidar usuario' }}</button></form>
-          <div v-if="canManageMembers && membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Carregando usuarios</h3><p>Consultando os membros autorizados desta empresa.</p></div></div>
-          <div v-if="canManageMembers && !membersLoading && !members.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" :size="29" /></div><h3>Nenhum usuario encontrado</h3><p>Use o formulario acima para convidar o primeiro usuario.</p></div></div>
-          <div v-if="canManageMembers && members.length" class="table-scroll" style="margin-top:16px">
-            <table class="data-table">
-              <thead><tr><th>Usuario</th><th>Perfil</th><th>Status</th><th>Criado em</th><th>Atualizado em</th><th>Acao</th></tr></thead>
-              <tbody>
-                <tr v-for="member in members" :key="member.userId">
-                  <td><div class="table-product"><span class="avatar">{{ member.name.slice(0, 2).toUpperCase() }}</span><div><strong>{{ member.name }}</strong><small>{{ member.email }}</small></div></div></td>
-                  <td><select v-model="memberDrafts[member.userId].role" class="select-compact" :disabled="!canEditMember(member)"><option v-for="role in roles" :key="role.value" :value="role.value">{{ role.label }}</option></select></td>
-                  <td><select v-model="memberDrafts[member.userId].status" class="select-compact" :disabled="!canEditMember(member)"><option value="active">Ativo</option><option value="suspended">Suspenso</option></select><span :class="memberBadge(member.status)" style="margin-left:6px">{{ memberStatusLabel(member.status) }}</span></td><td>{{ member.createdAt ? new Date(member.createdAt).toLocaleString('pt-BR') : '-' }}</td><td>{{ member.updatedAt ? new Date(member.updatedAt).toLocaleString('pt-BR') : '-' }}</td>
-                  <td><button class="btn btn--primary" :disabled="!canEditMember(member) || savingMemberId === member.userId" @click="saveMember(member.userId)">{{ savingMemberId === member.userId ? 'Salvando...' : 'Salvar' }}</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-if="canManageMembers" style="margin-top:20px"><h3 style="font-size:12px;margin:0 0 6px">Convites pendentes</h3><p style="color:var(--muted);font-size:10px;margin:0 0 10px">Cada link expira em 48 horas. Reenviar cancela o link anterior.</p><div v-if="!invitations.length" class="info-note"><UiIcon name="check" />Nenhum convite pendente.</div><div v-else class="table-scroll"><table class="data-table"><thead><tr><th>E-mail</th><th>Perfil</th><th>Expira em</th><th>Acoes</th></tr></thead><tbody><tr v-for="invitation in invitations" :key="invitation.id"><td>{{ invitation.email }}</td><td>{{ roles.find((role) => role.value === invitation.role)?.label || invitation.role }}</td><td>{{ new Date(invitation.expiresAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" :disabled="Boolean(invitationActionId)" @click="resendPendingInvitation(invitation.id)">{{ invitationActionId === invitation.id ? 'Aguarde...' : 'Reenviar' }}</button><button class="btn btn--danger" :disabled="Boolean(invitationActionId)" @click="cancelPendingInvitation(invitation.id, invitation.email)">Cancelar</button></td></tr></tbody></table></div></div>
-          <PanelCard title="Funcoes de Usuario" subtitle="Os acessos sao protegidos e registrados no historico de seguranca." style="margin-top:20px">
-            <LazyConfigRoleGrid :roles="roles" :members="members" />
-          </PanelCard>
-        </div>
+          <div v-if="!canManageMembers" class="members-access-restricted"><span><UiIcon name="lock" :size="21" /></span><div><strong>Gerenciamento restrito</strong><p>Somente Owner e Administrador podem consultar membros, enviar convites e alterar acessos.</p></div></div>
 
-        <div v-else-if="active === 'Seguranca'">
-          <form class="settings-security-card" @submit.prevent="submitPasswordChange">
-            <div><h2>Alterar senha</h2><p>Confirme sua senha atual. Os outros acessos serao encerrados automaticamente.</p></div>
-            <div class="form-grid" style="margin-top:16px">
-              <label class="field col-4"><span>Senha atual</span><input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" required></label>
-              <label class="field col-4"><span>Nova senha</span><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="10" required placeholder="Minimo 10 caracteres"></label>
-              <label class="field col-4"><span>Confirmar nova senha</span><input v-model="passwordForm.confirmation" type="password" autocomplete="new-password" minlength="10" required></label>
-            </div>
-            <button class="btn btn--primary" type="submit" :disabled="changingPassword">{{ changingPassword ? 'Alterando...' : 'Alterar senha' }}</button>
-          </form>
-          <div v-if="isPrivileged" class="settings-security-card" style="margin-top:16px">
-            <div><h2>Autenticacao em dois fatores (MFA)</h2><p>Adicione um codigo do seu aplicativo autenticador para proteger perfis privilegiados.</p></div>
-            <div v-if="mfaEnabled" class="info-note" style="margin-top:16px"><UiIcon name="check" />MFA ativo neste perfil. Para desativar, confirme sua senha atual.</div>
-            <div v-else-if="mfaSetup" style="margin-top:16px">
-              <div class="info-note"><UiIcon name="shield" /><div>Cadastre esta chave no seu aplicativo autenticador: <code>{{ mfaSetup.secret }}</code><br><small>{{ mfaSetup.otpauthUri }}</small></div></div>
-              <div class="form-grid" style="margin-top:12px"><label class="field col-4"><span>Codigo de confirmacao</span><input v-model="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required></label></div>
-              <button class="btn btn--primary" :disabled="mfaLoading" @click="confirmMfaSetup">{{ mfaLoading ? 'Confirmando...' : 'Ativar MFA' }}</button>
-            </div>
-            <div v-else style="margin-top:16px"><button class="btn btn--primary" :disabled="mfaLoading" @click="startMfaSetup">{{ mfaLoading ? 'Gerando...' : 'Configurar MFA' }}</button></div>
-            <div v-if="mfaEnabled" class="form-grid" style="margin-top:12px"><label class="field col-4"><span>Senha atual</span><input v-model="mfaDisablePassword" type="password" autocomplete="current-password"></label><div><button class="btn btn--danger" :disabled="mfaLoading" @click="turnOffMfa">Desativar MFA</button></div></div>
-          </div>
-          <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
-          <div class="settings-section-heading"><div><h2>Sessoes ativas</h2><p>Encerre acessos que voce nao reconhece.</p></div><button class="btn" :disabled="sessionsLoading" @click="loadSessions">Atualizar</button></div>
-          <div v-if="sessionsLoading" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Carregando sessoes</h3></div></div>
-          <div v-else-if="!sessions.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="shield" :size="29" /></div><h3>Nenhuma sessao ativa</h3><p>Entre novamente para continuar usando o PrintFlow.</p></div></div>
-          <div v-else><div class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Dispositivo</th><th>IP</th><th>Inicio</th><th>Ultima atividade</th><th>Expira em</th><th>Acao</th></tr></thead><tbody><tr v-for="session in sessions" :key="session.sessionId"><td>{{ session.deviceLabel || 'Dispositivo nao identificado' }}</td><td>{{ session.ipMasked || '-' }}</td><td>{{ new Date(session.createdAt).toLocaleString('pt-BR') }}</td><td>{{ session.lastSeenAt ? new Date(session.lastSeenAt).toLocaleString('pt-BR') : '-' }}</td><td>{{ new Date(session.expiresAt).toLocaleString('pt-BR') }}</td><td><button class="btn btn--danger" @click="endSession(session.sessionId)">Encerrar</button></td></tr></tbody></table></div><button class="btn btn--danger" style="margin-top:16px" @click="endAllSessions">Encerrar todas as sessoes</button></div>
-        </div>
-
-        <div v-else-if="active === 'Backup e Dados'" class="settings-security-card">
-          <div class="settings-section-heading"><div><h2>Backup e dados</h2><p>Exporte uma copia dos dados da sua empresa. Credenciais, integracoes e sessoes nao entram no arquivo.</p></div><button class="btn" :disabled="backupLoading" @click="loadBackup">Atualizar</button></div>
-          <div v-if="backupLoading" class="empty-state"><div><h3>Verificando disponibilidade</h3></div></div>
           <template v-else>
-            <div v-if="!backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Exportacao indisponivel no momento. Tente novamente mais tarde ou entre em contato com a equipe de suporte.</div>
-            <div v-else style="margin-top:16px"><div class="info-note"><UiIcon name="check" />Exportacao habilitada em {{ backupStatus.export.format.toUpperCase() }}. Cada arquivo fica registrado no historico de seguranca da empresa.</div><button class="btn btn--primary" style="margin-top:12px" :disabled="exportingData" @click="downloadTenantData">{{ exportingData ? 'Gerando...' : 'Exportar dados da empresa' }}</button></div>
-            <div v-if="exportHistory.length" class="table-scroll" style="margin-top:16px"><table class="data-table"><thead><tr><th>Arquivo</th><th>Formato</th><th>Registros</th><th>Status</th><th>Gerado em</th></tr></thead><tbody><tr v-for="item in exportHistory" :key="item.id"><td>{{ item.fileName }}</td><td>{{ item.format.toUpperCase() }}</td><td>{{ item.recordCount }}</td><td><span class="badge badge--green">{{ item.status }}</span></td><td>{{ new Date(item.createdAt).toLocaleString('pt-BR') }}</td></tr></tbody></table></div>
-            <div v-else-if="backupStatus.export.enabled" class="info-note" style="margin-top:16px"><UiIcon name="info" />Nenhuma exportacao registrada para esta empresa.</div>
-            <div class="info-note" style="margin-top:16px"><UiIcon name="shield" />Restauracao automatica permanece bloqueada. {{ backupStatus.restore.reason }}</div>
+            <section class="members-summary" aria-label="Resumo da equipe">
+              <article><span><UiIcon name="users" :size="17" /></span><div><small>Membros ativos</small><strong>{{ activeMemberCount }}</strong></div></article>
+              <article><span><UiIcon name="shield" :size="17" /></span><div><small>Owners ativos</small><strong>{{ ownerCount }}</strong></div></article>
+              <article><span><UiIcon name="clock" :size="17" /></span><div><small>Convites pendentes</small><strong>{{ invitations.length }}</strong></div></article>
+              <article><span><UiIcon name="alert" :size="17" /></span><div><small>Acessos suspensos</small><strong>{{ suspendedMemberCount }}</strong></div></article>
+            </section>
+
+            <form class="members-invite" @submit.prevent="sendInvitation">
+              <div class="members-invite__head"><span><UiIcon name="plus" :size="18" /></span><div><small>Novo acesso</small><h3>Convidar uma pessoa</h3><p>O convite expira em 48 horas e só pode ser usado pelo e-mail informado.</p></div></div>
+              <label class="field"><span>E-mail</span><input v-model="invite.email" type="email" required autocomplete="email" placeholder="pessoa@empresa.com"></label>
+              <label class="field"><span>Perfil inicial</span><select v-model="invite.role"><option value="admin">Administrador</option><option value="financeiro">Financeiro</option><option value="producao">Produção</option><option value="usuario">Usuário</option></select></label>
+              <button class="btn btn--primary" type="submit" :disabled="inviting || !invite.email.trim()"><UiIcon name="send" :size="15" />{{ inviting ? 'Enviando...' : 'Enviar convite' }}</button>
+            </form>
+
+            <section class="members-panel">
+              <div class="members-panel__head"><span><UiIcon name="users" :size="18" /></span><div><small>Equipe cadastrada</small><h3>Membros da empresa</h3><p>Alterações de perfil ou status encerram as sessões anteriores da pessoa.</p></div><span>{{ members.length }} {{ members.length === 1 ? 'membro' : 'membros' }}</span></div>
+              <div v-if="membersLoading && !members.length" class="members-loading" role="status"><i></i>Consultando membros...</div>
+              <div v-else-if="!members.length" class="members-empty"><span><UiIcon name="users" :size="21" /></span><div><strong>Nenhum membro encontrado</strong><p>Envie um convite para adicionar a primeira pessoa da equipe.</p></div></div>
+              <div v-else class="member-list">
+                <article v-for="member in members" :key="member.userId" class="member-row" :class="{ 'member-row--suspended': member.status === 'suspended' }">
+                  <span class="member-row__avatar">{{ memberInitials(member.name) }}</span>
+                  <div class="member-row__identity"><strong>{{ member.name }} <em v-if="member.userId === auth.user.value?.id">Você</em></strong><span>{{ member.email }}</span><small>Desde {{ formatMemberDate(member.createdAt) }}</small></div>
+                  <label class="field member-row__control"><span>Perfil</span><select v-model="memberDrafts[member.userId].role" :disabled="!canEditMember(member)"><option v-for="role in availableRolesFor(member)" :key="role.value" :value="role.value">{{ role.label }}</option></select></label>
+                  <label class="field member-row__control"><span>Status</span><select v-model="memberDrafts[member.userId].status" :disabled="!canEditMember(member)"><option value="active">Ativo</option><option value="suspended">Suspenso</option></select></label>
+                  <div class="member-row__state"><span :class="memberBadge(memberDrafts[member.userId]?.status || member.status)">{{ memberStatusLabel(memberDrafts[member.userId]?.status || member.status) }}</span><small v-if="!canEditMember(member)"><UiIcon name="lock" :size="11" />Protegido</small><small v-else-if="memberHasChanges(member)" class="member-row__pending"><UiIcon name="alert" :size="11" />Alteração não salva</small></div>
+                  <button class="btn" :class="{ 'btn--primary': memberHasChanges(member) }" type="button" :disabled="!canEditMember(member) || !memberHasChanges(member) || savingMemberId === member.userId" @click="saveMember(member.userId)">{{ savingMemberId === member.userId ? 'Salvando...' : 'Salvar acesso' }}</button>
+                </article>
+              </div>
+            </section>
+
+            <section class="members-panel">
+              <div class="members-panel__head"><span><UiIcon name="clock" :size="18" /></span><div><small>Aguardando aceite</small><h3>Convites pendentes</h3><p>Reenviar cria um novo link e invalida imediatamente o anterior.</p></div><span>{{ invitations.length }} pendentes</span></div>
+              <div v-if="!invitations.length" class="members-empty"><span><UiIcon name="check" :size="21" /></span><div><strong>Nenhum convite pendente</strong><p>Todos os convites enviados já foram aceitos ou cancelados.</p></div></div>
+              <div v-else class="invitation-list"><article v-for="invitation in invitations" :key="invitation.id" class="invitation-row"><span class="invitation-row__icon"><UiIcon name="send" :size="17" /></span><div><strong>{{ invitation.email }}</strong><span>Perfil: {{ roleLabel(invitation.role) }}</span></div><div><small>Expira em</small><strong>{{ new Date(invitation.expiresAt).toLocaleString('pt-BR') }}</strong></div><div class="invitation-row__actions"><button class="btn" type="button" :disabled="Boolean(invitationActionId)" @click="resendPendingInvitation(invitation.id)">{{ invitationActionId === invitation.id ? 'Aguarde...' : 'Reenviar' }}</button><button class="btn btn--danger" type="button" :disabled="Boolean(invitationActionId)" @click="cancelPendingInvitation(invitation.id, invitation.email)">Cancelar</button></div></article></div>
+            </section>
+
+            <section class="members-panel members-roles-panel">
+              <div class="members-panel__head"><span><UiIcon name="shield" :size="18" /></span><div><small>Matriz de acesso</small><h3>O que cada perfil pode fazer</h3><p>Use estes perfis para separar administração, financeiro e produção.</p></div></div>
+              <LazyConfigRoleGrid :roles="roles" :members="members" />
+            </section>
           </template>
-          <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
-          <div><h2>Excluir empresa e dados</h2><p>Esta acao agenda a exclusao completa da empresa, usuarios, dados operacionais, arquivos e informacoes no banco em sete dias.</p></div>
-          <form v-if="isOwner" style="margin-top:16px" @submit.prevent="requestTenantDeletion">
-            <div class="info-note" style="margin-bottom:16px"><UiIcon name="shield" />Ao entrar novamente no PrintFlow durante os 7 dias, a exclusao sera cancelada automaticamente. Esta confirmacao sera registrada em auditoria.</div>
-            <label class="field"><span>Senha atual</span><input v-model="deletionForm.currentPassword" type="password" autocomplete="current-password" required></label>
-            <label class="field" style="margin-top:12px"><span>Para confirmar, digite EXCLUIR</span><input v-model="deletionForm.confirmation" required autocomplete="off"></label>
-            <label style="display:flex;gap:8px;align-items:flex-start;margin:16px 0"><input v-model="deletionForm.acknowledged" type="checkbox" required><span>Li e estou ciente de que um novo login cancelara esta solicitacao de exclusao.</span></label>
-            <button class="btn btn--danger" type="submit" :disabled="deletingTenant">{{ deletingTenant ? 'Programando...' : 'Programar exclusao da empresa' }}</button>
-          </form>
-          <div v-else class="info-note"><UiIcon name="shield" />Somente o Owner pode solicitar a exclusao da empresa.</div>
         </div>
 
-        <div v-else-if="active === 'Privacidade e LGPD'" class="settings-security-card">
-          <div><h2>Privacidade e LGPD</h2><p>Escolha os dados que deseja exportar ou o direito que deseja exercer.</p></div>
-          <div class="info-note" style="margin-top:16px"><UiIcon name="info" />As exportações são geradas em CSV, sem credenciais, tokens ou sessões. A seleção limita o arquivo aos grupos escolhidos.</div>
+        <div v-else-if="active === 'Seguranca'" class="security-page">
+          <header class="security-hero">
+            <span class="security-hero__icon"><UiIcon name="shield" :size="24" /></span>
+            <div><span class="security-hero__eyebrow">Segurança da conta</span><h2>Proteja seu acesso ao PrintFlow</h2><p>Gerencie sua senha, a verificação em duas etapas e os dispositivos que permanecem conectados.</p></div>
+            <div :class="['security-hero__status', `security-hero__status--${securityStatus.tone}`]"><i></i><span><strong>{{ securityStatus.label }}</strong><small>{{ securityStatus.detail }}</small></span></div>
+          </header>
 
-          <form class="integration-section" @submit.prevent="downloadTenantData(privacyExportGroups)">
-            <div class="integration-section__head"><div><h3>Exportar dados da empresa</h3><p>Selecione exatamente quais grupos devem entrar no arquivo CSV.</p></div><UiIcon name="download" /></div>
+          <section class="security-summary" aria-label="Resumo de segurança">
+            <article><span><UiIcon name="lock" :size="17" /></span><div><small>Método principal</small><strong>Senha protegida</strong></div></article>
+            <article><span><UiIcon name="shield" :size="17" /></span><div><small>Verificação adicional</small><strong>{{ isPrivileged ? (mfaEnabled ? 'MFA ativo' : 'MFA desativado') : 'Não disponível para este perfil' }}</strong></div></article>
+            <article><span><UiIcon name="users" :size="17" /></span><div><small>Dispositivos conectados</small><strong>{{ sessionsLoading ? 'Consultando...' : groupedSessions.length }}</strong></div></article>
+          </section>
+
+          <form class="security-panel security-password-panel" @submit.prevent="submitPasswordChange">
+            <div class="security-panel__head"><span><UiIcon name="lock" :size="18" /></span><div><small>Credencial de acesso</small><h3>Alterar senha</h3><p>Use uma senha exclusiva. Ao salvar, os outros dispositivos serão desconectados.</p></div></div>
+            <div class="security-password-grid">
+              <label class="field"><span>Senha atual</span><input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" required placeholder="Confirme sua identidade"></label>
+              <label class="field"><span>Nova senha</span><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="10" required placeholder="Crie uma senha forte"></label>
+              <label class="field"><span>Confirmar nova senha</span><input v-model="passwordForm.confirmation" type="password" autocomplete="new-password" minlength="10" required placeholder="Repita a nova senha"><small v-if="passwordForm.confirmation" :class="passwordForm.newPassword === passwordForm.confirmation ? 'field-hint--success' : 'field-hint--error'">{{ passwordForm.newPassword === passwordForm.confirmation ? 'As senhas conferem.' : 'As senhas ainda não conferem.' }}</small></label>
+            </div>
+            <div class="security-password-footer">
+              <ul class="security-password-rules"><li v-for="rule in passwordRules" :key="rule.label" :class="{ 'is-met': rule.met }"><UiIcon :name="rule.met ? 'check' : 'close'" :size="13" />{{ rule.label }}</li></ul>
+              <button class="btn btn--primary" type="submit" :disabled="changingPassword || !passwordReady"><UiIcon name="lock" :size="15" />{{ changingPassword ? 'Alterando...' : 'Atualizar senha' }}</button>
+            </div>
+          </form>
+
+          <section v-if="isPrivileged" class="security-panel security-mfa-panel">
+            <div class="security-panel__head"><span><UiIcon name="shield" :size="18" /></span><div><small>Segundo fator</small><h3>Aplicativo autenticador</h3><p>Além da senha, um código temporário será solicitado ao entrar nesta conta privilegiada.</p></div><span :class="mfaEnabled ? 'badge badge--green' : 'badge badge--orange'">{{ mfaEnabled ? 'Ativo' : 'Recomendado' }}</span></div>
+
+            <div v-if="mfaEnabled" class="security-mfa-active">
+              <span><UiIcon name="check" :size="20" /></span><div><strong>Verificação em duas etapas ativada</strong><p>Seu aplicativo autenticador já está vinculado. Para desativar, confirme sua senha atual.</p></div>
+              <div class="security-mfa-disable"><label class="field"><span>Senha atual</span><input v-model="mfaDisablePassword" type="password" autocomplete="current-password" placeholder="Confirme para desativar"></label><button class="btn btn--danger" type="button" :disabled="mfaLoading || !mfaDisablePassword" @click="turnOffMfa">Desativar MFA</button></div>
+            </div>
+
+            <div v-else-if="mfaSetup" class="security-mfa-setup">
+              <div class="security-mfa-steps"><span>1</span><div><strong>Adicione a conta no autenticador</strong><p>Escolha a opção de inserir uma chave de configuração e use o código abaixo.</p></div></div>
+              <div class="security-mfa-secret"><code>{{ mfaSetup.secret }}</code><button class="btn" type="button" @click="copyMfaSecret">Copiar chave</button></div>
+              <div class="security-mfa-steps"><span>2</span><div><strong>Confirme o código gerado</strong><p>Digite o código temporário exibido pelo aplicativo.</p></div></div>
+              <div class="security-mfa-confirm"><label class="field"><span>Código de confirmação</span><input v-model="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="000000"></label><button class="btn btn--primary" type="button" :disabled="mfaLoading || !mfaCode.trim()" @click="confirmMfaSetup">{{ mfaLoading ? 'Confirmando...' : 'Ativar MFA' }}</button></div>
+              <p class="security-mfa-warning"><UiIcon name="alert" :size="15" />Não compartilhe essa chave. Ela permite gerar códigos de acesso à sua conta.</p>
+            </div>
+
+            <div v-else class="security-mfa-inactive"><span><UiIcon name="shield" :size="22" /></span><div><strong>Adicione uma segunda camada de proteção</strong><p>Compatível com aplicativos autenticadores que geram códigos temporários.</p></div><button class="btn btn--primary" type="button" :disabled="mfaLoading" @click="startMfaSetup">{{ mfaLoading ? 'Preparando...' : 'Configurar MFA' }}</button></div>
+          </section>
+
+          <section class="security-panel security-sessions-panel">
+            <div class="security-panel__head"><span><UiIcon name="users" :size="18" /></span><div><small>Acessos à conta</small><h3>Dispositivos e sessões</h3><p>Revise os acessos ativos e encerre qualquer dispositivo que você não reconheça.</p></div><button class="btn" type="button" :disabled="sessionsLoading" @click="loadSessions"><UiIcon name="refresh" :size="14" />{{ sessionsLoading ? 'Atualizando...' : 'Atualizar' }}</button></div>
+            <div v-if="sessionsLoading" class="security-sessions-loading" role="status"><span></span>Consultando sessões ativas...</div>
+            <div v-else-if="!sessions.length" class="security-sessions-empty"><span><UiIcon name="check" :size="21" /></span><div><strong>Nenhuma sessão ativa encontrada</strong><p>Uma nova sessão aparecerá aqui após o próximo acesso.</p></div></div>
+            <div v-else class="security-session-list">
+              <article v-for="session in groupedSessions" :key="session.key" class="security-session" :class="{ 'security-session--current': session.containsCurrent }">
+                <span class="security-session__device"><UiIcon name="settings" :size="19" /></span>
+                <div class="security-session__identity"><strong>{{ sessionDevice(session.deviceLabel).browser }} <em v-if="session.containsCurrent">Este dispositivo</em></strong><span>{{ sessionDevice(session.deviceLabel).system }} · IP {{ session.ipMasked || 'não disponível' }}</span><small v-if="session.sessionIds.length > 1">{{ session.sessionIds.length }} sessões agrupadas</small></div>
+                <div class="security-session__activity"><small>Última atividade</small><strong>{{ formatSecurityDate(session.lastSeenAt) }}</strong><span>Primeiro acesso em {{ formatSecurityDate(session.createdAt) }}</span></div>
+                <div class="security-session__expiry"><small>Expira em</small><strong>{{ formatSecurityDate(session.expiresAt) }}</strong></div>
+                <button class="btn btn--danger" type="button" :disabled="Boolean(endingSessionGroupKey)" @click="endSessionGroup(session)">{{ endingSessionGroupKey === session.key ? 'Encerrando...' : session.containsCurrent ? 'Sair deste dispositivo' : 'Encerrar' }}</button>
+              </article>
+            </div>
+            <div v-if="sessions.length" class="security-sessions-footer"><p><UiIcon name="info" :size="15" />Não reconhece um acesso? Encerre a sessão e altere sua senha.</p><button class="btn btn--danger" type="button" @click="endAllSessions">Encerrar todas</button></div>
+          </section>
+        </div>
+
+        <div v-else-if="active === 'Backup e Dados'" class="backup-data-page">
+          <header class="backup-data-hero">
+            <span class="backup-data-hero__icon"><UiIcon name="download" :size="24" /></span>
+            <div><span class="backup-data-hero__eyebrow">Portabilidade da empresa</span><h2>Cópias dos dados, sem ações escondidas</h2><p>Gere um CSV dos dados operacionais e acompanhe o histórico. Esta tela não restaura nem sobrescreve informações automaticamente.</p></div>
+            <button v-if="canExportCompanyData" type="button" class="btn" :disabled="backupLoading" @click="loadBackup"><UiIcon name="refresh" :size="15" />{{ backupLoading ? 'Atualizando...' : 'Atualizar status' }}</button>
+          </header>
+
+          <section v-if="!canExportCompanyData" class="backup-access-restricted">
+            <span><UiIcon name="lock" :size="22" /></span><div><small>Acesso administrativo</small><h3>Exportação restrita</h3><p>Somente o Owner ou um Administrador pode exportar e consultar o histórico dos dados operacionais da empresa.</p></div>
+          </section>
+
+          <template v-else>
+            <div v-if="backupLoading" class="backup-loading" role="status"><span></span><div><strong>Verificando disponibilidade</strong><p>Consultando exportação e histórico desta empresa.</p></div></div>
+            <template v-else>
+              <section class="backup-status-grid" aria-label="Resumo da exportação">
+                <article><span><UiIcon name="check" :size="17" /></span><div><small>Exportação</small><strong>{{ backupStatus.export.enabled ? 'Disponível' : 'Indisponível' }}</strong></div></article>
+                <article><span><UiIcon name="receipt" :size="17" /></span><div><small>Formato</small><strong>{{ backupStatus.export.enabled ? backupStatus.export.format.toUpperCase() : '—' }}</strong></div></article>
+                <article><span><UiIcon name="history" :size="17" /></span><div><small>Última exportação</small><strong>{{ latestExport ? new Date(latestExport.createdAt).toLocaleDateString('pt-BR') : 'Nenhuma' }}</strong></div></article>
+              </section>
+
+              <section class="backup-export-card" :class="{ 'backup-export-card--disabled': !backupStatus.export.enabled }">
+                <div class="backup-export-card__main">
+                  <span class="backup-export-card__icon"><UiIcon name="download" :size="21" /></span>
+                  <div><small>Cópia operacional</small><h3>Exportar todos os dados da empresa</h3><p>Produtos, pedidos, clientes, produção, financeiro e conexões são organizados em um único arquivo CSV.</p></div>
+                </div>
+                <button type="button" class="btn btn--primary" :disabled="exportingData || !backupStatus.export.enabled" @click="downloadTenantData()"><UiIcon name="download" :size="16" />{{ exportingData ? 'Gerando arquivo...' : 'Gerar exportação completa' }}</button>
+                <div class="backup-export-card__boundary"><UiIcon name="shield" :size="16" /><span><strong>Não entram no arquivo:</strong> {{ backupStatus.export.excludes.join(', ') || 'credenciais e sessões de acesso' }}.</span></div>
+              </section>
+
+              <section class="backup-history-card">
+                <div class="backup-section-heading"><div><small>Rastreabilidade</small><h3>Histórico de exportações</h3><p>Cada geração registra formato, quantidade de registros e horário.</p></div><span>{{ exportHistory.length }} {{ exportHistory.length === 1 ? 'arquivo' : 'arquivos' }}</span></div>
+                <div v-if="exportHistory.length" class="table-scroll"><table class="data-table"><thead><tr><th>Arquivo</th><th>Formato</th><th>Registros</th><th>Status</th><th>Gerado em</th></tr></thead><tbody><tr v-for="item in exportHistory" :key="item.id"><td><strong>{{ item.fileName }}</strong></td><td>{{ item.format.toUpperCase() }}</td><td>{{ item.recordCount.toLocaleString('pt-BR') }}</td><td><span class="badge badge--green">{{ item.status }}</span></td><td>{{ new Date(item.createdAt).toLocaleString('pt-BR') }}</td></tr></tbody></table></div>
+                <div v-else class="backup-history-empty"><span><UiIcon name="history" :size="21" /></span><div><strong>Nenhuma exportação gerada</strong><p>Quando uma cópia for criada, ela aparecerá aqui para consulta.</p></div></div>
+              </section>
+
+              <section class="backup-restore-note"><span><UiIcon name="shield" :size="20" /></span><div><small>Restauração protegida</small><h3>Nenhum dado será sobrescrito por esta tela</h3><p>{{ backupStatus.restore.reason || 'A restauração permanece controlada para evitar perda ou substituição indevida de informações.' }}</p></div></section>
+            </template>
+          </template>
+
+          <section class="backup-danger-zone">
+            <div class="backup-danger-zone__head"><span><UiIcon name="alert" :size="19" /></span><div><small>Zona de risco</small><h3>Excluir empresa e dados</h3><p>Esta ação é diferente de exportar dados e agenda a remoção integral da empresa após sete dias.</p></div></div>
+            <details v-if="isOwner">
+              <summary>Solicitar exclusão da empresa</summary>
+              <form @submit.prevent="requestTenantDeletion">
+                <div class="backup-danger-zone__notice"><UiIcon name="info" :size="17" /><span>Um novo login durante o prazo de sete dias cancela a solicitação. A confirmação e o cancelamento ficam registrados em auditoria.</span></div>
+                <div class="form-grid"><label class="field col-6"><span>Senha atual</span><input v-model="deletionForm.currentPassword" type="password" autocomplete="current-password" required></label><label class="field col-6"><span>Digite EXCLUIR para confirmar</span><input v-model="deletionForm.confirmation" required autocomplete="off" placeholder="EXCLUIR"></label></div>
+                <label class="backup-danger-zone__ack"><input v-model="deletionForm.acknowledged" type="checkbox" required><span>Li o aviso e entendo que esta solicitação afeta todos os usuários e dados da empresa.</span></label>
+                <button class="btn btn--danger" type="submit" :disabled="deletingTenant">{{ deletingTenant ? 'Programando exclusão...' : 'Programar exclusão em 7 dias' }}</button>
+              </form>
+            </details>
+            <div v-else class="backup-danger-zone__restricted"><UiIcon name="lock" :size="16" />Somente o Owner pode solicitar a exclusão da empresa.</div>
+          </section>
+        </div>
+
+        <div v-else-if="active === 'Privacidade e LGPD'" class="privacy-page">
+          <header class="privacy-hero">
+            <span class="privacy-hero__icon"><UiIcon name="shield" :size="25" /></span>
+            <div><span class="privacy-hero__eyebrow">Central de privacidade</span><h2>Dados da empresa e direitos do titular</h2><p>Escolha o fluxo correspondente ao que você precisa. Cada ação mantém finalidade, permissão e rastreabilidade próprias.</p></div>
+            <span class="privacy-hero__status"><i></i> Canal autenticado</span>
+          </header>
+
+          <section class="privacy-scope-note">
+            <UiIcon name="info" :size="18" />
+            <div><strong>Antes de continuar</strong><p>A exportação abaixo é uma cópia operacional dos dados da empresa. Para exercer um direito sobre dados pessoais, use a solicitação por protocolo.</p></div>
+          </section>
+
+          <form v-if="canExportCompanyData" class="privacy-panel" @submit.prevent="downloadTenantData(privacyExportGroups)">
+            <div class="privacy-panel__head">
+              <div class="privacy-panel__title"><span><UiIcon name="download" :size="19" /></span><div><small>Dados operacionais</small><h3>Exportar dados da empresa</h3><p>O arquivo CSV incluirá somente os grupos marcados.</p></div></div>
+              <div class="privacy-selection-actions"><button type="button" :disabled="allPrivacyExportGroupsSelected" @click="selectAllPrivacyExportGroups">Selecionar todos</button><button type="button" :disabled="!privacyExportGroups.length" @click="clearPrivacyExportGroups">Limpar seleção</button></div>
+            </div>
             <div class="privacy-export-options">
-              <label v-for="option in privacyExportOptions" :key="option.value" class="privacy-export-option">
+              <label v-for="option in privacyExportOptions" :key="option.value" class="privacy-export-option" :class="{ 'privacy-export-option--selected': privacyExportGroups.includes(option.value) }">
                 <input v-model="privacyExportGroups" type="checkbox" :value="option.value">
                 <span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span>
+                <UiIcon v-if="privacyExportGroups.includes(option.value)" name="check" :size="15" />
               </label>
             </div>
-            <div class="privacy-export-actions"><span>{{ privacyExportGroups.length }} grupo(s) selecionado(s)</span><button class="btn btn--primary" type="submit" :disabled="exportingData || !privacyExportGroups.length"><UiIcon name="download" />{{ exportingData ? 'Gerando CSV...' : 'Exportar seleção em CSV' }}</button></div>
+            <div class="privacy-export-actions"><span><strong>{{ privacyExportGroups.length }}</strong> de {{ privacyExportOptions.length }} grupos selecionados</span><button class="btn btn--primary" type="submit" :disabled="exportingData || !privacyExportGroups.length"><UiIcon name="download" :size="16" />{{ exportingData ? 'Gerando CSV...' : 'Gerar arquivo selecionado' }}</button></div>
           </form>
+          <section v-else class="privacy-panel privacy-panel--restricted">
+            <div class="privacy-panel__title"><span><UiIcon name="lock" :size="19" /></span><div><small>Dados operacionais</small><h3>Exportação restrita</h3><p>Somente o Owner ou um Administrador pode gerar uma cópia dos dados operacionais da empresa. Seus direitos sobre dados pessoais continuam disponíveis abaixo.</p></div></div>
+          </section>
 
-          <div class="integration-section">
-            <div class="integration-section__head"><div><h3>Solicitar outro direito</h3><p>Correção, eliminação, oposição e informações de compartilhamento continuam rastreáveis por protocolo.</p></div><UiIcon name="shield" /></div>
-            <div class="form-grid"><label class="field col-8"><span>O que você precisa?</span><select v-model="privacyRequestRight"><option v-for="option in privacyRequestOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><div class="privacy-request-action col-4"><button class="btn" @click="openPrivacySupport(selectedPrivacyRequest.subject, selectedPrivacyRequest.value)">Continuar solicitação</button></div></div>
-          </div>
+          <section class="privacy-panel">
+            <div class="privacy-panel__head"><div class="privacy-panel__title"><span><UiIcon name="shield" :size="19" /></span><div><small>Dados pessoais</small><h3>Exercer um direito LGPD</h3><p>Selecione o pedido. Na próxima etapa você poderá descrever o caso antes de gerar o protocolo.</p></div></div></div>
+            <div class="privacy-rights" role="radiogroup" aria-label="Direito que deseja exercer">
+              <button v-for="option in privacyRequestOptions" :key="option.value" type="button" class="privacy-right" :class="{ 'privacy-right--selected': privacyRequestRight === option.value }" role="radio" :aria-checked="privacyRequestRight === option.value" @click="privacyRequestRight = option.value">
+                <span class="privacy-right__icon"><UiIcon :name="option.icon" :size="18" /></span><span><strong>{{ option.label }}</strong><small>{{ option.description }}</small></span><i><UiIcon v-if="privacyRequestRight === option.value" name="check" :size="13" /></i>
+              </button>
+            </div>
+            <div class="privacy-request-summary"><div><small>Solicitação selecionada</small><strong>{{ selectedPrivacyRequest.label }}</strong><p>O atendimento será aberto no canal interno e receberá um protocolo exclusivo.</p></div><button type="button" class="btn btn--primary" @click="openPrivacySupport(selectedPrivacyRequest.subject, selectedPrivacyRequest.value)">Continuar solicitação</button></div>
+          </section>
 
-          <div class="integration-section">
-            <div class="integration-section__head"><div><h3>Acompanhar solicitações</h3><p>Veja protocolos, status, prazo e converse com a equipe responsável.</p></div><button class="btn" @click="openPrivacySupport()">Abrir solicitações</button></div>
-          </div>
-
-          <div class="integration-section">
-            <div class="integration-section__head"><div><h3>Documentos e transparência</h3><p>Os documentos públicos serão disponibilizados assim que o controlador e o canal oficial forem cadastrados.</p></div><UiIcon name="receipt" /></div>
-            <div class="info-note"><UiIcon name="info" />Retenção operacional definida: solicitações LGPD encerradas são anonimizadas após 7 dias, preservando protocolo, status e trilha de auditoria. Finalidades, bases legais, operadores, transferências internacionais e contato do encarregado ainda precisam ser cadastrados pelo controlador.</div>
-          </div>
+          <section class="privacy-secondary-grid">
+            <article><span><UiIcon name="alert" :size="19" /></span><div><small>Ação sobre toda a conta</small><h3>Excluir empresa e dados</h3><p>A exclusão integral da empresa é diferente de uma solicitação de titular e permanece restrita ao Owner.</p><NuxtLink v-if="isOwner" class="btn" to="/configuracoes/backup">Ir para exclusão da empresa</NuxtLink><em v-else>Se isso for necessário, solicite a ação ao Owner da empresa.</em></div></article>
+            <article><span><UiIcon name="receipt" :size="19" /></span><div><small>Transparência</small><h3>Canal e documentos oficiais</h3><p>O canal comercial e os documentos do controlador ainda não foram cadastrados. Até lá, as solicitações ficam registradas nesta central.</p><em>Solicitações encerradas são anonimizadas conforme a regra operacional vigente.</em></div></article>
+          </section>
         </div>
 
         <div v-else-if="active === 'Notificacoes'" class="settings-feature-page">
@@ -694,41 +919,91 @@ watch(() => supportDraft.category, (category) => {
 
           <div class="info-note"><UiIcon name="info" />Estas preferências controlam os avisos exibidos dentro do sistema. Resumos automáticos por e-mail ainda não estão disponíveis.</div>
         </div>
-        <div v-else-if="active === 'Integracoes'">
-          <div class="settings-section-heading"><div><h2>Integracoes</h2><p>Visao operacional das conexoes, sem expor tokens, chaves ou senhas.</p></div><button class="btn" :disabled="integrationsLoading" @click="loadIntegrations">Atualizar</button></div>
-          <div v-if="integrationsLoading" class="empty-state"><div><h3>Consultando integracoes</h3></div></div>
+        <div v-else-if="active === 'Integracoes'" class="integrations-page">
+          <header class="integrations-hero">
+            <span class="integrations-hero__icon"><UiIcon name="settings" :size="22" /></span>
+            <div class="integrations-hero__copy"><span>Central de conexões</span><h2>Integrações</h2><p>Acompanhe os serviços que ligam vendas, produção e comunicações ao PrintFlow.</p></div>
+            <div class="integrations-hero__actions">
+              <span :class="['integrations-health', `integrations-health--${integrationOverviewStatus.tone}`]"><i></i>{{ integrationOverviewStatus.label }}</span>
+              <button class="btn" type="button" :disabled="integrationsLoading" @click="loadIntegrations"><UiIcon name="refresh" :size="15" />{{ integrationsLoading ? 'Atualizando...' : 'Atualizar estados' }}</button>
+            </div>
+          </header>
+
+          <div v-if="integrationsLoading && !integrationsOverview.marketplaces.length && !integrationsOverview.agents.length" class="integrations-loading" role="status"><span></span><div><strong>Consultando conexões</strong><p>Buscando o estado mais recente dos serviços.</p></div></div>
           <template v-else>
-            <div class="integration-summary"><div class="stat-box"><small>Marketplaces</small><strong>{{ integrationsOverview.marketplaces.length }}</strong></div><div class="stat-box"><small>Agents</small><strong>{{ integrationsOverview.agents.length }}</strong></div><div class="stat-box"><small>E-mail</small><strong><span :class="integrationBadge(integrationsOverview.email.status)">{{ integrationStatus(integrationsOverview.email.status) }}</span></strong></div></div>
-            <div class="integration-section"><div class="integration-section__head"><div><h3>Marketplaces</h3><p>Contas autorizadas e sincronizacao mais recente.</p></div><NuxtLink class="btn" to="/marketplaces">Gerenciar</NuxtLink></div><div v-if="integrationsOverview.marketplaces.length" class="table-scroll"><table class="data-table"><thead><tr><th>Plataforma</th><th>Conta</th><th>Status</th><th>Ultima sincronizacao</th></tr></thead><tbody><tr v-for="integration in integrationsOverview.marketplaces" :key="integration.id || integration.platform"><td>{{ integration.connectionName || integration.platform }}</td><td>{{ integration.accountExternalId || '-' }}</td><td><span :class="integrationBadge(integration.status)">{{ integrationStatus(integration.status) }}</span></td><td>{{ integration.lastSyncAt ? new Date(integration.lastSyncAt).toLocaleString('pt-BR') : '-' }}</td></tr></tbody></table></div><div v-else class="info-note"><UiIcon name="info" />Nenhum marketplace conectado.</div></div>
-            <div class="integration-section"><div class="integration-section__head"><div><h3>PrintFlow Agent</h3><p>Computadores autorizados para conectar e controlar impressoras.</p></div><NuxtLink class="btn" to="/impressoras/nova">Gerenciar</NuxtLink></div><div v-if="integrationsOverview.agents.length" class="table-scroll"><table class="data-table"><thead><tr><th>Computador</th><th>Plataforma</th><th>Status</th><th>Ultimo contato</th></tr></thead><tbody><tr v-for="agent in integrationsOverview.agents" :key="agent.id"><td>{{ agent.name || agent.machineName }}</td><td>{{ agent.platform || '-' }}</td><td><span :class="integrationBadge(agent.status)">{{ integrationStatus(agent.status) }}</span></td><td>{{ agent.lastSeenAt ? new Date(agent.lastSeenAt).toLocaleString('pt-BR') : '-' }}</td></tr></tbody></table></div><div v-else class="info-note"><UiIcon name="info" />Nenhum Agent pareado.</div></div>
-            <div class="integration-section"><div class="integration-section__head"><div><h3>Envio de e-mail</h3><p>Usado para convites e comunicacoes transacionais.</p></div><span :class="integrationBadge(integrationsOverview.email.status)">{{ integrationStatus(integrationsOverview.email.status) }}</span></div><div class="info-note"><UiIcon name="shield" />Provedor: {{ integrationsOverview.email.provider }}. Credenciais nunca sao exibidas nesta tela.</div></div>
+            <section class="integrations-overview" aria-label="Resumo das integrações">
+              <article class="integration-domain-card integration-domain-card--marketplace">
+                <span class="integration-domain-card__icon"><UiIcon name="store" :size="20" /></span>
+                <div><span>Canais de venda</span><strong>{{ connectedMarketplaceCount }} de {{ integrationsOverview.marketplaces.length }} conectados</strong><p>Pedidos e vendas recebidos dos marketplaces.</p></div>
+                <NuxtLink to="/marketplaces?secao=conexoes" aria-label="Gerenciar contas conectadas"><UiIcon name="chevron" :size="17" /></NuxtLink>
+              </article>
+              <article class="integration-domain-card integration-domain-card--agent">
+                <span class="integration-domain-card__icon"><UiIcon name="printer" :size="20" /></span>
+                <div><span>Produção local</span><strong>{{ onlineAgentCount }} de {{ integrationsOverview.agents.length }} Agents online</strong><p>Computadores que conectam as impressoras.</p></div>
+                <NuxtLink to="/impressoras" aria-label="Gerenciar impressoras e Agents"><UiIcon name="chevron" :size="17" /></NuxtLink>
+              </article>
+              <article class="integration-domain-card integration-domain-card--email">
+                <span class="integration-domain-card__icon"><UiIcon name="send" :size="20" /></span>
+                <div><span>Comunicações</span><strong>{{ integrationStatus(integrationsOverview.email.status) }}</strong><p>Serviço transacional administrado pela plataforma.</p></div>
+                <span :class="integrationBadge(integrationsOverview.email.status)">{{ integrationsOverview.email.status === 'connected' ? 'Disponível' : 'Indisponível' }}</span>
+              </article>
+            </section>
+
+            <section class="integration-panel">
+              <div class="integration-panel__head"><span><UiIcon name="store" :size="18" /></span><div><h3>Contas conectadas</h3><p>Autorizações de marketplace e o último processamento registrado.</p></div><NuxtLink class="btn" to="/marketplaces?secao=conexoes">Gerenciar contas</NuxtLink></div>
+              <div v-if="integrationsOverview.marketplaces.length" class="integration-connection-list">
+                <article v-for="integration in integrationsOverview.marketplaces" :key="integration.id || integration.platform" class="integration-connection-row">
+                  <span class="integration-connection-row__logo"><MarketplaceLogo :platform="integration.platform" /></span>
+                  <div class="integration-connection-row__identity"><strong>{{ marketplaceName(integration) }}</strong><span>{{ integration.accountExternalId ? `Conta ${integration.accountExternalId}` : 'Identificador da conta não informado' }}</span></div>
+                  <div class="integration-connection-row__activity"><small>Última sincronização</small><strong>{{ formatIntegrationDate(integration.lastSyncAt) }}</strong></div>
+                  <span :class="integrationBadge(integration.status)">{{ integrationStatus(integration.status) }}</span>
+                </article>
+              </div>
+              <div v-else class="integration-empty"><span><UiIcon name="store" :size="21" /></span><div><strong>Nenhuma conta conectada</strong><p>Conecte uma conta para receber e acompanhar pedidos do marketplace.</p></div><NuxtLink class="btn btn--primary" to="/marketplaces/novo">Conectar conta</NuxtLink></div>
+            </section>
+
+            <section class="integration-panel">
+              <div class="integration-panel__head"><span><UiIcon name="printer" :size="18" /></span><div><h3>PrintFlow Agent</h3><p>Computadores autorizados a operar impressoras nesta empresa.</p></div><NuxtLink class="btn" to="/impressoras">Ver impressoras</NuxtLink></div>
+              <div v-if="integrationsOverview.agents.length" class="integration-connection-list">
+                <article v-for="agent in integrationsOverview.agents" :key="agent.id" class="integration-connection-row">
+                  <span class="integration-connection-row__device"><UiIcon name="printer" :size="18" /></span>
+                  <div class="integration-connection-row__identity"><strong>{{ agent.name || agent.machineName }}</strong><span>{{ agent.machineName && agent.machineName !== agent.name ? agent.machineName : (agent.platform || 'Plataforma não informada') }}</span></div>
+                  <div class="integration-connection-row__activity"><small>Último contato</small><strong>{{ formatIntegrationDate(agent.lastSeenAt) }}</strong></div>
+                  <span :class="integrationBadge(agent.status)">{{ integrationStatus(agent.status) }}</span>
+                </article>
+              </div>
+              <div v-else class="integration-empty"><span><UiIcon name="printer" :size="21" /></span><div><strong>Nenhum Agent pareado</strong><p>Instale ou conecte o Agent para detectar e controlar impressoras locais.</p></div><NuxtLink class="btn btn--primary" to="/impressoras/nova">Configurar Agent</NuxtLink></div>
+            </section>
+
+            <section class="integration-service-note">
+              <span><UiIcon name="shield" :size="19" /></span><div><strong>Envio transacional · {{ integrationsOverview.email.provider }}</strong><p>{{ integrationsOverview.email.status === 'connected' ? 'O serviço está disponível para comunicações automáticas da plataforma.' : 'O serviço ainda não está configurado no ambiente. Não há ação necessária nesta tela.' }} Credenciais e segredos nunca são exibidos.</p></div><span :class="integrationBadge(integrationsOverview.email.status)">{{ integrationStatus(integrationsOverview.email.status) }}</span>
+            </section>
           </template>
         </div>
 
-        <div v-else-if="active === 'Ajuda e Suporte'" class="settings-security-card">
-          <div class="settings-section-heading"><div><h2>Ajuda e Suporte</h2><p>Abra uma solicitação, acompanhe o prazo e converse com a equipe pelo protocolo.</p></div><span class="badge badge--green">Canal autenticado</span></div>
-          <div class="support-overview" style="margin-top:18px"><div class="stat-box"><small>Em andamento</small><strong>{{ supportStats.open }}</strong><span>Solicitações abertas</span></div><div class="stat-box"><small>Aguardando triagem</small><strong>{{ supportStats.waiting }}</strong><span>A equipe analisará em breve</span></div><div class="stat-box"><small>Encerradas</small><strong>{{ supportStats.closed }}</strong><span>Histórico preservado</span></div></div>
-          <div class="info-note" style="margin-top:16px"><UiIcon name="info" /><div><strong>Como funciona</strong><br>Descreva o problema com o impacto e o resultado esperado. A equipe responderá no chat deste protocolo; solicitações de privacidade e LGPD permanecem rastreáveis separadamente.</div></div>
-          <form class="integration-section" @submit.prevent="submitSupportRequest">
-            <div class="form-grid">
-              <label class="field col-8"><span>Assunto</span><input v-model="supportDraft.subject" minlength="4" maxlength="120" required placeholder="Resuma o que voce precisa"></label>
-              <label class="field col-4"><span>Categoria</span><select v-model="supportDraft.category"><option value="technical">Suporte tecnico</option><option value="financial">Financeiro</option><option value="integration">Integracoes</option><option value="account">Conta e permissoes</option><option value="data_backup">Backup e dados</option><option value="privacy">Privacidade e LGPD</option><option value="audit">Auditoria excepcional</option></select></label>
-              <label v-if="supportDraft.category === 'privacy'" class="field col-4"><span>Direito relacionado</span><select v-model="supportDraft.privacyRight" required><option value="access">Consulta e acesso</option><option value="correction">Correcao</option><option value="deletion">Eliminacao</option><option value="opposition">Oposicao</option><option value="portability">Portabilidade</option><option value="sharing">Compartilhamento</option></select></label>
-              <label class="field col-4"><span>Prioridade</span><select v-model="supportDraft.priority" :disabled="supportDraft.category === 'audit'"><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option></select></label>
-              <label class="field col-12"><span>Descricao detalhada</span><textarea v-model="supportDraft.reason" minlength="12" maxlength="1000" required placeholder="Descreva o problema, impacto e resultado esperado"></textarea></label>
-              <template v-if="supportDraft.category === 'audit'">
-                <div class="col-12 info-note"><UiIcon name="shield" />Auditorias podem envolver dados sensiveis e exigem confirmacao de identidade, escopo e aprovacao da equipe responsavel.</div>
-                <label class="field col-6"><span>Tipo de item</span><input v-model="supportDraft.entityType" maxlength="80" required></label>
-                <label class="field col-6"><span>Identificador</span><input v-model="supportDraft.entityId" maxlength="160" required></label>
-                <label class="field col-6"><span>Senha atual</span><input v-model="supportDraft.currentPassword" type="password" autocomplete="current-password" required></label>
-              </template>
-            </div>
-            <button class="btn btn--primary" type="submit" :disabled="submittingSupport">{{ submittingSupport ? 'Criando...' : 'Criar solicitacao' }}</button>
-          </form>
+        <div v-else-if="active === 'Ajuda e Suporte'" class="support-contact-page">
+          <header class="support-contact-hero">
+            <span class="support-contact-hero__icon"><UiIcon name="chat" :size="24" /></span>
+            <div><span class="support-contact-hero__eyebrow">Fale com a equipe</span><h2>Como podemos ajudar?</h2><p>Envie sua dúvida ou descreva o problema. A mensagem será registrada diretamente no painel de suporte do PrintFlow.</p></div>
+            <span class="support-contact-hero__status"><i></i> Canal interno</span>
+          </header>
 
-          <div class="settings-section-heading settings-section-heading--spaced"><div><h2>Minhas solicitações</h2><p>Somente você e a equipe de suporte acessam estas conversas.</p></div><div class="settings-section-heading__actions"><select v-model="supportFilter" class="select-compact" aria-label="Filtrar solicitações"><option value="open">Em andamento</option><option value="closed">Encerradas</option><option value="all">Todas</option></select><button class="btn" @click="loadSupport">Atualizar</button></div></div>
-          <div v-if="!filteredSupportRequests.length" class="empty-state"><div><h3>{{ supportFilter === 'closed' ? 'Nenhuma solicitação encerrada' : 'Nenhuma solicitação em andamento' }}</h3><p>{{ supportFilter === 'closed' ? 'O histórico aparecerá aqui quando um atendimento for encerrado.' : 'Use o formulário acima para iniciar um atendimento.' }}</p></div></div>
-          <div v-else class="table-scroll" style="margin-top:12px"><table class="data-table"><thead><tr><th>Protocolo</th><th>Assunto</th><th>Tipo</th><th>Status</th><th>Prazo</th><th>Responsável</th><th>Criada em</th><th>Ação</th></tr></thead><tbody><tr v-for="request in filteredSupportRequests" :key="request.id"><td><strong class="support-protocol">{{ request.id }}</strong></td><td>{{ request.subject }}<small v-if="request.requestKind === 'privacy'">{{ request.privacyRight || 'Direito do titular' }}</small></td><td>{{ request.requestKind === 'privacy' ? 'LGPD' : supportCategoryLabel(request.category) }}</td><td><span :class="supportStatusClass(request.status)">{{ supportStatusLabel(request.status) }}</span></td><td>{{ request.dueAt ? new Date(request.dueAt).toLocaleDateString('pt-BR') : '-' }}</td><td>{{ request.responsibleName || 'Ainda não atribuído' }}</td><td>{{ new Date(request.createdAt).toLocaleString('pt-BR') }}</td><td style="display:flex;gap:6px"><button class="btn" @click="selectSupportRequest(request.id)">Abrir chat</button><button v-if="request.status === 'pending'" class="btn btn--danger" @click="cancelSupport(request)">Cancelar</button></td></tr></tbody></table></div>
+          <div v-if="submittedSupportProtocol" class="support-contact-success" role="status">
+            <span><UiIcon name="check" :size="22" /></span>
+            <div><strong>Mensagem enviada com sucesso</strong><p>A equipe recebeu seu contato. Guarde o protocolo <code>{{ formatSupportProtocol(submittedSupportProtocol) }}</code> caso precise fazer referência a esta solicitação.</p></div>
+            <button type="button" class="btn" @click="submittedSupportProtocol = ''">Enviar outra</button>
+          </div>
+
+          <form v-else class="support-contact-form" @submit.prevent="submitSupportRequest">
+            <div class="support-contact-form__intro"><div><h3>Seus dados de contato</h3><p>Usamos os dados confirmados da sua conta para identificar a solicitação.</p></div><span><UiIcon name="shield" :size="15" /> Conta verificada</span></div>
+            <div class="form-grid support-contact-form__fields">
+              <label class="field col-6"><span>Nome</span><input :value="auth.user.value?.name || ''" readonly aria-readonly="true"></label>
+              <label class="field col-6"><span>E-mail</span><input :value="auth.user.value?.email || ''" type="email" readonly aria-readonly="true"></label>
+              <label class="field col-12"><span>Assunto</span><input v-model="supportDraft.subject" minlength="4" maxlength="120" required placeholder="Resuma o que você precisa"></label>
+              <label class="field col-12"><span>Mensagem</span><textarea v-model="supportDraft.reason" minlength="12" maxlength="1000" required placeholder="Conte o que aconteceu e inclua as informações necessárias para entendermos o caso"></textarea><small>{{ supportDraft.reason.length }}/1000 caracteres</small></label>
+            </div>
+            <div class="support-contact-form__footer"><p><UiIcon name="info" :size="15" />Não inclua senhas, tokens ou dados de pagamento.</p><button class="btn btn--primary" type="submit" :disabled="submittingSupport"><UiIcon name="send" :size="15" />{{ submittingSupport ? 'Enviando...' : 'Enviar mensagem' }}</button></div>
+          </form>
         </div>
       </section>
 
@@ -740,7 +1015,6 @@ watch(() => supportDraft.category, (category) => {
           <ul class="check-list settings-context-panel__checks">
             <li v-for="check in currentPresentation.checks" :key="check"><span><UiIcon name="check" :size="15" /></span>{{ check }}</li>
           </ul>
-          <button v-if="showContextExport" class="btn btn--wide" :disabled="exportingData" @click="downloadTenantData"><UiIcon name="download" />{{ exportingData ? 'Gerando arquivo...' : 'Exportar dados' }}</button>
         </template>
         <template v-else>
           <span class="settings-context-panel__eyebrow"><UiIcon name="shield" :size="14" /> Proteção ativa</span>

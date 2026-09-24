@@ -1,4 +1,4 @@
-import type { AuditRequest, AuthorizedTenantAudit, Message, Overview, PlatformAudit, PlatformNotification, SupportAttachment, SupportMacro, SupportMetrics, SupportSlaRule, Tenant, PlatformPlan, TenantDetails, TenantSubscriptionEvent, TenantUser, TenantBillingRecord } from '~/types/platform-admin'
+import type { AuditRequest, AuthorizedTenantAudit, Message, Overview, PlatformAudit, PlatformNotification, SupportAttachment, SupportContact, SupportMacro, SupportMetrics, SupportSlaRule, Tenant, PlatformPlan, TenantDetails, TenantSubscriptionEvent, TenantUser, TenantBillingRecord } from '~/types/platform-admin'
 
 type LoadOptions = { overview?: boolean; tenants?: boolean; requests?: boolean }
 type Resource = keyof LoadOptions
@@ -302,6 +302,7 @@ export const usePlatformAdminWorkspace = () => {
     return updated
   }
   const exportSupportRequestsReport = () => session.download('/api/platform-admin/support-requests/report', 'Relatorio_Solicitacoes_PrintFlow.csv')
+  const loadSupportContact = (requestId: string) => session.request<SupportContact>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/contact`)
   const claimChat = async (requestId: string) => {
     const updated = await session.request<AuditRequest>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/claim`, { method: 'POST', body: {} })
     requests.value = requests.value.map(request => request.id === requestId ? updated : request)
@@ -320,6 +321,11 @@ export const usePlatformAdminWorkspace = () => {
     requests.value = requests.value.map(request => request.id === requestId ? updated : request)
     return updated
   }
+  const addSupportNote = async (requestId: string, body: string) => {
+    await session.request(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/messages`, { method: 'POST', body: { body, visibility: 'internal' } })
+    messagesUpdatedAt.value = { ...messagesUpdatedAt.value, [requestId]: 0 }
+    return loadMessages(requestId, true)
+  }
   const reopenSupportChat = async (requestId: string, reason: string) => {
     const updated = await session.request<AuditRequest>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/reopen`, { method: 'POST', body: { reason } })
     requests.value = requests.value.map(request => request.id === requestId ? { ...request, ...updated, status: 'under_review', supportStatus: 'reopened' } : request)
@@ -333,6 +339,6 @@ export const usePlatformAdminWorkspace = () => {
 
   return {
     session, overview, platformAuditEvents, platformAuditUpdatedAt, tenants, tenantPage, tenantPageSize, requests, messagesByRequest, supportHistory, supportAttachments, authorizedTenantAudit, notifications, supportMacros, supportMetrics, supportSlaRules, tenantDetails, tenantUsers, tenantSubscriptionEvents, tenantBillingRecords, platformPlans, loading, error,
-    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, loadPlatformAudit, updatePrivacyRequest, updateSupportMetadata, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, updatePlatformPlanBillingConfiguration, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
+    formatDate, tenantFor, statusLabel, statusClass, isChatOpen, load, loadMessages, loadSupportContact, loadSupportHistory, loadSupportAttachments, uploadSupportAttachment, downloadSupportAttachment, refreshRequests, loadPlatformAudit, updatePrivacyRequest, updateSupportMetadata, addSupportNote, reopenSupportChat, snoozeSupport, exportPrivacyPortability, loadChatAssignees, loadNotifications, loadSupportMacros, loadSupportMetrics, loadSupportSlaRules, loadPlatformPlans, updatePlatformPlanBillingConfiguration, loadTenantDetails, loadTenantUsers, loadTenantSubscriptionEvents, loadTenantBillingRecords, updateTenantSubscription, createTenantBillingRecord, updateSupportSlaRule, bulkUpdateSupport, autoAssignSupport, markNotificationRead, exportSupportRequestsReport, claimChat, transferChat, addChatCollaborator, refreshTenants, clearWorkspace, activeRequests, closedRequests
   }
 }

@@ -159,6 +159,7 @@ const readPrintJobs = async (client, tenantId) => {
       pr.name as printer_name,
       j.agent_printer_id,
       j.fulfillment_plan_id,
+      j.retry_of_job_id,
       fp.status as fulfillment_status,
       fp.reserved_quantity as fulfillment_reserved_quantity,
       fp.production_quantity as fulfillment_production_quantity,
@@ -218,8 +219,9 @@ const readPrintJobs = async (client, tenantId) => {
         when 'awaiting_confirmation' then 2
         when 'queued' then 3
         when 'completed' then 4
-        when 'cancelled' then 5
-        else 6
+        when 'failed' then 5
+        when 'cancelled' then 6
+        else 7
       end,
       j.priority desc,
       j.created_at asc
@@ -236,6 +238,7 @@ const readPrintJobs = async (client, tenantId) => {
     printerName: row.printer_name || '',
     agentPrinterId: row.agent_printer_id ? String(row.agent_printer_id) : '',
     fulfillmentPlanId: row.fulfillment_plan_id ? String(row.fulfillment_plan_id) : '',
+    retryOfJobId: row.retry_of_job_id ? String(row.retry_of_job_id) : '',
     fulfillmentStatus: row.fulfillment_status || '',
     fulfillmentReservedQuantity: Number(row.fulfillment_reserved_quantity || 0),
     fulfillmentProductionQuantity: Number(row.fulfillment_production_quantity || 0),
@@ -402,18 +405,31 @@ const readExpenseSegments = async (client, tenantId) => {
 
 const readGoals = async (client, tenantId) => {
   const result = await client.query(`
+    with sales as (
+      select o.tenant_id, o.gross, o.profit, o.order_date as sold_at
+      from orders o
+      where o.tenant_id = $1 and o.status <> 'Cancelado'
+      union all
+      select ts.tenant_id, ts.gross, ts.profit, ts.sold_at
+      from tracked_sales ts
+      where ts.tenant_id = $1 and ts.status <> 'Cancelado'
+    ), metrics as (
+      select g.id, sum(s.gross) as revenue, sum(s.profit) as profit,
+        count(s.sold_at)::int as orders, avg(s.gross) as ticket
+      from goals g
+      left join sales s on s.tenant_id = g.tenant_id
+        and g.period_start is not null and g.period_end is not null
+        and s.sold_at >= g.period_start and s.sold_at < (g.period_end + interval '1 day')
+      where g.tenant_id = $1
+      group by g.id
+    )
     select g.id, g.name, g.goal_type, g.current_value, g.target_value, g.color, g.icon,
       to_char(g.period_start, 'YYYY-MM-DD') as period_start, to_char(g.period_end, 'YYYY-MM-DD') as period_end, g.status,
       case when g.goal_type = 'revenue' then coalesce(k.revenue, 0) when g.goal_type = 'profit' then coalesce(k.profit, 0)
         when g.goal_type = 'orders' then coalesce(k.orders, 0) when g.goal_type = 'average_ticket' then coalesce(k.ticket, 0)
         else g.current_value end as calculated_current
     from goals g
-    left join lateral (
-      select sum(s.gross) as revenue, sum(s.profit) as profit, count(*)::int as orders, avg(s.gross) as ticket
-      from (select o.gross, o.profit, o.order_date from orders o where o.tenant_id = g.tenant_id and o.status <> 'Cancelado'
-        union all select ts.gross, ts.profit, ts.sold_at as order_date from tracked_sales ts where ts.tenant_id = g.tenant_id and ts.status <> 'Cancelado') s
-      where g.period_start is not null and g.period_end is not null and s.order_date >= g.period_start and s.order_date < (g.period_end + interval '1 day')
-    ) k on true
+    left join metrics k on k.id = g.id
     where g.tenant_id = $1 order by g.created_at asc
   `, [tenantId])
   return result.rows.map((row) => ({ id: String(row.id), name: row.name, goalType: row.goal_type || 'revenue', current: number(row.calculated_current), target: number(row.target_value),
@@ -465,7 +481,9 @@ const readMarketplaceIntegrations = async (client, tenantId) => {
 }
 
 export const loadAppData = async (tenantId, requestedResources = null) => withTenant(tenantId, async (client) => {
-  const selected = requestedResources instanceof Set && requestedResources.size ? requestedResources : new Set(Object.keys(resourceReaders))
+  // Um Set vazio é um escopo explícito: páginas como o histórico financeiro
+  // carregam a própria API paginada e não precisam consultar todos os recursos.
+  const selected = requestedResources instanceof Set ? requestedResources : new Set(Object.keys(resourceReaders))
   const read = (resource) => selected.has(resource) ? resourceReaders[resource](client, tenantId) : Promise.resolve([])
   const [products, orders, printJobs, expenses, filaments, printers, marketplaces, clients, expenseSegments, goals, settings, marketplaceIntegrations] = await Promise.all([
     read('products'), read('orders'), read('printJobs'), read('expenses'), read('filaments'), read('printers'),

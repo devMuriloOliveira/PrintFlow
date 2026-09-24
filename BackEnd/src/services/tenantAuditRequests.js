@@ -7,6 +7,30 @@ import { loadAppData } from '../repositories/appDataRepository.js'
 import { env } from '../config/env.js'
 
 const id = () => `support_${randomBytes(16).toString('hex')}`
+export const generateSupportProtocol = (randomBytesFn = randomBytes) => {
+  let protocol = ''
+  while (protocol.length < 16) {
+    for (const byte of randomBytesFn(32)) {
+      if (byte >= 250) continue
+      const digit = byte % 10
+      if (!protocol.length && digit === 0) continue
+      protocol += String(digit)
+      if (protocol.length === 16) return protocol
+    }
+  }
+  return protocol
+}
+export const reserveSupportProtocol = async (client, requestId, generate = generateSupportProtocol) => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const protocolNumber = generate()
+    const result = await client.query(`
+      insert into support_protocol_registry (protocol_number, request_id)
+      values ($1, $2) on conflict do nothing returning protocol_number
+    `, [protocolNumber, requestId])
+    if (result.rowCount) return protocolNumber
+  }
+  throw new Error('Nao foi possivel reservar um protocolo unico para o atendimento.')
+}
 const clean = (value, max = 1000) => String(value || '').trim().slice(0, max)
 const categories = new Set(['technical', 'financial', 'integration', 'account', 'data_backup', 'privacy', 'audit'])
 const priorities = new Set(['low', 'normal', 'high'])
@@ -29,8 +53,9 @@ const scopeFor = (value = {}) => ({
   periodEnd: /^\d{4}-\d{2}-\d{2}$/.test(String(value.periodEnd || '')) ? value.periodEnd : null
 })
 export const mapAuditRequestRow = (row) => ({
-  id: row.id, tenantId: row.tenant_id, requestedBy: String(row.requested_by), status: row.status,
+  id: row.id, protocolNumber: row.protocol_number || '', tenantId: row.tenant_id, requestedBy: String(row.requested_by), status: row.status,
   requesterName: clean(decryptField(row.requester_name), 160),
+  requesterEmail: clean(decryptField(row.requester_email), 254),
   subject: row.subject || row.reason, category: row.category || 'audit', priority: row.priority || 'normal',
   requestKind: row.request_kind || (row.category === 'privacy' ? 'privacy' : 'support'),
   privacyRight: row.privacy_right || '',
@@ -85,13 +110,18 @@ export const createTenantAuditRequest = async (user, payload) => {
     const firstResponseDueAt = sla ? new Date(Date.now() + Number(sla.first_response_minutes) * 60_000) : null
     const resolutionDueAt = sla ? new Date(Date.now() + Number(sla.resolution_minutes) * 60_000) : null
     await client.query('insert into tenant_audit_requests (id, tenant_id, requested_by, requester_role, subject, category, request_kind, privacy_right, priority, reason, scope, support_first_response_due_at, support_resolution_due_at, chat_opened_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, now())', [requestId, user.tenantId, String(user.id), clean(user.role, 40), request.subject, request.category, request.requestKind, request.privacyRight, request.priority, request.reason, JSON.stringify(request.scope), firstResponseDueAt, resolutionDueAt])
+    const protocolNumber = await reserveSupportProtocol(client, requestId)
     await writeAuditEvent(user.tenantId, { action: request.requestKind === 'privacy' ? 'privacy.request.created' : 'support.request.created', actorType: 'user', actorId: user.id, entityType: request.requestKind === 'privacy' ? 'privacy_request' : 'support_request', entityId: requestId, details: { category: request.category, privacyRight: request.privacyRight, priority: request.priority, requesterRole: clean(user.role, 40), scope: request.scope } }, client)
-    return { id: requestId, status: 'pending', ...request, requesterRole: clean(user.role, 40), responsibleId: null, responsibleName: '', dueAt: null, supportFirstResponseDueAt: firstResponseDueAt, supportResolutionDueAt: resolutionDueAt }
+    return { id: requestId, protocolNumber, status: 'pending', ...request, requesterRole: clean(user.role, 40), responsibleId: null, responsibleName: '', dueAt: null, supportFirstResponseDueAt: firstResponseDueAt, supportResolutionDueAt: resolutionDueAt }
   })
 }
 
 export const listTenantAuditRequests = async (user) => withTenant(user.tenantId, async (client) => {
-  const result = await client.query('select * from tenant_audit_requests where tenant_id = $1 and requested_by::text = $2 order by created_at desc limit 50', [user.tenantId, String(user.id)])
+  const result = await client.query(`select request.*, protocol.protocol_number
+    from tenant_audit_requests request
+    left join support_protocol_registry protocol on protocol.request_id = request.id
+    where request.tenant_id = $1 and request.requested_by::text = $2
+    order by request.created_at desc limit 50`, [user.tenantId, String(user.id)])
   return result.rows.map(mapAuditRequestRow)
 })
 
@@ -141,9 +171,10 @@ export const addTenantAuditMessage = async (user, requestId, body) => {
       const firstResponseDueAt = sla ? new Date(Date.now() + Number(sla.first_response_minutes) * 60_000) : null
       const resolutionDueAt = sla ? new Date(Date.now() + Number(sla.resolution_minutes) * 60_000) : null
       await client.query(`insert into tenant_audit_requests (id, tenant_id, requested_by, requester_role, subject, category, request_kind, privacy_right, priority, reason, scope, support_first_response_due_at, support_resolution_due_at, support_parent_request_id, chat_opened_at) values ($1, $2, $3, $4, $5, $6, 'support', '', $7, $8, $9::jsonb, $10, $11, $12, now())`, [newRequestId, user.tenantId, String(user.id), request.requester_role || '', `Continuação: ${request.subject || request.reason}`.slice(0, 120), request.category, request.priority, request.reason, JSON.stringify(request.scope || {}), firstResponseDueAt, resolutionDueAt, request.id])
+      const protocolNumber = await reserveSupportProtocol(client, newRequestId)
       await client.query('insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body) values ($1, $2, $3, $4, $5)', [user.tenantId, newRequestId, 'requester', String(user.id), message])
       await writeAuditEvent(user.tenantId, { action: 'support.request.reopened_as_new', actorType: 'user', actorId: user.id, entityType: 'support_request', entityId: newRequestId, details: { previousRequestId: request.id } }, client)
-      return { requestId: newRequestId, createdNewProtocol: true, previousRequestId: request.id }
+      return { requestId: newRequestId, protocolNumber, createdNewProtocol: true, previousRequestId: request.id }
     }
     await client.query(`update tenant_audit_requests set support_status = case when $3 then 'reopened' else support_status end, support_reopened_at = case when $3 then now() else support_reopened_at end, updated_at = now() where id = $1 and tenant_id = $2`, [requestId, user.tenantId, resolved])
     await client.query('insert into tenant_audit_request_messages (tenant_id, request_id, sender_type, sender_id, body) values ($1, $2, $3, $4, $5)', [user.tenantId, requestId, 'requester', String(user.id), message])
@@ -164,12 +195,18 @@ const supportListFilters = (filters = {}) => ({
   offset: Math.min(1000000, Math.max(0, Number(filters.offset) || 0))
 })
 
-export const listPlatformAuditRequests = async (user, filters = {}) => {
+export const listPlatformAuditRequests = async (user, filters = {}, runQuery = query) => {
   const selected = supportListFilters(filters)
   const params = [String(user.id)]
   const where = [`(request.chat_assigned_to is null or request.chat_assigned_to = $1 or exists (select 1 from platform_chat_collaborators visible_collaborator where visible_collaborator.request_id = request.id and visible_collaborator.user_id = $1))`]
   const bind = (value) => { params.push(value); return `$${params.length}` }
-  if (selected.search) { const value = `%${selected.search}%`; const placeholder = bind(value); where.push(`(request.id::text ilike ${placeholder} or request.subject ilike ${placeholder} or request.reason ilike ${placeholder})`) }
+  if (selected.search) {
+    const value = `%${selected.search}%`
+    const placeholder = bind(value)
+    const digits = selected.search.replace(/\D/g, '')
+    const protocolClause = digits.length >= 12 && digits.length <= 16 ? ` or protocol.protocol_number = ${bind(digits)}` : ''
+    where.push(`(request.id::text ilike ${placeholder} or request.subject ilike ${placeholder} or request.reason ilike ${placeholder}${protocolClause})`)
+  }
   if (selected.category) where.push(`request.category = ${bind(selected.category)}`)
   if (selected.status) where.push(['closed', 'cancelled', 'expired'].includes(selected.status) ? `request.status = ${bind(selected.status)}` : `coalesce(request.support_status, request.status) = ${bind(selected.status)}`)
   if (selected.assigneeId === 'unassigned') where.push('request.chat_assigned_to is null')
@@ -178,12 +215,14 @@ export const listPlatformAuditRequests = async (user, filters = {}) => {
   if (selected.from) where.push(`request.created_at >= ${bind(selected.from)}::date`)
   if (selected.to) where.push(`request.created_at < (${bind(selected.to)}::date + interval '1 day')`)
   params.push(selected.limit, selected.offset)
-  return (await query(`
-  select request.*, coalesce(nullif(trim(account.name), ''), '') as requester_name,
+  return (await runQuery(`
+  select request.*, protocol.protocol_number, coalesce(nullif(trim(account.name), ''), '') as requester_name,
+         ''::text as requester_email,
          coalesce(nullif(trim(responsible.name), ''), '') as responsible_name,
          coalesce(nullif(trim(assignee.name), ''), '') as chat_assignee_name,
          coalesce(collaborators.items, '[]'::json) as chat_collaborators
     from tenant_audit_requests request
+    left join support_protocol_registry protocol on protocol.request_id = request.id
     left join users account
       on account.id::text = request.requested_by
      and account.tenant_id = request.tenant_id
@@ -201,6 +240,26 @@ export const listPlatformAuditRequests = async (user, filters = {}) => {
    order by request.created_at desc
    limit $${params.length - 1} offset $${params.length}
 `, params)).rows.map((row) => ({ ...mapAuditRequestRow(row), chatCollaborators: (row.chat_collaborators || []).map((collaborator) => ({ id: String(collaborator.id), name: clean(decryptField(collaborator.name || ''), 160) })) }))
+}
+
+export const getPlatformSupportContact = async (user, requestId, runQuery = query) => {
+  const result = await runQuery(`
+    select request.tenant_id, account.name as requester_name, account.email as requester_email
+      from tenant_audit_requests request
+      join users account on account.id::text = request.requested_by and account.tenant_id = request.tenant_id
+     where request.id = $1 and request.request_kind = 'support'
+       and (request.chat_assigned_to = $2 or exists (
+         select 1 from platform_chat_collaborators collaborator
+          where collaborator.request_id = request.id and collaborator.user_id = $2
+       ))
+     limit 1
+  `, [requestId, String(user.id)])
+  if (!result.rowCount) throw new Error('Contato indisponivel. Assuma o atendimento antes de acessar o e-mail.')
+  return {
+    tenantId: result.rows[0].tenant_id,
+    requesterName: clean(decryptField(result.rows[0].requester_name), 160),
+    requesterEmail: clean(decryptField(result.rows[0].requester_email), 254)
+  }
 }
 
 export const createPlatformPrivacyRequestActions = (runQuery = query) => ({
@@ -375,10 +434,11 @@ export const platformAuditMessages = async (requestId, range = {}, user = null) 
 
 export const getPlatformAuditChatReport = async (requestId, range = {}, user = null) => {
   const request = await query(`
-    select request.id, request.tenant_id, request.subject, request.created_at,
+    select request.id, protocol.protocol_number, request.tenant_id, request.subject, request.created_at,
            tenant.name as company_name, account.name as requester_name
       from tenant_audit_requests request
       join tenants tenant on tenant.id = request.tenant_id
+      left join support_protocol_registry protocol on protocol.request_id = request.id
       left join users account on account.id::text = request.requested_by and account.tenant_id = request.tenant_id
      where request.id = $1
        and ($2::text is null or request.chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators collaborator where collaborator.request_id = request.id and collaborator.user_id = $2)
@@ -389,7 +449,7 @@ export const getPlatformAuditChatReport = async (requestId, range = {}, user = n
   const conversation = await platformAuditMessages(requestId, range, user)
   if (!conversation.tenantId) throw new Error('Conversa indisponivel.')
   return {
-    id: request.rows[0].id, tenantId: request.rows[0].tenant_id, subject: request.rows[0].subject,
+    id: request.rows[0].id, protocolNumber: request.rows[0].protocol_number || '', tenantId: request.rows[0].tenant_id, subject: request.rows[0].subject,
     createdAt: request.rows[0].created_at, companyName: decryptField(request.rows[0].company_name),
     requesterName: decryptField(request.rows[0].requester_name), messages: conversation.messages
   }

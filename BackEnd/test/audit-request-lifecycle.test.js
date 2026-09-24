@@ -13,11 +13,15 @@ const {
   createPlatformSupportMetadataActions,
   createPlatformPrivacyRequestActions,
   findRequesterRequest,
+  generateSupportProtocol,
+  getPlatformSupportContact,
   isAuditChatOpenStatus,
+  listPlatformAuditRequests,
   mapAuditRequestRow,
   mapPlatformAuditMessage,
   mapTenantSupportMessage,
   normalizeSupportRequest,
+  reserveSupportProtocol,
   supportReopenDecision,
   updatePlatformSupportSlaRule
 } = await import('../src/services/tenantAuditRequests.js')
@@ -70,7 +74,7 @@ test('chat permanece aberto durante analise, aprovacao e rejeicao', () => {
 test('retorno preserva decisao e horarios depois do encerramento', () => {
   const row = mapAuditRequestRow({
     id: 'auditreq-mapped', tenant_id: 'tenant-test', requested_by: 'owner-test', reviewed_by: 'admin-test',
-    requester_name: 'Alex Solicitante',
+    requester_name: encryptField('Alex Solicitante'), requester_email: encryptField('alex@example.com'),
     status: 'closed', reason: 'Auditoria solicitada', scope: {}, review_reason: 'Acesso temporario aprovado.',
     expires_at: '2026-09-04T12:30:00.000Z', chat_opened_at: '2026-09-04T12:00:00.000Z',
     chat_closed_at: '2026-09-04T12:20:00.000Z', created_at: '2026-09-04T12:00:00.000Z', updated_at: '2026-09-04T12:20:00.000Z'
@@ -84,6 +88,7 @@ test('retorno preserva decisao e horarios depois do encerramento', () => {
   assert.equal(row.category, 'audit')
   assert.equal(row.subject, 'Auditoria solicitada')
   assert.equal(row.requesterName, 'Alex Solicitante')
+  assert.equal(row.requesterEmail, 'alex@example.com')
 })
 
 test('normaliza suporte comum sem exigir escopo e protege auditoria', () => {
@@ -98,6 +103,53 @@ test('normaliza suporte comum sem exigir escopo e protege auditoria', () => {
   assert.equal(audit.priority, 'high')
   assert.deepEqual(audit.scope, { type: 'operational_audit', entityType: 'order', entityId: 'order-1', periodStart: null, periodEnd: null })
   assert.throws(() => normalizeSupportRequest({ category: 'unknown', subject: 'Teste', reason: 'Descricao suficientemente longa.' }), /Categoria/)
+})
+
+test('protocolo publico tem 16 digitos, nao inicia com zero e e reservado com retry', async () => {
+  const bytes = Buffer.from(Array.from({ length: 32 }, (_, index) => index))
+  const protocol = generateSupportProtocol(() => bytes)
+  assert.match(protocol, /^[1-9][0-9]{15}$/)
+
+  const calls = []
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params })
+      return calls.length === 1 ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ protocol_number: params[0] }] }
+    }
+  }
+  const candidates = ['1234567890123456', '9876543210987654']
+  const reserved = await reserveSupportProtocol(client, 'support-1', () => candidates.shift())
+  assert.equal(reserved, '9876543210987654')
+  assert.equal(calls.length, 2)
+  assert.match(calls[0].sql, /on conflict do nothing/)
+  assert.deepEqual(calls[1].params, ['9876543210987654', 'support-1'])
+})
+
+test('contato do cliente exige atribuicao ao tecnico e nao usa protocolo como autorizacao', async () => {
+  const calls = []
+  const contact = await getPlatformSupportContact({ id: 'admin-a' }, 'support-1', async (sql, params) => {
+    calls.push({ sql, params })
+    return { rowCount: 1, rows: [{ tenant_id: 'tenant-a', requester_name: encryptField('Cliente Teste'), requester_email: encryptField('cliente@example.com') }] }
+  })
+  assert.deepEqual(contact, { tenantId: 'tenant-a', requesterName: 'Cliente Teste', requesterEmail: 'cliente@example.com' })
+  assert.deepEqual(calls[0].params, ['support-1', 'admin-a'])
+  assert.match(calls[0].sql, /chat_assigned_to = \$2/)
+  assert.match(calls[0].sql, /platform_chat_collaborators/)
+
+  await assert.rejects(getPlatformSupportContact({ id: 'admin-b' }, '1234567890123456', async () => ({ rowCount: 0, rows: [] })), /Assuma o atendimento/)
+})
+
+test('fila administrativa pesquisa protocolo formatado sem expor email do cliente', async () => {
+  let received
+  const rows = await listPlatformAuditRequests({ id: 'admin-a' }, { search: '1234 5678 9012 3456' }, async (sql, params) => {
+    received = { sql, params }
+    return { rows: [{ id: 'support-1', protocol_number: '1234567890123456', tenant_id: 'tenant-a', requested_by: 'user-a', requester_name: encryptField('Cliente'), requester_email: '', status: 'pending', subject: 'Ajuda', reason: 'Preciso de ajuda no sistema.', category: 'technical', request_kind: 'support', priority: 'normal', scope: {}, created_at: new Date(), updated_at: new Date() }] }
+  })
+  assert.equal(rows[0].protocolNumber, '1234567890123456')
+  assert.equal(rows[0].requesterEmail, '')
+  assert.match(received.sql, /''::text as requester_email/)
+  assert.match(received.sql, /protocol\.protocol_number/)
+  assert.ok(received.params.includes('1234567890123456'))
 })
 
 test('consulta de conversa exige tenant e solicitante exatos', async () => {

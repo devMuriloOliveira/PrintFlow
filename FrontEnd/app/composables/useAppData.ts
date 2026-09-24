@@ -9,7 +9,7 @@ export type Order = {
 
 export type PrintJob = {
   id?: string;
-  orderId?: string; externalOrderId?: string; trackedSaleId?: string; productId?: string; productName?: string;
+  orderId?: string; externalOrderId?: string; trackedSaleId?: string; productId?: string; productName?: string; retryOfJobId?: string;
   printerId?: string; printerName?: string; agentPrinterId?: string; agentPrinterStatus?: string;
   printFileName?: string; printFileFormat?: string; validationStatus?: string; validationMessage?: string;
   agentLastStatus?: Record<string, unknown>; source: string; title: string; quantity: number; priority: number;
@@ -162,7 +162,7 @@ export type BackupStatus = {
   export: { enabled: boolean; format: 'json'; excludes: string[] }
   restore: { enabled: false; reason: string }
 }
-export type SupportRequest = { id: string; status: string; supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; supportFirstResponseDueAt?: string | null; supportResolutionDueAt?: string | null; supportReopenUntil?: string | null; supportReopenedAt?: string | null; supportParentRequestId?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
+export type SupportRequest = { id: string; protocolNumber: string; status: string; supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; supportFirstResponseDueAt?: string | null; supportResolutionDueAt?: string | null; supportReopenUntil?: string | null; supportReopenedAt?: string | null; supportParentRequestId?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
 export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
 export type SupportAttachment = { id: string; requestId: string; originalName: string; mimeType: string; sizeBytes: number; expiresAt: string; createdAt: string }
 export type FinancialHistoryEntry = { id: string; resource: string; resourceId: string; snapshot: Record<string, any>; source: string; createdAt: string }
@@ -208,7 +208,12 @@ export const useAppData = () => {
       '/produtos': ['products', 'printers', 'filaments'],
       '/impressoras': ['printers', 'printJobs', 'products', 'filaments'],
       '/filamentos': ['filaments', 'printJobs', 'products'],
-      '/estoque': ['filaments', 'products'],
+      '/estoque': (() => {
+        const section = String(route.query.secao || 'visao')
+        if (section === 'filamentos') return ['filaments']
+        if (section === 'produtos') return ['products']
+        return ['filaments', 'products']
+      })(),
       '/despesas': ['expenses', 'expenseSegments'],
       '/metas': ['goals'],
       '/marketplaces': ['marketplaces', 'products'],
@@ -226,7 +231,7 @@ export const useAppData = () => {
   const loadAppData = async (force = false) => {
     const cacheTtlMs = 60_000
     const scope = resourceScopeForRoute()
-    const scopeKey = scope?.slice().sort().join(',') || 'all'
+    const scopeKey = scope === null ? 'all' : scope.slice().sort().join(',') || 'empty'
     const cacheKey = `${tenantId.value}:${scopeKey}`
     const cachedScope = scopeCache.value[cacheKey]
     if (!force && cachedScope && Date.now() - cachedScope.loadedAt < cacheTtlMs) {
@@ -373,6 +378,9 @@ export const useAppData = () => {
   const completeQueuedPrintJob = (id: string) =>
     requestPrintJobAction(`/api/print-jobs/${id}/complete`, {}, 'Nao foi possivel concluir o item da fila.')
 
+  const retryPrintJob = (id: string) =>
+    requestPrintJobAction(`/api/print-jobs/${id}/retry`, {}, 'Nao foi possivel criar uma nova tentativa.')
+
   const approveProductionOutput = async (id: string, approvedQuantity: number, rejectedQuantity: number) => {
     await $fetch(apiUrl(`/api/print-jobs/${id}/quality-approve`), { method: 'POST', body: { approvedQuantity, rejectedQuantity }, headers: resourceHeaders() })
     await loadAppData(true)
@@ -404,6 +412,22 @@ export const useAppData = () => {
       data.value.products = data.value.products.map((item) => String(item.id) === String(productId) ? response.product as Product : item)
     }
 
+    return response
+  }
+
+  const uploadProductImage = async (productId: string, file: File) => {
+    const response = await $fetch<{ product: Product | null }>(apiUrl(`/api/products/${encodeURIComponent(productId)}/image`), {
+      method: 'PUT',
+      body: file,
+      headers: {
+        ...resourceHeaders(),
+        'Content-Type': file.type || 'application/octet-stream'
+      }
+    })
+
+    if (response.product) {
+      data.value.products = data.value.products.map((item) => String(item.id) === String(productId) ? response.product as Product : item)
+    }
     return response
   }
 
@@ -599,7 +623,7 @@ export const useAppData = () => {
     error,
     refreshAppData: loadAppData,
     createProduct
-    , uploadProductPrintFile, generateRecurringExpenses
+    , uploadProductPrintFile, uploadProductImage, generateRecurringExpenses
     , createMarketplaceIntegration
     , loadInventoryOverview, listPendingProductionMaterial, reconcilePendingProductionMaterial, listProductInventoryMovements, createProductInventoryMovement
     , advanceOrderStage
@@ -639,6 +663,7 @@ export const useAppData = () => {
     , approveMarketplacePrintJob
     , startManualPrintJob
     , completeQueuedPrintJob
+    , retryPrintJob
     , approveProductionOutput
     , createItem
     , updateItem

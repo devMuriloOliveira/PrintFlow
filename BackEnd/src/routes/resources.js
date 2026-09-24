@@ -2,7 +2,7 @@ import { getTenantData } from '../data.js'
 import { hasDatabase, withTenant } from '../db/pool.js'
 import { getTenantId } from '../config/tenant.js'
 import { getAuthUser } from './auth.js'
-import { readJsonBody } from '../http/body.js'
+import { readJsonBody, readRawBody } from '../http/body.js'
 import { sendBuffer, sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
@@ -19,6 +19,11 @@ import {
   applyPrintFileMetadataToProduct,
   extractPrintFileMetadata
 } from '../services/printFileMetadata.js'
+import {
+  productImageMaxBytes,
+  readProductImage,
+  saveProductImage
+} from '../services/productImageStorage.js'
 import { generateDueRecurringExpenses } from '../repositories/expensesRepository.js'
 import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
@@ -72,7 +77,10 @@ export const readRoutes = {
     const tenantId = await getTenantId(req)
     if (!hasDatabase) return getTenantData(tenantId)
     const url = new URL(req.url, 'http://localhost')
-    const requested = new Set(String(url.searchParams.get('resources') || '').split(',').map((resource) => resource.trim()).filter(Boolean))
+    const rawResources = url.searchParams.get('resources')
+    const requested = rawResources === null
+      ? null
+      : new Set(String(rawResources).split(',').map((resource) => resource.trim()).filter(Boolean))
     return loadAppData(tenantId, requested)
   },
   '/api/financial-history': async (req) => {
@@ -203,7 +211,7 @@ export const handleProductPrintFileUpload = async (req, res, productId, url) => 
       const updated = await updateResource(tenantId, 'products', productId, applyPrintFileMetadataToProduct(productWithFile, metadata), {
         ...(await auditActor(req)),
         action: 'products.print_file_uploaded',
-        details: { format: stored.format, sizeBytes: stored.size }
+        details: { format: stored.format, sizeBytes: stored.sizeBytes }
       })
 
       const savedProduct = Array.isArray(updated)
@@ -251,6 +259,57 @@ export const handleProductPrintFileUpload = async (req, res, productId, url) => 
     })
   } catch (error) {
     return sendJson(res, 400, { error: error.message || 'Nao foi possivel enviar o arquivo' })
+  }
+}
+
+const findTenantProduct = async (tenantId, productId) => {
+  if (hasDatabase) {
+    await assertResourceBelongsToTenant(tenantId, 'products', productId)
+    return (await listProducts(tenantId)).find((item) => String(item.id) === String(productId)) || null
+  }
+  return getTenantData(tenantId).products.find((item) => String(item.id) === String(productId)) || null
+}
+
+export const handleProductImageUpload = async (req, res, productId) => {
+  try {
+    const tenantId = await getTenantId(req)
+    const product = await findTenantProduct(tenantId, productId)
+    if (!product) return sendJson(res, 404, { error: 'Registro nao encontrado' })
+
+    const body = await readRawBody(req, productImageMaxBytes)
+    const stored = await saveProductImage({ tenantId, productId, body })
+
+    if (hasDatabase) {
+      const list = await updateResource(tenantId, 'products', productId, { thumb: stored.marker }, {
+        ...(await auditActor(req)),
+        action: 'products.image_uploaded',
+        details: { mimeType: stored.mimeType, sizeBytes: stored.sizeBytes }
+      })
+      return sendJson(res, 200, {
+        product: list.find((item) => String(item.id) === String(productId)) || null
+      })
+    }
+
+    product.thumb = stored.marker
+    return sendJson(res, 200, { product })
+  } catch (error) {
+    const notFound = error.message === 'Registro nao encontrado'
+    return sendJson(res, notFound ? 404 : 400, { error: notFound ? error.message : (error.message || 'Nao foi possivel enviar a imagem') })
+  }
+}
+
+export const handleProductImageRead = async (req, res, productId) => {
+  try {
+    const tenantId = await getTenantId(req)
+    const product = await findTenantProduct(tenantId, productId)
+    if (!product) return sendJson(res, 404, { error: 'Registro nao encontrado' })
+    const image = await readProductImage({ tenantId, productId, marker: product.thumb })
+    return sendBuffer(res, 200, image.body, {
+      'Content-Type': image.mimeType,
+      'Cache-Control': 'private, max-age=300'
+    })
+  } catch {
+    return sendJson(res, 404, { error: 'Imagem nao encontrada' })
   }
 }
 

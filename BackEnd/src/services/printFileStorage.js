@@ -242,22 +242,27 @@ export const savePrintFileStream =
 
 export const resolvePrintFilePath =
   (storageKey) => {
-    const safeParts =
+    const parts =
       String(
         storageKey ||
           ''
       )
         .split('/')
-        .map(cleanSegment)
         .filter(Boolean)
 
     if (
-      safeParts.length !==
-      3
+      parts.length !== 3 ||
+      parts.some((part) => part === '.' || part === '..')
     ) {
       throw new Error(
         'Chave de arquivo invalida.'
       )
+    }
+
+    const safeParts = parts.map(cleanSegment)
+
+    if (safeParts.some((part) => !part || part === '.' || part === '..')) {
+      throw new Error('Chave de arquivo invalida.')
     }
 
     const filePath =
@@ -276,11 +281,7 @@ export const resolvePrintFilePath =
         filePath
       )
 
-    if (
-      !resolved.startsWith(
-        root
-      )
-    ) {
+    if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) {
       throw new Error(
         'Chave de arquivo invalida.'
       )

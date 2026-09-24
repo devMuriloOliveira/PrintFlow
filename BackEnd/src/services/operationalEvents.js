@@ -42,6 +42,7 @@ const actionLabels = {
   'platform.tenant_audit.read': 'Relatorio de empresa consultado',
   'platform.tenant_audit.exported': 'Relatorio de empresa exportado',
   'platform.support.chat_report_exported': 'Relatorio de conversa exportado',
+  'platform.support.customer_contact_viewed': 'Contato do cliente consultado pelo tecnico responsavel',
   'platform.support.requests_report_exported': 'Relatorio interno de solicitacoes exportado',
   'platform.support.message_sent': 'Resposta de suporte enviada',
   'platform.support.internal_note_added': 'Nota interna de suporte registrada',

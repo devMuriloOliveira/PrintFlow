@@ -1,5 +1,6 @@
 import { releaseProductionMaterialReservation, reserveProductionMaterial } from './productionInventory.js'
 import { createProductMovementWithClient } from '../repositories/inventoryRepository.js'
+import { writeOperationalNotification } from './operationalEvents.js'
 
 const quantity = (value) => {
   const parsed = Math.floor(Number(value))
@@ -13,6 +14,11 @@ const sourceColumn = (sourceType) => {
   throw new Error('Origem de atendimento invalida.')
 }
 
+export const productUnitsPerRun = (product = {}) => {
+  const value = Math.floor(Number(product?.cost_breakdown?.unitsPerRun ?? product?.cost_breakdown?.batchQuantity ?? 1))
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 1000) : 1
+}
+
 export const createSalesFulfillmentPlan = async ({ client, tenantId, sourceType, sourceId, productId, requestedQuantity, title = '', notes = '', awaitingConfirmation = false }) => {
   const existing = await client.query(
     `select id, reserved_quantity, production_quantity, status
@@ -24,7 +30,7 @@ export const createSalesFulfillmentPlan = async ({ client, tenantId, sourceType,
   if (existing.rowCount) return { plan: existing.rows[0], idempotent: true }
 
   const product = await client.query(
-    `select p.id, p.name, p.printer_id, pr.agent_printer_id, coalesce(pi.quantity, 0) as quantity, coalesce(pi.reserved_quantity, 0) as reserved_quantity
+    `select p.id, p.name, p.printer_id, p.cost_breakdown, pr.agent_printer_id, coalesce(pi.quantity, 0) as quantity, coalesce(pi.reserved_quantity, 0) as reserved_quantity
        from products p
        left join product_inventory pi on pi.tenant_id = p.tenant_id and pi.product_id = p.id
        left join printers pr on pr.tenant_id = p.tenant_id and pr.id = p.printer_id
@@ -58,24 +64,44 @@ export const createSalesFulfillmentPlan = async ({ client, tenantId, sourceType,
     [tenantId, sourceType, sourceId, productId, requested, reserved, production, production ? 'partial_production' : 'reserved']
   )
 
-  if (!production || !row.printer_id) return { plan: plan.rows[0], productionJobId: null }
+  if (!production) return { plan: plan.rows[0], productionJobId: null, productionJobIds: [] }
+  if (!row.printer_id) {
+    await writeOperationalNotification(tenantId, {
+      type: 'production.printer_missing', severity: 'warning', title: 'Venda aguardando impressora',
+      message: `O produto ${row.name || `#${productId}`} precisa produzir ${production} unidade(s), mas nao possui impressora configurada.`,
+      entityType: 'sales_fulfillment_plan', entityId: String(plan.rows[0].id),
+      dedupeKey: `production-printer-missing:${plan.rows[0].id}`
+    }, client)
+    return { plan: plan.rows[0], productionJobId: null, productionJobIds: [], exception: 'printer_missing' }
+  }
   const source = sourceColumn(sourceType)
   const priority = await client.query(
     `select coalesce(max(priority), 0) + 1 as next_priority from print_jobs where tenant_id = $1 and printer_id = $2 and status = 'queued'`,
     [tenantId, row.printer_id]
   )
-  const job = await client.query(
-    `insert into print_jobs (tenant_id, ${source}, product_id, printer_id, agent_printer_id, fulfillment_plan_id, source, title, quantity, priority, status, notes)
-     values ($1, $2, $3, $4, $5, $6, 'fulfillment', $7, $8, $9, $10, $11)
-     returning id`,
-    [tenantId, sourceId, productId, row.printer_id, row.agent_printer_id || null, plan.rows[0].id, title || row.name, production, Number(priority.rows[0]?.next_priority || 1), awaitingConfirmation ? 'awaiting_confirmation' : 'queued', notes]
-  )
-  try {
-    await reserveProductionMaterial({ client, tenantId, printJobId: job.rows[0].id, productId, quantity: production })
-  } catch (error) {
+  const unitsPerRun = productUnitsPerRun(row)
+  const runsRequired = Math.ceil(production / unitsPerRun)
+  const productionJobIds = []
+  let reservationFailed = false
+  for (let runIndex = 0; runIndex < runsRequired; runIndex += 1) {
+    const runNotes = [notes, runsRequired > 1 ? `Execucao ${runIndex + 1}/${runsRequired}; ${unitsPerRun} unidade(s) fisicas por arquivo.` : ''].filter(Boolean).join(' ')
+    const job = await client.query(
+      `insert into print_jobs (tenant_id, ${source}, product_id, printer_id, agent_printer_id, fulfillment_plan_id, source, title, quantity, priority, status, notes)
+       values ($1, $2, $3, $4, $5, $6, 'fulfillment', $7, $8, $9, $10, $11)
+       returning id`,
+      [tenantId, sourceId, productId, row.printer_id, row.agent_printer_id || null, plan.rows[0].id, title || row.name, unitsPerRun, Number(priority.rows[0]?.next_priority || 1) + runsRequired - runIndex - 1, awaitingConfirmation ? 'awaiting_confirmation' : 'queued', runNotes]
+    )
+    productionJobIds.push(job.rows[0].id)
+    try {
+      await reserveProductionMaterial({ client, tenantId, printJobId: job.rows[0].id, productId, quantity: unitsPerRun })
+    } catch (error) {
+      reservationFailed = true
+    }
+  }
+  if (reservationFailed) {
     await client.query(`update sales_fulfillment_plans set status = 'awaiting_material', updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, plan.rows[0].id])
   }
-  return { plan: plan.rows[0], productionJobId: job.rows[0].id }
+  return { plan: plan.rows[0], productionJobId: productionJobIds[0] || null, productionJobIds, unitsPerRun, runsRequired }
 }
 
 export const releaseSalesFulfillmentPlan = async ({ client, tenantId, sourceType, sourceId }) => {
@@ -127,23 +153,23 @@ export const reduceSalesFulfillmentPlan = async ({ client, tenantId, sourceType,
 
   const jobs = await client.query(
     `select id, product_id, quantity, status
-       from print_jobs
+      from print_jobs
       where tenant_id = $1 and fulfillment_plan_id = $2
-      order by id desc
-      limit 1
+      order by id asc
       for update`,
     [tenantId, row.id]
   )
   const nextProduction = Math.max(0, requested - nextReserved)
-  const job = jobs.rows[0]
-  if (job && ['queued', 'awaiting_confirmation'].includes(String(job.status || ''))) {
+  const committedUnits = jobs.rows
+    .filter((job) => !['queued', 'awaiting_confirmation', 'cancelled', 'failed'].includes(String(job.status || '')))
+    .reduce((sum, job) => sum + Number(job.quantity || 0), 0)
+  const pendingJobs = jobs.rows.filter((job) => ['queued', 'awaiting_confirmation'].includes(String(job.status || '')))
+  const unitsPerRun = Number(pendingJobs[0]?.quantity || 1)
+  const pendingRunsRequired = Math.ceil(Math.max(0, nextProduction - committedUnits) / Math.max(1, unitsPerRun))
+  for (let index = pendingRunsRequired; index < pendingJobs.length; index += 1) {
+    const job = pendingJobs[index]
     await releaseProductionMaterialReservation({ client, tenantId, printJobId: job.id, reason: 'Quantidade do marketplace reduzida.' })
-    if (nextProduction > 0) {
-      await client.query(`update print_jobs set quantity = $3, updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, job.id, nextProduction])
-      await reserveProductionMaterial({ client, tenantId, printJobId: job.id, productId: job.product_id, quantity: nextProduction })
-    } else {
-      await client.query(`update print_jobs set status = 'cancelled', updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, job.id])
-    }
+    await client.query(`update print_jobs set status = 'cancelled', cancelled_at = coalesce(cancelled_at, now()), updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, job.id])
   }
   await client.query(
     `update sales_fulfillment_plans

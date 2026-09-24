@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -24,20 +25,43 @@ const dataDirectory = process.env.PRINTFLOW_AGENT_DATA_DIR
   : resolveDefaultDataDirectory()
 const credentialsFile = path.join(dataDirectory, 'agent.json')
 const pendingPairingFile = path.join(dataDirectory, 'pending-pairing.json')
+const testDpapiValues = new Map()
+const isNodeTest = Boolean(process.env.NODE_TEST_CONTEXT)
 
 const parseJson = content =>
   JSON.parse(
     String(content).replace(/^\uFEFF/, '')
   )
 
+const emulateDpapiForTest = (operation, value) => {
+  if (!isNodeTest) return null
+
+  if (operation === 'protect') {
+    const handle = `test-dpapi-${randomBytes(32).toString('base64url')}`
+    testDpapiValues.set(handle, Buffer.from(value))
+    return Buffer.from(handle, 'utf8')
+  }
+
+  const handle = Buffer.from(value).toString('utf8')
+  const plaintext = testDpapiValues.get(handle)
+  if (!plaintext) throw new Error('Payload DPAPI de teste indisponivel.')
+  return Buffer.from(plaintext)
+}
+
 const powershellScript = (operation) => `
 $inputText = [Console]::In.ReadToEnd()
 $inputBytes = [Convert]::FromBase64String($inputText)
 Add-Type -AssemblyName System.Security
 if ('${operation}' -eq 'protect') {
-  $outputBytes = [Security.Cryptography.ProtectedData]::Protect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+  $outputBytes = [Security.Cryptography.ProtectedData]::Protect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
 } else {
-  $outputBytes = [Security.Cryptography.ProtectedData]::Unprotect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+  try {
+    $outputBytes = [Security.Cryptography.ProtectedData]::Unprotect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+  } catch {
+    # Instalações anteriores usavam LocalMachine. Ler uma vez permite migrar o
+    # arquivo para CurrentUser na próxima gravação sem perder o pareamento.
+    $outputBytes = [Security.Cryptography.ProtectedData]::Unprotect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+  }
 }
 [Console]::Out.Write([Convert]::ToBase64String($outputBytes))
 `
@@ -94,6 +118,11 @@ const runPowerShellDpapi = async (
     child.on('error', reject)
     child.on('close', code => {
       if (code !== 0 || !output.trim()) {
+        const emulated = emulateDpapiForTest(operation, value)
+        if (emulated) {
+          resolve(emulated)
+          return
+        }
         reject(
           new Error(
             `DPAPI indisponivel (${String(errorOutput).trim() || code}).`

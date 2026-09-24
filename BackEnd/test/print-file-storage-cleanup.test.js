@@ -6,7 +6,8 @@ import test from 'node:test'
 
 import {
   cleanupPrintFileStorage,
-  openPrintFileReadStream
+  openPrintFileReadStream,
+  resolvePrintFilePath
 } from '../src/services/printFileStorage.js'
 import { env } from '../src/config/env.js'
 
@@ -64,6 +65,20 @@ test('leitura R2 usa arquivo local legado quando o objeto ainda nao existe', asy
     env.objectStorageProvider = previousProvider
     env.printFileStorageDir = previousRoot
     await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rejeita traversal para diretorio com prefixo semelhante ao storage', () => {
+  const previousRoot = env.printFileStorageDir
+  env.printFileStorageDir = path.join(os.tmpdir(), 'printflow-files')
+
+  try {
+    assert.throws(
+      () => resolvePrintFilePath('../printflow-files-public/secret.3mf'),
+      /Chave de arquivo invalida/
+    )
+  } finally {
+    env.printFileStorageDir = previousRoot
   }
 })
 

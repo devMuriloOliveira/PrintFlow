@@ -15,5 +15,9 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "devalue": "5.9.1",
+    "svgo": "4.1.0"
   }
 }

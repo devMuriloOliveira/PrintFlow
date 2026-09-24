@@ -3024,13 +3024,16 @@ export const handleAgentPrintFileGet =
         ''
       ).trim()
 
-    if (!storageKey) {
+    const printJobId =
+      String(url.searchParams.get('printJobId') || '').trim()
+
+    if (!storageKey || (printJobId && !/^\d+$/.test(printJobId))) {
       return sendJson(
         res,
         400,
         {
           error:
-            'Chave do arquivo obrigatoria'
+            'Chave do arquivo invalida'
         }
       )
     }
@@ -3040,15 +3043,24 @@ export const handleAgentPrintFileGet =
         agent.tenant_id,
         `
           select
-            id,
-            print_file_name,
-            print_file_format,
-            print_file_hash,
-            print_file_size_bytes,
-            print_file_storage_key
-          from products
-          where tenant_id = $1
-            and print_file_storage_key = $2
+            p.id,
+            p.print_file_name,
+            p.print_file_format,
+            p.print_file_hash,
+            p.print_file_size_bytes,
+            p.print_file_storage_key
+          from print_jobs j
+          join products p
+            on p.id = j.product_id
+           and p.tenant_id = j.tenant_id
+          join agent_printers ap
+            on ap.id = j.agent_printer_id
+           and ap.tenant_id = j.tenant_id
+          where j.tenant_id = $1
+            and ($4::bigint is null or j.id = $4)
+            and p.print_file_storage_key = $2
+            and ap.agent_id = $3
+            and j.status in ('queued', 'starting', 'printing')
           union all
           select
             j.id,
@@ -3062,14 +3074,17 @@ export const handleAgentPrintFileGet =
             on ap.id = j.agent_printer_id
            and ap.tenant_id = j.tenant_id
           where j.tenant_id = $1
+            and ($4::bigint is null or j.id = $4)
             and j.slicing_artifact_storage_key = $2
             and ap.agent_id = $3
+            and j.status in ('queued', 'starting', 'printing')
           limit 1
         `,
         [
           agent.tenant_id,
           storageKey,
-          agent.id
+          agent.id,
+          printJobId || null
         ]
       )
 

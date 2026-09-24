@@ -1,6 +1,7 @@
 import { hasDatabase, withTenant } from '../db/pool.js'
 import { blindIndex } from '../security/crypto.js'
 import { createSalesFulfillmentPlan, fulfillSalesFulfillmentPlan, reduceSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from './salesFulfillment.js'
+import { writeOperationalNotification } from './operationalEvents.js'
 
 const text = (value) =>
   String(value || '')
@@ -269,7 +270,20 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
     // A marketplace item is never matched by name. Only an explicit, hashed
     // SKU link can authorize inventory reservation or production.
     const product = linkedProductResult.rows[0]
-    if (!product?.printer_id) {
+    if (!product) {
+      await writeOperationalNotification(tenantId, {
+        type: 'marketplace.product_link_missing', severity: 'warning', title: 'Venda sem produto vinculado',
+        message: `O SKU da venda ${text(sale.externalOrderId) || String(sale.id)} precisa ser vinculado a um produto antes da producao.`,
+        entityType: 'tracked_sale', entityId: String(sale.id), dedupeKey: `marketplace-product-link-missing:${sale.id}`
+      }, client)
+      return null
+    }
+    if (!product.printer_id) {
+      await writeOperationalNotification(tenantId, {
+        type: 'production.printer_missing', severity: 'warning', title: 'Venda aguardando impressora',
+        message: `O produto ${product.name || `#${product.id}`} esta vinculado a venda, mas nao possui impressora configurada.`,
+        entityType: 'tracked_sale', entityId: String(sale.id), dedupeKey: `production-printer-missing-sale:${sale.id}`
+      }, client)
       return null
     }
 

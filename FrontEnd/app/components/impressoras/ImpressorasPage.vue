@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { products, printers, printJobs, filaments, deleteItem, refreshAppData, enqueuePrintJob, reorderPrintJob, movePrintJobPrinter, cancelQueuedPrintJob, approveMarketplacePrintJob, startManualPrintJob, completeQueuedPrintJob, approveProductionOutput } = useAppData()
+const { products, printers, printJobs, filaments, deleteItem, refreshAppData, enqueuePrintJob, reorderPrintJob, movePrintJobPrinter, cancelQueuedPrintJob, approveMarketplacePrintJob, startManualPrintJob, completeQueuedPrintJob, retryPrintJob, approveProductionOutput } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
@@ -166,8 +166,8 @@ const printReadinessError = (job: any) => {
   if (infill <= 0 || infill > 100) return 'Preenchimento precisa estar entre 1% e 100%.'
   return ''
 }
-const printJobStatusLabel = (status: string) => ({ awaiting_confirmation: 'Aguardando confirmação', queued: 'Na fila', starting: 'Iniciando', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluído', cancelled: 'Cancelado' }[status] || status || '-')
-const printJobBadgeClass = (status: string) => ({ awaiting_confirmation: 'badge--orange', queued: '', starting: 'badge--orange', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', cancelled: 'badge--red' }[status] || '')
+const printJobStatusLabel = (status: string) => ({ awaiting_confirmation: 'Aguardando confirmação', queued: 'Na fila', starting: 'Iniciando', printing: 'Imprimindo', paused: 'Pausado', completed: 'Concluído', failed: 'Falhou', cancelled: 'Cancelado' }[status] || status || '-')
+const printJobBadgeClass = (status: string) => ({ awaiting_confirmation: 'badge--orange', queued: '', starting: 'badge--orange', printing: 'badge--orange', paused: 'badge--purple', completed: 'badge--green', failed: 'badge--red', cancelled: 'badge--red' }[status] || '')
 const qualityApprovedFor = (job: any) => qualityApproved[String(job.id)] ?? Number(job.quantity || 0)
 const approveQuality = async (job: any) => {
   const approved = Number(qualityApprovedFor(job))
@@ -515,6 +515,19 @@ const cancelPrintJob = async (job: any) => {
     queueLoadingId.value = ''
   }
 }
+const retryJob = async (job: any) => {
+  if (!job?.id || queueLoadingId.value) return
+  if (!window.confirm(`Criar uma nova tentativa de impressão?\n\n${job.title || job.productName || 'Impressão'}\n\nO histórico anterior será preservado.`)) return
+  queueLoadingId.value = String(job.id)
+  try {
+    await retryPrintJob(String(job.id))
+    notify('Nova tentativa adicionada à fila.')
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Não foi possível criar uma nova tentativa.', 'info')
+  } finally {
+    queueLoadingId.value = ''
+  }
+}
 onMounted(() => {
   seedPrinterStatusCache()
   loadAgents().then(() => refreshAllPrinterStatuses()).catch(() => {})
@@ -694,7 +707,8 @@ onBeforeUnmount(() => {
                     <button v-if="job.status === 'awaiting_confirmation'" type="button" class="btn btn--primary" :disabled="queueLoadingId !== '' || Boolean(printReadinessError(job))" @click="approvePrintJob(job)">Confirmar pedido</button>
                     <button v-if="job.status === 'queued'" type="button" class="btn btn--primary" :disabled="queueLoadingId !== '' || Boolean(printReadinessError(job))" @click="startPrintJob(job)">Iniciar</button>
                     <button v-if="job.status === 'printing'" type="button" class="btn" :disabled="queueLoadingId !== ''" @click="completePrintJob(job)">Concluir</button>
-                    <button type="button" class="text-action text-action--danger" :disabled="queueLoadingId !== ''" @click="cancelPrintJob(job)">Remover</button>
+                    <button v-if="['failed', 'cancelled'].includes(job.status) || (job.status === 'completed' && Number(job.rejectedQuantity || 0) > 0)" type="button" class="btn" :disabled="queueLoadingId !== ''" @click="retryJob(job)">Tentar novamente</button>
+                    <button v-if="['awaiting_confirmation', 'queued', 'printing', 'paused', 'starting'].includes(job.status)" type="button" class="text-action text-action--danger" :disabled="queueLoadingId !== ''" @click="cancelPrintJob(job)">Remover</button>
                   </div>
                 </div>
               </article>

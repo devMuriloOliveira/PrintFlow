@@ -531,7 +531,10 @@ export const handleCommand = async (
 
         const cachedFile =
           await fileManager.ensureCached(
-            job.printFile
+            {
+              ...job.printFile,
+              printJobId: job.id || command.payload?.printJobId
+            }
           )
 
         job = {

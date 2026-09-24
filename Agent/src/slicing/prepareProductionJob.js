@@ -28,7 +28,7 @@ export const prepareProductionJobSlicing = async ({
     throw new Error('Configure PRINTFLOW_ORCA_SLICER_PATH antes de preparar o G-code.')
   }
 
-  const source = await fileManager.ensureCached(job.printFile)
+  const source = await fileManager.ensureCached({ ...job.printFile, printJobId: job.id })
   await fileManager.pin(source.localPath)
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'printflow-slice-'))
   try {

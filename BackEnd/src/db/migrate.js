@@ -1826,15 +1826,14 @@ export const migrate =
 
     await query(
       `
-        create unique index if not exists
-          print_jobs_tracked_sale_unique_idx
+        create index if not exists
+          print_jobs_tracked_sale_idx
 
         on print_jobs (
           tenant_id,
           tracked_sale_id
         )
 
-        where tracked_sale_id is not null
       `
     )
 
@@ -2783,6 +2782,34 @@ export const migrate =
       review_reason text not null default '', expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
     )`)
     await query(`create index if not exists tenant_audit_requests_tenant_idx on tenant_audit_requests (tenant_id, created_at desc)`)
+    await query(`create table if not exists support_protocol_registry (
+      protocol_number varchar(16) primary key check (protocol_number ~ '^[1-9][0-9]{15}$'),
+      request_id text not null unique,
+      issued_at timestamptz not null default now()
+    )`)
+    await query(`do $$
+      declare
+        target record;
+        candidate text;
+        inserted integer;
+      begin
+        for target in
+          select request.id, request.created_at
+            from tenant_audit_requests request
+           where not exists (select 1 from support_protocol_registry protocol where protocol.request_id = request.id)
+           order by request.created_at, request.id
+        loop
+          loop
+            candidate := (1 + floor(random() * 9))::int::text
+              || lpad(floor(random() * 1000000000000000)::numeric::text, 15, '0');
+            insert into support_protocol_registry (protocol_number, request_id, issued_at)
+            values (candidate, target.id, coalesce(target.created_at, now()))
+            on conflict do nothing;
+            get diagnostics inserted = row_count;
+            exit when inserted = 1;
+          end loop;
+        end loop;
+      end $$`)
     await query(`create table if not exists tenant_audit_request_messages (
       id bigserial primary key, tenant_id text not null references tenants(id) on delete cascade,
       request_id text not null references tenant_audit_requests(id) on delete cascade,
@@ -3255,6 +3282,10 @@ export const migrate =
     `)
     await query(`create index if not exists sales_fulfillment_plans_lookup_idx on sales_fulfillment_plans (tenant_id, status, product_id, created_at desc)`)
     await query(`alter table print_jobs add column if not exists fulfillment_plan_id bigint references sales_fulfillment_plans(id) on delete set null`)
+    await query(`alter table print_jobs add column if not exists retry_of_job_id bigint references print_jobs(id) on delete set null`)
+    await query(`create index if not exists print_jobs_retry_lookup_idx on print_jobs (tenant_id, retry_of_job_id, created_at desc)`)
+    await query(`drop index if exists print_jobs_tracked_sale_unique_idx`)
+    await query(`create index if not exists print_jobs_tracked_sale_idx on print_jobs (tenant_id, tracked_sale_id) where tracked_sale_id is not null`)
     await query(`
       create table if not exists production_outputs (
         id bigserial primary key,

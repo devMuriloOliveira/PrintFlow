@@ -90,6 +90,7 @@ test('download do cache continua com Range e valida o hash final', async () => {
         },
         {
           storageKey: 'tenant/file.3mf',
+          printJobId: 'job-resume-1',
           hash,
           format: '3mf',
           sizeBytes: content.length

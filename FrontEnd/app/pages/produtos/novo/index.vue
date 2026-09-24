@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { calculatePricing } from '../../../utils/pricing.js'
-const { products, printers, filaments, settings, createProduct, updateItem, uploadProductPrintFile } = useAppData()
+const { products, printers, filaments, settings, createProduct, updateItem, uploadProductPrintFile, uploadProductImage } = useAppData()
 const { notify } = useUi()
 const router = useRouter()
 const route = useRoute()
@@ -10,9 +10,12 @@ const editingId = computed(() => String(route.query.id || ''))
 const isEditing = computed(() => Boolean(editingId.value))
 const hydratedFor = ref('')
 const selectedPrintFile = ref<File | null>(null)
+const selectedImageFile = ref<File | null>(null)
+const imagePreviewUrl = ref('')
+const recipeImported = ref(false)
 const recipeEnabled = ref(false)
 const allowedPrintFileFormats = new Set(['3mf', 'gcode', 'bgcode'])
-const form = reactive({ name: '', sku: '', category: 'Decoração', description: '', status: 'Ativo', printerId: '', filamentId: '', weight: 0, wastePercent: 0, failurePercent: 0, hours: 0, minutes: 0, quantity: 1, layer: 0.2, infill: 15, dimensions: '', printFileName: '', printFileFormat: '', printFileHash: '', printFileSizeBytes: 0, printFileStorageKey: '', nozzleMm: 0.4, bedTemperature: 60, nozzleTemperature: 205, support: false, scalePercent: 100, allowedMaterials: 'PLA', validationStatus: 'needs_validation', validationMessage: '', packaging: 0, materials: 0, labor: 0, setupMinutes: 0, postProcessingMinutes: 0, packagingMinutes: 0, laborRatePerHour: 0, printerPurchasePrice: 0, printerLifespanHours: 5000, machineMaintenancePerHour: 0, minimumPrice: 0, energy: true, shopeeFee: 0, otherMarketplaceFee: 0, marketplaceFee: 0, taxPercent: 0, otherCosts: 0, price: 0, desiredMargin: 40 })
+const form = reactive({ name: '', sku: '', category: 'Decoração', description: '', status: 'Ativo', thumb: 'vase', printerId: '', filamentId: '', weight: 0, wastePercent: 0, failurePercent: 0, hours: 0, minutes: 0, unitsPerRun: 1, layer: 0.2, infill: 15, dimensions: '', printFileName: '', printFileFormat: '', printFileHash: '', printFileSizeBytes: 0, printFileStorageKey: '', nozzleMm: 0.4, bedTemperature: 60, nozzleTemperature: 205, support: false, scalePercent: 100, allowedMaterials: 'PLA', validationStatus: 'needs_validation', validationMessage: '', packaging: 0, materials: 0, labor: 0, setupMinutes: 0, postProcessingMinutes: 0, packagingMinutes: 0, laborRatePerHour: 0, printerPurchasePrice: 0, printerLifespanHours: 5000, machineMaintenancePerHour: 0, minimumPrice: 0, energy: true, shopeeFee: 0, otherMarketplaceFee: 0, marketplaceFee: 0, taxPercent: 0, otherCosts: 0, price: 0, desiredMargin: 40 })
 const hasPrintRecipe = computed(() => Boolean(selectedPrintFile.value || form.printFileName.trim() || form.printFileStorageKey.trim()))
 const selectedPrinter = computed(() => printers.value.find((printer) => printer.id === form.printerId))
 const selectedFilament = computed(() => filaments.value.find((filament) => filament.id === form.filamentId))
@@ -23,10 +26,10 @@ const fixedCostPerUnit = computed(() => {
   const planned = Number(financialDefaults.value.plannedMonthlyUnits || 0)
   return planned > 0 ? fixed / planned : 0
 })
-const batchQuantity = computed(() => Math.max(1, Math.floor(Number(form.quantity || 1))))
+const unitsPerRun = computed(() => Math.max(1, Math.floor(Number(form.unitsPerRun || 1))))
 const batchProductionMinutes = computed(() => Number(form.hours || 0) * 60 + Number(form.minutes || 0))
-const unitProductionMinutes = computed(() => batchProductionMinutes.value / batchQuantity.value)
-const pricing = computed(() => calculatePricing({ pricePerKg: selectedFilament.value?.initial ? Number(selectedFilament.value.cost || 0) / Number(selectedFilament.value.initial) * 1000 : 0, weight: form.weight, wastePercent: form.wastePercent, failurePercent: form.failurePercent, hours: 0, minutes: unitProductionMinutes.value, energyEnabled: form.energy && Boolean(selectedPrinter.value), energyRate: kwhCost.value, watts: selectedPrinter.value?.power || 0, fixedCostPerUnit: fixedCostPerUnit.value, packaging: form.packaging, materials: form.materials, labor: form.labor, setupMinutes: Number(form.setupMinutes || 0) / batchQuantity.value, postProcessingMinutes: Number(form.postProcessingMinutes || 0) / batchQuantity.value, packagingMinutes: form.packagingMinutes, laborRatePerHour: form.laborRatePerHour, printerPurchasePrice: form.printerPurchasePrice, printerLifespanHours: form.printerLifespanHours, machineMaintenancePerHour: form.machineMaintenancePerHour, minimumPrice: form.minimumPrice, quantity: batchQuantity.value, otherCosts: form.otherCosts, marketplaceFee: Number(form.shopeeFee || 0) + Number(form.otherMarketplaceFee || 0) + Number(form.marketplaceFee || 0), taxPercent: form.taxPercent, desiredMargin: form.desiredMargin, salePrice: form.price }))
+const unitProductionMinutes = computed(() => batchProductionMinutes.value / unitsPerRun.value)
+const pricing = computed(() => calculatePricing({ pricePerKg: selectedFilament.value?.initial ? Number(selectedFilament.value.cost || 0) / Number(selectedFilament.value.initial) * 1000 : 0, weight: form.weight, wastePercent: form.wastePercent, failurePercent: form.failurePercent, hours: 0, minutes: unitProductionMinutes.value, energyEnabled: form.energy && Boolean(selectedPrinter.value), energyRate: kwhCost.value, watts: selectedPrinter.value?.power || 0, fixedCostPerUnit: fixedCostPerUnit.value, packaging: form.packaging, materials: form.materials, labor: form.labor, setupMinutes: Number(form.setupMinutes || 0) / unitsPerRun.value, postProcessingMinutes: Number(form.postProcessingMinutes || 0) / unitsPerRun.value, packagingMinutes: form.packagingMinutes, laborRatePerHour: form.laborRatePerHour, printerPurchasePrice: form.printerPurchasePrice, printerLifespanHours: form.printerLifespanHours, machineMaintenancePerHour: form.machineMaintenancePerHour, minimumPrice: form.minimumPrice, quantity: unitsPerRun.value, otherCosts: form.otherCosts, marketplaceFee: Number(form.shopeeFee || 0) + Number(form.otherMarketplaceFee || 0) + Number(form.marketplaceFee || 0), taxPercent: form.taxPercent, desiredMargin: form.desiredMargin, salePrice: form.price }))
 const filamentCost = computed(() => pricing.value.materialCost)
 const energyCost = computed(() => pricing.value.energyCost)
 const shopeeCost = computed(() => form.price * form.shopeeFee / 100)
@@ -45,7 +48,8 @@ const costBreakdown = computed(() => ({
   packagingCost: Number(form.packaging || 0),
   productionTimeMinutes: unitProductionMinutes.value,
   batchProductionTimeMinutes: batchProductionMinutes.value,
-  batchQuantity: batchQuantity.value,
+  unitsPerRun: unitsPerRun.value,
+  batchQuantity: unitsPerRun.value,
   energyEnabled: form.energy,
   energyCost: energyCost.value,
   fixedCostPerUnit: fixedCostPerUnit.value,
@@ -65,7 +69,7 @@ const costBreakdown = computed(() => ({
   printerLifespanHours: Number(form.printerLifespanHours || 0),
   machineMaintenancePerHour: Number(form.machineMaintenancePerHour || 0),
   failureCost: pricing.value.failureCost,
-  quantity: batchQuantity.value,
+  quantity: unitsPerRun.value,
   minimumPrice: Number(form.minimumPrice || 0),
   otherCosts: Number(form.otherCosts || 0),
   shopeeFeePercent: Number(form.shopeeFee || 0),
@@ -89,6 +93,19 @@ const splitTime = (value = '') => {
 const parseDimensions = (value: string) => {
   const parts = String(value || '').replace(/,/g, '.').match(/\d+(?:\.\d+)?/g)?.map(Number).filter((item) => Number.isFinite(item) && item > 0) || []
   return parts.length >= 3 ? { x: parts[0], y: parts[1], z: parts[2] } : null
+}
+const handleImageSelect = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+    input.value = ''
+    notify('Use uma foto JPG, PNG ou WEBP de até 5 MB.', 'info')
+    return
+  }
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
+  selectedImageFile.value = file
+  imagePreviewUrl.value = URL.createObjectURL(file)
 }
 const handlePrintFileSelect = (event: Event) => {
   const input = event.target as HTMLInputElement
@@ -119,6 +136,7 @@ const hydrateForm = (product: any) => {
     category: product.category || 'Decoracao',
     description: product.description || product.subtitle || '',
     status: product.status || 'Ativo',
+    thumb: product.thumb || 'vase',
     printerId: product.printerId || printers.value.find((printer) => printer.name === product.printer)?.id || '',
     filamentId: product.filamentId || filaments.value.find((filament) => filament.name === product.filament)?.id || '',
     weight: Number(product.weight || 0),
@@ -126,7 +144,7 @@ const hydrateForm = (product: any) => {
     failurePercent: Number(product.costBreakdown?.failurePercent || 0),
     hours: time.hours,
     minutes: time.minutes,
-    quantity: Number(product.costBreakdown?.batchQuantity || product.costBreakdown?.quantity || 1),
+    unitsPerRun: Number(product.costBreakdown?.unitsPerRun ?? product.costBreakdown?.batchQuantity ?? product.costBreakdown?.quantity ?? 1),
     layer: Number(product.layer || product.printProfile?.layerHeightMm || 0.2),
     infill: Number(product.infill || product.printProfile?.infillPercent || 15),
     dimensions: product.dimensions || '',
@@ -190,7 +208,7 @@ onMounted(() => {
     const draft = JSON.parse(raw)
     Object.assign(form, {
       printerId: draft.printerId || '', filamentId: draft.filamentId || '', weight: Number(draft.weight || 0), wastePercent: Number(draft.wastePercent || 0), failurePercent: Number(draft.failurePercent || 0),
-      hours: Number(draft.hours || 0), minutes: Number(draft.minutes || 0), quantity: Number(draft.quantity || 1), packaging: Number(draft.packaging || 0),
+      hours: Number(draft.hours || 0), minutes: Number(draft.minutes || 0), unitsPerRun: Number(draft.unitsPerRun ?? draft.batchQuantity ?? draft.quantity ?? 1), packaging: Number(draft.packaging || 0),
       materials: Number(draft.materials || 0), labor: Number(draft.labor || 0), setupMinutes: Number(draft.setupMinutes || 0), postProcessingMinutes: Number(draft.postProcessingMinutes || 0), packagingMinutes: Number(draft.packagingMinutes || 0), laborRatePerHour: Number(draft.laborRatePerHour || 0), printerPurchasePrice: Number(draft.printerPurchasePrice || 0), printerLifespanHours: Number(draft.printerLifespanHours || 5000), machineMaintenancePerHour: Number(draft.machineMaintenancePerHour || 0), minimumPrice: Number(draft.minimumPrice || 0), otherCosts: Number(draft.otherCosts || 0),
       energy: draft.energyEnabled !== false, marketplaceFee: Number(draft.marketplaceFee || 0), taxPercent: Number(draft.taxPercent || 0),
       price: Number(draft.suggestedPrice || 0), desiredMargin: Number(draft.desiredMargin || 40)
@@ -200,6 +218,9 @@ onMounted(() => {
   } catch {
     sessionStorage.removeItem('printflow-calculator-draft')
   }
+})
+onBeforeUnmount(() => {
+  if (imagePreviewUrl.value) URL.revokeObjectURL(imagePreviewUrl.value)
 })
 const validate = () => {
   Object.keys(errors).forEach(key => delete errors[key])
@@ -231,6 +252,7 @@ const save = async () => {
   saving.value = true
   try {
     const hadSelectedPrintFile = Boolean(selectedPrintFile.value)
+    const hadSelectedImage = Boolean(selectedImageFile.value)
     const allowedMaterials = form.allowedMaterials.split(',').map((item) => item.trim()).filter(Boolean)
     const payload = {
       id: editingId.value || undefined,
@@ -270,15 +292,21 @@ const save = async () => {
       profit: profit.value,
       margin: margin.value,
       status: form.status,
-      thumb: 'vase'
+      thumb: form.thumb || 'vase'
     }
     const saved = isEditing.value ? payload : await createProduct(payload)
     if (isEditing.value) await updateItem('products', payload)
     const productId = String(saved.id || editingId.value || '')
+    if (selectedImageFile.value && productId) {
+      const imageUpload = await uploadProductImage(productId, selectedImageFile.value)
+      if (imageUpload.product) hydrateForm(imageUpload.product)
+      selectedImageFile.value = null
+    }
     if (selectedPrintFile.value && productId) {
       const upload = await uploadProductPrintFile(productId, selectedPrintFile.value)
       if (upload.product) hydrateForm(upload.product)
       selectedPrintFile.value = null
+      recipeImported.value = true
     }
     if (selectedPrintFile.value) {
       // O upload nao foi concluido; mantenha o arquivo selecionado para nova tentativa.
@@ -288,6 +316,15 @@ const save = async () => {
       notify('Arquivo enviado, mas nao foi possivel obter as dimensoes automaticamente. Informe-as para revisar a receita.', 'info')
       if (!isEditing.value && productId) await router.replace(`/produtos/novo?id=${productId}`)
       return
+    }
+    if (hadSelectedPrintFile) {
+      notify('Arquivo processado. Revise os dados importados da receita antes de concluir.', 'info')
+      if (!isEditing.value && productId) await router.replace(`/produtos/novo?id=${productId}`)
+      return
+    }
+    if (hadSelectedImage && imagePreviewUrl.value) {
+      URL.revokeObjectURL(imagePreviewUrl.value)
+      imagePreviewUrl.value = ''
     }
     notify(isEditing.value ? 'Produto atualizado com sucesso' : 'Produto salvo com sucesso')
     router.push('/produtos')
@@ -309,6 +346,13 @@ const save = async () => {
 
     <form class="product-editor__layout" @submit.prevent="save">
       <main class="product-editor__main">
+        <nav class="product-editor__steps" aria-label="Etapas do cadastro">
+          <span class="is-active"><b>01</b> Produto</span>
+          <span :class="{ 'is-complete': form.printerId || form.filamentId || form.weight > 0 }"><b>02</b> Produção</span>
+          <span :class="{ 'is-complete': hasPrintRecipe }"><b>03</b> Receita</span>
+          <span :class="{ 'is-complete': form.price > 0 }"><b>04</b> Preço</span>
+        </nav>
+
         <section class="product-editor__notice">
           <span class="product-editor__notice-icon"><UiIcon name="box" :size="20" /></span>
           <div>
@@ -325,6 +369,20 @@ const save = async () => {
               <p>Dados usados nas vendas, no estoque e nos relatórios.</p>
             </div>
             <span class="badge badge--green">2 campos obrigatórios</span>
+          </div>
+
+          <div class="product-photo-field">
+            <ProductThumb :type="form.thumb" :product-id="editingId" :preview-url="imagePreviewUrl" :size="96" />
+            <div class="product-photo-field__copy">
+              <strong>Foto de apresentação</strong>
+              <p>Use uma foto real do produto para facilitar a identificação nas vendas, no estoque e nos relatórios.</p>
+              <label class="btn btn--ghost product-photo-field__button">
+                <UiIcon name="upload" :size="16" />
+                {{ selectedImageFile ? 'Trocar foto selecionada' : form.thumb.startsWith('photo:') ? 'Trocar foto' : 'Adicionar foto' }}
+                <input type="file" accept="image/jpeg,image/png,image/webp" hidden @change="handleImageSelect">
+              </label>
+              <small>JPG, PNG ou WEBP · máximo de 5 MB</small>
+            </div>
           </div>
 
           <div class="form-grid">
@@ -374,9 +432,9 @@ const save = async () => {
                 <input v-model.number="form.weight" type="number" min="0" step="0.1">
               </div>
               <div class="field col-2">
-                <label>Peças por lote <span class="field__optional">opcional</span></label>
-                <input v-model.number="form.quantity" type="number" min="1" step="1">
-                <small>Quantas peças cabem na mesma impressão.</small>
+                <label>Unidades vendáveis por impressão <span class="field__optional">opcional</span></label>
+                <input v-model.number="form.unitsPerRun" type="number" min="1" step="1">
+                <small>Informe produtos completos por arquivo. Partes como corpo e tampa do mesmo produto contam como uma unidade.</small>
               </div>
               <div class="field col-2"><label>Horas do lote</label><input v-model.number="form.hours" type="number" min="0"></div>
               <div class="field col-2"><label>Minutos do lote</label><input v-model.number="form.minutes" type="number" min="0" max="59"></div>
@@ -434,6 +492,19 @@ const save = async () => {
               <span><UiIcon name="upload" :size="28" /><strong>{{ selectedPrintFile?.name || form.printFileName || 'Selecionar arquivo de impressão' }}</strong><small>3MF, G-code ou BGCODE. O arquivo será enviado depois que o produto for criado.</small></span>
             </label>
 
+            <div v-if="recipeImported" class="product-recipe__imported">
+              <UiIcon name="check" :size="20" />
+              <div>
+                <strong>Dados encontrados no arquivo</strong>
+                <p>Confira os campos abaixo antes de marcar a receita como validada.</p>
+                <span>{{ form.dimensions || 'Dimensões não encontradas' }}</span>
+                <span>Camada {{ form.layer }} mm</span>
+                <span>{{ form.infill }}% de preenchimento</span>
+                <span>Bico {{ form.nozzleMm }} mm</span>
+                <span>{{ form.allowedMaterials || 'Material não identificado' }}</span>
+              </div>
+            </div>
+
             <div class="form-grid product-recipe__fields">
               <div class="field col-4" :class="{ 'field--error': errors.dimensions }"><label>Dimensões (mm) <span class="field__optional">opcional</span></label><input v-model="form.dimensions" placeholder="120 x 80 x 45"><small v-if="errors.dimensions" class="field__error">{{ errors.dimensions }}</small></div>
               <div class="field col-2" :class="{ 'field--error': errors.layer }"><label>Camada (mm)</label><input v-model.number="form.layer" type="number" step=".01" min="0"><small v-if="errors.layer" class="field__error">{{ errors.layer }}</small></div>
@@ -465,7 +536,7 @@ const save = async () => {
       <aside class="product-editor__aside">
         <div class="detail-card product-summary">
           <div class="product-summary__identity">
-            <ProductThumb type="vase" :size="64" />
+            <ProductThumb :type="form.thumb" :product-id="editingId" :preview-url="imagePreviewUrl" :size="72" />
             <div><small>Prévia do produto</small><h3>{{ form.name || 'Produto sem nome' }}</h3><p>{{ form.sku || 'SKU ainda não informado' }} · {{ form.status }}</p></div>
           </div>
 
@@ -476,9 +547,9 @@ const save = async () => {
             <div><small>Margem líquida</small><strong :class="margin >= 0 ? 'money-positive' : 'money-negative'">{{ margin.toFixed(1) }}%</strong></div>
           </div>
 
-          <div v-if="batchQuantity > 1" class="product-summary__batch">
+          <div v-if="unitsPerRun > 1" class="product-summary__batch">
             <UiIcon name="printer" :size="17" />
-            <div><strong>{{ batchQuantity }} peças por impressão</strong><small>{{ batchProductionMinutes }} min por lote · {{ unitProductionMinutes.toFixed(1) }} min rateados por peça</small></div>
+            <div><strong>{{ unitsPerRun }} unidade(s) vendável(is) por execução</strong><small>Uma execução do arquivo produz este conjunto completo · {{ batchProductionMinutes }} min na mesa · {{ unitProductionMinutes.toFixed(1) }} min rateados por unidade</small></div>
           </div>
 
           <details class="product-summary__breakdown">
@@ -489,7 +560,7 @@ const save = async () => {
               <div class="detail-list__row"><span>Embalagem e extras</span><strong>{{ formatCurrency(Number(form.packaging || 0) + Number(form.materials || 0)) }}</strong></div>
               <div class="detail-list__row"><span>Mão de obra</span><strong>{{ formatCurrency(pricing.laborCost) }}</strong></div>
               <div class="detail-list__row"><span>Taxas e impostos</span><strong>{{ formatCurrency(pricing.feeCost) }}</strong></div>
-              <div v-if="batchQuantity > 1" class="detail-list__row"><span>Custo do lote</span><strong>{{ formatCurrency(totalCost * batchQuantity) }}</strong></div>
+              <div v-if="unitsPerRun > 1" class="detail-list__row"><span>Custo da execução</span><strong>{{ formatCurrency(totalCost * unitsPerRun) }}</strong></div>
             </div>
           </details>
 
@@ -507,3 +578,83 @@ const save = async () => {
     </form>
   </div>
 </template>
+
+<style scoped>
+.product-editor__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid #dfe6ef;
+  border-radius: 12px;
+  background: #fff;
+}
+.product-editor__steps span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 14px;
+  border-right: 1px solid #edf0f5;
+  color: #7a8698;
+  font-size: 11px;
+  font-weight: 650;
+}
+.product-editor__steps span:last-child { border-right: 0; }
+.product-editor__steps b {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  background: #f0f3f7;
+  color: #6f7c90;
+  font-size: 9px;
+}
+.product-editor__steps .is-active { color: #1759ba; background: #f7faff; }
+.product-editor__steps .is-active b { color: #fff; background: #2563c7; }
+.product-editor__steps .is-complete b { color: #087c4b; background: #e9f8f1; }
+.product-photo-field {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f8fbff, #fff);
+}
+.product-photo-field :deep(.product-thumb) {
+  flex: 0 0 96px;
+  border: 1px solid #d9e1eb;
+  border-radius: 12px;
+  background: #eef2f7;
+}
+.product-photo-field__copy { display: grid; gap: 5px; min-width: 0; }
+.product-photo-field__copy strong { color: var(--ink); font-size: 13px; }
+.product-photo-field__copy p { max-width: 580px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.product-photo-field__copy small { color: #8793a6; font-size: 9px; }
+.product-photo-field__button { width: max-content; margin-top: 3px; cursor: pointer; }
+.product-recipe__imported {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  border: 1px solid #bfe8d4;
+  border-radius: 10px;
+  padding: 13px 15px;
+  background: #f1fbf6;
+  color: #087c4b;
+}
+.product-recipe__imported > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.product-recipe__imported strong, .product-recipe__imported p { flex-basis: 100%; }
+.product-recipe__imported strong { color: #11603e; font-size: 12px; }
+.product-recipe__imported p { margin: 2px 0 5px; color: #527062; font-size: 10px; }
+.product-recipe__imported span { border-radius: 999px; padding: 5px 8px; background: #fff; color: #496257; font-size: 9px; }
+.product-summary__identity :deep(.product-thumb) { flex: 0 0 72px; border-radius: 11px; background: #eef2f7; }
+
+@media (max-width: 760px) {
+  .product-editor__steps { grid-template-columns: 1fr 1fr; }
+  .product-editor__steps span:nth-child(2) { border-right: 0; }
+  .product-editor__steps span:nth-child(-n + 2) { border-bottom: 1px solid #edf0f5; }
+  .product-photo-field { align-items: flex-start; }
+}
+</style>

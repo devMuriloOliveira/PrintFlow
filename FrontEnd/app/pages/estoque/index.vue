@@ -35,6 +35,8 @@ const reservedProductUnits = computed(() => inventory.value.products.reduce((sum
 const availableProductUnits = computed(() => Math.max(0, totalProductUnits.value - reservedProductUnits.value))
 const lowFilaments = computed(() => filaments.value.filter((item: any) => Number(item.remaining || 0) <= Number(item.minStock ?? 300)))
 const filamentStatuses = computed(() => ['Todos', ...new Set(filaments.value.map((item: any) => String(item.status || '')).filter(Boolean))])
+const needsOverview = computed(() => section.value === 'visao' || section.value === 'produtos')
+const needsPendingMaterial = computed(() => section.value === 'visao')
 
 const productReasons: Record<MovementType, string[]> = {
   in: ['Produção concluída', 'Produção excedente', 'Retorno de venda cancelada', 'Devolução de cliente'],
@@ -47,12 +49,16 @@ const filamentReasons: Record<MovementType, string[]> = {
   adjustment: ['Pesagem e conferência física', 'Correção de cadastro']
 }
 
-const refresh = async () => {
+const refresh = async (forceAppData = false) => {
   loading.value = true
   try {
-    await refreshAppData(true)
-    inventory.value = await loadInventoryOverview()
-    pendingProductionMaterial.value = await listPendingProductionMaterial().catch(() => [])
+    await refreshAppData(forceAppData)
+    const [overview, pending] = await Promise.all([
+      needsOverview.value ? loadInventoryOverview() : Promise.resolve({ products: [], movements: [], total: 0 }),
+      needsPendingMaterial.value ? listPendingProductionMaterial().catch(() => []) : Promise.resolve([])
+    ])
+    if (needsOverview.value) inventory.value = overview
+    pendingProductionMaterial.value = pending
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Não foi possível carregar o estoque.', 'info')
   } finally { loading.value = false }
@@ -62,7 +68,7 @@ const reconcilePendingMaterial = async (item: any) => {
   reconcilingPrintJobId.value = String(item.printJobId)
   try {
     await reconcilePendingProductionMaterial(String(item.printJobId))
-    await refresh()
+    await refresh(true)
     notify('Consumo pendente conciliado e estoque atualizado.')
   } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel conciliar o consumo.', 'info') }
   finally { reconcilingPrintJobId.value = '' }
@@ -77,7 +83,7 @@ const saveProductMovement = async () => {
     await createProductInventoryMovement(String(product.id), { type: productMovement.type, quantity: productMovement.quantity, reason: reasonText(productMovement.reason, productMovement.notes) })
     productMovement.quantity = 0
     productMovement.notes = ''
-    await refresh()
+    await refresh(true)
     notify('Movimentação do produto registrada e saldo atualizado.')
   } catch (error: any) { notify(error?.data?.error || error?.message || 'Não foi possível registrar a movimentação.', 'info') }
   finally { savingProduct.value = false }
@@ -91,7 +97,7 @@ const saveFilamentMovement = async () => {
     await createFilamentMovement(String(filament.id), { type: filamentMovement.type, quantity: filamentMovement.quantity, reason: reasonText(filamentMovement.reason, filamentMovement.notes) })
     filamentMovement.quantity = 0
     filamentMovement.notes = ''
-    await refresh()
+    await refresh(true)
     notify('Movimentação do filamento registrada e saldo atualizado.')
   } catch (error: any) { notify(error?.data?.error || error?.message || 'Não foi possível registrar a movimentação.', 'info') }
   finally { savingFilament.value = false }
@@ -110,6 +116,7 @@ onMounted(async () => {
   }
   await refresh()
 })
+watch(section, () => { if (process.client) void refresh() })
 </script>
 
 <template>
@@ -118,11 +125,6 @@ onMounted(async () => {
       <div v-if="section === 'visao'" class="stock-header-actions"><NuxtLink class="btn" to="/produtos/novo"><UiIcon name="box" :size="16" />Novo produto</NuxtLink><NuxtLink class="btn btn--primary" to="/filamentos/novo"><UiIcon name="plus" :size="16" />Novo filamento</NuxtLink></div>
     </PageHeader>
 
-    <nav class="stock-tabs" aria-label="Seções do estoque">
-      <NuxtLink to="/estoque?secao=visao" :class="{ active: section === 'visao' }"><UiIcon name="home" :size="15" />Visão geral</NuxtLink>
-      <NuxtLink to="/estoque?secao=filamentos" :class="{ active: section === 'filamentos' }"><UiIcon name="spool" :size="15" />Filamentos</NuxtLink>
-      <NuxtLink to="/estoque?secao=produtos" :class="{ active: section === 'produtos' }"><UiIcon name="box" :size="15" />Produtos fabricados</NuxtLink>
-    </nav>
     <div class="stock-context"><span>Estoque</span><UiIcon name="chevron" :size="12" /><strong>{{ sectionTitle }}</strong></div>
     <div v-if="loading" class="empty-state stock-loading">Carregando estoque...</div>
 

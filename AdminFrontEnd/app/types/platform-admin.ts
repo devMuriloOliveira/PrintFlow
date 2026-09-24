@@ -38,9 +38,11 @@ export type TenantBillingRecord = { id: string; reference?: string; amount: numb
 
 export type AuditRequest = {
   id: string
+  protocolNumber: string
   tenantId: string
   requestedBy: string
   requesterName: string
+  requesterEmail?: string
   status: string
   subject: string
   category: 'technical' | 'financial' | 'integration' | 'account' | 'data_backup' | 'privacy' | 'audit'
@@ -72,6 +74,8 @@ export type AuditRequest = {
   createdAt: string
   updatedAt: string
 }
+
+export type SupportContact = { requesterName: string; requesterEmail: string }
 
 export type Message = {
   id: string

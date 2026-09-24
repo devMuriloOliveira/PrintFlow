@@ -40,15 +40,25 @@ const sendAuth = (res, status, user, session, extra = {}) => sendJson(res, statu
   ...extra
 }, { 'Set-Cookie': createRefreshCookie(session.refreshToken) })
 
+// Uma request pode passar por autenticação global, autorização e pelo handler
+// específico. Reutilizar a mesma promessa evita validar o JWT e tocar a sessão
+// mais de uma vez, sem compartilhar autenticação entre requests diferentes.
+const authUserByRequest = new WeakMap()
+
 export const getAuthUser = async (req) => {
-  const header = req.headers.authorization || ''
-  const token = String(header).startsWith('Bearer ') ? String(header).slice(7) : ''
-  const payload = verifyToken(token)
-  if (!payload) return null
-  const user = await validateAccessPayload(payload)
-  if (!user) return null
-  await touchUserSession(user, payload.sid, sessionMetadata(req))
-  return user
+  if (authUserByRequest.has(req)) return authUserByRequest.get(req)
+  const resolution = (async () => {
+    const header = req.headers.authorization || ''
+    const token = String(header).startsWith('Bearer ') ? String(header).slice(7) : ''
+    const payload = verifyToken(token)
+    if (!payload) return null
+    const user = await validateAccessPayload(payload)
+    if (!user) return null
+    await touchUserSession(user, payload.sid, sessionMetadata(req))
+    return user
+  })()
+  authUserByRequest.set(req, resolution)
+  return resolution
 }
 
 export const handleRegister = async (req, res) => {

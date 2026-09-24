@@ -28,7 +28,7 @@ import {
 } from '../services/platformAdmin.js'
 import { listTenantDeletionAudit } from '../services/tenantDeletion.js'
 import { listPlatformAdminNotifications, markPlatformAdminNotificationRead } from '../services/platformAdminNotifications.js'
-import { addPlatformAuditMessage, addPlatformChatCollaborator, autoAssignPlatformSupport, bulkUpdatePlatformSupport, claimPlatformAuditChat, closePlatformAuditChat, decidePlatformAuditRequest, getPlatformAuditChatReport, getPlatformPrivacyPortabilityExport, getPlatformSupportMetrics, listPlatformAuditRequests, listPlatformSupportMacros, listPlatformSupportSlaRules, platformAuditMessages, reopenPlatformSupportChat, snoozePlatformSupport, transferPlatformAuditChat, updatePlatformSupportMetadata, updatePlatformSupportRequest, updatePlatformSupportSlaRule } from '../services/tenantAuditRequests.js'
+import { addPlatformAuditMessage, addPlatformChatCollaborator, autoAssignPlatformSupport, bulkUpdatePlatformSupport, claimPlatformAuditChat, closePlatformAuditChat, decidePlatformAuditRequest, getPlatformAuditChatReport, getPlatformPrivacyPortabilityExport, getPlatformSupportContact, getPlatformSupportMetrics, listPlatformAuditRequests, listPlatformSupportMacros, listPlatformSupportSlaRules, platformAuditMessages, reopenPlatformSupportChat, snoozePlatformSupport, transferPlatformAuditChat, updatePlatformSupportMetadata, updatePlatformSupportRequest, updatePlatformSupportSlaRule } from '../services/tenantAuditRequests.js'
 import { formatTenantDataCsv } from './settings.js'
 import { addPlatformSupportAttachment, listPlatformSupportAttachments, readPlatformSupportAttachment } from '../services/supportAttachments.js'
 
@@ -277,7 +277,7 @@ export const handlePlatformSupportRequestsReport = async (req, res, url) => {
   })
   return sendText(res, 200, platformReportCsv('Relatorio interno de solicitacoes', [
     ['Protocolo', 'Empresa', 'Tipo', 'Direito LGPD', 'Status', 'Responsavel', 'Prazo', 'Criado em', 'Atualizado em'],
-    ...requests.map((request) => [request.id, request.tenantId, request.requestKind === 'privacy' ? 'LGPD' : request.category, request.privacyRight || '', request.status, request.responsibleName || request.chatAssigneeName || '', request.dueAt || '', request.createdAt, request.updatedAt || ''])
+    ...requests.map((request) => [request.protocolNumber || request.id, request.tenantId, request.requestKind === 'privacy' ? 'LGPD' : request.category, request.privacyRight || '', request.status, request.responsibleName || request.chatAssigneeName || '', request.dueAt || '', request.createdAt, request.updatedAt || ''])
   ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Relatorio_Solicitacoes_PrintFlow.csv"', 'Cache-Control': 'no-store' })
 }
 export const handlePlatformSupportMetrics = async (req, res, url) => {
@@ -314,7 +314,7 @@ export const handlePlatformAuditChatReport = async (req, res, requestId, url) =>
   const range = reportRange(url); const report = await getPlatformAuditChatReport(requestId, range, user)
   await writePlatformAudit(req, user, { action: 'platform.support.chat_report_exported', targetTenantId: report.tenantId, targetResource: 'support_chat_report', targetResourceId: requestId, details: { messageCount: report.messages.length, format: 'csv', ...range } })
   return sendText(res, 200, platformReportCsv('Relatorio de conversa de suporte', [
-    ['Protocolo', report.id], ['Empresa', report.companyName], ['Solicitante', report.requesterName], ['Assunto', report.subject], ['Aberto em', report.createdAt], [],
+    ['Protocolo', report.protocolNumber || report.id], ['Empresa', report.companyName], ['Solicitante', report.requesterName], ['Assunto', report.subject], ['Aberto em', report.createdAt], [],
     ['Data', 'Remetente', 'Mensagem'], ...report.messages.map((message) => [message.created_at, message.sender_type === 'superadmin' ? 'Suporte tecnico' : report.requesterName, message.body])
   ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="Relatorio_Conversa_${requestId}.csv"`, 'Cache-Control': 'no-store' })
 }
@@ -324,6 +324,12 @@ export const handlePlatformAuditChatClose = async (req, res, requestId) => { con
 export const handlePlatformSupportReopen = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await reopenPlatformSupportChat(user, requestId, payload.reason); await writePlatformAudit(req, user, { action: 'platform.support.reopened', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, reason: payload.reason }); return sendJson(res, 200, result) }
 export const handlePlatformSupportSnooze = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await snoozePlatformSupport(user, requestId, payload.until); await writePlatformAudit(req, user, { action: 'platform.support.snoozed', targetTenantId: result.tenantId, targetResource: 'support_request', targetResourceId: requestId, details: { until: result.supportSnoozedUntil } }); return sendJson(res, 200, result) }
 export const handlePlatformChatClaim = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const result = await claimPlatformAuditChat(user, requestId); await writePlatformAudit(req, user, { action: 'platform.support.chat_claimed', targetTenantId: result.tenantId, targetResource: 'support_request_chat', targetResourceId: requestId }); return sendJson(res, 200, result) }
+export const handlePlatformSupportContact = async (req, res, requestId) => {
+  const user = await requirePlatformAdmin(req, res); if (!user) return
+  const contact = await getPlatformSupportContact(user, requestId)
+  await writePlatformAudit(req, user, { action: 'platform.support.customer_contact_viewed', targetTenantId: contact.tenantId, targetResource: 'support_request_contact', targetResourceId: requestId })
+  return sendJson(res, 200, { requesterName: contact.requesterName, requesterEmail: contact.requesterEmail })
+}
 export const handlePlatformChatTransfer = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await transferPlatformAuditChat(user, requestId, payload.targetUserId, payload.reason); await writePlatformAudit(req, user, { action: 'platform.support.chat_transferred', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, reason: payload.reason, details: { targetUserId: result.chat_assigned_to } }); return sendJson(res, 200, result) }
 export const handlePlatformChatCollaboratorAdd = async (req, res, requestId) => { const user = await requirePlatformAdmin(req, res); if (!user) return; const payload = await readJsonBody(req); const result = await addPlatformChatCollaborator(user, requestId, payload.targetUserId); await writePlatformAudit(req, user, { action: 'platform.support.chat_collaborator_added', targetTenantId: result.tenant_id, targetResource: 'support_request_chat', targetResourceId: requestId, details: { collaboratorId: result.user_id } }); return sendJson(res, 201, result) }
 export const handlePlatformPrivacyRequestUpdate = async (req, res, requestId) => {
