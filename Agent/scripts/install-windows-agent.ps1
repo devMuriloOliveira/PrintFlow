@@ -38,47 +38,44 @@ function Stop-ExistingAgentInstall {
   Start-Sleep -Milliseconds 1200
 }
 
-function Assert-NodeRuntime {
-  $candidates = @()
-  try {
-    $command = Get-Command "node.exe" -ErrorAction SilentlyContinue
-    if ($command -and $command.Source) {
-      $candidates += $command.Source
-    }
-  } catch {
+function Assert-BundledNodeRuntime {
+  $runtimeRoot = Join-Path $sourceRoot "runtime"
+  $runtimeNode = Join-Path $runtimeRoot "node.exe"
+  $runtimeMetadataPath = Join-Path $runtimeRoot "runtime.json"
+  $runtimeLicensePath = Join-Path $runtimeRoot "LICENSE.node.txt"
+
+  if (
+    -not (Test-Path -LiteralPath $runtimeNode) -or
+    -not (Test-Path -LiteralPath $runtimeMetadataPath) -or
+    -not (Test-Path -LiteralPath $runtimeLicensePath)
+  ) {
+    throw "Pacote do Agent incompleto: runtime Node.js portatil ausente."
   }
 
-  $candidates += @(
-    (Join-Path ${env:ProgramFiles} "nodejs\node.exe"),
-    (Join-Path ${env:ProgramW6432} "nodejs\node.exe"),
-    (Join-Path ${env:LOCALAPPDATA} "Programs\nodejs\node.exe")
-  )
-
-  foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
-    if (-not (Test-Path -LiteralPath $candidate)) {
-      continue
-    }
-
-    try {
-      $version = (& $candidate --version 2>$null).Trim()
-      if ($version -match '^v(\d+)\.' -and [int]$Matches[1] -ge 22) {
-        return
-      }
-    } catch {
-    }
+  $metadata = Get-Content -LiteralPath $runtimeMetadataPath -Raw | ConvertFrom-Json
+  $actualHash = (Get-FileHash -LiteralPath $runtimeNode -Algorithm SHA256).Hash.ToUpperInvariant()
+  if (-not $metadata.sha256 -or $actualHash -ne ([string]$metadata.sha256).ToUpperInvariant()) {
+    throw "Runtime Node.js do Agent falhou na verificacao SHA-256."
   }
 
-  throw "Node.js 22.13 ou superior nao encontrado. Instale o Node.js LTS antes de instalar o PrintFlow Agent."
+  $actualVersion = (& $runtimeNode --version 2>$null).Trim().TrimStart('v')
+  $actualArchitecture = (& $runtimeNode -p "process.arch" 2>$null).Trim()
+  if ($LASTEXITCODE -ne 0 -or $actualVersion -ne [string]$metadata.version) {
+    throw "Runtime Node.js do Agent possui versao inesperada."
+  }
+  if ($actualArchitecture -ne "x64" -or [string]$metadata.architecture -ne "x64") {
+    throw "Este instalador do PrintFlow Agent exige Windows x64."
+  }
 }
 
-Assert-NodeRuntime
+Assert-BundledNodeRuntime
 Stop-ExistingAgentInstall
 
 if (-not (Test-Path $installRoot)) {
   New-Item -ItemType Directory -Path $installRoot | Out-Null
 }
 
-$items = @("assets", "node_modules", "scripts", "src", "package.json", "package-lock.json", "README.md")
+$items = @("assets", "node_modules", "runtime", "scripts", "src", "package.json", "package-lock.json", "README.md")
 foreach ($item in $items) {
   $source = Join-Path $sourceRoot $item
   if (Test-Path $source) {
@@ -96,8 +93,7 @@ $uninstallWrapper = Join-Path $installRoot "scripts\uninstall-windows-agent.vbs"
 $packagePath = Join-Path $installRoot "package.json"
 
 if (-not (Test-Path (Join-Path $installRoot "node_modules"))) {
-  Set-Location $installRoot
-  npm ci --omit=dev
+  throw "Pacote do Agent incompleto: dependencias de producao ausentes."
 }
 
 $version = "0.1.0"

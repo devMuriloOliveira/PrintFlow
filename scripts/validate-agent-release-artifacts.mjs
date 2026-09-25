@@ -23,6 +23,15 @@ if (metadata.signingMode === 'PRODUCTION_TRUSTED' && metadata.productionTrusted 
 if (metadata.signingMode === 'DEV_SELF_SIGNED' && metadata.productionTrusted !== false) {
   throw new Error('DEV_SELF_SIGNED exige productionTrusted=false.')
 }
+if (metadata.portableRuntime !== true) {
+  throw new Error('Release do Agent deve incluir runtime portatil.')
+}
+if (!/^24\.\d+\.\d+$/.test(String(metadata.nodeRuntimeVersion || ''))) {
+  throw new Error('Versao do runtime Node.js da release e invalida.')
+}
+if (metadata.nodeRuntimeArchitecture !== 'x64') {
+  throw new Error('Arquitetura do runtime Node.js da release e invalida.')
+}
 
 const sums = await readFile(path.join(dist, 'SHA256SUMS.txt'), 'utf8')
 const entries = sums.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {

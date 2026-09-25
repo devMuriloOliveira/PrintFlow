@@ -3,6 +3,7 @@ param(
   [string]$PackageName = "PrintFlow-Agent-Windows",
   [string]$InstallerName = "PrintFlow-Agent-Setup",
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
+  [string]$NodeRuntimeVersion = "24.19.0",
   [switch]$SignDev,
   [switch]$RequirePersistedCertificate,
   [switch]$SkipOuterSignature,
@@ -26,6 +27,19 @@ $installerSedPath = Join-Path $outputRoot "$InstallerName.sed"
 $devCertificatePath = Join-Path $outputRoot "PrintFlow-Agent-Dev-Certificate.cer"
 
 Set-Location $agentRoot
+
+$buildNodeCommand = Get-Command "node.exe" -ErrorAction Stop
+$buildNodeExecutable = $buildNodeCommand.Source
+$buildNodeVersion = (& $buildNodeExecutable --version).Trim().TrimStart('v')
+$buildNodeArchitecture = (& $buildNodeExecutable -p "process.arch").Trim()
+
+if ($buildNodeVersion -ne $NodeRuntimeVersion) {
+  throw "O build exige Node.js $NodeRuntimeVersion; encontrado $buildNodeVersion."
+}
+
+if ($buildNodeArchitecture -ne "x64") {
+  throw "O pacote Windows atual exige runtime Node.js x64; encontrado $buildNodeArchitecture."
+}
 
 if (-not $SkipInstall) {
   npm ci --omit=dev
@@ -54,6 +68,54 @@ foreach ($item in $items) {
   if (Test-Path $source) {
     Copy-Item -LiteralPath $source -Destination $stageRoot -Recurse -Force
   }
+}
+
+$runtimeRoot = Join-Path $stageRoot "runtime"
+New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+$runtimeNodePath = Join-Path $runtimeRoot "node.exe"
+Copy-Item -LiteralPath $buildNodeExecutable -Destination $runtimeNodePath -Force
+
+$runtimeLicensePath = Join-Path $runtimeRoot "LICENSE.node.txt"
+$localLicenseCandidates = @(
+  (Join-Path (Split-Path $buildNodeExecutable -Parent) "LICENSE"),
+  (Join-Path (Split-Path $buildNodeExecutable -Parent) "LICENSE.txt")
+)
+$localLicense = $localLicenseCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+if ($localLicense) {
+  Copy-Item -LiteralPath $localLicense -Destination $runtimeLicensePath -Force
+} else {
+  Invoke-WebRequest `
+    -Uri "https://raw.githubusercontent.com/nodejs/node/v$NodeRuntimeVersion/LICENSE" `
+    -OutFile $runtimeLicensePath `
+    -UseBasicParsing
+}
+
+if (-not (Test-Path -LiteralPath $runtimeLicensePath) -or (Get-Item -LiteralPath $runtimeLicensePath).Length -lt 1000) {
+  throw "Licenca do runtime Node.js nao foi incluida no pacote."
+}
+
+$runtimeHash = (Get-FileHash -LiteralPath $runtimeNodePath -Algorithm SHA256).Hash.ToUpperInvariant()
+[ordered]@{
+  version = $buildNodeVersion
+  architecture = $buildNodeArchitecture
+  sha256 = $runtimeHash
+  source = "actions/setup-node"
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runtimeRoot "runtime.json") -Encoding UTF8
+
+Push-Location $stageRoot
+try {
+  & $runtimeNodePath --check "src/index.js"
+  if ($LASTEXITCODE -ne 0) {
+    throw "O entrypoint falhou no runtime Node.js empacotado."
+  }
+
+  & $runtimeNodePath -e "Promise.all([import('node:sqlite'), import('serialport')]).catch(error => { console.error(error); process.exit(1) })"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Dependencias nativas falharam no runtime Node.js empacotado."
+  }
+} finally {
+  Pop-Location
 }
 
 if (Test-Path $zipPath) {

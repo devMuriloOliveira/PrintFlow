@@ -15,6 +15,7 @@ $rollbackRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("PrintFlowAgent-Rol
 $binaryItems = @(
   "assets",
   "node_modules",
+  "runtime",
   "scripts",
   "src",
   "package.json",
@@ -68,7 +69,12 @@ $arguments = @(
 if ($ExpectedVersion) { $arguments += "--expected-version=$ExpectedVersion" }
 if ($ExpectedCertificateSha256) { $arguments += "--expected-certificate-sha256=$ExpectedCertificateSha256" }
 
-& node @arguments
+$verifierNode = Join-Path $installRoot "runtime\node.exe"
+if (-not (Test-Path -LiteralPath $verifierNode)) {
+  $verifierNode = (Get-Command "node.exe" -ErrorAction Stop).Source
+}
+
+& $verifierNode @arguments
 if ($LASTEXITCODE -ne 0) {
   throw "O pacote de atualizacao nao passou na verificacao de integridade."
 }

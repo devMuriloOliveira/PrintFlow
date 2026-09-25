@@ -106,7 +106,13 @@ foreach ($name in $wanted) {
 }
 
 $metadata = Get-Content (Join-Path $packageRoot 'RELEASE-METADATA.json') -Raw | ConvertFrom-Json
-if ([string]$metadata.version -ne $latestVersion -or $metadata.signingMode -notin @('DEV_SELF_SIGNED', 'PRODUCTION_TRUSTED')) { throw 'Manifesto da release invalido.' }
+if (
+  [string]$metadata.version -ne $latestVersion -or
+  $metadata.signingMode -notin @('DEV_SELF_SIGNED', 'PRODUCTION_TRUSTED') -or
+  $metadata.portableRuntime -ne $true -or
+  [string]$metadata.nodeRuntimeVersion -notmatch '^24\.\d+\.\d+$' -or
+  [string]$metadata.nodeRuntimeArchitecture -ne 'x64'
+) { throw 'Manifesto da release invalido.' }
 $verifiedNames = @{}
 foreach ($line in Get-Content (Join-Path $packageRoot 'SHA256SUMS.txt')) {
   if ($line -notmatch '^([A-Fa-f0-9]{64})\s+(.+)$') { throw 'SHA256SUMS invalido.' }

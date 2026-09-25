@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $updatesRoot = Join-Path $env:APPDATA 'PrintFlow Agent\updates'
 $historyPath = Join-Path $updatesRoot 'update-history.jsonl'
 $rollbackRoot = Join-Path $updatesRoot ("rollback-$PreviousVersion-" + [guid]::NewGuid().ToString('N'))
-$binaryItems = @('assets', 'node_modules', 'scripts', 'src', 'package.json', 'package-lock.json', 'README.md')
+$binaryItems = @('assets', 'node_modules', 'runtime', 'scripts', 'src', 'package.json', 'package-lock.json', 'README.md')
 $rollbackSucceeded = $false
 
 function Add-UpdateHistory {

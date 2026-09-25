@@ -136,11 +136,11 @@ try {
   if (!trayLauncher.includes('PRINTFLOW_ENVIRONMENT')) {
     errors.push('launcher de Production nao define PRINTFLOW_ENVIRONMENT.')
   }
-  if (!trayLauncher.includes('Resolve-NodeExecutable') || !trayLauncher.includes('Node.js 22.13')) {
+  if (!trayLauncher.includes('Resolve-NodeExecutable') || !trayLauncher.includes('runtime\\node.exe')) {
     errors.push('launcher do Agent nao resolve um Node.js suportado fora do PATH interativo.')
   }
-  if (!installer.includes('Assert-NodeRuntime') || !installer.includes('Node.js 22.13')) {
-    errors.push('instalador nao valida a presenca de Node.js suportado.')
+  if (!installer.includes('Assert-BundledNodeRuntime') || !installer.includes('runtime Node.js portatil ausente')) {
+    errors.push('instalador nao valida o runtime Node.js portatil empacotado.')
   }
 
   const packageBuilder = await fs.readFile(
@@ -149,6 +149,14 @@ try {
   )
   if (!packageBuilder.includes('apiUri.Scheme -ne "https"') || !packageBuilder.includes('localhost')) {
     errors.push('builder do pacote nao bloqueia endpoint local/inseguro em Production.')
+  }
+  if (
+    !packageBuilder.includes('NodeRuntimeVersion') ||
+    !packageBuilder.includes('runtime.json') ||
+    !packageBuilder.includes("import('node:sqlite')") ||
+    !packageBuilder.includes("import('serialport')")
+  ) {
+    errors.push('builder nao inclui e exercita o runtime Node.js portatil.')
   }
   if (
     !packageBuilder.includes('RequirePersistedCertificate') ||
@@ -202,6 +210,17 @@ try {
     !updater.includes('$signature.Status -ne "Valid"')
   ) {
     errors.push('atualizador aceita instalador sem assinatura confiavel.')
+  }
+  if (!updater.includes('"runtime"') || !updater.includes('runtime\\node.exe')) {
+    errors.push('atualizador nao preserva nem usa o runtime Node.js portatil.')
+  }
+
+  const updateApplier = await fs.readFile(
+    path.join(agentRoot, 'scripts/apply-windows-agent-update.ps1'),
+    'utf8'
+  )
+  if (!updateApplier.includes("'runtime'")) {
+    errors.push('aplicador de atualizacao nao inclui o runtime Node.js no rollback.')
   }
 
   const releaseWorkflow = await fs.readFile(

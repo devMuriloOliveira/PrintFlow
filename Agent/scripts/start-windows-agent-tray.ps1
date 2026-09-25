@@ -55,7 +55,9 @@ function Write-AgentLauncherError {
 }
 
 function Resolve-NodeExecutable {
-  $candidates = @()
+  $candidates = @(
+    (Join-Path $agentRoot "runtime\node.exe")
+  )
 
   try {
     $command = Get-Command "node.exe" -ErrorAction SilentlyContinue
