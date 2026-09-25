@@ -40,6 +40,64 @@ Add-Type -AssemblyName System.Drawing
 $agentProcess = $null
 $agentClosing = $false
 
+function Write-AgentLauncherError {
+  param(
+    [string]$Message
+  )
+
+  try {
+    Add-Content `
+      -LiteralPath (Join-Path $logPath "launcher.log") `
+      -Value ("{0} {1}" -f ([DateTime]::UtcNow.ToString("o")), $Message) `
+      -Encoding UTF8
+  } catch {
+  }
+}
+
+function Resolve-NodeExecutable {
+  $candidates = @()
+
+  try {
+    $command = Get-Command "node.exe" -ErrorAction SilentlyContinue
+    if ($command -and $command.Source) {
+      $candidates += $command.Source
+    }
+  } catch {
+  }
+
+  $candidates += @(
+    (Join-Path ${env:ProgramFiles} "nodejs\node.exe"),
+    (Join-Path ${env:ProgramW6432} "nodejs\node.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\nodejs\node.exe")
+  )
+
+  foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    if (-not (Test-Path -LiteralPath $candidate)) {
+      continue
+    }
+
+    try {
+      $version = (& $candidate --version 2>$null).Trim()
+      if ($version -match '^v(\d+)\.') {
+        $major = [int]$Matches[1]
+        if ($major -ge 22) {
+          return (Resolve-Path -LiteralPath $candidate).Path
+        }
+      }
+    } catch {
+    }
+  }
+
+  throw "Node.js 22.13 ou superior nao encontrado. Instale o Node.js LTS e inicie o PrintFlow Agent novamente."
+}
+
+try {
+  $nodeExecutable = Resolve-NodeExecutable
+} catch {
+  Write-AgentLauncherError $_.Exception.Message
+  throw
+}
+
 function Start-AgentProcess {
   if ($script:agentClosing) {
     return
@@ -50,7 +108,7 @@ function Start-AgentProcess {
   }
 
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-  $startInfo.FileName = "node"
+  $startInfo.FileName = $nodeExecutable
   $startInfo.Arguments = "`"$scriptPath`""
   $startInfo.WorkingDirectory = $agentRoot
   $startInfo.UseShellExecute = $false
@@ -266,6 +324,9 @@ try {
   $restartTimer.Start()
   $updateTimer.Start()
   [System.Windows.Forms.Application]::Run()
+} catch {
+  Write-AgentLauncherError $_.Exception.Message
+  throw
 } finally {
   $script:agentClosing = $true
   $restartTimer.Stop()

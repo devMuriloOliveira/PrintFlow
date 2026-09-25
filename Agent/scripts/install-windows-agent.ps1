@@ -38,6 +38,40 @@ function Stop-ExistingAgentInstall {
   Start-Sleep -Milliseconds 1200
 }
 
+function Assert-NodeRuntime {
+  $candidates = @()
+  try {
+    $command = Get-Command "node.exe" -ErrorAction SilentlyContinue
+    if ($command -and $command.Source) {
+      $candidates += $command.Source
+    }
+  } catch {
+  }
+
+  $candidates += @(
+    (Join-Path ${env:ProgramFiles} "nodejs\node.exe"),
+    (Join-Path ${env:ProgramW6432} "nodejs\node.exe"),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\nodejs\node.exe")
+  )
+
+  foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    if (-not (Test-Path -LiteralPath $candidate)) {
+      continue
+    }
+
+    try {
+      $version = (& $candidate --version 2>$null).Trim()
+      if ($version -match '^v(\d+)\.' -and [int]$Matches[1] -ge 22) {
+        return
+      }
+    } catch {
+    }
+  }
+
+  throw "Node.js 22.13 ou superior nao encontrado. Instale o Node.js LTS antes de instalar o PrintFlow Agent."
+}
+
+Assert-NodeRuntime
 Stop-ExistingAgentInstall
 
 if (-not (Test-Path $installRoot)) {

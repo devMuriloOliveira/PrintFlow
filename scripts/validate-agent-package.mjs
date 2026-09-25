@@ -136,6 +136,12 @@ try {
   if (!trayLauncher.includes('PRINTFLOW_ENVIRONMENT')) {
     errors.push('launcher de Production nao define PRINTFLOW_ENVIRONMENT.')
   }
+  if (!trayLauncher.includes('Resolve-NodeExecutable') || !trayLauncher.includes('Node.js 22.13')) {
+    errors.push('launcher do Agent nao resolve um Node.js suportado fora do PATH interativo.')
+  }
+  if (!installer.includes('Assert-NodeRuntime') || !installer.includes('Node.js 22.13')) {
+    errors.push('instalador nao valida a presenca de Node.js suportado.')
+  }
 
   const packageBuilder = await fs.readFile(
     path.join(agentRoot, 'scripts/build-windows-package.ps1'),
