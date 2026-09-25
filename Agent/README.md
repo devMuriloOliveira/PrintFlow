@@ -178,6 +178,11 @@ Para uma impressora cadastrada, `resolveOfficialOrcaProfileForPrinter()` exige
 um modelo exato com preset oficial (P1S, P1P, X1 Carbon, A1 ou A1 mini). Nao
 ha fallback entre modelos: sem perfil correspondente o slicing e recusado.
 
+## Compatibilidade
+
+- Versao minima suportada do Agent: `0.1.10`.
+- Versoes anteriores devem usar o instalador completo/de transicao para chegar a uma versao atual; elas nao fazem parte do contrato funcional suportado.
+
 ## Scripts
 
 - `npm.cmd run start`: inicia o Agent em modo console.

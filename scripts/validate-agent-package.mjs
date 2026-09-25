@@ -229,10 +229,23 @@ try {
   )
   if (
     !releaseWorkflow.includes('PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64') ||
+    !releaseWorkflow.includes("PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'") ||
     !releaseWorkflow.includes('-SignDev') ||
     !releaseWorkflow.includes('-RequirePersistedCertificate')
   ) {
     errors.push('workflow de release nao exige assinatura Early Access persistente.')
+  }
+
+  const ciWorkflow = await fs.readFile(
+    path.join(root, '.github/workflows/ci.yml'),
+    'utf8'
+  )
+  if (
+    !ciWorkflow.includes("PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'") ||
+    !ciWorkflow.includes('node-version: ${{ env.PRINTFLOW_AGENT_NODE_VERSION }}') ||
+    !ciWorkflow.includes('-NodeRuntimeVersion $env:PRINTFLOW_AGENT_NODE_VERSION')
+  ) {
+    errors.push('CI do pacote Windows nao fixa o mesmo runtime Node.js da release.')
   }
 } catch (error) {
   errors.push(

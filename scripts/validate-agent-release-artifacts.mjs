@@ -14,6 +14,7 @@ const sha256 = async filePath => {
 }
 
 const metadata = await readJson('RELEASE-METADATA.json')
+const minimumSupportedVersion = process.env.PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION || '0.1.10'
 if (!['DEV_SELF_SIGNED', 'PRODUCTION_TRUSTED'].includes(metadata.signingMode)) {
   throw new Error('signingMode da release invalido.')
 }
@@ -22,6 +23,9 @@ if (metadata.signingMode === 'PRODUCTION_TRUSTED' && metadata.productionTrusted 
 }
 if (metadata.signingMode === 'DEV_SELF_SIGNED' && metadata.productionTrusted !== false) {
   throw new Error('DEV_SELF_SIGNED exige productionTrusted=false.')
+}
+if (metadata.minimumSupportedVersion !== minimumSupportedVersion) {
+  throw new Error(`Versao minima suportada deve ser ${minimumSupportedVersion}.`)
 }
 if (metadata.portableRuntime !== true) {
   throw new Error('Release do Agent deve incluir runtime portatil.')

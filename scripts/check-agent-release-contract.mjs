@@ -8,7 +8,7 @@ const workflow = await fs.readFile(workflowPath, 'utf8')
 const required = [
   "- 'agent-v*'",
   'PRINTFLOW_API_URL',
-  'PRINTFLOW_MINIMUM_SUPPORTED_VERSION',
+  "PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'",
   'npm test',
   'build-windows-package.ps1',
   'Get-FileHash',

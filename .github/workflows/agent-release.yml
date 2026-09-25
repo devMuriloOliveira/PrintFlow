@@ -2,6 +2,7 @@ name: Agent Release
 
 env:
   PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'
+  PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'
 
 on:
   push:
@@ -29,12 +30,12 @@ jobs:
         run: |
           $tagVersion = '${{ github.ref_name }}' -replace '^agent-v', ''
           $packageVersion = (Get-Content Agent/package.json -Raw | ConvertFrom-Json).version
-          $minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'.Trim()
+          $minimumSupportedVersion = $env:PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION.Trim()
           if ($tagVersion -ne $packageVersion) {
             throw "Tag $tagVersion diverge da versao do Agent $packageVersion."
           }
           if ($minimumSupportedVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-            throw 'Configure PRINTFLOW_MINIMUM_SUPPORTED_VERSION como SemVer antes de publicar uma release.'
+            throw 'PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION deve ser SemVer.'
           }
           node scripts/validate-agent-package.mjs
 
@@ -138,7 +139,7 @@ jobs:
           [ordered]@{
             tag = '${{ github.ref_name }}'
             version = $package.version
-            minimumSupportedVersion = '${{ vars.PRINTFLOW_MINIMUM_SUPPORTED_VERSION }}'.Trim()
+            minimumSupportedVersion = $env:PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION
             portableRuntime = $true
             nodeRuntimeVersion = $env:PRINTFLOW_AGENT_NODE_VERSION
             nodeRuntimeArchitecture = 'x64'

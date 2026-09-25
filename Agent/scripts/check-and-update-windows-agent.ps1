@@ -108,6 +108,7 @@ foreach ($name in $wanted) {
 $metadata = Get-Content (Join-Path $packageRoot 'RELEASE-METADATA.json') -Raw | ConvertFrom-Json
 if (
   [string]$metadata.version -ne $latestVersion -or
+  [string]$metadata.minimumSupportedVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$' -or
   $metadata.signingMode -notin @('DEV_SELF_SIGNED', 'PRODUCTION_TRUSTED') -or
   $metadata.portableRuntime -ne $true -or
   [string]$metadata.nodeRuntimeVersion -notmatch '^24\.\d+\.\d+$' -or

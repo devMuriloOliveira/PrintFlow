@@ -8,6 +8,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'
+
 jobs:
   security:
     runs-on: ubuntu-latest
@@ -76,7 +79,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ env.PRINTFLOW_AGENT_NODE_VERSION }}
           cache: npm
           cache-dependency-path: Agent/package-lock.json
       - run: npm ci
@@ -87,7 +90,9 @@ jobs:
           PRINTFLOW_API_URL: https://api.example.invalid
         run: >-
           npm.cmd --prefix Agent run build:windows --
-          -ApiUrl $env:PRINTFLOW_API_URL -SkipInstall
+          -ApiUrl $env:PRINTFLOW_API_URL
+          -NodeRuntimeVersion $env:PRINTFLOW_AGENT_NODE_VERSION
+          -SkipInstall
       - name: Validate package contract and generated artifact
         shell: powershell
         run: |
