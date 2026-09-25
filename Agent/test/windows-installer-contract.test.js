@@ -45,3 +45,15 @@ test('cadastro do Windows inclui informacoes de versao e instalacao', async () =
     assert.match(install, new RegExp(`"${property}"`))
   }
 })
+
+test('verificacao de atualizacao nao bloqueia a bandeja e possui timeouts', async () => {
+  const updater = await readScript('check-and-update-windows-agent.ps1')
+  const tray = await readScript('start-windows-agent-tray.ps1')
+
+  assert.match(updater, /-TimeoutSec \$ReleaseTimeoutSec/)
+  assert.match(updater, /-TimeoutSec \$ArtifactTimeoutSec/)
+  assert.match(updater, /Voce ja esta usando a versao mais recente/)
+  assert.match(tray, /Start-Process `\r?\n\s+-FilePath 'powershell\.exe'/)
+  assert.match(tray, /Verificando atualiza.{0,20}em segundo plano/)
+  assert.match(tray, /A verifica.{0,30}atualiza.{0,20}em andamento/)
+})

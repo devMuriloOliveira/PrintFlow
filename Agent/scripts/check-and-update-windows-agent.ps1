@@ -2,6 +2,8 @@
   [string]$CurrentVersion = '',
   [string]$InstallDir = "$env:LOCALAPPDATA\PrintFlowAgent",
   [string]$LocalHealthUrl = 'http://127.0.0.1:17873/healthz',
+  [int]$ReleaseTimeoutSec = 15,
+  [int]$ArtifactTimeoutSec = 60,
   [switch]$VerifyOnly,
   [switch]$Interactive
 )
@@ -52,7 +54,10 @@ function Get-AgentHealth {
   }
 }
 
-$release = Invoke-RestMethod -Uri $releaseApi -Headers @{ 'User-Agent' = 'PrintFlow-Agent-Updater' }
+$release = Invoke-RestMethod `
+  -Uri $releaseApi `
+  -Headers @{ 'User-Agent' = 'PrintFlow-Agent-Updater' } `
+  -TimeoutSec $ReleaseTimeoutSec
 $tag = [string]$release.tag_name
 if ($tag -notmatch '^agent-v(\d+\.\d+\.\d+)$') { throw 'Release do Agent invalida.' }
 $latestVersion = $Matches[1]
@@ -60,6 +65,14 @@ if (-not $CurrentVersion) {
   $CurrentVersion = (Get-Content (Join-Path $InstallDir 'package.json') -Raw | ConvertFrom-Json).version
 }
 if ((Compare-SemVer $latestVersion $CurrentVersion) -le 0) {
+  if ($Interactive) {
+    [System.Windows.Forms.MessageBox]::Show(
+      "Voce ja esta usando a versao mais recente do PrintFlow Agent ($CurrentVersion).",
+      'PrintFlow Agent',
+      'OK',
+      'Information'
+    ) | Out-Null
+  }
   return [pscustomobject]@{ updateAvailable = $false; currentVersion = $CurrentVersion; latestVersion = $latestVersion }
 }
 
@@ -79,7 +92,18 @@ function Get-DeferredResult {
 
 if (-not $VerifyOnly) {
   $health = Get-AgentHealth
-  if (-not $health -or $health.updateBlocked) { return Get-DeferredResult -Health $health }
+  if (-not $health -or $health.updateBlocked) {
+    $deferredResult = Get-DeferredResult -Health $health
+    if ($Interactive) {
+      [System.Windows.Forms.MessageBox]::Show(
+        "A versao $latestVersion esta disponivel, mas a atualizacao foi adiada: $($deferredResult.reason).",
+        'PrintFlow Agent',
+        'OK',
+        'Information'
+      ) | Out-Null
+    }
+    return $deferredResult
+  }
 }
 
 if ($Interactive -and -not $VerifyOnly) {
@@ -102,7 +126,11 @@ $hashedArtifacts = @('PrintFlow-Agent-Setup.exe', 'PrintFlow-Agent-Dev-Certifica
 foreach ($name in $wanted) {
   $asset = @($release.assets | Where-Object { $_.name -eq $name })[0]
   if (-not $asset) { throw "Artefato ausente na release: $name" }
-  Invoke-WebRequest -Uri $asset.browser_download_url -OutFile (Join-Path $packageRoot $name) -UseBasicParsing
+  Invoke-WebRequest `
+    -Uri $asset.browser_download_url `
+    -OutFile (Join-Path $packageRoot $name) `
+    -UseBasicParsing `
+    -TimeoutSec $ArtifactTimeoutSec
 }
 
 $metadata = Get-Content (Join-Path $packageRoot 'RELEASE-METADATA.json') -Raw | ConvertFrom-Json

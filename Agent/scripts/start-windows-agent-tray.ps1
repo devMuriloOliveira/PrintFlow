@@ -248,6 +248,8 @@ $exitItem.Add_Click({
 
 $updateScript = Join-Path $agentRoot 'scripts\check-and-update-windows-agent.ps1'
 $updateHistoryPath = Join-Path $env:APPDATA 'PrintFlow Agent\updates\update-history.jsonl'
+$script:updateCheckProcess = $null
+$script:updateCheckPollTimer = $null
 
 function Stop-AgentForUpdate {
   $script:agentClosing = $true
@@ -261,23 +263,55 @@ function Stop-AgentForUpdate {
 
 $updateItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $updateItem.Text = 'Verificar atualizações'
-$updateItem.Add_Click({
-  try {
-    $result = & $updateScript -CurrentVersion $version -Interactive
-    if ($result -and $result.deferred) {
-      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização programada para o próximo período sem impressão ativa.', [System.Windows.Forms.ToolTipIcon]::Info)
-    } elseif ($result -and $result.updateAvailable -and -not $result.installed) {
-      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "A atualização $($result.latestVersion) está disponível.", [System.Windows.Forms.ToolTipIcon]::Info)
-    } elseif ($result -and $result.installed) {
-      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização iniciada. A versão anterior será restaurada automaticamente se a nova não iniciar.', [System.Windows.Forms.ToolTipIcon]::Info)
-      Stop-AgentForUpdate
-    } else {
-      $notifyIcon.ShowBalloonTip(3000, 'PrintFlow Agent', 'Você já está usando a versão mais recente.', [System.Windows.Forms.ToolTipIcon]::Info)
-    }
-  } catch {
-    $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "Não foi possível verificar atualização: $($_.Exception.Message)", [System.Windows.Forms.ToolTipIcon]::Warning)
+
+function Start-InteractiveUpdateCheck {
+  if ($script:updateCheckProcess -and -not $script:updateCheckProcess.HasExited) {
+    $notifyIcon.ShowBalloonTip(3000, 'PrintFlow Agent', 'A verificação de atualização já está em andamento.', [System.Windows.Forms.ToolTipIcon]::Info)
+    return
   }
-})
+
+  try {
+    $script:updateCheckProcess = Start-Process `
+      -FilePath 'powershell.exe' `
+      -ArgumentList @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-WindowStyle', 'Hidden',
+        '-File', "`"$updateScript`"",
+        '-CurrentVersion', "`"$version`"",
+        '-Interactive'
+      ) `
+      -WindowStyle Hidden `
+      -PassThru
+
+    $notifyIcon.ShowBalloonTip(3000, 'PrintFlow Agent', 'Verificando atualizações em segundo plano...', [System.Windows.Forms.ToolTipIcon]::Info)
+
+    if (-not $script:updateCheckPollTimer) {
+      $script:updateCheckPollTimer = New-Object System.Windows.Forms.Timer
+      $script:updateCheckPollTimer.Interval = 500
+      $script:updateCheckPollTimer.Add_Tick({
+        if (-not $script:updateCheckProcess -or -not $script:updateCheckProcess.HasExited) {
+          return
+        }
+
+        $exitCode = $script:updateCheckProcess.ExitCode
+        $script:updateCheckProcess.Dispose()
+        $script:updateCheckProcess = $null
+        $script:updateCheckPollTimer.Stop()
+
+        if ($exitCode -ne 0 -and -not $script:agentClosing) {
+          $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Não foi possível verificar a atualização. Consulte o histórico de atualizações.', [System.Windows.Forms.ToolTipIcon]::Warning)
+        }
+      })
+    }
+
+    $script:updateCheckPollTimer.Start()
+  } catch {
+    $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "Não foi possível iniciar a verificação: $($_.Exception.Message)", [System.Windows.Forms.ToolTipIcon]::Warning)
+  }
+}
+
+$updateItem.Add_Click({ Start-InteractiveUpdateCheck })
 [void]$menu.Items.Insert(1, $updateItem)
 
 $updateHistoryItem = New-Object System.Windows.Forms.ToolStripMenuItem
