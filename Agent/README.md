@@ -242,6 +242,15 @@ Este canal continua sendo self-signed e adequado somente ao Early Access com con
 
 Depois de extraido, o instalador copia o Agent para `%LOCALAPPDATA%\PrintFlowAgent`, registra a inicializacao no login, cria atalhos e registra o protocolo local.
 
+O instalador informa a versao atual e a versao do pacote, o destino, a arquitetura
+e que o runtime Node.js ja esta incluido. Atualizacoes preservam o pareamento,
+as credenciais protegidas e o historico operacional local.
+
+O desinstalador preserva esses dados por padrao para permitir reinstalacao sem
+novo pareamento. A remocao completa e opcional, exige confirmacao explicita e
+apaga o conteudo de `%APPDATA%\PrintFlow Agent`, incluindo pareamento,
+credenciais de impressoras, cache, historico e logs.
+
 ## Variaveis de Ambiente
 
 - `PRINTFLOW_API_URL`: URL da API do PrintFlow.

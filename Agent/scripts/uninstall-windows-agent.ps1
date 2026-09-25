@@ -1,12 +1,14 @@
 param(
   [string]$InstallDir = "$env:LOCALAPPDATA\PrintFlowAgent",
   [string]$TaskName = "PrintFlowAgent",
-  [switch]$Quiet
+  [switch]$Quiet,
+  [switch]$RemoveUserData
 )
 
 $ErrorActionPreference = "Stop"
 
 $installRoot = [System.IO.Path]::GetFullPath($InstallDir)
+$dataRoot = [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA "PrintFlow Agent"))
 $iconPath = Join-Path $installRoot "assets\printflow-agent-icon.ico"
 $script:UninstallSucceeded = $false
 $script:UninstallAttempted = $false
@@ -14,7 +16,8 @@ $script:UninstallForm = $null
 
 function Invoke-AgentUninstall {
   param(
-    [scriptblock]$StatusCallback = {}
+    [scriptblock]$StatusCallback = {},
+    [switch]$DeleteUserData
   )
 
   & $StatusCallback "Removendo inicializacao automatica..."
@@ -73,11 +76,23 @@ function Invoke-AgentUninstall {
   if (Test-Path $installRoot) {
     Remove-Item -LiteralPath $installRoot -Recurse -Force
   }
+
+  if ($DeleteUserData) {
+    & $StatusCallback "Removendo pareamento e dados operacionais locais..."
+
+    if (Test-Path -LiteralPath $dataRoot) {
+      Remove-Item -LiteralPath $dataRoot -Recurse -Force
+    }
+  }
 }
 
 if ($Quiet) {
-  Invoke-AgentUninstall
-  Write-Host "PrintFlow Agent desinstalado."
+  Invoke-AgentUninstall -DeleteUserData:$RemoveUserData
+  if ($RemoveUserData) {
+    Write-Host "PrintFlow Agent e dados locais desinstalados."
+  } else {
+    Write-Host "PrintFlow Agent desinstalado. Pareamento e dados locais foram preservados."
+  }
   return
 }
 
@@ -94,7 +109,7 @@ $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
-$form.ClientSize = [System.Drawing.Size]::new(560, 340)
+$form.ClientSize = [System.Drawing.Size]::new(560, 408)
 $form.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
 $form.Font = [System.Drawing.Font]::new("Segoe UI", 9)
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
@@ -123,7 +138,7 @@ $panel = New-Object System.Windows.Forms.Panel
 $panel.BackColor = [System.Drawing.Color]::White
 $panel.BorderStyle = "None"
 $panel.Location = [System.Drawing.Point]::new(38, 112)
-$panel.Size = [System.Drawing.Size]::new(484, 142)
+$panel.Size = [System.Drawing.Size]::new(484, 174)
 $form.Controls.Add($panel)
 
 $question = New-Object System.Windows.Forms.Label
@@ -136,27 +151,36 @@ $question.Size = [System.Drawing.Size]::new(448, 28)
 $panel.Controls.Add($question)
 
 $description = New-Object System.Windows.Forms.Label
-$description.Text = "O Agent deixara de conectar este computador ao PrintFlow, nao iniciara mais com o Windows e as impressoras vinculadas por este computador ficarao indisponiveis ate novo pareamento."
+$description.Text = "O Agent deixara de iniciar com o Windows e este computador ficara offline no PrintFlow. Por padrao, o pareamento e as configuracoes locais serao preservados para uma futura reinstalacao."
 $description.Font = [System.Drawing.Font]::new("Segoe UI", 9)
 $description.ForeColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
 $description.AutoSize = $false
 $description.Location = [System.Drawing.Point]::new(18, 50)
-$description.Size = [System.Drawing.Size]::new(448, 54)
+$description.Size = [System.Drawing.Size]::new(448, 52)
 $panel.Controls.Add($description)
+
+$removeDataCheck = New-Object System.Windows.Forms.CheckBox
+$removeDataCheck.Text = "Remover tambem pareamento, credenciais, cache, historico e logs locais"
+$removeDataCheck.Font = [System.Drawing.Font]::new("Segoe UI", 9)
+$removeDataCheck.ForeColor = [System.Drawing.Color]::FromArgb(185, 28, 28)
+$removeDataCheck.AutoSize = $false
+$removeDataCheck.Location = [System.Drawing.Point]::new(18, 108)
+$removeDataCheck.Size = [System.Drawing.Size]::new(448, 38)
+$panel.Controls.Add($removeDataCheck)
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = ""
 $statusLabel.Font = [System.Drawing.Font]::new("Segoe UI", 9)
 $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $statusLabel.AutoSize = $false
-$statusLabel.Location = [System.Drawing.Point]::new(18, 108)
+$statusLabel.Location = [System.Drawing.Point]::new(18, 148)
 $statusLabel.Size = [System.Drawing.Size]::new(448, 18)
 $panel.Controls.Add($statusLabel)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
 $progress.Style = "Marquee"
 $progress.MarqueeAnimationSpeed = 0
-$progress.Location = [System.Drawing.Point]::new(38, 274)
+$progress.Location = [System.Drawing.Point]::new(38, 328)
 $progress.Size = [System.Drawing.Size]::new(484, 8)
 $progress.Visible = $false
 $form.Controls.Add($progress)
@@ -165,7 +189,7 @@ $cancelButton = New-Object System.Windows.Forms.Button
 $cancelButton.Text = "Cancelar"
 $cancelButton.Width = 110
 $cancelButton.Height = 36
-$cancelButton.Location = [System.Drawing.Point]::new(288, 296)
+$cancelButton.Location = [System.Drawing.Point]::new(288, 354)
 $cancelButton.FlatStyle = "Flat"
 $cancelButton.BackColor = [System.Drawing.Color]::White
 $cancelButton.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
@@ -180,7 +204,7 @@ $uninstallButton = New-Object System.Windows.Forms.Button
 $uninstallButton.Text = "Desinstalar"
 $uninstallButton.Width = 122
 $uninstallButton.Height = 36
-$uninstallButton.Location = [System.Drawing.Point]::new(408, 296)
+$uninstallButton.Location = [System.Drawing.Point]::new(408, 354)
 $uninstallButton.BackColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
 $uninstallButton.ForeColor = [System.Drawing.Color]::White
 $uninstallButton.FlatStyle = "Flat"
@@ -246,6 +270,20 @@ $uninstallButton.Add_Click({
   }
 
   try {
+    if ($removeDataCheck.Checked) {
+      $confirmation = [System.Windows.Forms.MessageBox]::Show(
+        "Esta opcao apaga permanentemente o pareamento, as credenciais protegidas das impressoras, o cache, o historico operacional e os logs deste computador.`n`nDeseja continuar?",
+        "Remover todos os dados locais?",
+        "YesNo",
+        "Warning",
+        "Button2"
+      )
+
+      if ($confirmation -ne "Yes") {
+        return
+      }
+    }
+
     $script:UninstallAttempted = $true
     $uninstallButton.Enabled = $false
     $cancelButton.Enabled = $false
@@ -254,10 +292,17 @@ $uninstallButton.Add_Click({
     $progress.Style = "Marquee"
     $progress.MarqueeAnimationSpeed = 24
 
-    Invoke-AgentUninstall -StatusCallback ${function:Set-UninstallStatus}
+    Invoke-AgentUninstall `
+      -StatusCallback ${function:Set-UninstallStatus} `
+      -DeleteUserData:$removeDataCheck.Checked
 
+    $completedMessage = if ($removeDataCheck.Checked) {
+      "PrintFlow Agent e todos os dados locais foram removidos."
+    } else {
+      "PrintFlow Agent removido. Pareamento e dados locais foram preservados."
+    }
     Complete-Uninstall `
-      -Message "PrintFlow Agent desinstalado com sucesso." `
+      -Message $completedMessage `
       -Success $true
   } catch {
     Complete-Uninstall `

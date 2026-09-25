@@ -25,6 +25,11 @@ $installerSourceRoot = Join-Path $outputRoot "$InstallerName-source"
 $installerPath = Join-Path $outputRoot "$InstallerName.exe"
 $installerSedPath = Join-Path $outputRoot "$InstallerName.sed"
 $devCertificatePath = Join-Path $outputRoot "PrintFlow-Agent-Dev-Certificate.cer"
+$packageVersion = [string]((Get-Content -LiteralPath (Join-Path $agentRoot "package.json") -Raw | ConvertFrom-Json).version)
+
+if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+  throw "Versao do Agent invalida no package.json."
+}
 
 Set-Location $agentRoot
 
@@ -146,7 +151,7 @@ $launcher = @"
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
-cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\$installerBootstrapName" & """ -ApiUrl ""$escapedApiUrlForVbs"""
+cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\$installerBootstrapName" & """ -ApiUrl ""$escapedApiUrlForVbs"" -PackageVersion ""$packageVersion"""
 code = shell.Run(cmd, 0, True)
 WScript.Quit code
 "@

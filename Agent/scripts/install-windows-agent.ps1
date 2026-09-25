@@ -258,11 +258,18 @@ Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "PrintFlow Agent
 Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value $version
 Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "PrintFlow 3D"
 Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installRoot
-Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $iconPath
+Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value "$iconPath,0"
 Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value $uninstallCommand
 Set-ItemProperty -Path $uninstallKey -Name "QuietUninstallString" -Value $quietUninstallCommand
+Set-ItemProperty -Path $uninstallKey -Name "InstallDate" -Value (Get-Date -Format "yyyyMMdd")
+Set-ItemProperty -Path $uninstallKey -Name "Comments" -Value "Conector local do PrintFlow para impressoras 3D. Inclui runtime proprio e inicia no login deste usuario."
 New-ItemProperty -Path $uninstallKey -Name "NoModify" -Value 1 -PropertyType DWord -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "NoRepair" -Value 1 -PropertyType DWord -Force | Out-Null
+
+if ($version -match '^(\d+)\.(\d+)\.(\d+)') {
+  New-ItemProperty -Path $uninstallKey -Name "VersionMajor" -Value ([int]$Matches[1]) -PropertyType DWord -Force | Out-Null
+  New-ItemProperty -Path $uninstallKey -Name "VersionMinor" -Value ([int]$Matches[2]) -PropertyType DWord -Force | Out-Null
+}
 
 if ($estimatedSizeKb -gt 0) {
   New-ItemProperty -Path $uninstallKey -Name "EstimatedSize" -Value $estimatedSizeKb -PropertyType DWord -Force | Out-Null

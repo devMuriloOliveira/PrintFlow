@@ -1,5 +1,6 @@
 param(
-  [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com"
+  [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
+  [string]$PackageVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,14 +15,29 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $packageRoot = $PSScriptRoot
 $zipPath = Join-Path $packageRoot "PrintFlow-Agent-Windows.zip"
 $iconPath = Join-Path $packageRoot "printflow-agent-icon.ico"
+$installRoot = Join-Path $env:LOCALAPPDATA "PrintFlowAgent"
 $extractRoot = Join-Path $env:TEMP ("PrintFlowAgentSetup-" + [guid]::NewGuid().ToString("N"))
 $script:InstallerSucceeded = $false
 $script:InstallAttempted = $false
 $script:InstallerForm = $null
 
+$existingVersion = ""
+$existingPackagePath = Join-Path $installRoot "package.json"
+if (Test-Path -LiteralPath $existingPackagePath) {
+  try {
+    $existingVersion = [string]((Get-Content -LiteralPath $existingPackagePath -Raw | ConvertFrom-Json).version)
+  } catch {
+    $existingVersion = "instalada"
+  }
+}
+
+$isUpgrade = [bool]$existingVersion
+$operationName = if ($isUpgrade) { "Atualizacao" } else { "Instalacao" }
+$actionLabel = if ($isUpgrade) { "Atualizar" } else { "Instalar" }
+
 $form = New-Object System.Windows.Forms.Form
 $script:InstallerForm = $form
-$form.Text = "PrintFlow Agent Setup"
+$form.Text = "$operationName do PrintFlow Agent"
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -44,7 +60,7 @@ $title.Location = [System.Drawing.Point]::new(34, 28)
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = "Conector local para impressoras 3D"
+$subtitle.Text = if ($isUpgrade) { "Atualize o conector local com seguranca" } else { "Conector local para impressoras 3D" }
 $subtitle.Font = [System.Drawing.Font]::new("Segoe UI", 10)
 $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
 $subtitle.AutoSize = $true
@@ -59,7 +75,7 @@ $infoPanel.Size = [System.Drawing.Size]::new(564, 258)
 $form.Controls.Add($infoPanel)
 
 $infoTitle = New-Object System.Windows.Forms.Label
-$infoTitle.Text = "Antes de instalar"
+$infoTitle.Text = "Resumo da $($operationName.ToLowerInvariant())"
 $infoTitle.Font = [System.Drawing.Font]::new("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
 $infoTitle.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $infoTitle.AutoSize = $true
@@ -76,29 +92,29 @@ $termsBox.ForeColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
 $termsBox.BackColor = [System.Drawing.Color]::White
 $termsBox.Location = [System.Drawing.Point]::new(18, 46)
 $termsBox.Size = [System.Drawing.Size]::new(526, 188)
+$currentVersionText = if ($existingVersion) { $existingVersion } else { "Nao instalado" }
+$targetVersionText = if ($PackageVersion) { $PackageVersion } else { "Versao do pacote" }
 $termsBox.Text = @"
-O PrintFlow Agent e um aplicativo local do PrintFlow 3D.
+Versao atual: $currentVersionText
+Versao a instalar: $targetVersionText
+Arquitetura: Windows x64
+Destino: $installRoot
 
-O que ele faz:
-- Encontra impressoras 3D na rede local e em portas USB deste computador.
-- Conecta este computador a conta PrintFlow autorizada pelo site.
-- Recebe comandos do PrintFlow para consultar status, conectar impressoras e iniciar/pausar/cancelar impressoes quando configurado.
-- Baixa arquivos de impressao autorizados pelo PrintFlow para enviar a impressora selecionada.
-- Fica em segundo plano e aparece na bandeja do Windows.
+O Agent encontra impressoras 3D na rede local ou USB e conecta este computador a conta PrintFlow pareada. Ele recebe somente comandos autorizados pelo PrintFlow e fica disponivel na bandeja do Windows.
 
-Dados e seguranca:
-- O Agent nao acessa arquivos pessoais do usuario.
-- O Agent guarda credenciais locais apenas para manter a conexao com a conta autorizada.
-- As credenciais de impressoras ficam isoladas neste computador.
-- Cada conta PrintFlow usa pareamento proprio para evitar mistura de dados entre clientes.
-- O Agent se comunica com a API configurada: $ApiUrl
+Configuracao no Windows:
+- Inicia automaticamente quando este usuario entrar no Windows.
+- Cria atalhos e registra o protocolo printflow-agent://.
+- Usa o runtime Node.js incluido; nao exige Node.js instalado separadamente.
+- Mantem pareamento, credenciais protegidas e historico local durante atualizacoes.
+- Comunica-se com: $ApiUrl
 
-Ao continuar, voce autoriza a instalacao do Agent neste Windows, a criacao de atalhos, inicializacao no login e registro do protocolo printflow-agent://.
+O Agent nao procura documentos pessoais. Arquivos de impressao autorizados ficam no cache operacional local e podem ser removidos pelo desinstalador.
 "@
 $infoPanel.Controls.Add($termsBox)
 
 $acceptCheck = New-Object System.Windows.Forms.CheckBox
-$acceptCheck.Text = "Li e aceito instalar o PrintFlow Agent neste computador."
+$acceptCheck.Text = "Entendi as informacoes e quero $($actionLabel.ToLowerInvariant()) o PrintFlow Agent."
 $acceptCheck.Font = [System.Drawing.Font]::new("Segoe UI", 9)
 $acceptCheck.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
 $acceptCheck.AutoSize = $true
@@ -148,7 +164,7 @@ $cancelButton.Add_Click({
 $form.Controls.Add($cancelButton)
 
 $installButton = New-Object System.Windows.Forms.Button
-$installButton.Text = "Instalar"
+$installButton.Text = $actionLabel
 $installButton.Enabled = $false
 $installButton.Width = 122
 $installButton.Height = 36
@@ -245,7 +261,7 @@ function Start-Install {
     $acceptCheck.Enabled = $false
     $installButton.Enabled = $false
     $cancelButton.Enabled = $false
-    $installButton.Text = "Instalando..."
+    $installButton.Text = if ($isUpgrade) { "Atualizando..." } else { "Instalando..." }
     $statusPanel.Visible = $true
     $progress.Style = "Continuous"
     $progress.MarqueeAnimationSpeed = 0
@@ -273,7 +289,7 @@ function Start-Install {
     Set-InstallerProgress 90 "Iniciando Agent em segundo plano..."
 
     Complete-Installer `
-      -Message "PrintFlow Agent instalado. Ele deve aparecer na bandeja do Windows." `
+      -Message "PrintFlow Agent $targetVersionText pronto. Ele deve aparecer na bandeja do Windows." `
       -Success $true
   } catch {
     Complete-Installer `
