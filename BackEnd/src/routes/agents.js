@@ -901,7 +901,13 @@ export const handleAgentVerify =
             status
           from agents
           where id = $1
-            and secret_hash = $2
+            and (
+              secret_hash = $2
+              or (
+                pending_secret_hash = $2
+                and pending_secret_expires_at > now()
+              )
+            )
             and secret_hash is not null
             and status <> 'revoked'
           limit 1
@@ -1083,7 +1089,13 @@ export const handleAgentHeartbeat =
               now()
 
           where id = $1
-            and secret_hash = $2
+            and (
+              secret_hash = $2
+              or (
+                pending_secret_hash = $2
+                and pending_secret_expires_at > now()
+              )
+            )
             and secret_hash is not null
             and status <> 'revoked'
 
@@ -1858,7 +1870,13 @@ export const handleAgentCommandsPending =
             tenant_id
           from agents
           where id = $1
-            and secret_hash = $2
+            and (
+              secret_hash = $2
+              or (
+                pending_secret_hash = $2
+                and pending_secret_expires_at > now()
+              )
+            )
             and secret_hash is not null
             and status <> 'revoked'
           limit 1
@@ -3320,7 +3338,13 @@ export const handleAgentCommandComplete =
             tenant_id
           from agents
           where id = $1
-            and secret_hash = $2
+            and (
+              secret_hash = $2
+              or (
+                pending_secret_hash = $2
+                and pending_secret_expires_at > now()
+              )
+            )
             and secret_hash is not null
             and status <> 'revoked'
           limit 1
