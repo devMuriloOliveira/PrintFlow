@@ -27,23 +27,22 @@ const MOCK_BAMBU_IP =
   '192.168.2.250'
 
 export const getBambuTlsOptions = (
-  environment = process.env
+  _environment = process.env
 ) => {
-  const explicitlyAllowed =
-    String(
-      environment.PRINTFLOW_BAMBU_ALLOW_INSECURE_TLS ||
-      ''
-    ).toLowerCase() === 'true'
-
-  const isProduction =
-    String(
-      environment.NODE_ENV ||
-      ''
-    ).toLowerCase() === 'production'
-
   return {
-    rejectUnauthorized:
-      !(explicitlyAllowed && !isProduction)
+    /*
+     * As impressoras Bambu no modo LAN usam um certificado TLS
+     * autoassinado em seu broker MQTT local (porta 8883). Ele nao
+     * pertence a uma CA publica e, portanto, a validacao padrao do
+     * Node sempre falha com "self-signed certificate in certificate
+     * chain".
+     *
+     * Esta excecao esta restrita a este adaptador, que sempre abre
+     * mqtts:// para o IP configurado da propria impressora. O canal
+     * continua cifrado e a autenticacao MQTT continua exigindo o LAN
+     * Access Code; nenhum cliente TLS generico do Agent e afetado.
+     */
+    rejectUnauthorized: false
   }
 }
 
@@ -825,10 +824,8 @@ const createClient = (
             .slice(2)}`,
 
         /*
-         * O certificado LAN da Bambu pode ser
-         * autoassinado. A excecao fica restrita
-         * ao desenvolvimento local e precisa ser
-         * opt-in; nunca e permitida em producao.
+         * O certificado LAN da Bambu e autoassinado. A excecao
+         * permanece limitada a esta conexao MQTT local da Bambu.
          */
         ...getBambuTlsOptions()
       }
