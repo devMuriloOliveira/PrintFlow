@@ -522,22 +522,8 @@ const generatePairingCode =
 const agentIsOnline = (
   agent: any
 ) => {
-  if (
-    !agent?.lastSeenAt
-  ) {
-    return false
-  }
-
-  const lastSeen =
-    new Date(
-      agent.lastSeenAt
-    ).getTime()
-
-  return (
-    Date.now() -
-      lastSeen <
-    90_000
-  )
+  return agent?.status ===
+    'online'
 }
 
 // ======================================================
