@@ -106,8 +106,9 @@ test(
     assert.equal(payload.ok, true)
     assert.equal(
       payload.connections[0].printer.ip,
-      '192.168.10.25'
+      '192.168.10.x'
     )
+    assert.equal(payload.connections[0].printer.serial, '***ESTE')
     assert.equal(
       JSON.stringify(payload).includes('NAO-DEVE-APARECER'),
       false
@@ -118,5 +119,53 @@ test(
         item.address.endsWith('.x')
       )
     )
+  }
+)
+
+test(
+  'servidor local restringe origem, diagnostico web e novo pareamento',
+  async t => {
+    const server = startLocalServer({
+      port: 0,
+      allowedOrigins: ['https://app.example.com'],
+      canAcceptPairing: () => false
+    })
+
+    await new Promise((resolve, reject) => {
+      server.once('listening', resolve)
+      server.once('error', reject)
+    })
+    t.after(() => new Promise(resolve => server.close(resolve)))
+
+    const baseUrl = `http://127.0.0.1:${server.address().port}`
+    const rejected = await fetch(`${baseUrl}/healthz`, {
+      headers: { Origin: 'https://malicious.example' }
+    })
+    assert.equal(rejected.status, 403)
+    assert.equal(rejected.headers.get('access-control-allow-origin'), null)
+
+    const allowed = await fetch(`${baseUrl}/healthz`, {
+      headers: { Origin: 'https://app.example.com' }
+    })
+    assert.equal(allowed.status, 200)
+    assert.equal(
+      allowed.headers.get('access-control-allow-origin'),
+      'https://app.example.com'
+    )
+
+    const diagnostics = await fetch(`${baseUrl}/diagnostics`, {
+      headers: { Origin: 'https://app.example.com' }
+    })
+    assert.equal(diagnostics.status, 403)
+
+    const pairing = await fetch(`${baseUrl}/pair`, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://app.example.com',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code: 'PF-ABCD-EFGH' })
+    })
+    assert.equal(pairing.status, 409)
   }
 )

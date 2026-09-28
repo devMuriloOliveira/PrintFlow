@@ -90,13 +90,33 @@ function Get-DeferredResult {
   }
 }
 
+function Get-DeferredMessage {
+  param([string]$Reason)
+
+  switch ($Reason) {
+    'active_print' {
+      return 'Existe uma impressao ativa. A atualizacao sera tentada novamente quando ela terminar.'
+    }
+    'print_connection_lost' {
+      return 'A comunicacao com uma impressora em atividade foi perdida. Reconecte a impressora e confirme o estado antes de atualizar.'
+    }
+    'health_unavailable' {
+      return 'O Agent local ainda nao respondeu. A atualizacao sera tentada novamente quando ele estiver disponivel.'
+    }
+    default {
+      return 'A atualizacao foi adiada por seguranca e sera tentada novamente depois.'
+    }
+  }
+}
+
 if (-not $VerifyOnly) {
   $health = Get-AgentHealth
   if (-not $health -or $health.updateBlocked) {
     $deferredResult = Get-DeferredResult -Health $health
     if ($Interactive) {
+      $deferredMessage = Get-DeferredMessage -Reason $deferredResult.reason
       [System.Windows.Forms.MessageBox]::Show(
-        "A versao $latestVersion esta disponivel, mas a atualizacao foi adiada: $($deferredResult.reason).",
+        "A versao $latestVersion esta disponivel, mas a atualizacao foi adiada.`n`n$deferredMessage",
         'PrintFlow Agent',
         'OK',
         'Information'

@@ -1,6 +1,7 @@
 param(
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
-  [string]$PackageVersion = ""
+  [string]$PackageVersion = "",
+  [string]$CertificateSha256 = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -94,6 +95,7 @@ $termsBox.Location = [System.Drawing.Point]::new(18, 46)
 $termsBox.Size = [System.Drawing.Size]::new(526, 188)
 $currentVersionText = if ($existingVersion) { $existingVersion } else { "Nao instalado" }
 $targetVersionText = if ($PackageVersion) { $PackageVersion } else { "Versao do pacote" }
+$certificateNotice = if ($CertificateSha256) { "- Confia, para este usuario, no certificado de assinatura Early Access incluido e validado pelo pacote." } else { "" }
 $termsBox.Text = @"
 Versao atual: $currentVersionText
 Versao a instalar: $targetVersionText
@@ -107,7 +109,8 @@ Configuracao no Windows:
 - Cria atalhos e registra o protocolo printflow-agent://.
 - Usa o runtime Node.js incluido; nao exige Node.js instalado separadamente.
 - Mantem pareamento, credenciais protegidas e historico local durante atualizacoes.
-- Comunica-se com: $ApiUrl
+- Conecta-se ao PrintFlow Cloud por HTTPS.
+$certificateNotice
 
 O Agent nao procura documentos pessoais. Arquivos de impressao autorizados ficam no cache operacional local e podem ser removidos pelo desinstalador.
 "@
@@ -269,6 +272,37 @@ function Start-Install {
 
     if (-not (Test-Path $zipPath)) {
       throw "Pacote PrintFlow-Agent-Windows.zip nao encontrado."
+    }
+
+    if ($CertificateSha256) {
+      $certificatePath = Join-Path $packageRoot "PrintFlow-Agent-Dev-Certificate.cer"
+      if (-not (Test-Path -LiteralPath $certificatePath)) {
+        throw "Certificado Early Access ausente no instalador."
+      }
+      $actualCertificateHash = (Get-FileHash -LiteralPath $certificatePath -Algorithm SHA256).Hash.ToUpperInvariant()
+      if ($actualCertificateHash -ne $CertificateSha256.ToUpperInvariant()) {
+        throw "Certificado Early Access nao corresponde ao pacote."
+      }
+
+      $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
+      $codeSigningOid = '1.3.6.1.5.5.7.3.3'
+      $isCodeSigning = @($certificate.Extensions | Where-Object {
+        $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] -and
+        @($_.EnhancedKeyUsages | Where-Object { $_.Value -eq $codeSigningOid }).Count -gt 0
+      }).Count -gt 0
+      if (-not $isCodeSigning) {
+        throw "Certificado Early Access nao possui finalidade de assinatura de codigo."
+      }
+
+      foreach ($storeName in @('Root', 'TrustedPublisher')) {
+        $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, 'CurrentUser')
+        try {
+          $store.Open('ReadWrite')
+          $store.Add($certificate)
+        } finally {
+          $store.Close()
+        }
+      }
     }
 
     Set-InstallerProgress 10 "Preparando arquivos do PrintFlow Agent..."

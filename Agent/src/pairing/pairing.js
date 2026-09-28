@@ -1,10 +1,10 @@
-import axios from 'axios'
 import os from 'node:os'
 import readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
 import { saveCredentials } from '../storage/credentials.js'
 import { AGENT_VERSION } from '../agentInfo.js'
+import { cloudHttp } from '../cloud/httpClient.js'
 
 export const pairAgent = async (
   apiUrl,
@@ -37,7 +37,7 @@ export const pairAgent = async (
     console.log('')
     console.log('Conectando ao PrintFlow...')
 
-    const response = await axios.post(
+    const response = await cloudHttp.post(
       `${apiUrl}/api/agents/pair`,
       {
         code: code.trim().toUpperCase(),

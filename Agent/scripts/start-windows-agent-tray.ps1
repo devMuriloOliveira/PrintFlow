@@ -218,9 +218,8 @@ Versao: $version
 
 O Agent conecta este computador ao PrintFlow para encontrar e controlar impressoras 3D conectadas por rede ou cabo USB.
 
-Ele envia status, recebe comandos de impressao e mantem a comunicacao com o site enquanto estiver aberto.
+Ele envia status, recebe comandos de impressao e mantem uma conexao segura com o PrintFlow Cloud enquanto estiver aberto.
 
-API: $ApiUrl
 Logs: $logPath
 "@
 
@@ -250,16 +249,6 @@ $updateScript = Join-Path $agentRoot 'scripts\check-and-update-windows-agent.ps1
 $updateHistoryPath = Join-Path $env:APPDATA 'PrintFlow Agent\updates\update-history.jsonl'
 $script:updateCheckProcess = $null
 $script:updateCheckPollTimer = $null
-
-function Stop-AgentForUpdate {
-  $script:agentClosing = $true
-  $restartTimer.Stop()
-  $updateTimer.Stop()
-  $statusItem.Text = 'PrintFlow Agent atualizando...'
-  Stop-AgentProcess
-  $notifyIcon.Visible = $false
-  [System.Windows.Forms.Application]::Exit()
-}
 
 $updateItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $updateItem.Text = 'Verificar atualizações'
@@ -329,22 +318,14 @@ $updateTimer = New-Object System.Windows.Forms.Timer
 $updateTimer.Interval = 30 * 1000
 $updateTimer.Add_Tick({
   $updateTimer.Stop()
-  $result = $null
   try {
-    $result = & $updateScript -CurrentVersion $version -Interactive
-    if ($result -and $result.installed) {
-      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', 'Atualização iniciada com proteção de rollback.', [System.Windows.Forms.ToolTipIcon]::Info)
-      Stop-AgentForUpdate
-      return
-    }
-    if ($result -and $result.updateAvailable -and -not $result.installed -and -not $result.deferred) {
-      $notifyIcon.ShowBalloonTip(5000, 'PrintFlow Agent', "A versão $($result.latestVersion) está disponível. Use 'Verificar atualizações' para instalar.", [System.Windows.Forms.ToolTipIcon]::Info)
-    }
+    # A verificacao usa outro processo para nunca bloquear a thread da bandeja.
+    Start-InteractiveUpdateCheck
   } catch {
     # A indisponibilidade da internet não interrompe o Agent.
   } finally {
     if (-not $script:agentClosing) {
-      $updateTimer.Interval = if ($result -and $result.deferred) { 5 * 60 * 1000 } else { 6 * 60 * 60 * 1000 }
+      $updateTimer.Interval = 6 * 60 * 60 * 1000
       $updateTimer.Start()
     }
   }

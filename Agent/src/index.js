@@ -1,4 +1,3 @@
-import axios from 'axios'
 import os from 'node:os'
 
 import { config } from './config/config.js'
@@ -28,6 +27,9 @@ import {
 } from './cloud/apiClient.js'
 
 import { startLocalServer } from './localServer.js'
+import { cloudHttp } from './cloud/httpClient.js'
+import { createSingleFlightScheduler } from './cloud/singleFlightScheduler.js'
+import { retryUntilStarted } from './cloud/startupRetry.js'
 import { cleanupPrintFileCache } from './files/printFileCache.js'
 import {
   createLocalOperationsDb
@@ -47,7 +49,10 @@ import {
 import { monitorPrintJobCompletion } from './printing/productionJobMonitor.js'
 import {
   getCachedActivePrintCount,
+  getCachedPrinterPrintActivity,
+  getDisconnectedActivePrintCount,
   listActiveConnections,
+  listPrinterConnectionStates,
   startPrinterStatusPolling
 } from './printers/printerManager.js'
 
@@ -127,7 +132,6 @@ console.log('Sistema:', os.platform())
 console.log('Arquitetura:', os.arch())
 
 console.log('')
-console.log('API:', apiUrl)
 console.log('Log:', logger.logPath)
 
 process.on('uncaughtException', error => {
@@ -153,23 +157,40 @@ startCacheCleanup()
 const localOperations =
   createLocalOperationsDb()
 
+let pairingAllowed = false
+
 startLocalServer({
+  allowedOrigins: config.appOrigins,
+  canAcceptPairing: () => pairingAllowed,
   getRuntimeStatus: () => {
-    const monitoredPrintJobs =
-      localOperations
-        .listPendingProductionJobMonitors()
-        .length
+    const monitoredPrintJobs = localOperations
+      .listPendingProductionJobMonitors()
+      .reduce((count, monitor) => {
+        const activity = getCachedPrinterPrintActivity(monitor.printer)
+
+        // Um monitor antigo sem conexao e sem atividade confirmada nao pode
+        // bloquear atualizacoes para sempre. Se a conexao caiu depois de um
+        // estado ativo, o PrinterManager devolve true e preserva o bloqueio.
+        // Com conexao, estado desconhecido tambem e conservador; estado
+        // ocioso/terminal libera.
+        return count + (activity === true || activity === undefined ? 1 : 0)
+      }, 0)
+    const disconnectedActivePrintJobs =
+      getDisconnectedActivePrintCount()
     const activePrintJobs =
       Math.max(
         monitoredPrintJobs,
-        getCachedActivePrintCount()
+        getCachedActivePrintCount(),
+        disconnectedActivePrintJobs
       )
 
     return {
       updateBlocked:
         activePrintJobs > 0,
       updateBlockedReason:
-        activePrintJobs > 0
+        disconnectedActivePrintJobs > 0
+          ? 'print_connection_lost'
+          : activePrintJobs > 0
           ? 'active_print'
           : null,
       activePrintJobs
@@ -221,7 +242,7 @@ const start = async () => {
     console.log('')
     console.log('Verificando BackEnd...')
 
-    const response = await axios.get(
+    const response = await cloudHttp.get(
       `${apiUrl}/healthz`
     )
 
@@ -232,7 +253,12 @@ const start = async () => {
     console.log('BackEnd online')
 
     let credentials = await loadCredentials()
+    pairingAllowed = !credentials
     let startupPairingCode = pairingCode
+
+    if (credentials) {
+      await consumePendingPairingCode()
+    }
 
     while (!credentials) {
       const pendingPairingCode =
@@ -247,6 +273,7 @@ const start = async () => {
           pendingPairingCode,
           credentials
         )
+        pairingAllowed = !credentials
       }
 
       if (!credentials) {
@@ -261,6 +288,8 @@ const start = async () => {
         await wait(5000)
       }
     }
+
+    pairingAllowed = false
 
     console.log('')
     console.log('Verificando credencial do Agent...')
@@ -277,10 +306,11 @@ const start = async () => {
       }
 
       await clearCredentials()
+      pairingAllowed = true
       console.log(
         'Credencial do Agent recusada; aguardando novo pareamento pelo site.'
       )
-      return start()
+      return false
     }
 
     console.log('Agent autenticado pelo PrintFlow')
@@ -318,39 +348,53 @@ const start = async () => {
     console.log('')
     console.log('Iniciando heartbeat...')
 
+    let heartbeatInFlight = false
+    let restartRequested = false
+
     const heartbeat = async () => {
+      if (heartbeatInFlight || restartRequested) return
+      heartbeatInFlight = true
+
       try {
-        const pendingPairingCode =
-          await consumePendingPairingCode()
-
-        if (pendingPairingCode) {
-          const pairedCredentials = await pairAgent(
-            apiUrl,
-            pendingPairingCode,
-            credentials
+        const ignoredPairingCode = await consumePendingPairingCode()
+        if (ignoredPairingCode) {
+          console.log(
+            '[Pairing] Pedido ignorado porque o Agent ja esta pareado.'
           )
-
-          if (pairedCredentials) {
-            credentials = pairedCredentials
-          }
         }
 
         await sendHeartbeat(
           apiUrl,
           credentials,
-          getAgentRuntimeInfo()
+          {
+            ...getAgentRuntimeInfo(),
+            printers: listPrinterConnectionStates()
+          }
         )
 
         console.log(
           `[Heartbeat] Agent online - ${new Date().toLocaleTimeString()}`
         )
       } catch (error) {
+        if (isInvalidAgentCredentialError(error)) {
+          restartRequested = true
+          await clearCredentials()
+          pairingAllowed = true
+          console.log(
+            '[Heartbeat] Credencial revogada; reiniciando para permitir novo pareamento.'
+          )
+          setTimeout(() => process.exit(1), 100).unref?.()
+          return
+        }
+
         console.log(
           `[Heartbeat] Falha - ${
             error.response?.data?.error ||
             error.message
           }`
         )
+      } finally {
+        heartbeatInFlight = false
       }
     }
 
@@ -481,18 +525,8 @@ if (
   )
 }
 
-const scheduleCommandCheck = (
-  delay = commandPollDelay
-) => {
-  setTimeout(
-    checkCommands,
-    delay
-  )
-}
-
 const checkCommands = async () => {
   if (processingCommand) {
-    scheduleCommandCheck()
     return
   }
 
@@ -632,11 +666,15 @@ const checkCommands = async () => {
     )
   } finally {
     processingCommand = false
-    scheduleCommandCheck()
   }
 }
 
-await checkCommands()
+const commandScheduler = createSingleFlightScheduler({
+  run: checkCommands,
+  getDefaultDelay: () => commandPollDelay
+})
+
+commandScheduler.schedule(0)
 
     startCommandEvents({
       apiUrl,
@@ -646,7 +684,7 @@ await checkCommands()
         commandPollDelay =
           5_000
 
-        scheduleCommandCheck(0)
+        commandScheduler.schedule(0)
       },
 
       onError: error => {
@@ -663,7 +701,7 @@ await checkCommands()
       credentials,
       onCommandAvailable: async () => {
         commandPollDelay = 5_000
-        scheduleCommandCheck(0)
+        commandScheduler.schedule(0)
       },
       onError: error => {
         console.log('[WebSocket] Canal indisponivel; SSE e polling permanecem ativos:', error.message || error)
@@ -700,6 +738,7 @@ await checkCommands()
 
     console.log('')
     console.log('PrintFlow Agent pronto.')
+    return true
   } catch (error) {
     console.log('')
     console.log('Nao foi possivel iniciar o Agent.')
@@ -709,7 +748,16 @@ await checkCommands()
       error.response?.data?.error ||
       error.message
     )
+    return false
   }
 }
 
-start()
+void retryUntilStarted({
+  start,
+  wait,
+  onRetry: retryDelay => {
+    console.log(
+      `[Startup] Nova tentativa em ${Math.round(retryDelay / 1000)}s.`
+    )
+  }
+})

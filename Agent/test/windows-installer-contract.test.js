@@ -46,6 +46,18 @@ test('cadastro do Windows inclui informacoes de versao e instalacao', async () =
   }
 })
 
+test('inicializacao do Windows tenta recuperar a tarefa e instalador confirma healthz local', async () => {
+  const startup = await readScript('install-windows-startup.ps1')
+  const install = await readScript('install-windows-agent.ps1')
+
+  assert.match(startup, /-StartWhenAvailable/)
+  assert.match(startup, /-RestartCount 5/)
+  assert.match(startup, /-RestartInterval \(New-TimeSpan -Minutes 1\)/)
+  assert.match(install, /Wait-ForLocalAgent/)
+  assert.match(install, /127\.0\.0\.1:17873\/healthz/)
+  assert.match(install, /O Agent foi instalado, mas o healthz local ainda nao respondeu/)
+})
+
 test('verificacao de atualizacao nao bloqueia a bandeja e possui timeouts', async () => {
   const updater = await readScript('check-and-update-windows-agent.ps1')
   const tray = await readScript('start-windows-agent-tray.ps1')
@@ -53,7 +65,36 @@ test('verificacao de atualizacao nao bloqueia a bandeja e possui timeouts', asyn
   assert.match(updater, /-TimeoutSec \$ReleaseTimeoutSec/)
   assert.match(updater, /-TimeoutSec \$ArtifactTimeoutSec/)
   assert.match(updater, /Voce ja esta usando a versao mais recente/)
+  assert.match(updater, /'print_connection_lost'/)
+  assert.match(updater, /A comunicacao com uma impressora em atividade foi perdida/)
   assert.match(tray, /Start-Process `\r?\n\s+-FilePath 'powershell\.exe'/)
   assert.match(tray, /Verificando atualiza.{0,20}em segundo plano/)
   assert.match(tray, /A verifica.{0,30}atualiza.{0,20}em andamento/)
+  assert.doesNotMatch(tray, /\$result\s*=\s*&\s*\$updateScript/)
+  assert.match(tray, /Start-InteractiveUpdateCheck/)
+})
+
+test('instalador Early Access fixa e confia somente no certificado empacotado', async () => {
+  const build = await readScript('build-windows-package.ps1')
+  const bootstrap = await readScript('install-windows-agent-from-package.ps1')
+
+  assert.match(build, /-CertificateSha256 ""\$devCertificateSha256""/)
+  assert.match(build, /Get-FileHash -LiteralPath \$devCertificatePath -Algorithm SHA256/)
+  assert.match(bootstrap, /Certificado Early Access nao corresponde ao pacote/)
+  assert.match(bootstrap, /1\.3\.6\.1\.5\.5\.7\.3\.3/)
+  assert.match(bootstrap, /@\('Root', 'TrustedPublisher'\)/)
+  assert.match(bootstrap, /X509Store.*CurrentUser/)
+})
+
+test('interface e instalador nao exibem o endereco interno da API', async () => {
+  const tray = await readScript('start-windows-agent-tray.ps1')
+  const bootstrap = await readScript('install-windows-agent-from-package.ps1')
+  const install = await readScript('install-windows-agent.ps1')
+  const startup = await readScript('install-windows-startup.ps1')
+
+  assert.doesNotMatch(tray, /API:\s*\$ApiUrl/)
+  assert.doesNotMatch(bootstrap, /Comunica-se com:\s*\$ApiUrl/)
+  assert.doesNotMatch(install, /Write-Host\s+"API:\s*\$ApiUrl"/)
+  assert.doesNotMatch(startup, /Write-Host\s+"API:\s*\$ApiUrl"/)
+  assert.match(bootstrap, /Conecta-se ao PrintFlow Cloud por HTTPS/)
 })

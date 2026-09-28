@@ -26,12 +26,22 @@ $installerPath = Join-Path $outputRoot "$InstallerName.exe"
 $installerSedPath = Join-Path $outputRoot "$InstallerName.sed"
 $devCertificatePath = Join-Path $outputRoot "PrintFlow-Agent-Dev-Certificate.cer"
 $packageVersion = [string]((Get-Content -LiteralPath (Join-Path $agentRoot "package.json") -Raw | ConvertFrom-Json).version)
+$devCertificateSha256 = ""
 
 if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
   throw "Versao do Agent invalida no package.json."
 }
 
 Set-Location $agentRoot
+
+if ($SignDev) {
+  & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
+    -FilePath "package.json" `
+    -ExportPublicCertificatePath (Join-Path $OutputDir "PrintFlow-Agent-Dev-Certificate.cer") `
+    -RequirePersistedCertificate:$RequirePersistedCertificate `
+    -ExportOnly
+  $devCertificateSha256 = (Get-FileHash -LiteralPath $devCertificatePath -Algorithm SHA256).Hash.ToUpperInvariant()
+}
 
 $buildNodeCommand = Get-Command "node.exe" -ErrorAction Stop
 $buildNodeExecutable = $buildNodeCommand.Source
@@ -145,13 +155,16 @@ $installerIconName = "printflow-agent-icon.ico"
 Copy-Item -LiteralPath $zipPath -Destination (Join-Path $installerSourceRoot $installerZipName) -Force
 Copy-Item -LiteralPath $installerBootstrap -Destination (Join-Path $installerSourceRoot $installerBootstrapName) -Force
 Copy-Item -LiteralPath $installerIcon -Destination (Join-Path $installerSourceRoot $installerIconName) -Force
+if ($SignDev) {
+  Copy-Item -LiteralPath $devCertificatePath -Destination (Join-Path $installerSourceRoot "PrintFlow-Agent-Dev-Certificate.cer") -Force
+}
 
 $escapedApiUrlForVbs = $ApiUrl.Replace("""", """""")
 $launcher = @"
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
-cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\$installerBootstrapName" & """ -ApiUrl ""$escapedApiUrlForVbs"" -PackageVersion ""$packageVersion"""
+cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\$installerBootstrapName" & """ -ApiUrl ""$escapedApiUrlForVbs"" -PackageVersion ""$packageVersion"" -CertificateSha256 ""$devCertificateSha256"""
 code = shell.Run(cmd, 0, True)
 WScript.Quit code
 "@
@@ -174,6 +187,8 @@ if (Test-Path $installerSedPath) {
 $escapedInstallerPath = $installerPath
 $escapedSourceRoot = $installerSourceRoot
 $appLaunched = "wscript.exe $installerLauncherName"
+$certificateSedFile = if ($SignDev) { "FILE4=PrintFlow-Agent-Dev-Certificate.cer" } else { "" }
+$certificateSedSource = if ($SignDev) { "%FILE4%=" } else { "" }
 
 $sed = @"
 [Version]
@@ -210,6 +225,7 @@ FILE0=$installerZipName
 FILE1=$installerBootstrapName
 FILE2=$installerIconName
 FILE3=$installerLauncherName
+$certificateSedFile
 [SourceFiles]
 SourceFiles0=$escapedSourceRoot
 [SourceFiles0]
@@ -217,6 +233,7 @@ SourceFiles0=$escapedSourceRoot
 %FILE1%=
 %FILE2%=
 %FILE3%=
+$certificateSedSource
 "@
 
 Set-Content -LiteralPath $installerSedPath -Value $sed -Encoding ASCII

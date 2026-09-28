@@ -1,6 +1,7 @@
-import axios from 'axios'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
+
+import { cloudHttp, CLOUD_TRANSFER_TIMEOUT_MS } from './httpClient.js'
 
 export const uploadSlicedPrintArtifact = async (
   apiUrl,
@@ -22,12 +23,13 @@ export const uploadSlicedPrintArtifact = async (
     throw new Error('Perfil e idempotencyKey de slicing obrigatorios.')
   }
 
-  const response = await axios.post(
+  const response = await cloudHttp.post(
     `${apiUrl}/api/agents/print-jobs/${encodeURIComponent(printJobId)}/slicing-artifact`,
     createReadStream(localPath),
     {
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
+      timeout: CLOUD_TRANSFER_TIMEOUT_MS,
       headers: {
         'content-type': 'application/octet-stream',
         'x-agent-id': credentials.agentId,

@@ -21,7 +21,10 @@ $trigger = New-ScheduledTaskTrigger `
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
-  -ExecutionTimeLimit (New-TimeSpan -Days 0)
+  -ExecutionTimeLimit (New-TimeSpan -Days 0) `
+  -StartWhenAvailable `
+  -RestartCount 5 `
+  -RestartInterval (New-TimeSpan -Minutes 1)
 
 Register-ScheduledTask `
   -TaskName $TaskName `
@@ -37,5 +40,4 @@ if (-not $NoStart) {
 
 Write-Host "PrintFlow Agent instalado no login do Windows."
 Write-Host "Task: $TaskName"
-Write-Host "API: $ApiUrl"
 Write-Host "Logs: $logPath"

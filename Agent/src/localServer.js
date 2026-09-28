@@ -10,7 +10,7 @@ import {
 
 const DEFAULT_LOCAL_PORT = 17873
 
-const json = (response, statusCode, payload) => {
+const json = (response, statusCode, payload, origin = '') => {
   if (
     response.destroyed ||
     response.writableEnded
@@ -18,10 +18,7 @@ const json = (response, statusCode, payload) => {
     return
   }
 
-  response.writeHead(
-    statusCode,
-    {
-      'Access-Control-Allow-Origin': '*',
+  const headers = {
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
       'Access-Control-Allow-Private-Network': 'true',
@@ -29,7 +26,13 @@ const json = (response, statusCode, payload) => {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store'
     }
-  )
+
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin
+    headers.Vary = 'Origin'
+  }
+
+  response.writeHead(statusCode, headers)
 
   response.end(JSON.stringify(payload))
 }
@@ -116,6 +119,14 @@ const sanitizeDiagnostics = value => {
     if (/(?:secret|token|password|access.?code|authorization|credential|api.?key)/i.test(key)) {
       continue
     }
+    if (/^(?:ip|address|host|hostname)$/i.test(key) && typeof item === 'string') {
+      sanitized[key] = redactAddress(item)
+      continue
+    }
+    if (/serial/i.test(key) && typeof item === 'string') {
+      sanitized[key] = item.length > 4 ? `***${item.slice(-4)}` : '[redacted]'
+      continue
+    }
     sanitized[key] = sanitizeDiagnostics(item)
   }
   return sanitized
@@ -169,6 +180,8 @@ const getLocalDiagnostics = async ({
 export const startLocalServer = ({
   port = process.env.PRINTFLOW_AGENT_LOCAL_PORT ||
     DEFAULT_LOCAL_PORT,
+  allowedOrigins = [],
+  canAcceptPairing,
   getRuntimeStatus,
   getDiagnostics
 } = {}) => {
@@ -179,11 +192,25 @@ export const startLocalServer = ({
     parsedPort <= 65535
       ? parsedPort
       : DEFAULT_LOCAL_PORT
+  const allowedOriginSet = new Set(
+    allowedOrigins.map(value => String(value || '').trim()).filter(Boolean)
+  )
 
   const server = http.createServer(async (request, response) => {
     try {
+      const origin = String(request.headers.origin || '').trim()
+      const originAllowed = !origin || allowedOriginSet.has(origin)
+
+      if (!originAllowed) {
+        json(response, 403, {
+          ok: false,
+          error: 'Origem nao autorizada para o Agent local.'
+        })
+        return
+      }
+
       if (request.method === 'OPTIONS') {
-        json(response, 204, {})
+        json(response, 204, {}, origin)
         return
       }
 
@@ -201,7 +228,8 @@ export const startLocalServer = ({
           200,
           await getLocalStatus(
             getRuntimeStatus
-          )
+          ),
+          origin
         )
         return
       }
@@ -210,6 +238,14 @@ export const startLocalServer = ({
         request.method === 'GET' &&
         requestUrl.pathname === '/diagnostics'
       ) {
+        if (origin) {
+          json(response, 403, {
+            ok: false,
+            error: 'Diagnostico disponivel somente para acesso local direto.'
+          }, origin)
+          return
+        }
+
         json(
           response,
           200,
@@ -225,6 +261,18 @@ export const startLocalServer = ({
         request.method === 'POST' &&
         requestUrl.pathname === '/pair'
       ) {
+        const pairingAllowed = typeof canAcceptPairing === 'function'
+          ? await canAcceptPairing()
+          : !(await loadCredentials())?.agentId
+
+        if (!pairingAllowed) {
+          json(response, 409, {
+            ok: false,
+            error: 'Agent ja pareado. Revogue o vinculo atual antes de conectar outra empresa.'
+          }, origin)
+          return
+        }
+
         const body = await readJsonBody(request)
         const code = String(body?.code || '')
           .trim()
@@ -234,7 +282,7 @@ export const startLocalServer = ({
           json(response, 400, {
             ok: false,
             error: 'Codigo de pareamento invalido.'
-          })
+          }, origin)
           return
         }
 
@@ -243,14 +291,14 @@ export const startLocalServer = ({
         json(response, 202, {
           ok: true,
           status: 'pairing_queued'
-        })
+        }, origin)
         return
       }
 
       json(response, 404, {
         ok: false,
         error: 'Rota local nao encontrada.'
-      })
+      }, origin)
     } catch (error) {
       json(response, 500, {
         ok: false,

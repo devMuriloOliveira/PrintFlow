@@ -1,4 +1,3 @@
-import axios from 'axios'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
@@ -6,6 +5,10 @@ import path from 'node:path'
 import {
   getAgentLocalPaths
 } from '../storage/localPaths.js'
+import {
+  cloudHttp,
+  CLOUD_TRANSFER_TIMEOUT_MS
+} from '../cloud/httpClient.js'
 
 const cacheDirectory =
   getAgentLocalPaths()
@@ -448,11 +451,13 @@ export const ensurePrintFileCached =
     }
 
     const response =
-      await axios.get(
+      await cloudHttp.get(
         `${apiUrl}/api/agents/print-file?key=${encodeURIComponent(printFile.storageKey)}&printJobId=${encodeURIComponent(printFile.printJobId)}`,
         {
           responseType:
             'stream',
+          timeout:
+            CLOUD_TRANSFER_TIMEOUT_MS,
           headers:
             requestHeaders,
           validateStatus:

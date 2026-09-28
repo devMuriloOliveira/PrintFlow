@@ -278,7 +278,41 @@ if ($estimatedSizeKb -gt 0) {
 Start-ScheduledTask `
   -TaskName $TaskName
 
+function Wait-ForLocalAgent {
+  param(
+    [int]$TimeoutSeconds = 15
+  )
+
+  $healthUrl = "http://127.0.0.1:17873/healthz"
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+
+  do {
+    try {
+      $health = Invoke-RestMethod `
+        -Uri $healthUrl `
+        -Method Get `
+        -TimeoutSec 2 `
+        -ErrorAction Stop
+
+      if ($health.ok -eq $true -and $health.app -eq 'printflow-agent') {
+        return $health
+      }
+    } catch {
+    }
+
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $deadline)
+
+  return $null
+}
+
+$localHealth = Wait-ForLocalAgent
+if (-not $localHealth) {
+  Write-Warning "O Agent foi instalado, mas o healthz local ainda nao respondeu. O Windows tentara inicia-lo novamente no proximo login."
+} elseif (-not $localHealth.paired) {
+  Write-Host "Agent iniciado e aguardando pareamento pelo PrintFlow."
+}
+
 Write-Host "PrintFlow Agent instalado."
 Write-Host "Diretorio: $installRoot"
-Write-Host "API: $ApiUrl"
 Write-Host "Protocolo: printflow-agent://"

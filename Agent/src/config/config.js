@@ -17,6 +17,10 @@ const DEVELOPMENT_API_URL =
 const PRODUCTION_API_URL =
   'https://printflow-api-4y5l.onrender.com'
 
+const PRODUCTION_APP_ORIGINS = [
+  'https://print-flow-d5si.vercel.app'
+]
+
 const isLocalHost = hostname =>
   [
     'localhost',
@@ -82,6 +86,22 @@ export const resolveRuntimeConfig = (
       ? apiUrl.replace(/^https:/i, 'wss:')
       : 'ws://localhost:3333')
 
+  const configuredAppOrigins = String(
+    environment.PRINTFLOW_APP_ORIGINS || ''
+  )
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+
+  const appOrigins = configuredAppOrigins.length
+    ? configuredAppOrigins
+    : runtimeEnvironment === 'PRODUCTION'
+      ? PRODUCTION_APP_ORIGINS
+      : [
+          'http://localhost:3000',
+          'http://127.0.0.1:3000'
+        ]
+
   if (
     runtimeEnvironment === 'PRODUCTION'
   ) {
@@ -95,6 +115,13 @@ export const resolveRuntimeConfig = (
       wsUrl,
       ['wss:']
     )
+    for (const origin of appOrigins) {
+      assertProductionEndpoint(
+        'PRINTFLOW_APP_ORIGINS',
+        origin,
+        ['https:']
+      )
+    }
 
     if (
       String(
@@ -111,7 +138,8 @@ export const resolveRuntimeConfig = (
   return Object.freeze({
     environment: runtimeEnvironment,
     apiUrl,
-    wsUrl
+    wsUrl,
+    appOrigins: Object.freeze([...appOrigins])
   })
 }
 

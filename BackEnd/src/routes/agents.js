@@ -49,6 +49,12 @@ import {
 
 import { normalizeAgentMetrics, recordProductionJobMetrics } from '../services/productionJobMetrics.js'
 import { recordProductionJobSlicingArtifact } from '../services/productionJobSlicing.js'
+import { syncAgentPrinterHeartbeat } from '../services/agentPrinterHeartbeat.js'
+import {
+  isAgentVersionSupported,
+  unsupportedAgentVersionPayload
+} from '../services/agentVersionPolicy.js'
+import { claimAgentPairingCode } from '../services/agentPairingCode.js'
 
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
@@ -319,7 +325,8 @@ export const authenticateAgentRequest =
         `
           select
             id,
-            tenant_id
+            tenant_id,
+            agent_version
           from agents
           where id = $1
             and (
@@ -339,9 +346,10 @@ export const authenticateAgentRequest =
         ]
       )
 
-    return result
-      .rows[0] ||
-      null
+    const agent = result.rows[0] || null
+    return agent && isAgentVersionSupported(agent.agent_version)
+      ? agent
+      : null
   }
 
 // ======================================================
@@ -570,6 +578,14 @@ export const handleAgentPair =
         ''
       ).trim()
 
+    if (!isAgentVersionSupported(version)) {
+      return sendJson(
+        res,
+        426,
+        unsupportedAgentVersionPayload()
+      )
+    }
+
     if (!code) {
       return sendJson(
         res,
@@ -680,6 +696,17 @@ export const handleAgentPair =
           'agents'
         )
     )
+
+    // A transicao unused -> used precisa ser atomica. A leitura anterior e
+    // apenas informativa; somente uma requisicao concorrente pode obter esta
+    // linha e continuar o pareamento.
+    const pairingClaimed = await claimAgentPairingCode(query, pairing.id)
+
+    if (!pairingClaimed) {
+      return sendJson(res, 409, {
+        error: 'Este codigo ja foi utilizado ou expirou'
+      })
+    }
 
     const agentSecret =
       `pf_agent_${crypto
@@ -795,19 +822,6 @@ export const handleAgentPair =
      * CÃ³digo de pareamento Ã©
      * utilizado somente uma vez.
      */
-    const claimResult =
-      await query(
-      `
-        update agent_pairing_codes
-        set
-          used_at = now()
-        where id = $1
-      `,
-      [
-        pairing.id
-      ]
-    )
-
     const agent =
       agentResult
         .rows[0]
@@ -921,6 +935,14 @@ export const handleAgentVerify =
     const agent =
       result.rows[0]
 
+    if (agent && !isAgentVersionSupported(agent.agent_version)) {
+      return sendJson(
+        res,
+        426,
+        unsupportedAgentVersionPayload()
+      )
+    }
+
     if (!agent) {
       return sendJson(
         res,
@@ -1032,6 +1054,14 @@ export const handleAgentHeartbeat =
         ''
       ).trim()
 
+    if (!isAgentVersionSupported(version)) {
+      return sendJson(
+        res,
+        426,
+        unsupportedAgentVersionPayload()
+      )
+    }
+
     const platform =
       String(
         body.platform ||
@@ -1101,6 +1131,7 @@ export const handleAgentHeartbeat =
 
           returning
             id,
+            tenant_id,
             machine_name,
             last_seen_at
         `,
@@ -1124,6 +1155,18 @@ export const handleAgentHeartbeat =
           error:
             'Agent invalido'
         }
+      )
+    }
+
+    if (Array.isArray(body.printers)) {
+      await withTenant(
+        agent.tenant_id,
+        client => syncAgentPrinterHeartbeat({
+          client,
+          tenantId: agent.tenant_id,
+          agentId: agent.id,
+          printers: body.printers
+        })
       )
     }
 

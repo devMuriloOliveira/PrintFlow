@@ -1,7 +1,7 @@
-import axios from 'axios'
+import { cloudHttp } from './httpClient.js'
 
 export const verifyAgent = async (apiUrl, credentials) => {
-  const response = await axios.post(
+  const response = await cloudHttp.post(
     `${apiUrl}/api/agents/verify`,
     null,
     {

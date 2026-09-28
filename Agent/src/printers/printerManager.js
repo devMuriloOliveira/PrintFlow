@@ -65,6 +65,53 @@ const adapters = {
 const activeConnections =
   new Map()
 
+const printerConnectionStates =
+  new Map()
+
+const heartbeatStatusFields = [
+  'state',
+  'status',
+  'progress',
+  'remainingMinutes',
+  'currentLayer',
+  'totalLayers',
+  'nozzleTemperature',
+  'nozzleTargetTemperature',
+  'bedTemperature',
+  'bedTargetTemperature',
+  'file'
+]
+
+const sanitizeHeartbeatStatus = status => {
+  if (!status || typeof status !== 'object') return null
+  const sanitized = {}
+  for (const field of heartbeatStatusFields) {
+    const value = status[field]
+    if (value == null || !['string', 'number', 'boolean'].includes(typeof value)) continue
+    sanitized[field] = typeof value === 'string' ? value.slice(0, 500) : value
+  }
+  return Object.keys(sanitized).length ? sanitized : null
+}
+
+const recordPrinterConnectionState = ({
+  key,
+  status,
+  error = '',
+  lastStatus = null
+}) => {
+  if (!key) return
+  printerConnectionStates.set(key, {
+    connectionKey: key,
+    status: status === 'connected' ? 'connected' : 'disconnected',
+    lastError: String(error || '').slice(0, 500),
+    lastStatus: sanitizeHeartbeatStatus(lastStatus),
+    observedAt: new Date().toISOString()
+  })
+}
+
+export const listPrinterConnectionStates = () =>
+  Array.from(printerConnectionStates.values(), state => ({ ...state }))
+
 let statusPollingTimer = null
 let statusPollingInFlight = false
 
@@ -109,7 +156,59 @@ export const getCachedActivePrintCount =
     return count
   }
 
-export const refreshActivePrinterStatuses = async () => {
+// Retorna a atividade em cache de uma impressora especifica.
+//
+// O resultado e tri-state de proposito:
+//   true  = a conexao informa impressao ativa;
+//   false = a conexao informa estado ocioso/terminal;
+//   null  = nao ha conexao;
+//   undefined = ha conexao, mas ainda nao recebemos status.
+//
+// O Agent usa o estado desconhecido como bloqueio conservador durante uma
+// atualizacao, mas nao deve tratar um monitor persistido como ativo quando a
+// propria impressora conectada ja informou que esta ociosa.
+export const getCachedPrinterPrintActivity = (
+  printer
+) => {
+  const key = getPrinterKey(printer)
+  const entry = getActiveConnection(printer)
+
+  if (!entry) {
+    const lastKnown = key ? printerConnectionStates.get(key) : null
+    if (
+      lastKnown?.status === 'disconnected' &&
+      isActivePrinterStatus(lastKnown.lastStatus)
+    ) {
+      return true
+    }
+    return null
+  }
+
+  if (!entry.lastStatus) {
+    return undefined
+  }
+
+  return isActivePrinterStatus(entry.lastStatus)
+}
+
+export const getDisconnectedActivePrintCount = () => {
+  let count = 0
+  for (const state of printerConnectionStates.values()) {
+    if (
+      state.status === 'disconnected' &&
+      isActivePrinterStatus(state.lastStatus)
+    ) {
+      count += 1
+    }
+  }
+  return count
+}
+
+export const refreshActivePrinterStatuses = async ({
+  failureThreshold = Number(
+    process.env.PRINTFLOW_PRINTER_STATUS_FAILURE_THRESHOLD || 3
+  )
+} = {}) => {
   if (statusPollingInFlight) {
     return {
       refreshed: 0,
@@ -119,6 +218,10 @@ export const refreshActivePrinterStatuses = async () => {
   }
 
   statusPollingInFlight = true
+  const requiredFailures = Math.max(
+    1,
+    Math.min(10, Number(failureThreshold) || 3)
+  )
   let refreshed = 0
   let failed = 0
 
@@ -136,12 +239,35 @@ export const refreshActivePrinterStatuses = async () => {
       try {
         entry.lastStatus = await entry.adapter.getStatus(entry.connection)
         entry.lastStatusAt = new Date()
+        entry.statusFailureCount = 0
+        recordPrinterConnectionState({
+          key,
+          status: 'connected',
+          lastStatus: entry.lastStatus
+        })
         refreshed += 1
       } catch (error) {
         failed += 1
-        if (entry.connection?.connected !== true) {
-          removeStaleConnection(key)
+        entry.statusFailureCount = Number(entry.statusFailureCount || 0) + 1
+
+        // Socket/serial encerrado e evidencia imediata. Em conexoes HTTP,
+        // exigimos falhas consecutivas para nao transformar um timeout
+        // transitorio em falso offline.
+        const connectionClosed = entry.connection?.connected !== true
+        if (
+          !connectionClosed &&
+          entry.statusFailureCount < requiredFailures
+        ) {
+          continue
         }
+
+        if (entry.connection) {
+          entry.connection.connected = false
+        }
+        removeStaleConnection(
+          key,
+          'Impressora indisponivel ou fora da rede.'
+        )
       }
     }
   } finally {
@@ -365,7 +491,8 @@ const isConnectionEntryActive = (
 // ======================================================
 
 const removeStaleConnection = (
-  key
+  key,
+  error = ''
 ) => {
   if (!key) {
     return
@@ -376,6 +503,13 @@ const removeStaleConnection = (
       key
     )
   ) {
+    const entry = activeConnections.get(key)
+    recordPrinterConnectionState({
+      key,
+      status: 'disconnected',
+      error,
+      lastStatus: entry?.lastStatus
+    })
     activeConnections.delete(
       key
     )
@@ -718,9 +852,17 @@ export const connectPrinter = async (
         null,
 
       lastStatusAt:
-        null
+        null,
+
+      statusFailureCount:
+        0
     }
   )
+
+  recordPrinterConnectionState({
+    key,
+    status: 'connected'
+  })
 
   console.log(
     `[PrinterManager] Conexao registrada: ${key}`
@@ -805,6 +947,10 @@ export const disconnectPrinter =
       activeConnections.delete(
         key
       )
+      recordPrinterConnectionState({
+        key,
+        status: 'disconnected'
+      })
     }
 
     console.log(
@@ -863,6 +1009,12 @@ export const getPrinterStatus =
 
       entry.lastStatusAt =
         new Date()
+
+      recordPrinterConnectionState({
+        key,
+        status: 'connected',
+        lastStatus: status
+      })
 
       return status
     } catch (

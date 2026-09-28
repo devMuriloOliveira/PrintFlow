@@ -1,4 +1,4 @@
-import axios from 'axios'
+import { cloudHttp } from './httpClient.js'
 export { reportPrintJobMetrics } from './productionJobMetrics.js'
 export { uploadSlicedPrintArtifact } from './productionJobSlicing.js'
 
@@ -11,7 +11,7 @@ export const sendHeartbeat = async (
   credentials,
   runtimeInfo = {}
 ) => {
-  const response = await axios.post(
+  const response = await cloudHttp.post(
     `${apiUrl}/api/agents/heartbeat`,
     runtimeInfo,
     {
@@ -34,7 +34,7 @@ export const getPendingCommand = async (
   apiUrl,
   credentials
 ) => {
-  const response = await axios.get(
+  const response = await cloudHttp.get(
     `${apiUrl}/api/agents/commands/pending`,
     {
       headers: {
@@ -53,7 +53,7 @@ export const completeCommand = async (
   commandId,
   result
 ) => {
-  const response = await axios.post(
+  const response = await cloudHttp.post(
     `${apiUrl}/api/agents/commands/${commandId}/complete`,
     {
       success: result.success !== false,
@@ -85,7 +85,7 @@ export const syncAgentEvents = async (
   }
 
   const response =
-    await axios.post(
+    await cloudHttp.post(
       `${apiUrl}/api/agents/sync-events`,
       {
         events
@@ -106,11 +106,11 @@ export const syncAgentEvents = async (
 }
 
 export const rotateAgentCredential = async (apiUrl, credentials) => {
-  const response = await axios.post(`${apiUrl}/api/agents/credential/rotate`, {}, { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret } })
+  const response = await cloudHttp.post(`${apiUrl}/api/agents/credential/rotate`, {}, { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret } })
   return response.data
 }
 
 export const confirmAgentCredentialRotation = async (apiUrl, credentials) => {
-  const response = await axios.post(`${apiUrl}/api/agents/credential/rotate/confirm`, {}, { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret } })
+  const response = await cloudHttp.post(`${apiUrl}/api/agents/credential/rotate/confirm`, {}, { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret } })
   return response.data
 }
