@@ -7,6 +7,7 @@ const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', '
 const monthlyRevenue = computed(() => {
   const values = Array.from({ length: 12 }, () => 0)
   for (const order of orders.value) {
+    if (order.status === 'Cancelado') continue
     const parts = String(order.date).split('/').map(Number)
     const month = parts.length >= 2 ? parts[1] : Number(String(order.date).slice(5, 7))
     if (month >= 1 && month <= 12) values[month - 1] += order.gross / 1000
@@ -25,6 +26,7 @@ const monthlyExpenses = computed(() => {
 const monthlyOrders = computed(() => {
   const values = Array.from({ length: 12 }, () => 0)
   for (const order of orders.value) {
+    if (order.status === 'Cancelado') continue
     const parts = String(order.date).split('/').map(Number)
     const month = parts.length >= 2 ? parts[1] : Number(String(order.date).slice(5, 7))
     if (month >= 1 && month <= 12) values[month - 1] += Number(order.qty || 1)
@@ -34,6 +36,7 @@ const monthlyOrders = computed(() => {
 const productPerformance = computed(() => {
   const totals = new Map<string, { sales: number, profit: number }>()
   for (const order of orders.value) {
+    if (order.status === 'Cancelado') continue
     const current = totals.get(order.product) || { sales: 0, profit: 0 }
     current.sales += order.qty
     current.profit += order.profit

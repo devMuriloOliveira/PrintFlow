@@ -114,8 +114,8 @@ const generateDue = async () => {
       <div class="field"><label>Categoria</label><select v-model="category"><option>Todas</option><option v-for="item in categories" :key="item">{{ item }}</option></select></div>
       <div class="field"><label>Pagamento</label><select v-model="payment"><option>Todas</option><option v-for="item in payments" :key="item">{{ item }}</option></select></div>
       <div class="field"><label>Status</label><select v-model="status"><option>Todos</option><option v-for="item in statuses" :key="item">{{ item }}</option></select></div>
-      <div class="field"><label>De</label><input v-model="dateFrom" type="date"></div>
-      <div class="field"><label>Até</label><input v-model="dateTo" type="date"></div>
+      <div class="field"><label>De</label><UiDateInput v-model="dateFrom" aria-label="Despesas a partir de" /></div>
+      <div class="field"><label>Até</label><UiDateInput v-model="dateTo" aria-label="Despesas até" /></div>
       <button class="btn" type="button" @click="clearFilters"><UiIcon name="close" :size="15" /> Limpar</button>
     </div>
     <div class="split-layout" style="grid-template-columns:minmax(0,1fr) 350px">

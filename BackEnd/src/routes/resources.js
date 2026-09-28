@@ -10,7 +10,7 @@ import { listFinancialHistory } from '../repositories/financialHistoryRepository
 import { createFilamentMovement, listFilamentMovements, createProductMovement, createProductMovementWithClient, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
 import { listPendingProductionMaterial, reconcilePendingProductionMaterial } from '../services/productionInventory.js'
 import { fulfillSalesFulfillmentPlan, releaseSalesFulfillmentPlan } from '../services/salesFulfillment.js'
-import { assertResourceBelongsToTenant, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
+import { assertResourceBelongsToTenant, createExpenseInstallments, createResource, deleteResource, updateResource } from '../repositories/crudRepository.js'
 import {
   resolvePrintFilePath,
   savePrintFileStream
@@ -24,7 +24,7 @@ import {
   readProductImage,
   saveProductImage
 } from '../services/productImageStorage.js'
-import { generateDueRecurringExpenses } from '../repositories/expensesRepository.js'
+import { buildExpenseInstallments, generateDueRecurringExpenses } from '../repositories/expensesRepository.js'
 import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
 const readResource = (resource) => async (req) => {
@@ -37,13 +37,24 @@ export const readRoutes = {
     const tenantId = await getTenantId(req)
     if (hasDatabase) return getOrdersSummary(tenantId)
     const orders = getTenantData(tenantId).orders || []
+    const activeOrders = orders.filter((order) => order.status !== 'Cancelado')
+    const cancelledOrders = orders.filter((order) => order.status === 'Cancelado')
     const byStatus = new Map()
-    const totals = orders.reduce((acc, order) => {
-      const status = order.status || 'Sem status'; byStatus.set(status, (byStatus.get(status) || 0) + 1)
+    for (const order of orders) {
+      const status = order.status || 'Sem status'
+      byStatus.set(status, (byStatus.get(status) || 0) + 1)
+    }
+    const totals = activeOrders.reduce((acc, order) => {
       acc.orderCount += 1; acc.gross += Number(order.gross || 0); acc.net += Number(order.net || 0); acc.profit += Number(order.profit || 0); acc.fees += Number(order.fee || 0); acc.shipping += Number(order.shipping || 0)
       return acc
     }, { orderCount: 0, gross: 0, net: 0, profit: 0, fees: 0, shipping: 0 })
-    return { ...totals, ticket: totals.orderCount ? totals.gross / totals.orderCount : 0, byStatus: [...byStatus.entries()].map(([status, count]) => ({ status, count })) }
+    return {
+      ...totals,
+      ticket: totals.orderCount ? totals.gross / totals.orderCount : 0,
+      cancelledCount: cancelledOrders.length,
+      cancelledGross: cancelledOrders.reduce((sum, order) => sum + Number(order.gross || 0), 0),
+      byStatus: [...byStatus.entries()].map(([status, count]) => ({ status, count }))
+    }
   },
   '/api/products': async (req) => {
     const tenantId = await getTenantId(req)
@@ -376,6 +387,32 @@ export const handleRecurringExpensesGenerate = async (req, res) => {
   const tenantId = await getTenantId(req)
   const generated = await generateDueRecurringExpenses(tenantId)
   return sendJson(res, 200, { generated: generated.length, expenses: await listResource(tenantId, 'expenses') })
+}
+
+export const handleExpenseInstallmentsCreate = async (req, res) => {
+  let expense
+  let installmentCount
+  let installments
+  let tenantId
+  try {
+    const payload = await readJsonBody(req)
+    installmentCount = payload.installmentCount
+    expense = { ...payload }
+    delete expense.installmentCount
+    installments = buildExpenseInstallments(expense, installmentCount)
+    tenantId = await getTenantId(req)
+  } catch (error) {
+    return sendJson(res, 400, { error: error.message || 'Nao foi possivel criar as parcelas.' })
+  }
+
+  const list = hasDatabase
+    ? await createExpenseInstallments(tenantId, expense, installmentCount, await auditActor(req))
+    : (() => {
+        const tenantData = getTenantData(tenantId)
+        for (const installment of installments) createLocalResource(tenantId, 'expenses', installment)
+        return tenantData.expenses
+      })()
+  return sendJson(res, 201, list)
 }
 
 export const handleFilamentMovements = async (req, res, filamentId) => {

@@ -342,6 +342,60 @@ test('fluxo operacional do pedido exige etapas sequenciais e rastreio para envio
   assert.ok(sent.body.order.shippedAt)
 })
 
+test('cancelamento de pedido e permitido antes do envio e bloqueado depois', async () => {
+  const session = await registerSession('cancelamento-pedido', '127.0.5.12')
+  const created = await request({
+    method: 'POST', path: '/api/orders', token: session.accessToken,
+    body: { id: `PED-CANCEL-${Date.now()}`, product: 'Produto teste', qty: 1, status: 'Novo' }
+  })
+  const order = created.body[0]
+  const path = `/api/orders/${order.dbId || order.id}/advance-stage`
+
+  const cancelled = await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Cancelado' } })
+  assert.equal(cancelled.status, 200)
+  assert.equal(cancelled.body.order.status, 'Cancelado')
+  const cannotResume = await request({ method: 'POST', path, token: session.accessToken, body: { status: 'Producao' } })
+  assert.equal(cannotResume.status, 400)
+
+  const shippedCreate = await request({
+    method: 'POST', path: '/api/orders', token: session.accessToken,
+    body: { id: `PED-CANCEL-ENVIADO-${Date.now()}`, product: 'Produto teste', qty: 1, status: 'Novo' }
+  })
+  const shippedOrder = shippedCreate.body[0]
+  const shippedPath = `/api/orders/${shippedOrder.dbId || shippedOrder.id}/advance-stage`
+  for (const status of ['Producao', 'Impresso', 'Embalando']) {
+    assert.equal((await request({ method: 'POST', path: shippedPath, token: session.accessToken, body: { status } })).status, 200)
+  }
+  assert.equal((await request({ method: 'POST', path: shippedPath, token: session.accessToken, body: { status: 'Enviado', trackingCode: 'BR123456789' } })).status, 200)
+  const rejected = await request({ method: 'POST', path: shippedPath, token: session.accessToken, body: { status: 'Cancelado' } })
+  assert.equal(rejected.status, 400)
+})
+
+test('resumo financeiro exclui vendas canceladas e conserva total cancelado', async () => {
+  const session = await registerSession('resumo-venda-cancelada', '127.0.5.13')
+  const active = await request({
+    method: 'POST', path: '/api/orders', token: session.accessToken,
+    body: { id: `PED-ATIVO-${Date.now()}`, product: 'Produto ativo', qty: 1, gross: 120, net: 110, profit: 40, status: 'Novo' }
+  })
+  assert.equal(active.status, 201)
+  const cancelled = await request({
+    method: 'POST', path: '/api/orders', token: session.accessToken,
+    body: { id: `PED-CANCELADO-${Date.now()}`, product: 'Produto cancelado', qty: 1, gross: 75, net: 70, profit: 25, status: 'Novo' }
+  })
+  assert.equal(cancelled.status, 201)
+  const cancelledOrder = cancelled.body.find((order) => order.id.startsWith('PED-CANCELADO-'))
+  const cancelledPath = `/api/orders/${cancelledOrder.dbId || cancelledOrder.id}/advance-stage`
+  assert.equal((await request({ method: 'POST', path: cancelledPath, token: session.accessToken, body: { status: 'Cancelado' } })).status, 200)
+
+  const summary = await request({ method: 'GET', path: '/api/orders/summary', token: session.accessToken })
+  assert.equal(summary.status, 200)
+  assert.equal(summary.body.orderCount, 1)
+  assert.equal(summary.body.gross, 120)
+  assert.equal(summary.body.cancelledCount, 1)
+  assert.equal(summary.body.cancelledGross, 75)
+  assert.equal(summary.body.byStatus.find((item) => item.status === 'Cancelado').count, 1)
+})
+
 test('edicao generica nao permite pular a etapa operacional do pedido', async () => {
   const session = await registerSession('edicao-etapa-pedido', '127.0.5.15')
   const created = await request({

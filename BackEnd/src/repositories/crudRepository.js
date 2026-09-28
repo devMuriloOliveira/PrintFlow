@@ -6,6 +6,7 @@ import { writeAuditEvent } from '../services/operationalEvents.js'
 import { recordFinancialSnapshot } from './financialHistoryRepository.js'
 import { assertTenantResourceLimit } from '../services/subscriptionEntitlements.js'
 import { createSalesFulfillmentPlan } from '../services/salesFulfillment.js'
+import { buildExpenseInstallments } from './expensesRepository.js'
 
 const number = (value) => Number(value || 0)
 const dateOrNull = (value) => value || null
@@ -415,6 +416,22 @@ export const createResource = async (tenantId, resource, item, audit = null) => 
     await writeRelatedAudits(client, tenantId, audit, result.relatedCreated)
   })
   return listResource(tenantId, resource)
+}
+
+export const createExpenseInstallments = async (tenantId, expense, count, audit = null) => {
+  const installments = buildExpenseInstallments(expense, count)
+  await withTenant(tenantId, async (client) => {
+    await client.query('insert into tenants (id, name) values ($1, $1) on conflict (id) do nothing', [tenantId])
+    for (let index = 0; index < installments.length; index += 1) {
+      const result = await writePatch(client, tenantId, 'expenses', installments[index])
+      await writeResourceAudit(client, tenantId, {
+        ...audit,
+        operation: 'created',
+        details: { installment: index + 1, installmentCount: installments.length }
+      }, 'expenses', result.id, result.changedFields)
+    }
+  })
+  return listResource(tenantId, 'expenses')
 }
 
 export const updateResource = async (tenantId, resource, id, item, audit = null) => {

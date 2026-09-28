@@ -4,13 +4,15 @@ export const useBusinessMetrics = () => {
   const sum = <T>(items: T[], getter: (item: T) => number) => items.reduce((total, item) => total + getter(item), 0)
   const avg = (total: number, count: number) => count ? total / count : 0
   const percent = (value: number) => `${value.toFixed(1).replace('.', ',')}%`
+  const activeOrders = computed(() => orders.value.filter((order) => order.status !== 'Cancelado'))
+  const cancelledOrders = computed(() => orders.value.filter((order) => order.status === 'Cancelado'))
   const parseProductHours = (time = '') => {
     const hours = Number(time.match(/(\d+(?:[.,]\d+)?)\s*h/i)?.[1]?.replace(',', '.') || 0)
     const minutes = Number(time.match(/(\d+(?:[.,]\d+)?)\s*m/i)?.[1]?.replace(',', '.') || 0)
     return hours + minutes / 60
   }
   const productForOrder = (order: any) => products.value.find((product) => product.id && product.id === order.productId) || products.value.find((product) => product.name === order.product)
-  const soldRecipeRows = computed(() => orders.value.map((order) => ({ order, product: productForOrder(order) })).filter((row) => row.product))
+  const soldRecipeRows = computed(() => activeOrders.value.map((order) => ({ order, product: productForOrder(order) })).filter((row) => row.product))
   const filamentUsageById = computed(() => {
     const totals = new Map<string, number>()
     for (const { order, product } of soldRecipeRows.value) {
@@ -29,15 +31,17 @@ export const useBusinessMetrics = () => {
   })
   const orderRecipeCost = computed(() => sum(soldRecipeRows.value, ({ order, product }) => Number(product?.cost || 0) * Number(order.qty || 0)))
 
-  const revenue = computed(() => sum(orders.value, (order) => order.gross))
-  const netRevenue = computed(() => sum(orders.value, (order) => order.net))
-  const profit = computed(() => sum(orders.value, (order) => order.profit))
-  const fees = computed(() => sum(orders.value, (order) => order.fee))
-  const shipping = computed(() => sum(orders.value, (order) => order.shipping))
+  const revenue = computed(() => sum(activeOrders.value, (order) => order.gross))
+  const netRevenue = computed(() => sum(activeOrders.value, (order) => order.net))
+  const profit = computed(() => sum(activeOrders.value, (order) => order.profit))
+  const fees = computed(() => sum(activeOrders.value, (order) => order.fee))
+  const shipping = computed(() => sum(activeOrders.value, (order) => order.shipping))
   const manualExpenseTotal = computed(() => sum(expenses.value, (expense) => expense.value))
   const derivedExpenseTotal = computed(() => fees.value + shipping.value + orderRecipeCost.value)
   const expenseTotal = computed(() => manualExpenseTotal.value + derivedExpenseTotal.value)
-  const orderCount = computed(() => orders.value.length)
+  const orderCount = computed(() => activeOrders.value.length)
+  const cancelledOrderCount = computed(() => cancelledOrders.value.length)
+  const cancelledGross = computed(() => sum(cancelledOrders.value, (order) => order.gross))
   const ticket = computed(() => avg(revenue.value, orderCount.value))
   const margin = computed(() => revenue.value ? profit.value / revenue.value * 100 : 0)
 
@@ -101,6 +105,9 @@ export const useBusinessMetrics = () => {
     manualExpenseTotal,
     derivedExpenseTotal,
     orderCount,
+    cancelledOrders,
+    cancelledOrderCount,
+    cancelledGross,
     ticket,
     margin,
     activeProducts,

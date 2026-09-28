@@ -110,8 +110,8 @@ const exportReport = async () => {
       </div>
 
       <div class="report-filters" :class="{ 'report-filters--compact': !showCommercialFilters }">
-        <label class="field"><span>Início</span><input v-model="filters.periodStart" type="date"></label>
-        <label class="field"><span>Fim</span><input v-model="filters.periodEnd" type="date"></label>
+        <label class="field"><span>Início</span><UiDateInput v-model="filters.periodStart" aria-label="Início do período" /></label>
+        <label class="field"><span>Fim</span><UiDateInput v-model="filters.periodEnd" aria-label="Fim do período" /></label>
         <label v-if="reportSection === 'financeiro'" class="field"><span>Agrupamento</span><select v-model="filters.grouping"><option value="month">Mensal</option><option value="week">Semanal</option><option value="day">Diário</option></select></label>
         <label v-if="showCommercialFilters" class="field"><span>Canal de venda</span><select v-model="filters.channel"><option value="Todos">Todos</option><option value="direct">Venda direta</option><option value="marketplace">Marketplace</option></select></label>
         <label v-if="showCommercialFilters" class="field"><span>Marketplace</span><select v-model="filters.marketplace"><option v-for="item in marketplaceOptions" :key="item">{{ item }}</option></select></label>

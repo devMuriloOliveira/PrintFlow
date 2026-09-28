@@ -4169,12 +4169,12 @@ const cancel = () => {
                 Data de aquisição
               </label>
 
-              <input
+              <UiDateInput
                 v-model="
                   form.acquired
                 "
-                type="date"
-              >
+                aria-label="Data de aquisição"
+              />
             </div>
 
             <div class="field col-4">
@@ -4499,12 +4499,12 @@ const cancel = () => {
                 Última manutenção
               </label>
 
-              <input
+              <UiDateInput
                 v-model="
                   form.maintenance
                 "
-                type="date"
-              >
+                aria-label="Última manutenção"
+              />
             </div>
 
             <div class="field col-4">
@@ -4512,12 +4512,12 @@ const cancel = () => {
                 Próxima manutenção
               </label>
 
-              <input
+              <UiDateInput
                 v-model="
                   form.nextMaintenance
                 "
-                type="date"
-              >
+                aria-label="Próxima manutenção"
+              />
             </div>
 
             <div class="field col-4">

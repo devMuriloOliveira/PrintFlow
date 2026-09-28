@@ -84,7 +84,7 @@ const cancel = () => {
             <div class="field col-3" data-field="initial" :class="{'field--error':errors.initial}"><label>Peso inicial *</label><input v-model.number="form.initial" type="number"><small v-if="errors.initial" class="field__error">{{errors.initial}}</small></div>
             <div class="field col-3" data-field="remaining" :class="{'field--error':errors.remaining}"><label>{{ isEditing ? 'Saldo atual' : 'Peso inicial disponível' }} *</label><input v-model.number="form.remaining" type="number" :disabled="isEditing"><small v-if="errors.remaining" class="field__error">{{errors.remaining}}</small><small v-else-if="isEditing">Altere o saldo por uma movimentação no Estoque.</small></div>
             <div class="field col-3" data-field="cost" :class="{'field--error':errors.cost}"><label>Custo do rolo *</label><input v-model.number="form.cost" type="number" step=".01"><small v-if="errors.cost" class="field__error">{{errors.cost}}</small></div>
-            <div class="field col-3"><label>Data da compra</label><input v-model="form.date" type="date"></div>
+            <div class="field col-3"><label>Data da compra</label><UiDateInput v-model="form.date" aria-label="Data da compra" /></div>
             <div class="field col-6"><label>Fornecedor</label><input v-model="form.supplier" placeholder="3D Fila"></div>
           </div>
         </div>

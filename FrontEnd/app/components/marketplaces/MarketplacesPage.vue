@@ -11,7 +11,7 @@ const pageSubtitle = computed(() => activeSection.value === 'conexoes'
     ? 'Revise os pedidos recebidos e vincule-os aos produtos.'
     : 'Gerencie seus canais de venda e estruturas de taxas')
 const saleValue = ref(100)
-const selectedName = ref('Shopee')
+const selectedName = ref('Mercado Livre')
 const marketplaceFilter = ref('Todos os canais')
 const marketplaceSearch = ref('')
 const linkingOrderId = ref('')
@@ -24,6 +24,11 @@ const marketplacePageSize = ref(25)
 const marketplaceTotal = ref(0)
 const marketplacePageLoading = ref(false)
 const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
+const integrationAvailability = [
+  { id: 'mercado_livre', name: 'Mercado Livre', status: 'Disponível', badge: 'badge--green', description: 'OAuth oficial e importação de pedidos disponíveis.' },
+  { id: 'shopee', name: 'Shopee', status: 'Em breve', badge: 'badge--orange', description: 'Canal manual disponível; integração automática em desenvolvimento.' },
+  { id: 'amazon', name: 'Amazon', status: 'Em breve', badge: 'badge--orange', description: 'Canal manual disponível; integração automática ainda não liberada.' }
+]
 const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
 const marketplaceOptions = computed(() => ['Todos os canais', ...new Set(marketplaces.value.map((marketplace: any) => String(marketplace.name || '').trim()).filter(Boolean))])
 const filteredMarketplaces = computed(() => marketplaces.value.filter((marketplace: any) =>
@@ -31,6 +36,14 @@ const filteredMarketplaces = computed(() => marketplaces.value.filter((marketpla
   Object.values(marketplace).join(' ').toLowerCase().includes(marketplaceSearch.value.toLowerCase())
 ))
 const clearMarketplaceFilters = () => { marketplaceFilter.value = 'Todos os canais'; marketplaceSearch.value = '' }
+const marketplacePlatform = (marketplace: any) => String(marketplace.platform || '').toLowerCase()
+const automaticIntegrationPending = (marketplace: any) => ['shopee', 'amazon'].includes(marketplacePlatform(marketplace))
+const connectionLabel = (marketplace: any) => automaticIntegrationPending(marketplace)
+  ? 'Integração em breve'
+  : marketplace.connectionStatus === 'connected' ? 'Conectado' : 'Manual'
+const connectionClass = (marketplace: any) => automaticIntegrationPending(marketplace)
+  ? 'badge--orange'
+  : marketplace.connectionStatus === 'connected' ? 'badge--green' : 'badge--gray'
 const feeRate = (marketplace: any) => marketplace.gross > 0 && marketplace.fees !== undefined ? Number(marketplace.fees || 0) / Number(marketplace.gross) * 100 : Number(marketplace.commission || 0) + Number(marketplace.financial || 0) + Number(marketplace.ads || 0) + Number(marketplace.others || 0)
 const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
@@ -172,6 +185,16 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 <template>
   <div>
     <PageHeader title="Marketplaces" :subtitle="pageSubtitle"><a v-if="activeSection === 'canais'" class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Adicionar canal</a><a v-else-if="activeSection === 'conexoes'" class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Conectar conta</a></PageHeader>
+    <section v-if="activeSection !== 'pedidos'" class="integration-availability">
+      <header><div><span>INTEGRAÇÕES OFICIAIS</span><h2>Disponibilidade por canal</h2><p>Você pode configurar taxas manualmente em qualquer canal. A importação automática depende da integração oficial.</p></div><span class="integration-availability__legend"><i />1 integração disponível</span></header>
+      <div class="integration-availability__grid">
+        <article v-for="item in integrationAvailability" :key="item.id" :class="{ 'is-pending': item.status === 'Em breve' }">
+          <MarketplaceLogo :platform="item.id" :name="item.name" :size="34" />
+          <div><strong>{{ item.name }}</strong><small>{{ item.description }}</small></div>
+          <span class="badge" :class="item.badge">{{ item.status }}</span>
+        </article>
+      </div>
+    </section>
     <div v-if="activeSection !== 'pedidos'" class="split-layout" style="grid-template-columns:minmax(0,1fr) 330px">
       <div>
         <div class="metrics-grid metrics-grid--4"><MetricCard label="Canais Cadastrados" :value="formatNumber(marketplaces.length)" icon="store" :change="`${metrics.activeMarketplaces.value} ativos`" :points="marketplaces.map(marketplace => marketplace.active ? 1 : 0)" /><MetricCard label="Taxa Média" :value="metrics.percent(metrics.marketplaceAverageFee.value)" icon="percent" change="Sobre o valor bruto" color="green" :points="marketplaces.map(feeRate)" /><MetricCard label="Maior Receita Líquida" :value="formatCurrency(metrics.bestMarketplace.value?.net || 0)" icon="trend" :change="metrics.bestMarketplace.value?.name || '-'" color="green" :points="marketplaces.map(marketplace => Number(marketplace.net || 0))" /><MetricCard label="Maior Taxa" :value="metrics.percent(metrics.highestFeeMarketplace.value ? feeRate(metrics.highestFeeMarketplace.value) : 0)" icon="percent" :change="metrics.highestFeeMarketplace.value?.name || '-'" color="orange" :points="marketplaces.map(feeRate)" /></div>
@@ -181,9 +204,10 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
             <table class="data-table">
               <thead><tr><th>Marketplace</th><th>Conexão</th><th>Comissão</th><th>Tarifa Fixa</th><th>Taxa Financeira</th><th>Custo Anúncio</th><th>Outras Tarifas</th><th>Receita Bruta</th><th>Receita Líquida</th><th>Pedidos</th><th>Status</th><th></th></tr></thead>
               <tbody>
+                <tr v-if="!filteredMarketplaces.length"><td colspan="12"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store" /></div><h3>Nenhum canal encontrado</h3><p>{{ marketplaces.length ? 'Ajuste ou limpe os filtros para visualizar outros canais.' : 'Adicione um canal para configurar taxas e acompanhar resultados.' }}</p><button v-if="marketplaces.length" class="btn" type="button" @click="clearMarketplaceFilters">Limpar filtros</button><NuxtLink v-else class="btn btn--primary" to="/marketplaces/novo">Adicionar canal</NuxtLink></div></div></td></tr>
                 <tr v-for="m in filteredMarketplaces" :key="m.id || m.name">
                   <td><div class="table-product table-product--editable"><MarketplaceLogo :platform="m.platform" :name="m.name" :short="m.short" :size="28" /><strong>{{m.name}}</strong><button class="row-action row-action--edit" title="Editar marketplace" @click.stop="editMarketplace(m)"><UiIcon name="edit" :size="15" /></button></div></td>
-                  <td><span class="badge" :class="m.connectionStatus==='connected'?'badge--green':'badge--gray'">{{m.connectionStatus==='connected'?'Conectado':'Manual'}}</span></td>
+                  <td><span class="badge" :class="connectionClass(m)">{{ connectionLabel(m) }}</span></td>
                   <td>{{m.commission}}%</td>
                   <td>{{formatCurrency(m.fixed)}}</td>
                   <td>{{m.financial}}%</td>
@@ -202,7 +226,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
         </PanelCard>
         <PanelCard v-if="activeSection === 'conexoes'" title="Contas conectadas" subtitle="Cada conta OAuth recebe pedidos separadamente. As taxas ficam configuradas no canal correspondente." style="margin-top:12px">
           <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row"><div><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small><small v-if="integration.lastError" style="display:block;color:var(--danger,#c0392b)">{{ integration.lastError }}</small></div><div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" aria-label="Sincronizar pedido por ID" @click="syncConnectionOrder(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar autorização" aria-label="Reconectar autorização do Mercado Livre" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" aria-label="Desconectar conta do Mercado Livre" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div></div>
-          <div v-if="!marketplaceConnections.length" style="color:var(--muted);font-size:11px">Nenhuma conta OAuth conectada ainda.</div>
+          <div v-if="!marketplaceConnections.length" class="connection-empty"><span><UiIcon name="store" :size="18" /></span><div><strong>Nenhuma conta conectada</strong><small>Atualmente, somente o Mercado Livre possui integração automática disponível.</small></div><NuxtLink class="btn btn--compact" to="/marketplaces/novo">Conectar Mercado Livre</NuxtLink></div>
         </PanelCard>
       </div>
       <aside>
@@ -241,8 +265,8 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
         <span>{{ marketplacePageLoading ? 'Carregando pedidos...' : `Exibindo ${marketplaceTotal ? (marketplacePage * marketplacePageSize + 1) : 0}-${Math.min((marketplacePage + 1) * marketplacePageSize, marketplaceTotal)} de ${marketplaceTotal} pedidos` }}</span>
         <div class="pagination">
           <button class="page-btn" type="button" :disabled="marketplacePage === 0 || marketplacePageLoading" @click="changeMarketplacePage(marketplacePage - 1)">Anterior</button>
-          <button class="page-btn" type="button" :disabled="(marketplacePage + 1) * marketplacePageSize >= marketplaceTotal || marketplacePageLoading" @click="changeMarketplacePage(marketplacePage + 1)">PrÃ³xima</button>
-          <select v-model.number="marketplacePageSize" :disabled="marketplacePageLoading" aria-label="Pedidos por pÃ¡gina" @change="loadMarketplacePage()"><option :value="25">25/pÃ¡gina</option><option :value="50">50/pÃ¡gina</option><option :value="100">100/pÃ¡gina</option></select>
+          <button class="page-btn" type="button" :disabled="(marketplacePage + 1) * marketplacePageSize >= marketplaceTotal || marketplacePageLoading" @click="changeMarketplacePage(marketplacePage + 1)">Próxima</button>
+          <select v-model.number="marketplacePageSize" :disabled="marketplacePageLoading" aria-label="Pedidos por página" @change="loadMarketplacePage()"><option :value="25">25/página</option><option :value="50">50/página</option><option :value="100">100/página</option></select>
         </div>
       </div>
     </PanelCard>
@@ -250,6 +274,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 </template>
 
 <style scoped>
+.integration-availability{margin-bottom:14px;border:1px solid #d9e5f6;border-radius:13px;background:linear-gradient(135deg,#fbfdff,#f2f7ff);padding:16px}.integration-availability>header{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px}.integration-availability>header span:first-child{display:block;color:var(--blue);font-size:8px;font-weight:800;letter-spacing:.09em}.integration-availability h2{margin:3px 0;color:#19243a;font-size:14px}.integration-availability p{margin:0;color:var(--muted);font-size:9px}.integration-availability__legend{display:flex;align-items:center;gap:6px;border:1px solid #d8e4f3;border-radius:999px;color:#47617f;background:rgba(255,255,255,.82);padding:6px 9px;font-size:8px;font-weight:750;white-space:nowrap}.integration-availability__legend i{width:7px;height:7px;border-radius:50%;background:#16a36a;box-shadow:0 0 0 3px rgba(22,163,106,.12)}.integration-availability__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.integration-availability article{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;border:1px solid #dce7f5;border-radius:10px;background:#fff;padding:10px 11px}.integration-availability article.is-pending{background:#fffdf8}.integration-availability article strong,.integration-availability article small{display:block}.integration-availability article strong{color:#253248;font-size:10px}.integration-availability article small{color:var(--muted);margin-top:3px;font-size:8px;line-height:1.4}.connection-empty{display:flex;align-items:center;gap:10px;border:1px dashed #d4dfed;border-radius:10px;background:#fafcff;padding:12px}.connection-empty>span{display:grid;width:36px;height:36px;flex:0 0 auto;place-items:center;border-radius:9px;color:var(--blue);background:var(--blue-soft)}.connection-empty>div{min-width:0;flex:1}.connection-empty strong,.connection-empty small{display:block}.connection-empty strong{color:#2a374b;font-size:10px}.connection-empty small{color:var(--muted);margin-top:3px;font-size:8px}
 .market-cell{display:flex;align-items:center;gap:8px;white-space:nowrap}
 .connection-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
 .connection-row:last-child{border-bottom:0}
@@ -258,5 +283,6 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 .section-tabs a{flex:0 0 auto;border:1px solid var(--line);border-radius:999px;padding:8px 14px;color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
 .section-tabs a:hover,.section-tabs a.active{border-color:#9ebcf8;background:#eef4ff;color:var(--blue)}
 .section-tabs a:focus-visible{outline:3px solid rgba(23,104,242,.25);outline-offset:2px}
-@media (max-width:780px){.section-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding:4px 2px 12px;margin-bottom:14px}.section-tabs a{white-space:nowrap}.connection-row{align-items:flex-start;flex-direction:column}.connection-row__actions{width:100%;justify-content:flex-end}.table-footer{align-items:flex-start;flex-direction:column;gap:10px}.table-footer .pagination{width:100%;justify-content:space-between}}
+@media (max-width:980px){.integration-availability__grid{grid-template-columns:1fr}}
+@media (max-width:780px){.integration-availability>header{align-items:flex-start;flex-direction:column}.section-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding:4px 2px 12px;margin-bottom:14px}.section-tabs a{white-space:nowrap}.connection-row,.connection-empty{align-items:flex-start;flex-direction:column}.connection-row__actions{width:100%;justify-content:flex-end}.connection-empty .btn{width:100%}.table-footer{align-items:flex-start;flex-direction:column;gap:10px}.table-footer .pagination{width:100%;justify-content:space-between}}
 </style>

@@ -52,13 +52,18 @@ export const handleOperationalAuditList = async (req, res, url) => {
   const user = await getAuthUser(req)
   if (!user) return sendJson(res, 401, { error: 'Login necessario' })
 
+  const entityType = String(url.searchParams.get('entityType') || '').trim().slice(0, 80) || null
+  const entityId = String(url.searchParams.get('entityId') || '').trim().slice(0, 180) || null
+
   const result = await tenantQuery(user.tenantId, `
     select id, action, actor_type, actor_id, entity_type, entity_id, details, created_at
       from operational_audit_events
      where tenant_id = $1
+       and ($2::text is null or entity_type = $2)
+       and ($3::text is null or entity_id = $3)
      order by created_at desc
-     limit $2
-  `, [user.tenantId, limitFromUrl(url)])
+     limit $4
+  `, [user.tenantId, entityType, entityId, limitFromUrl(url)])
 
   return sendJson(res, 200, result.rows.map((row) => {
     const description = describeAuditEvent(row)

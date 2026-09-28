@@ -42,7 +42,7 @@ const sections = [
   {
     label: 'ESTOQUE',
     items: [
-      { label: 'Estoque', to: '/estoque?secao=visao', icon: 'box', children: [{ label: 'Visão geral', to: '/estoque?secao=visao' }, { label: 'Filamentos', to: '/estoque?secao=filamentos' }, { label: 'Produtos fabricados', to: '/estoque?secao=produtos' }, { label: 'Registrar produção', to: '/estoque/registrar-producao' }] }
+      { label: 'Estoque', to: '/estoque?secao=visao', icon: 'box', children: [{ label: 'Visão geral', to: '/estoque?secao=visao' }, { label: 'Filamentos', to: '/estoque?secao=filamentos' }, { label: 'Produtos fabricados', to: '/estoque?secao=produtos' }] }
     ]
   },
   {

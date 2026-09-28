@@ -45,6 +45,7 @@ import {
   handleProductImageRead,
   handleProductImageUpload,
   handleProductPrintFileUpload,
+  handleExpenseInstallmentsCreate,
   handleRecurringExpensesGenerate,
   handleResourceCreate,
   handleResourceDelete,
@@ -1546,6 +1547,7 @@ export const handleRequest =
       if (req.method === 'POST' && orderStageMatch) return await handleOrderStageAdvance(req, res, orderStageMatch[1])
 
       if (req.method === 'POST' && url.pathname === '/api/expenses/recurring/generate') return await handleRecurringExpensesGenerate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/expenses/installments') return await handleExpenseInstallmentsCreate(req, res)
 
       const resourceMatch =
         url.pathname.match(

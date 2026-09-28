@@ -323,6 +323,16 @@ export const useAppData = () => {
     return list[0]
   }
 
+  const createExpenseInstallments = async (expense: Expense, installmentCount: number) => {
+    const list = await $fetch<Expense[]>(apiUrl('/api/expenses/installments'), {
+      method: 'POST',
+      body: { ...expense, installmentCount },
+      headers: resourceHeaders()
+    })
+    setResource('expenses', list)
+    return list
+  }
+
   const updateItem = async <T extends { id?: string; dbId?: string }>(resource: keyof AppData, item: T) => {
     const id = item.dbId || item.id
     if (!id) throw new Error('Registro sem identificador para editar.')
@@ -495,7 +505,7 @@ export const useAppData = () => {
   const loadClientOrders = (clientId: string) => loadOrdersPage({ clientId, salesChannel: 'direct', limit: 100, offset: 0 })
 
   const loadOrdersSummary = async () => $fetch<{
-    orderCount: number; gross: number; net: number; profit: number; fees: number; shipping: number; ticket: number;
+    orderCount: number; gross: number; net: number; profit: number; fees: number; shipping: number; ticket: number; cancelledCount: number; cancelledGross: number;
     byStatus: Array<{ status: string; count: number }>
   }>(apiUrl('/api/orders/summary'), { headers: resourceHeaders() })
 
@@ -666,6 +676,7 @@ export const useAppData = () => {
     , retryPrintJob
     , approveProductionOutput
     , createItem
+    , createExpenseInstallments
     , updateItem
     , deleteItem
   }

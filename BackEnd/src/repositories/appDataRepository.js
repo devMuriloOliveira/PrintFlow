@@ -122,10 +122,15 @@ export const getOrdersSummary = async (tenantId) => withTenant(tenantId, async (
       union all
       select gross, net, profit, marketplace_fee as fee, shipping, status, sold_at from tracked_sales where tenant_id = $1
     )
-    select count(*)::int as order_count,
-      coalesce(sum(gross), 0) as gross, coalesce(sum(net), 0) as net,
-      coalesce(sum(profit), 0) as profit, coalesce(sum(fee), 0) as fees,
-      coalesce(sum(shipping), 0) as shipping, coalesce(avg(gross), 0) as ticket
+    select count(*) filter (where coalesce(status, '') <> 'Cancelado')::int as order_count,
+      coalesce(sum(gross) filter (where coalesce(status, '') <> 'Cancelado'), 0) as gross,
+      coalesce(sum(net) filter (where coalesce(status, '') <> 'Cancelado'), 0) as net,
+      coalesce(sum(profit) filter (where coalesce(status, '') <> 'Cancelado'), 0) as profit,
+      coalesce(sum(fee) filter (where coalesce(status, '') <> 'Cancelado'), 0) as fees,
+      coalesce(sum(shipping) filter (where coalesce(status, '') <> 'Cancelado'), 0) as shipping,
+      coalesce(avg(gross) filter (where coalesce(status, '') <> 'Cancelado'), 0) as ticket,
+      count(*) filter (where status = 'Cancelado')::int as cancelled_count,
+      coalesce(sum(gross) filter (where status = 'Cancelado'), 0) as cancelled_gross
     from combined
   `, [tenantId])
   const statusResult = await client.query(`
@@ -140,6 +145,7 @@ export const getOrdersSummary = async (tenantId) => withTenant(tenantId, async (
   const row = result.rows[0] || {}
   return {
     orderCount: Number(row.order_count || 0), gross: number(row.gross), net: number(row.net), profit: number(row.profit),
+    cancelledCount: Number(row.cancelled_count || 0), cancelledGross: number(row.cancelled_gross),
     fees: number(row.fees), shipping: number(row.shipping), ticket: number(row.ticket),
     byStatus: statusResult.rows.map((item) => ({ status: item.status, count: Number(item.count || 0) }))
   }
@@ -361,11 +367,11 @@ const readMarketplaces = async (client, tenantId) => {
     from marketplaces m
     left join (
       select marketplace_id, sum(gross) as gross, sum(net) as net, sum(fee) as fees, count(id)::int as orders
-      from orders where tenant_id = $1 group by marketplace_id
+      from orders where tenant_id = $1 and coalesce(status, '') <> 'Cancelado' group by marketplace_id
     ) o on o.marketplace_id = m.id
     left join (
       select marketplace_id, sum(gross) as gross, sum(net) as net, sum(marketplace_fee) as fees, count(id)::int as orders
-      from tracked_sales where tenant_id = $1 group by marketplace_id
+      from tracked_sales where tenant_id = $1 and coalesce(status, '') <> 'Cancelado' group by marketplace_id
     ) ts on ts.marketplace_id = m.id
     where m.tenant_id = $1
     order by m.created_at asc
@@ -380,10 +386,10 @@ const readClients = async (client, tenantId) => {
   const result = await client.query(`
     select c.id, c.name, c.email, c.phone, c.client_type, c.document, c.zip, c.address, c.address_number,
       c.complement, c.district, c.city, c.state, c.origin, c.notes, c.tags, c.status,
-      count(o.id) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))::int as orders,
-      coalesce(sum(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as revenue,
-      coalesce(avg(o.gross) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 0) as ticket,
-      to_char(max(o.order_date) filter (where o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')), 'DD/MM/YYYY') as last
+      count(o.id) filter (where coalesce(o.status, '') <> 'Cancelado' and (o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual')))::int as orders,
+      coalesce(sum(o.gross) filter (where coalesce(o.status, '') <> 'Cancelado' and (o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))), 0) as revenue,
+      coalesce(avg(o.gross) filter (where coalesce(o.status, '') <> 'Cancelado' and (o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))), 0) as ticket,
+      to_char(max(o.order_date) filter (where coalesce(o.status, '') <> 'Cancelado' and (o.sales_channel = 'direct' or (o.sales_channel is null and lower(coalesce(m.name, '')) = 'manual'))), 'DD/MM/YYYY') as last
     from clients c left join orders o on o.client_id = c.id and o.tenant_id = $1
       left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
     where c.tenant_id = $1 group by c.id order by c.created_at desc
