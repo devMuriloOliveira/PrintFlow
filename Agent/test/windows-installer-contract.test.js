@@ -74,6 +74,19 @@ test('verificacao de atualizacao nao bloqueia a bandeja e possui timeouts', asyn
   assert.match(tray, /Start-InteractiveUpdateCheck/)
 })
 
+test('atualizador fixa a identidade do certificado Early Access', async () => {
+  const updater = await readScript('check-and-update-windows-agent.ps1')
+  const validator = await fs.readFile(
+    path.join(process.cwd(), '..', 'scripts', 'validate-agent-release-artifacts.mjs'),
+    'utf8'
+  )
+  const fingerprint = 'AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB'
+
+  assert.match(updater, new RegExp(fingerprint))
+  assert.match(updater, /\$certificateHash -ne \$trustedReleaseCertificateSha256/)
+  assert.match(validator, new RegExp(fingerprint))
+})
+
 test('instalador Early Access fixa e confia somente no certificado empacotado', async () => {
   const build = await readScript('build-windows-package.ps1')
   const bootstrap = await readScript('install-windows-agent-from-package.ps1')

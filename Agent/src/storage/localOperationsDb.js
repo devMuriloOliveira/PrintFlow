@@ -364,6 +364,10 @@ export const createLocalOperationsDb = (
       `
     )
 
+  const deleteStaleLocalStates = database.prepare(
+    'delete from local_states where updated_at < ?'
+  )
+
   const begin = (
     command
   ) => {
@@ -663,6 +667,11 @@ export const createLocalOperationsDb = (
         updatedAt:
           state.updated_at
       }
+    },
+    pruneLocalStates: (maxAgeMs = 30 * 24 * 60 * 60 * 1000) => {
+      const age = Math.max(24 * 60 * 60 * 1000, Number(maxAgeMs) || 0)
+      const cutoff = new Date(Date.now() - age).toISOString()
+      return Number(deleteStaleLocalStates.run(cutoff).changes)
     },
     listPendingCompletions: (
       limit = 20

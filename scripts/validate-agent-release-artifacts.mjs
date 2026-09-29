@@ -5,6 +5,7 @@ import process from 'node:process'
 
 const distFlag = process.argv.find(value => value.startsWith('--dist='))
 const dist = path.resolve(distFlag?.slice('--dist='.length) || 'Agent/dist')
+const trustedEarlyAccessCertificateSha256 = 'AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB'
 
 const readJson = async name => JSON.parse(await readFile(path.join(dist, name), 'utf8'))
 const sha256 = async filePath => {
@@ -51,6 +52,9 @@ for (const entry of entries) {
 }
 
 const certificateEntry = entries.find(entry => entry.relativePath.endsWith('PrintFlow-Agent-Dev-Certificate.cer'))
+if (metadata.signingMode === 'DEV_SELF_SIGNED' && certificateEntry?.expected !== trustedEarlyAccessCertificateSha256) {
+  throw new Error('Certificado Early Access diverge da identidade confiavel do Agent.')
+}
 if (metadata.certificateSha256 && certificateEntry?.expected !== String(metadata.certificateSha256).toUpperCase()) {
   throw new Error('certificateSha256 nao corresponde ao certificado publicado.')
 }

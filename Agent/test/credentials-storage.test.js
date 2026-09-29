@@ -94,6 +94,15 @@ test('codigo de pareamento pendente e consumido uma unica vez', async () => {
     'ab12cd'
   )
 
+  const pendingContent = await fs.readFile(
+    path.join(tempDir, 'pending-pairing.json'),
+    'utf8'
+  )
+  if (process.platform === 'win32') {
+    assert.equal(pendingContent.includes('AB12CD'), false)
+    assert.match(pendingContent, /windows-dpapi/)
+  }
+
   assert.equal(
     await consumePendingPairingCode(),
     'AB12CD'
@@ -103,4 +112,17 @@ test('codigo de pareamento pendente e consumido uma unica vez', async () => {
     await consumePendingPairingCode(),
     ''
   )
+})
+
+test('descarta codigo de pareamento local expirado', async () => {
+  await fs.writeFile(
+    path.join(tempDir, 'pending-pairing.json'),
+    JSON.stringify({
+      code: 'STALE1',
+      createdAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+    }),
+    'utf8'
+  )
+
+  assert.equal(await consumePendingPairingCode(), '')
 })

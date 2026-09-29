@@ -11,6 +11,9 @@
 $ErrorActionPreference = 'Stop'
 $null = Add-Type -AssemblyName System.Windows.Forms
 $releaseApi = 'https://api.github.com/repos/devMuriloOliveira/PrintFlow/releases/latest'
+# Trust anchor embedded in installed Agent versions. Rotate only with a release
+# that is still signed by this certificate and carries the next pinned value.
+$trustedReleaseCertificateSha256 = 'AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB'
 $updatesRoot = Join-Path $env:APPDATA 'PrintFlow Agent\updates'
 $historyPath = Join-Path $updatesRoot 'update-history.jsonl'
 
@@ -178,6 +181,7 @@ $signature = Get-AuthenticodeSignature (Join-Path $packageRoot 'PrintFlow-Agent-
 if (-not $signature.SignerCertificate) { throw 'Installer sem assinatura.' }
 if ($signature.Status -ne 'Valid') { throw 'Assinatura do installer nao e confiavel neste computador. Instale o certificado oficial do Early Access.' }
 $certificateHash = (Get-FileHash (Join-Path $packageRoot 'PrintFlow-Agent-Dev-Certificate.cer') -Algorithm SHA256).Hash
+if ($certificateHash -ne $trustedReleaseCertificateSha256) { throw 'Certificado da release nao corresponde a identidade confiavel do Agent.' }
 if ($metadata.certificateSha256 -and $certificateHash -ne [string]$metadata.certificateSha256) { throw 'Certificado do instalador nao corresponde ao manifesto.' }
 $signerHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($signature.SignerCertificate.RawData)))).Replace('-', '')
 if ($signerHash -ne $certificateHash) { throw 'Certificado do instalador nao corresponde ao manifesto.' }

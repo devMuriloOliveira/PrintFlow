@@ -156,6 +156,10 @@ startCacheCleanup()
 
 const localOperations =
   createLocalOperationsDb()
+const expiredLocalStates = localOperations.pruneLocalStates()
+if (expiredLocalStates > 0) {
+  console.log(`[Storage] ${expiredLocalStates} estado(s) local(is) antigo(s) removido(s).`)
+}
 
 let pairingAllowed = false
 
