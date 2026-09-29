@@ -49,7 +49,7 @@ const channelLabel = (value: string) => value === 'direct' ? 'Venda direta' : 'M
 </script>
 
 <template>
-  <div class="product-report">
+  <div class="report-section product-report">
     <div class="metrics-grid metrics-grid--4">
       <MetricCard label="Vendas" :value="formatNumber(filteredSales.length)" icon="cart" note="Pedidos não cancelados" />
       <MetricCard label="Itens vendidos" :value="formatNumber(quantityTotal)" icon="box" note="Soma das quantidades" color="cyan" />
@@ -86,5 +86,5 @@ const channelLabel = (value: string) => value === 'direct' ? 'Venda direta' : 'M
 </template>
 
 <style scoped>
-.product-report{display:grid;width:100%;max-width:1360px;margin:0 auto;gap:16px}.product-report>.metrics-grid{width:100%;margin-bottom:0}.product-report__summary{display:grid;grid-template-columns:2fr 1fr 1fr;gap:1px;overflow:hidden;border:1px solid #dce4f0;border-radius:12px;background:#dce4f0}.product-report__summary>div{display:grid;gap:3px;padding:13px 16px;background:#fff}.product-report__summary small,.table-product small,.sale-marketplace{display:block;color:#687386;font-size:11px}.product-report__summary strong{overflow:hidden;color:#172033;text-overflow:ellipsis;white-space:nowrap}.table-product>div{display:grid;gap:2px}.sale-marketplace{margin-top:2px}@media(max-width:700px){.product-report__summary{grid-template-columns:1fr}.product-report__summary strong{white-space:normal}}
+.product-report>.metrics-grid{width:100%;margin-bottom:0}.product-report__summary{display:grid;grid-template-columns:2fr 1fr 1fr;gap:1px;overflow:hidden;border:1px solid #dce4f0;border-radius:12px;background:#dce4f0}.product-report__summary>div{display:grid;gap:3px;padding:13px 16px;background:#fff}.product-report__summary small,.table-product small,.sale-marketplace{display:block;color:#687386;font-size:11px}.product-report__summary strong{overflow:hidden;color:#172033;text-overflow:ellipsis;white-space:nowrap}.table-product>div{display:grid;gap:2px}.sale-marketplace{margin-top:2px}@media(max-width:700px){.product-report__summary{grid-template-columns:1fr}.product-report__summary strong{white-space:normal}}
 </style>

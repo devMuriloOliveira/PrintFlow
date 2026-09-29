@@ -181,9 +181,9 @@ input, select, textarea { color: var(--ink); }
 .section-title { margin: 0 0 12px; font-size: 15px; }
 
 .metrics-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
-.metrics-grid--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); max-width: 1280px; margin-left: auto; margin-right: auto; }
+.metrics-grid--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .metrics-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.sales-metrics { width: min(100%, 1280px); max-width: 1280px; margin-left: auto; margin-right: auto; }
+.sales-metrics { width: 100%; }
 .expense-status-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .metric-card { min-width: 0; min-height: 154px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; padding: 15px; box-shadow: var(--shadow); overflow: hidden; transition: border-color .18s var(--ease-out), box-shadow .18s var(--ease-out), transform .18s var(--ease-out); }
 .metric-card--interactive:hover { border-color: #b8c7dc; background: #fafcff; }
@@ -221,7 +221,8 @@ input, select, textarea { color: var(--ink); }
 .dashboard-grid > .panel { min-height: 252px; }
 .dashboard-grid--bottom { grid-template-columns: repeat(2, minmax(280px, 1fr)); max-width: 980px; margin-left: auto; margin-right: auto; }
 .line-chart { width: 100%; height: 230px; }
-.sales-chart-panel { width: min(100%, 1280px); max-width: 1280px; margin-left: auto; margin-right: auto; }
+.sales-chart-panel { width: 100%; }
+.report-section { display: grid; width: 100%; min-width: 0; gap: 16px; }
 .line-chart svg { width: 100%; height: 100%; overflow: visible; }
 .chart-grid line { stroke: #e8edf4; stroke-width: 1; stroke-dasharray: 4 4; }
 .chart-labels text { fill: var(--muted); font-size: 11px; }
@@ -995,7 +996,7 @@ input, select, textarea { color: var(--ink); }
 .profile-section-card__icon { width: 32px; height: 32px; border-radius: 6px; background: #f3f5f7; color: var(--muted); }
 .profile-section-card__content { min-width: 0; }
 .profile-section-card__content small { font-size: 12px; }
-.dashboard-page .metrics-grid--5, .dashboard-page .dashboard-grid--bottom { max-width: none; }
+.dashboard-page .dashboard-grid--bottom { max-width: none; }
 .dashboard-page .metrics-grid, .dashboard-page .dashboard-grid { gap: 16px; margin-bottom: 20px; }
 .dashboard-page .dashboard-grid--bottom > :last-child { grid-column: auto; }
 

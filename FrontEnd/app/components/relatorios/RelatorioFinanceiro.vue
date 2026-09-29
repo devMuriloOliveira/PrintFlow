@@ -99,7 +99,7 @@ const expenseSegments = computed(() => {
 </script>
 
 <template>
-  <div class="financial-report">
+  <div class="report-section financial-report">
     <div class="metrics-grid metrics-grid--5">
       <MetricCard label="Faturamento bruto" :value="formatCurrency(revenueTotal)" icon="trend" note="Total vendido" :points="revenueChart" />
       <MetricCard label="Receita após taxas" :value="formatCurrency(netTotal)" icon="wallet" note="Líquido informado nas vendas" color="cyan" :points="revenueChart" />
@@ -159,5 +159,5 @@ const expenseSegments = computed(() => {
 </template>
 
 <style scoped>
-.financial-report{display:grid;gap:16px}.financial-definition{display:flex;align-items:flex-start;gap:9px;padding:12px 14px;border:1px solid #cfe0fb;border-radius:11px;background:#f5f9ff;color:#445066;font-size:12px;line-height:1.5}.financial-definition svg{flex:0 0 auto;color:#1768f2}.financial-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.financial-details{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.report-breakdown{display:grid;gap:11px;padding:18px}.report-breakdown div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #edf0f5;padding-bottom:8px}.report-breakdown div:last-child{border-bottom:0}.report-breakdown span{color:#687386}.report-breakdown strong{color:#172033;text-align:right}.report-breakdown__total{margin-top:2px;padding-top:9px;border-top:2px solid #dce4f0}.report-breakdown__reference{font-size:11px}.report-breakdown__reference span,.report-breakdown__reference strong{color:#7b8494}.report-bars{padding:18px}@media(max-width:1180px){.financial-details{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.financial-charts,.financial-details{grid-template-columns:1fr}}
+.financial-definition{display:flex;align-items:flex-start;gap:9px;padding:12px 14px;border:1px solid #cfe0fb;border-radius:11px;background:#f5f9ff;color:#445066;font-size:12px;line-height:1.5}.financial-definition svg{flex:0 0 auto;color:#1768f2}.financial-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.financial-details{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.report-breakdown{display:grid;gap:11px;padding:18px}.report-breakdown div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #edf0f5;padding-bottom:8px}.report-breakdown div:last-child{border-bottom:0}.report-breakdown span{color:#687386}.report-breakdown strong{color:#172033;text-align:right}.report-breakdown__total{margin-top:2px;padding-top:9px;border-top:2px solid #dce4f0}.report-breakdown__reference{font-size:11px}.report-breakdown__reference span,.report-breakdown__reference strong{color:#7b8494}.report-bars{padding:18px}@media(max-width:1180px){.financial-details{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.financial-charts,.financial-details{grid-template-columns:1fr}}
 </style>

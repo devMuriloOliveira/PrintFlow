@@ -1,4 +1,19 @@
+import {
+  getMockBackupStatus,
+  getMockCalculatorSimulations,
+  getMockFinancialHistory,
+  getMockIntegrationsOverview,
+  getMockInventoryOverview,
+  getMockOrdersPage,
+  getMockOrdersSummary,
+  getMockPendingProductionMaterial,
+  mockAppData,
+  mockMarketplaceOrders,
+  mockSupportRequests
+} from '~/mock/demoData'
+
 const appDataInFlight = new Map<string, Promise<AppData>>()
+const cloneMock = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 
 export type Order = {
   dbId?: string;
@@ -105,7 +120,7 @@ export type Goal = {
   periodStart?: string; periodEnd?: string; status?: string
 }
 
-type AppData = {
+export type AppData = {
   products: Product[]
   orders: Order[]
   printJobs: PrintJob[]
@@ -181,6 +196,7 @@ export const formatNumber = (value: number) => new Intl.NumberFormat('pt-BR').fo
 export const useAppData = () => {
   const config = useRuntimeConfig()
   const apiBase = String(config.public.apiBase || '').replace(/\/$/, '')
+  const mockEnabled = import.meta.dev && String(config.public.useMockData || '').toLowerCase() === 'true'
   const auth = useAuth()
   const tenantId = useTenantId()
   const route = useRoute()
@@ -229,6 +245,18 @@ export const useAppData = () => {
   }
 
   const loadAppData = async (force = false) => {
+    if (mockEnabled) {
+      const nextData = cloneMock(mockAppData)
+      data.value = nextData
+      goals.value = nextData.goals || []
+      loaded.value = true
+      loadedTenant.value = tenantId.value
+      loadedAt.value = Date.now()
+      loadedScope.value = 'mock'
+      pending.value = false
+      error.value = null
+      return data.value
+    }
     const cacheTtlMs = 60_000
     const scope = resourceScopeForRoute()
     const scopeKey = scope === null ? 'all' : scope.slice().sort().join(',') || 'empty'
@@ -314,6 +342,12 @@ export const useAppData = () => {
   }
 
   const createItem = async <T>(resource: keyof AppData, item: T) => {
+    if (mockEnabled) {
+      const list = data.value[resource] as any[]
+      const created = { ...(item as Record<string, unknown>), id: `${String(resource)}-mock-${Date.now()}` }
+      setResource(resource, [created, ...(Array.isArray(list) ? list : [])])
+      return created as T
+    }
     const list = await $fetch<T[]>(apiUrl(`/api/${String(resource)}`), {
       method: 'POST',
       body: item,
@@ -324,6 +358,19 @@ export const useAppData = () => {
   }
 
   const createExpenseInstallments = async (expense: Expense, installmentCount: number) => {
+    if (mockEnabled) {
+      const total = Number(expense.value || 0)
+      const installmentValue = Number((total / installmentCount).toFixed(2))
+      const created = Array.from({ length: installmentCount }, (_, index) => ({
+        ...expense,
+        id: `expense-installment-mock-${Date.now()}-${index}`,
+        description: `${expense.description} (${index + 1}/${installmentCount})`,
+        value: installmentValue,
+        status: index === 0 ? expense.status : 'Pendente'
+      }))
+      data.value.expenses = [...created, ...data.value.expenses]
+      return data.value.expenses
+    }
     const list = await $fetch<Expense[]>(apiUrl('/api/expenses/installments'), {
       method: 'POST',
       body: { ...expense, installmentCount },
@@ -336,6 +383,11 @@ export const useAppData = () => {
   const updateItem = async <T extends { id?: string; dbId?: string }>(resource: keyof AppData, item: T) => {
     const id = item.dbId || item.id
     if (!id) throw new Error('Registro sem identificador para editar.')
+    if (mockEnabled) {
+      const list = data.value[resource] as any[]
+      setResource(resource, Array.isArray(list) ? list.map((candidate) => String(candidate.dbId || candidate.id) === String(id) ? { ...candidate, ...item } : candidate) : [])
+      return data.value[resource] as T[]
+    }
     const list = await $fetch<T[]>(apiUrl(`/api/${String(resource)}/${id}`), {
       method: 'PUT',
       body: item,
@@ -346,6 +398,11 @@ export const useAppData = () => {
   }
 
   const deleteItem = async (resource: keyof AppData, id: string) => {
+    if (mockEnabled) {
+      const list = data.value[resource] as any[]
+      setResource(resource, Array.isArray(list) ? list.filter((candidate) => String(candidate.dbId || candidate.id) !== String(id)) : [])
+      return data.value[resource] as any[]
+    }
     const list = await $fetch<any[]>(apiUrl(`/api/${String(resource)}/${id}`), {
       method: 'DELETE',
       headers: resourceHeaders()
@@ -355,6 +412,7 @@ export const useAppData = () => {
   }
 
   const requestPrintJobAction = async (path: string, body: Record<string, unknown> = {}, statusMessage = 'Nao foi possivel atualizar a fila.') => {
+    if (mockEnabled) return data.value.printJobs
     const list = await $fetch<PrintJob[]>(apiUrl(path), {
       method: 'POST',
       body,
@@ -397,6 +455,11 @@ export const useAppData = () => {
   }
 
   const createProduct = async (product: Product) => {
+    if (mockEnabled) {
+      const created = { ...product, id: `product-mock-${Date.now()}` }
+      data.value.products = [created, ...data.value.products]
+      return created
+    }
     const created = await $fetch<Product>(apiUrl('/api/products'), {
       method: 'POST',
       body: product,
@@ -407,6 +470,10 @@ export const useAppData = () => {
   }
 
   const uploadProductPrintFile = async (productId: string, file: File) => {
+    if (mockEnabled) {
+      const product = data.value.products.find((item) => String(item.id) === String(productId)) || null
+      return { file: { name: file.name, mock: true }, product }
+    }
     const response = await $fetch<{ file: Record<string, unknown>; product: Product | null }>(apiUrl(`/api/products/${productId}/print-file`), {
       method: 'PUT',
       body: file,
@@ -426,6 +493,10 @@ export const useAppData = () => {
   }
 
   const uploadProductImage = async (productId: string, file: File) => {
+    if (mockEnabled) {
+      const product = data.value.products.find((item) => String(item.id) === String(productId)) || null
+      return { product }
+    }
     const response = await $fetch<{ product: Product | null }>(apiUrl(`/api/products/${encodeURIComponent(productId)}/image`), {
       method: 'PUT',
       body: file,
@@ -442,6 +513,10 @@ export const useAppData = () => {
   }
 
   const advanceOrderStage = async (orderId: string, status: string, trackingCode = '') => {
+    if (mockEnabled) {
+      data.value.orders = data.value.orders.map((item) => String(item.dbId || item.id) === String(orderId) ? { ...item, status, trackingCode } : item)
+      return { id: orderId, status }
+    }
     const result = await $fetch<{ order: { id: string; status: string } }>(apiUrl(`/api/orders/${encodeURIComponent(orderId)}/advance-stage`), {
       method: 'POST', body: { status, trackingCode }, headers: resourceHeaders()
     })
@@ -450,6 +525,11 @@ export const useAppData = () => {
   }
 
   const createMarketplaceIntegration = async (integration: Partial<MarketplaceIntegration> & Record<string, unknown>) => {
+    if (mockEnabled) {
+      const created = { id: `integration-mock-${Date.now()}`, platform: 'custom', connectionName: 'Integracao mock', status: 'connected', ...integration } as MarketplaceIntegration
+      data.value.marketplaceIntegrations = [created, ...(data.value.marketplaceIntegrations || [])]
+      return created
+    }
     const created = await $fetch<MarketplaceIntegration>(apiUrl('/api/marketplace-integrations'), {
       method: 'POST',
       body: integration,
@@ -463,6 +543,7 @@ export const useAppData = () => {
   }
 
   const startMarketplaceOAuth = async (platform: string) => {
+    if (mockEnabled) throw new Error('OAuth real desativado no modo mock visual.')
     const response = await $fetch<{ url: string }>(apiUrl(`/api/marketplace-integrations/${platform}/oauth-start`), {
       method: 'POST',
       headers: resourceHeaders()
@@ -473,6 +554,10 @@ export const useAppData = () => {
   }
 
   const disconnectMarketplaceIntegration = async (id: string) => {
+    if (mockEnabled) {
+      data.value.marketplaceIntegrations = (data.value.marketplaceIntegrations || []).map((item) => item.id === id ? { ...item, status: 'disconnected' } : item)
+      return
+    }
     await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(id)}`), {
       method: 'DELETE', headers: resourceHeaders()
     }).catch((err) => {
@@ -482,6 +567,10 @@ export const useAppData = () => {
   }
 
   const refreshMarketplaceOrders = async () => {
+    if (mockEnabled) {
+      data.value.marketplaceOrders = cloneMock(mockMarketplaceOrders)
+      return data.value.marketplaceOrders
+    }
     const list = await $fetch<MarketplaceOrder[]>(apiUrl('/api/marketplace-orders'), {
       headers: resourceHeaders()
     })
@@ -490,6 +579,11 @@ export const useAppData = () => {
   }
 
   const loadMarketplaceOrdersPage = async (params: { limit?: number; offset?: number } = {}) => {
+    if (mockEnabled) {
+      const offset = Number(params.offset || 0)
+      const limit = Number(params.limit || 25)
+      return { items: mockMarketplaceOrders.slice(offset, offset + limit), total: mockMarketplaceOrders.length, limit, offset }
+    }
     const query = new URLSearchParams()
     for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, String(value))
     const suffix = query.toString() ? `?${query.toString()}` : ''
@@ -497,6 +591,7 @@ export const useAppData = () => {
   }
 
   const loadOrdersPage = async (params: { limit?: number; offset?: number; status?: string; salesChannel?: string; search?: string; from?: string; to?: string; clientId?: string } = {}) => {
+    if (mockEnabled) return getMockOrdersPage(params)
     const query = new URLSearchParams()
     for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') query.set(key, String(value))
     const suffix = query.toString() ? `?${query.toString()}` : ''
@@ -504,12 +599,13 @@ export const useAppData = () => {
   }
   const loadClientOrders = (clientId: string) => loadOrdersPage({ clientId, salesChannel: 'direct', limit: 100, offset: 0 })
 
-  const loadOrdersSummary = async () => $fetch<{
+  const loadOrdersSummary = async () => mockEnabled ? getMockOrdersSummary() : $fetch<{
     orderCount: number; gross: number; net: number; profit: number; fees: number; shipping: number; ticket: number; cancelledCount: number; cancelledGross: number;
     byStatus: Array<{ status: string; count: number }>
   }>(apiUrl('/api/orders/summary'), { headers: resourceHeaders() })
 
   const generateRecurringExpenses = async () => {
+    if (mockEnabled) return 0
     const response = await $fetch<{ generated: number; expenses: Expense[] }>(apiUrl('/api/expenses/recurring/generate'), {
       method: 'POST', headers: resourceHeaders()
     })
@@ -518,6 +614,10 @@ export const useAppData = () => {
   }
 
   const syncMarketplaceOrder = async (integrationId: string, externalOrderId: string) => {
+    if (mockEnabled) {
+      await refreshMarketplaceOrders()
+      return
+    }
     await $fetch(apiUrl(`/api/marketplace-integrations/${encodeURIComponent(integrationId)}/sync-order`), {
       method: 'POST', body: { externalOrderId }, headers: resourceHeaders()
     }).catch((err) => {
@@ -528,6 +628,10 @@ export const useAppData = () => {
   }
 
   const linkMarketplaceOrderProduct = async (id: string, productId: string) => {
+    if (mockEnabled) {
+      data.value.marketplaceOrders = (data.value.marketplaceOrders || []).map((item) => item.id === id ? { ...item, mappedProductId: productId, mappedProductName: data.value.products.find((product) => product.id === productId)?.name || '' } : item)
+      return data.value.marketplaceOrders
+    }
     const list = await $fetch<MarketplaceOrder[]>(apiUrl(`/api/marketplace-orders/${id}/link-product`), {
       method: 'POST',
       body: { productId },
@@ -541,6 +645,10 @@ export const useAppData = () => {
   }
 
   const updateSettings = async (settings: Record<string, unknown>) => {
+    if (mockEnabled) {
+      data.value.settings = { ...(data.value.settings || {}), ...settings }
+      return data.value.settings
+    }
     const saved = await $fetch<Record<string, unknown>>(apiUrl('/api/settings'), {
       method: 'PUT', body: settings, headers: resourceHeaders()
     })
@@ -548,68 +656,79 @@ export const useAppData = () => {
     return saved
   }
 
-  const lookupCompanyByCnpj = (cnpj: string) => $fetch<{
+  const lookupCompanyByCnpj = (cnpj: string) => mockEnabled ? Promise.resolve({
+    name: 'Empresa Mock LTDA', legalName: 'Empresa Mock LTDA', phone: '(11) 4000-0000', email: 'mock@example.test',
+    address: 'Rua Visual', district: 'Centro', city: 'Sao Paulo', state: 'SP', zip: '01000-000', status: 'Ativa'
+  }) : $fetch<{
     name: string; legalName: string; phone: string; email: string; address: string; district: string; city: string; state: string; zip: string; status: string
   }>(apiUrl('/api/settings/company-lookup'), { query: { cnpj }, headers: resourceHeaders() })
 
-  const exportTenantData = (groups: string[] = ['all']) => $fetch<Blob>(apiUrl('/api/settings/export'), {
+  const exportTenantData = (groups: string[] = ['all']) => mockEnabled ? Promise.resolve(new Blob(['mock export'], { type: 'text/plain' })) : $fetch<Blob>(apiUrl('/api/settings/export'), {
     query: { groups: groups.join(',') }, responseType: 'blob', headers: resourceHeaders()
   })
 
-  const getStripeBilling = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
+  const getStripeBilling = () => mockEnabled ? Promise.resolve({
+    configured: true,
+    environment: 'sandbox' as const,
+    plans: [{ id: 'pro', code: 'PRO', name: 'Pro Mock', description: 'Plano ficticio para review', monthly: 79.9, yearly: 799, monthlyEnabled: true, yearlyEnabled: true }],
+    subscription: { status: 'active', billingCycle: 'monthly', planCode: 'PRO', planName: 'Pro Mock', currentPeriodEnd: new Date(Date.now() + 20 * 86400000).toISOString() },
+    checkout: null
+  }) : $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
     headers: resourceHeaders()
   })
 
-  const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) =>
+  const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
     $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
     })
-  const changeStripeSubscriptionPlan = (billingCycle: 'monthly' | 'yearly') => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/change-plan'), { method: 'POST', body: { billingCycle }, headers: resourceHeaders() })
-  const cancelStripeSubscription = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/cancel'), { method: 'POST', headers: resourceHeaders() })
-  const resumeStripeSubscription = () => $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe/subscription/resume'), { method: 'POST', headers: resourceHeaders() })
+  const changeStripeSubscriptionPlan = (billingCycle: 'monthly' | 'yearly') => getStripeBilling()
+  const cancelStripeSubscription = () => getStripeBilling()
+  const resumeStripeSubscription = () => getStripeBilling()
 
-  const listSettingsExports = () => $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
+  const listSettingsExports = () => mockEnabled ? Promise.resolve([{ id: 'export-mock-1', fileName: 'printflow-mock-export.json', type: 'tenant_data', format: 'json', recordCount: 128, status: 'success', createdAt: new Date().toISOString() }]) : $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
     headers: resourceHeaders()
   })
 
-  const listFinancialHistory = (options: { resource?: string; resourceId?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) => $fetch<FinancialHistoryPage>(apiUrl('/api/financial-history'), { query: options, headers: resourceHeaders() })
+  const listFinancialHistory = (options: { resource?: string; resourceId?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) => mockEnabled ? Promise.resolve(getMockFinancialHistory(options)) : $fetch<FinancialHistoryPage>(apiUrl('/api/financial-history'), { query: options, headers: resourceHeaders() })
 
-  const exportFinancialReport = (filters: Record<string, string>) => $fetch<Blob>(apiUrl('/api/reports/financial-export'), {
+  const exportFinancialReport = (filters: Record<string, string>) => mockEnabled ? Promise.resolve(new Blob(['mock report'], { type: 'text/plain' })) : $fetch<Blob>(apiUrl('/api/reports/financial-export'), {
     query: filters, responseType: 'blob', headers: resourceHeaders()
   })
 
-  const listCalculatorSimulations = () => $fetch<CalculatorSimulation[]>(apiUrl('/api/calculator/simulations'), { headers: resourceHeaders() })
-  const createCalculatorSimulation = (body: Record<string, unknown>) => $fetch<CalculatorSimulation>(apiUrl('/api/calculator/simulations'), { method: 'POST', body, headers: resourceHeaders() })
+  const listCalculatorSimulations = () => mockEnabled ? Promise.resolve(getMockCalculatorSimulations()) : $fetch<CalculatorSimulation[]>(apiUrl('/api/calculator/simulations'), { headers: resourceHeaders() })
+  const createCalculatorSimulation = (body: Record<string, unknown>) => mockEnabled ? Promise.resolve({ ...getMockCalculatorSimulations()[0], id: `calc-mock-${Date.now()}`, snapshot: body }) : $fetch<CalculatorSimulation>(apiUrl('/api/calculator/simulations'), { method: 'POST', body, headers: resourceHeaders() })
 
-  const listFilamentMovements = (filamentId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
-  const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
-  const loadInventoryOverview = (options: { from?: string; to?: string; resource?: string; type?: string; search?: string; limit?: number; offset?: number } = {}) => $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { query: options, headers: resourceHeaders() })
-  const listPendingProductionMaterial = () => $fetch<PendingProductionMaterial[]>(apiUrl('/api/inventory/production-pending'), { headers: resourceHeaders() })
-  const reconcilePendingProductionMaterial = (printJobId: string) => $fetch(apiUrl(`/api/inventory/production-pending/${encodeURIComponent(printJobId)}/reconcile`), { method: 'POST', headers: resourceHeaders() })
-  const listProductInventoryMovements = (productId: string) => $fetch<InventoryMovement[]>(apiUrl(`/api/inventory/products/${productId}/movements`), { headers: resourceHeaders() })
-  const createProductInventoryMovement = (productId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => $fetch<InventoryMovement>(apiUrl(`/api/inventory/products/${productId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
+  const listFilamentMovements = (filamentId: string) => mockEnabled ? Promise.resolve(getMockInventoryOverview({ resource: 'filaments' }).movements.filter((item) => item.resourceId === filamentId)) : $fetch<InventoryMovement[]>(apiUrl(`/api/filaments/${filamentId}/movements`), { headers: resourceHeaders() })
+  const createFilamentMovement = (filamentId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => mockEnabled ? Promise.resolve({ id: `movement-mock-${Date.now()}`, type: body.type, quantity: body.quantity, previousQuantity: 0, resultingQuantity: body.quantity, reason: body.reason, createdAt: new Date().toISOString() }) : $fetch<InventoryMovement>(apiUrl(`/api/filaments/${filamentId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
+  const loadInventoryOverview = (options: { from?: string; to?: string; resource?: string; type?: string; search?: string; limit?: number; offset?: number } = {}) => mockEnabled ? Promise.resolve(getMockInventoryOverview(options)) : $fetch<InventoryOverview>(apiUrl('/api/inventory/overview'), { query: options, headers: resourceHeaders() })
+  const listPendingProductionMaterial = () => mockEnabled ? Promise.resolve(getMockPendingProductionMaterial()) : $fetch<PendingProductionMaterial[]>(apiUrl('/api/inventory/production-pending'), { headers: resourceHeaders() })
+  const reconcilePendingProductionMaterial = (printJobId: string) => mockEnabled ? Promise.resolve({ ok: true }) : $fetch(apiUrl(`/api/inventory/production-pending/${encodeURIComponent(printJobId)}/reconcile`), { method: 'POST', headers: resourceHeaders() })
+  const listProductInventoryMovements = (productId: string) => mockEnabled ? Promise.resolve(getMockInventoryOverview({ resource: 'products' }).movements.filter((item) => item.resourceId === productId)) : $fetch<InventoryMovement[]>(apiUrl(`/api/inventory/products/${productId}/movements`), { headers: resourceHeaders() })
+  const createProductInventoryMovement = (productId: string, body: { type: InventoryMovement['type']; quantity: number; reason: string }) => mockEnabled ? Promise.resolve({ id: `product-movement-mock-${Date.now()}`, type: body.type, quantity: body.quantity, previousQuantity: 0, resultingQuantity: body.quantity, reason: body.reason, createdAt: new Date().toISOString() }) : $fetch<InventoryMovement>(apiUrl(`/api/inventory/products/${productId}/movements`), { method: 'POST', body, headers: resourceHeaders() })
 
-  const loadBackupStatus = () => $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
+  const loadBackupStatus = () => mockEnabled ? Promise.resolve(getMockBackupStatus()) : $fetch<BackupStatus>(apiUrl('/api/settings/backup-status'), {
     headers: resourceHeaders()
   })
-  const listSupportRequests = () => $fetch<SupportRequest[]>(apiUrl('/api/support/requests'), { headers: resourceHeaders() })
-  const createSupportRequest = (body: Record<string, unknown>) => $fetch<SupportRequest>(apiUrl('/api/support/requests'), { method: 'POST', body, headers: resourceHeaders() })
-  const cancelSupportRequest = (id: string) => $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}`), { method: 'DELETE', headers: resourceHeaders() })
-  const listSupportMessages = (id: string, since?: string) => $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
-  const getSupportUnread = (since?: string) => $fetch<{ total: number; byRequest: Array<{ requestId: string; total: number }> }>(apiUrl(`/api/support/unread${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
-  const sendSupportMessage = (id: string, body: string) => $fetch<{ requestId: string; createdNewProtocol: boolean; previousRequestId?: string | null }>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
-  const listSupportAttachments = (id: string) => $fetch<SupportAttachment[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { headers: resourceHeaders() })
+  const listSupportRequests = () => mockEnabled ? Promise.resolve(mockSupportRequests) : $fetch<SupportRequest[]>(apiUrl('/api/support/requests'), { headers: resourceHeaders() })
+  const createSupportRequest = (body: Record<string, unknown>) => mockEnabled ? Promise.resolve({ ...mockSupportRequests[0], id: `support-mock-${Date.now()}`, subject: String(body.subject || 'Chamado mock criado') }) : $fetch<SupportRequest>(apiUrl('/api/support/requests'), { method: 'POST', body, headers: resourceHeaders() })
+  const cancelSupportRequest = (id: string) => mockEnabled ? Promise.resolve({ ok: true }) : $fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}`), { method: 'DELETE', headers: resourceHeaders() })
+  const listSupportMessages = (id: string, since?: string) => mockEnabled ? Promise.resolve([{ id: 'message-mock-1', senderType: 'support' as const, body: 'Mensagem mock para revisar a conversa de suporte.', createdAt: new Date().toISOString() }]) : $fetch<SupportMessage[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
+  const getSupportUnread = (since?: string) => mockEnabled ? Promise.resolve({ total: 1, byRequest: [{ requestId: 'mock-support-1', total: 1 }] }) : $fetch<{ total: number; byRequest: Array<{ requestId: string; total: number }> }>(apiUrl(`/api/support/unread${since ? `?since=${encodeURIComponent(since)}` : ''}`), { headers: resourceHeaders() })
+  const sendSupportMessage = (id: string, body: string) => mockEnabled ? Promise.resolve({ requestId: id, createdNewProtocol: false, previousRequestId: null }) : $fetch<{ requestId: string; createdNewProtocol: boolean; previousRequestId?: string | null }>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/messages`), { method: 'POST', body: { body }, headers: resourceHeaders() })
+  const listSupportAttachments = (id: string) => mockEnabled ? Promise.resolve([]) : $fetch<SupportAttachment[]>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { headers: resourceHeaders() })
   const uploadSupportAttachment = async (id: string, file: File) => {
+    if (mockEnabled) return { id: `attachment-mock-${Date.now()}`, requestId: id, originalName: file.name, mimeType: file.type, sizeBytes: file.size, expiresAt: new Date(Date.now() + 86400000).toISOString(), createdAt: new Date().toISOString() }
     const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || '').split(',').pop() || ''); reader.onerror = reject; reader.readAsDataURL(file) })
     return $fetch<SupportAttachment>(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments`), { method: 'POST', body: { fileName: file.name, mimeType: file.type, data }, headers: resourceHeaders() })
   }
   const downloadSupportAttachment = async (id: string, attachment: SupportAttachment) => {
+    if (mockEnabled) return
     const response = await fetch(apiUrl(`/api/support/requests/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachment.id)}`), { credentials: 'include', headers: resourceHeaders() })
     if (!response.ok) throw new Error('Nao foi possivel baixar o anexo.')
     const link = document.createElement('a'); link.href = URL.createObjectURL(await response.blob()); link.download = attachment.originalName; link.click(); URL.revokeObjectURL(link.href)
   }
 
-  const loadIntegrationsOverview = () => $fetch<IntegrationsOverview>(apiUrl('/api/integrations/overview'), {
+  const loadIntegrationsOverview = () => mockEnabled ? Promise.resolve(getMockIntegrationsOverview()) : $fetch<IntegrationsOverview>(apiUrl('/api/integrations/overview'), {
     headers: resourceHeaders()
   })
 

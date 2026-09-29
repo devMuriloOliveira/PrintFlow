@@ -44,7 +44,7 @@ watch(() => [props.periodStart, props.periodEnd], () => load(true), { immediate:
 </script>
 
 <template>
-  <div class="inventory-report">
+  <div class="report-section inventory-report">
     <div class="metrics-grid metrics-grid--4 inventory-metrics">
       <MetricCard label="Movimentações" :value="formatNumber(total)" icon="history" note="Encontradas no período" />
       <MetricCard label="Entradas" :value="formatNumber(entryCount)" icon="trend" note="Na página exibida" color="green" />
@@ -78,5 +78,5 @@ watch(() => [props.periodStart, props.periodEnd], () => load(true), { immediate:
 </template>
 
 <style scoped>
-.inventory-report{display:grid;width:100%;max-width:1360px;margin:0 auto;gap:16px}.inventory-metrics{width:100%;margin-bottom:0}.inventory-search{display:grid;grid-template-columns:minmax(260px,1fr) minmax(160px,.35fr) minmax(140px,.3fr) auto;align-items:end;gap:10px;padding:16px;border:1px solid #dce4f0;border-radius:12px;background:#fff}.inventory-search__actions{display:flex;align-items:center;gap:8px}.movement-sku{display:block;margin-top:2px;color:#687386;font-size:10px}.inventory-error{display:flex;align-items:flex-start;gap:12px;padding:22px;color:#b42318}.inventory-error p{margin:4px 0 12px;color:#687386}.report-pager{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:14px 16px;color:#687386;font-size:12px}@media(max-width:1050px){.inventory-search{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-search .field--search,.inventory-search__actions{grid-column:1/-1}.inventory-search__actions{justify-content:flex-end}}@media(max-width:620px){.inventory-search{grid-template-columns:1fr}.inventory-search .field--search,.inventory-search__actions{grid-column:auto}.inventory-search__actions{justify-content:stretch}.inventory-search__actions .btn{flex:1;justify-content:center}.report-pager{justify-content:flex-start;flex-wrap:wrap}}
+.inventory-metrics{width:100%;margin-bottom:0}.inventory-search{display:grid;grid-template-columns:minmax(260px,1fr) minmax(160px,.35fr) minmax(140px,.3fr) auto;align-items:end;gap:10px;padding:16px;border:1px solid #dce4f0;border-radius:12px;background:#fff}.inventory-search__actions{display:flex;align-items:center;gap:8px}.movement-sku{display:block;margin-top:2px;color:#687386;font-size:10px}.inventory-error{display:flex;align-items:flex-start;gap:12px;padding:22px;color:#b42318}.inventory-error p{margin:4px 0 12px;color:#687386}.report-pager{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:14px 16px;color:#687386;font-size:12px}@media(max-width:1050px){.inventory-search{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-search .field--search,.inventory-search__actions{grid-column:1/-1}.inventory-search__actions{justify-content:flex-end}}@media(max-width:620px){.inventory-search{grid-template-columns:1fr}.inventory-search .field--search,.inventory-search__actions{grid-column:auto}.inventory-search__actions{justify-content:stretch}.inventory-search__actions .btn{flex:1;justify-content:center}.report-pager{justify-content:flex-start;flex-wrap:wrap}}
 </style>

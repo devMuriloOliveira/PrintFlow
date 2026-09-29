@@ -7,6 +7,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com',
+      useMockData: process.env.NUXT_PUBLIC_USE_MOCK_DATA || 'false',
       agentWindowsDownloadUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL || '',
       agentWindowsDevCertificateUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DEV_CERTIFICATE_URL || '',
       agentLocalUrl: process.env.NUXT_PUBLIC_AGENT_LOCAL_URL || 'http://127.0.0.1:17873'

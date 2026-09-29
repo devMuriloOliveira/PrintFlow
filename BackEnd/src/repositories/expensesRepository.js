@@ -34,6 +34,11 @@ export const buildExpenseInstallments = (expense, count) => {
 
 const frequency = (value) => String(value || '').split(' - ')[0].trim().toLowerCase()
 const isRecurring = (value) => !frequency(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').startsWith('nao')
+const sqlDate = (value) => {
+  if (!value) return ''
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10)
+  return String(value).slice(0, 10)
+}
 const nextDate = (value, recurrence) => {
   const date = new Date(`${value}T00:00:00Z`)
   if (Number.isNaN(date.getTime())) return null
@@ -59,7 +64,7 @@ export const generateDueRecurringExpenses = async (tenantId, today = new Date().
   const generated = []
   for (const expense of result.rows) {
     if (!isRecurring(expense.recurrence)) continue
-    const dueDate = String(expense.next_due_date).slice(0, 10)
+    const dueDate = sqlDate(expense.next_due_date)
     const following = nextDate(dueDate, expense.recurrence)
     await client.query(`
       insert into expenses (tenant_id, description, category, supplier, amount, expense_date, payment, recurrence, status, next_due_date, notes, recurrence_parent_id)

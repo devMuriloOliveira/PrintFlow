@@ -6,7 +6,8 @@ const route = useRoute()
 const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, cancelStripeSubscription, resumeStripeSubscription, createSupportRequest } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 
-const active = ref(String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
+const routeActiveSection = computed(() => String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
+const active = ref(routeActiveSection.value)
 const savingMemberId = ref('')
 const inviting = ref(false)
 const invitationActionId = ref('')
@@ -51,6 +52,10 @@ const tabs = [
   ['Assinatura', 'money', 'Plano e pagamento da plataforma'],
   ['Notificacoes', 'bell', 'E-mails e alertas do sistema']
 ]
+
+watch(routeActiveSection, (section) => {
+  active.value = section
+})
 const sectionPresentation: Record<string, { title: string; subtitle: string; asideTitle: string; asideDescription: string; checks: string[] }> = {
   'Usuarios e Permissoes': { title: 'Usuários e permissões', subtitle: 'Gerencie a equipe, os perfis de acesso e os convites da empresa.', asideTitle: 'Governança de acesso', asideDescription: 'Cada pessoa recebe apenas as permissões necessárias para sua função.', checks: ['Papéis separados por responsabilidade.', 'Mudanças de acesso encerram sessões anteriores.', 'Convites possuem prazo de validade.'] },
   Seguranca: { title: 'Segurança da conta', subtitle: 'Proteja sua senha, segundo fator e sessões conectadas.', asideTitle: 'Proteção da conta', asideDescription: 'Controles para reduzir acessos indevidos e recuperar o controle da conta.', checks: ['Senhas protegidas e sessões revogáveis.', 'MFA disponível para perfis privilegiados.', 'Dispositivos podem ser encerrados individualmente.'] },

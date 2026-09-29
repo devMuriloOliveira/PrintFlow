@@ -7,11 +7,15 @@ const route = useRoute()
 const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Estoque: route.path === '/estoque', Configurações: route.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
 const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
+const normalizePath = (path: string) => path.length > 1 ? path.replace(/\/+$/, '') : path
+const hasSectionQuery = (to: string) => new URLSearchParams(to.split('?')[1] || '').has('secao')
 const childIsActive = (to: string) => {
   const [path, queryString] = to.split('?')
-  if (route.path !== path) return false
+  const [currentPath, currentQueryString] = String(route.fullPath || '').split('?')
+  if (normalizePath(currentPath) !== normalizePath(path)) return false
   const section = new URLSearchParams(queryString || '').get('secao')
-  return section ? String(route.query.secao || '') === section : true
+  const currentSection = new URLSearchParams(currentQueryString || '').get('secao')
+  return section ? currentSection === section : true
 }
 const isLocked = (to: string) => subscriptionAccess.isLocked(to)
 const targetFor = (to: string) => isLocked(to) ? subscriptionAccess.upgradePath : to
@@ -114,7 +118,25 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
           </a>
           </NuxtLink>
           <div v-if="item.children && expandedItems[item.label]" class="nav-submenu">
-            <NuxtLink v-for="child in item.children" :key="child.to" :to="targetFor(child.to)" class="nav-submenu__item" :class="{ 'nav-submenu__item--active': childIsActive(child.to), 'nav-submenu__item--locked': isLocked(child.to) }" @click="emit('close')"><span>{{ child.label }}</span><UiIcon v-if="isLocked(child.to)" name="lock" :size="12" /></NuxtLink>
+            <NuxtLink
+              v-for="child in item.children"
+              :key="child.to"
+              :to="targetFor(child.to)"
+              v-slot="{ href, navigate, isExactActive }"
+              custom
+            >
+              <a
+                :href="href"
+                class="nav-submenu__item"
+                :class="{
+                  'nav-submenu__item--active': hasSectionQuery(child.to) ? childIsActive(child.to) : isExactActive,
+                  'nav-submenu__item--locked': isLocked(child.to)
+                }"
+                @click="event => { navigate(event); emit('close') }"
+              >
+                <span>{{ child.label }}</span><UiIcon v-if="isLocked(child.to)" name="lock" :size="12" />
+              </a>
+            </NuxtLink>
           </div>
         </div>
       </div>
