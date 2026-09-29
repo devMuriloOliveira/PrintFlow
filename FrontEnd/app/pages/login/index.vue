@@ -189,7 +189,7 @@ const submit = async () => {
 
         <label class="field">
           <span>Senha</span>
-          <input v-model="form.password" type="password" autocomplete="current-password" required minlength="10" placeholder="Mínimo 10 caracteres">
+          <input v-model="form.password" type="password" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" required minlength="10" placeholder="Mínimo 10 caracteres">
         </label>
 
         <label v-if="mode === 'register'" class="field">

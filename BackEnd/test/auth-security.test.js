@@ -10,6 +10,7 @@ process.env.WEBHOOK_SHARED_SECRET = 'auth-security-webhook-secret-32-characters'
 process.env.PLATFORM_SUPER_ADMIN_EMAILS = 'platform-admin@example.com'
 process.env.RATE_LIMIT_AUTH_MAX_REQUESTS = '2'
 process.env.RATE_LIMIT_WINDOW_MS = '60000'
+process.env.TRUSTED_CLIENT_IP_HEADER = 'CF-Connecting-IP'
 process.env.CORS_ALLOWED_ORIGINS = 'https://app.example.com,https://admin.example.com'
 process.env.DATABASE_URL = ''
 
@@ -51,7 +52,7 @@ class MockResponse extends EventEmitter {
   }
 }
 
-const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAgent }) => new Promise((resolve) => {
+const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAgent, forwardedFor, trustedClientIp }) => new Promise((resolve) => {
   const req = new MockRequest({
     method,
     path,
@@ -61,7 +62,9 @@ const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAg
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(origin ? { origin } : {}),
       ...(cookie ? { cookie } : {}),
-      ...(userAgent ? { 'user-agent': userAgent } : {})
+      ...(userAgent ? { 'user-agent': userAgent } : {}),
+      ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
+      ...(trustedClientIp ? { 'cf-connecting-ip': trustedClientIp } : {})
     }
   })
   const res = new MockResponse()
@@ -121,6 +124,17 @@ test('login possui rate limiting contra brute force', async () => {
   const blocked = await request({ method: 'POST', path: '/api/auth/login', body, ip })
   assert.equal(blocked.status, 429)
   assert.equal(blocked.headers['Retry-After'], '60')
+})
+
+test('rate limit usa o IP confiavel do proxy e ignora X-Forwarded-For informado pelo cliente', async () => {
+  const trustedClientIp = `198.51.100.${Math.floor(Math.random() * 200) + 20}`
+  const body = { email: 'nao-existe-proxy@example.com', password: 'SenhaErrada1!' }
+
+  assert.equal((await request({ method: 'POST', path: '/api/auth/login', body, trustedClientIp, forwardedFor: '203.0.113.10' })).status, 400)
+  assert.equal((await request({ method: 'POST', path: '/api/auth/login', body, trustedClientIp, forwardedFor: '203.0.113.11' })).status, 400)
+
+  const blocked = await request({ method: 'POST', path: '/api/auth/login', body, trustedClientIp, forwardedFor: '203.0.113.12' })
+  assert.equal(blocked.status, 429)
 })
 
 test('refresh token possui rotacao e rejeita reutilizacao', async () => {
