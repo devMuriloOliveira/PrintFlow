@@ -3,6 +3,7 @@ import { readJsonBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { env } from '../config/env.js'
 import { clearRefreshCookie, createRefreshCookie, readRefreshCookie } from '../http/cookies.js'
+import { getClientIp } from '../http/clientIp.js'
 import { changeUserPassword, consumeAuthEmailToken, consumeMfaChallenge, createAuthEmailToken, createMfaChallenge, createMfaSetup, createSession, disableUserMfa, enableUserMfa, findActiveUserByEmail, findActiveUserById, isUserMfaEnabled, listUserSessions, loginUser, markEmailVerified, registerUser, resetUserPassword, revokeAllUserSessions, revokeRefreshSession, revokeUserSession, rotateRefreshToken, touchUserSession, validateAccessPayload, verifyUserCurrentPassword, verifyUserMfa } from '../repositories/authRepository.js'
 import { otpauthUri } from '../services/mfa.js'
 import { isEmailDeliveryConfigured, sendAuthEmail } from '../services/email.js'
@@ -18,8 +19,6 @@ const authPayload = (user, session) => {
   }
 }
 
-const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || String(req.socket.remoteAddress || '')
-
 const maskIp = (ip) => {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip.split('.').slice(0, 3).concat('0').join('.')
   const blocks = ip.split(':').filter(Boolean)
@@ -29,7 +28,7 @@ const maskIp = (ip) => {
 const sessionMetadata = (req) => {
   const userAgent = String(req.headers['user-agent'] || '').slice(0, 300)
   return {
-    ipMasked: maskIp(clientIp(req)),
+    ipMasked: maskIp(getClientIp(req)),
     userAgent,
     deviceLabel: userAgent ? userAgent.replace(/\s+/g, ' ').slice(0, 120) : 'Dispositivo nao identificado'
   }

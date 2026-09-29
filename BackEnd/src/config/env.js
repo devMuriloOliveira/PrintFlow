@@ -103,6 +103,7 @@ export const env = {
     .filter(Boolean),
   authTokenTtlSeconds: Number(process.env.AUTH_TOKEN_TTL_SECONDS || defaultAuthTokenTtlSeconds),
   refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS || defaultRefreshTokenTtlSeconds),
+  trustedClientIpHeader: String(process.env.TRUSTED_CLIENT_IP_HEADER || (isProduction ? 'cf-connecting-ip' : '')).toLowerCase(),
   authCookieSameSite: String(process.env.AUTH_COOKIE_SAME_SITE || (productionLike ? 'none' : 'lax')).toLowerCase(),
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMaxRequests: Number(process.env.RATE_LIMIT_MAX_REQUESTS || 120),

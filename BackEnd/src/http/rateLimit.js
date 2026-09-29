@@ -1,14 +1,9 @@
 import { env } from '../config/env.js'
 import { hasDatabase, query } from '../db/pool.js'
+import { getClientIp } from './clientIp.js'
 
 const windows = new Map()
 const activeRequests = new Map()
-
-const getClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for']
-  const firstForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded
-  return String(firstForwarded || req.socket.remoteAddress || 'unknown').split(',')[0].trim()
-}
 
 const isAuthPath = (path) => [
   '/api/auth/login',
