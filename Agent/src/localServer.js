@@ -1,5 +1,6 @@
 import http from 'node:http'
 import os from 'node:os'
+import { timingSafeEqual } from 'node:crypto'
 import { URL } from 'node:url'
 
 import { AGENT_VERSION } from './agentInfo.js'
@@ -132,6 +133,14 @@ const sanitizeDiagnostics = value => {
   return sanitized
 }
 
+const hasValidDiagnosticsToken = (provided, expected) => {
+  if (!provided || !expected) return false
+  const providedBytes = Buffer.from(String(provided), 'utf8')
+  const expectedBytes = Buffer.from(String(expected), 'utf8')
+  return providedBytes.length === expectedBytes.length &&
+    timingSafeEqual(providedBytes, expectedBytes)
+}
+
 const getLocalDiagnostics = async ({
   getRuntimeStatus,
   getDiagnostics
@@ -182,6 +191,7 @@ export const startLocalServer = ({
     DEFAULT_LOCAL_PORT,
   allowedOrigins = [],
   canAcceptPairing,
+  diagnosticsToken = '',
   getRuntimeStatus,
   getDiagnostics
 } = {}) => {
@@ -243,6 +253,22 @@ export const startLocalServer = ({
             ok: false,
             error: 'Diagnostico disponivel somente para acesso local direto.'
           }, origin)
+          return
+        }
+
+        if (!diagnosticsToken) {
+          json(response, 503, {
+            ok: false,
+            error: 'Diagnostico local nao configurado.'
+          })
+          return
+        }
+
+        if (!hasValidDiagnosticsToken(request.headers['x-printflow-diagnostics-token'], diagnosticsToken)) {
+          json(response, 401, {
+            ok: false,
+            error: 'Token local de diagnostico invalido.'
+          })
           return
         }
 

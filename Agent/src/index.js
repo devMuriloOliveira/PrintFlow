@@ -28,12 +28,21 @@ import {
 
 import { startLocalServer } from './localServer.js'
 import { cloudHttp } from './cloud/httpClient.js'
+import { createFatalShutdownController } from './runtime/fatalShutdown.js'
 import { createSingleFlightScheduler } from './cloud/singleFlightScheduler.js'
 import { retryUntilStarted } from './cloud/startupRetry.js'
-import { cleanupPrintFileCache } from './files/printFileCache.js'
+import {
+  cleanupPrintFileCache,
+  recoverStalePrintFilePins,
+  unpinPrintFileCacheByPrintJobId
+} from './files/printFileCache.js'
 import {
   createLocalOperationsDb
 } from './storage/localOperationsDb.js'
+import {
+  createDiagnosticsToken,
+  removeDiagnosticsToken
+} from './storage/diagnosticsToken.js'
 import {
   executeAgentCommand,
   flushPendingCommandCompletions,
@@ -46,11 +55,18 @@ import {
 import {
   startAgentWebSocket
 } from './cloud/websocket.js'
-import { monitorPrintJobCompletion } from './printing/productionJobMonitor.js'
 import {
+  ensurePrinterConnectionForMonitor,
+  monitorPrintJobCompletion
+} from './printing/productionJobMonitor.js'
+import {
+  disconnectPrinter,
+  getPrinterStatus,
   getCachedActivePrintCount,
   getCachedPrinterPrintActivity,
   getDisconnectedActivePrintCount,
+  hasActiveConnection,
+  isKnownIdlePrinterStatus,
   listActiveConnections,
   listPrinterConnectionStates,
   startPrinterStatusPolling
@@ -58,12 +74,37 @@ import {
 
 const logger =
   installFileLogger()
+const diagnosticsAccess = await createDiagnosticsToken()
+process.on('exit', removeDiagnosticsToken)
 
 const apiUrl = config.apiUrl
 
 const pairingCode =
   process.env.PRINTFLOW_PAIRING_CODE ||
   ''
+
+let localOperations = null
+let processingCommand = false
+
+function getActivePrintJobCount() {
+  if (!localOperations) return 0
+  const monitoredPrintJobs = localOperations
+    .listPendingProductionJobMonitors()
+    .reduce((count, monitor) => {
+      const activity = getCachedPrinterPrintActivity(monitor.printer)
+      return count + (activity === true || activity === undefined ? 1 : 0)
+    }, 0)
+  return Math.max(
+    monitoredPrintJobs,
+    getCachedActivePrintCount(),
+    getDisconnectedActivePrintCount()
+  )
+}
+
+const fatalShutdown = createFatalShutdownController({
+  getActivePrintJobs: getActivePrintJobCount,
+  isCommandRunning: () => processingCommand
+})
 
 const wait = (delay) =>
   new Promise(resolve =>
@@ -87,8 +128,32 @@ const startCacheCleanup =
     const run =
       async () => {
         try {
-          const result =
-            await cleanupPrintFileCache()
+          const monitors = localOperations.listPendingProductionJobMonitors()
+          const activePrintJobs = getActivePrintJobCount()
+          const stalePins = await recoverStalePrintFilePins({
+            activePrintJobIds: monitors.map(monitor => monitor.printJobId),
+            hasActivePrints: activePrintJobs > 0,
+            isPrinterIdle: async printer => {
+              const alreadyConnected = hasActiveConnection(printer)
+              try {
+                await ensurePrinterConnectionForMonitor(printer)
+                return isKnownIdlePrinterStatus(await getPrinterStatus(printer))
+              } catch (error) {
+                console.log(
+                  `[Cache] Pin antigo mantido; nao foi possivel confirmar estado da impressora: ${error.message}`
+                )
+                return false
+              } finally {
+                if (!alreadyConnected) {
+                  await disconnectPrinter(printer).catch(() => {})
+                }
+              }
+            }
+          })
+          if (stalePins.released > 0) {
+            console.log(`[Cache] ${stalePins.released} pin(s) antigo(s) liberado(s) apos confirmar impressora ociosa.`)
+          }
+          const result = await cleanupPrintFileCache()
 
           if (
             result.removed >
@@ -133,60 +198,31 @@ console.log('Arquitetura:', os.arch())
 
 console.log('')
 console.log('Log:', logger.logPath)
+console.log('Token local de diagnostico:', diagnosticsAccess.tokenPath)
 
-process.on('uncaughtException', error => {
+process.on('uncaughtException', error => fatalShutdown.handle(error))
+process.on('unhandledRejection', error => fatalShutdown.handle(error))
+
+localOperations = createLocalOperationsDb()
+const prunedLocalData = localOperations.pruneLocalData()
+if (prunedLocalData.localStatesRemoved > 0 || prunedLocalData.processedCommandsRemoved > 0) {
   console.log(
-    '[Fatal] Excecao nao tratada:',
-    error?.stack ||
-      error?.message ||
-      error
+    `[Storage] Retencao local removeu ${prunedLocalData.localStatesRemoved} estado(s) e ${prunedLocalData.processedCommandsRemoved} comando(s) concluido(s) antigo(s).`
   )
-})
-
-process.on('unhandledRejection', error => {
-  console.log(
-    '[Fatal] Promise rejeitada sem tratamento:',
-    error?.stack ||
-      error?.message ||
-      error
-  )
-})
-
-startCacheCleanup()
-
-const localOperations =
-  createLocalOperationsDb()
-const expiredLocalStates = localOperations.pruneLocalStates()
-if (expiredLocalStates > 0) {
-  console.log(`[Storage] ${expiredLocalStates} estado(s) local(is) antigo(s) removido(s).`)
 }
 
 let pairingAllowed = false
 
+startCacheCleanup()
+
 startLocalServer({
   allowedOrigins: config.appOrigins,
-  canAcceptPairing: () => pairingAllowed,
+  diagnosticsToken: diagnosticsAccess.token,
+  canAcceptPairing: () => pairingAllowed && !fatalShutdown.isShutdownRequested(),
   getRuntimeStatus: () => {
-    const monitoredPrintJobs = localOperations
-      .listPendingProductionJobMonitors()
-      .reduce((count, monitor) => {
-        const activity = getCachedPrinterPrintActivity(monitor.printer)
-
-        // Um monitor antigo sem conexao e sem atividade confirmada nao pode
-        // bloquear atualizacoes para sempre. Se a conexao caiu depois de um
-        // estado ativo, o PrinterManager devolve true e preserva o bloqueio.
-        // Com conexao, estado desconhecido tambem e conservador; estado
-        // ocioso/terminal libera.
-        return count + (activity === true || activity === undefined ? 1 : 0)
-      }, 0)
     const disconnectedActivePrintJobs =
       getDisconnectedActivePrintCount()
-    const activePrintJobs =
-      Math.max(
-        monitoredPrintJobs,
-        getCachedActivePrintCount(),
-        disconnectedActivePrintJobs
-      )
+    const activePrintJobs = getActivePrintJobCount()
 
     return {
       updateBlocked:
@@ -356,7 +392,7 @@ const start = async () => {
     let restartRequested = false
 
     const heartbeat = async () => {
-      if (heartbeatInFlight || restartRequested) return
+      if (heartbeatInFlight || restartRequested || fatalShutdown.isShutdownRequested()) return
       heartbeatInFlight = true
 
       try {
@@ -387,7 +423,7 @@ const start = async () => {
           console.log(
             '[Heartbeat] Credencial revogada; reiniciando para permitir novo pareamento.'
           )
-          setTimeout(() => process.exit(1), 100).unref?.()
+          fatalShutdown.handle(new Error('Credencial do Agent revogada; reinicio necessario.'))
           return
         }
 
@@ -416,8 +452,12 @@ const start = async () => {
 console.log('')
 console.log('Iniciando busca de comandos...')
 
-let processingCommand = false
 let commandPollDelay = 5_000
+const maxPendingLocalOperations = Math.max(
+  100,
+  Number(process.env.PRINTFLOW_AGENT_MAX_PENDING_OPERATIONS) || 5_000
+)
+let pendingQueueBlocked = false
 
 const reportProductionJobCompletion = async (
   targetApiUrl,
@@ -462,7 +502,9 @@ const runProductionJobMonitor = (
     context: { apiUrl, credentials },
     report: reportProductionJobCompletion
   }).then(
-    () => {
+    async result => {
+      if (result?.skipped) return
+      await unpinPrintFileCacheByPrintJobId(monitor.printJobId)
       localOperations.acknowledgeProductionJobMonitor(
         monitor.printJobId
       )
@@ -482,7 +524,7 @@ const startProductionJobMonitor = (
   command
 ) => {
   const monitor = {
-    printJobId: command?.payload?.printJobId,
+    printJobId: command?.payload?.printJobId || command?.payload?.job?.id,
     commandId: command?.id,
     printer: command?.payload?.printer,
     startedAt: command?.payload?.startedAt || new Date().toISOString()
@@ -530,7 +572,7 @@ if (
 }
 
 const checkCommands = async () => {
-  if (processingCommand) {
+  if (processingCommand || fatalShutdown.isShutdownRequested()) {
     return
   }
 
@@ -570,6 +612,18 @@ const checkCommands = async () => {
               [events]
             )
       })
+
+    const pendingCounts = localOperations.getPendingCounts()
+    if (pendingCounts.total >= maxPendingLocalOperations) {
+      if (!pendingQueueBlocked) {
+        console.error(
+          `[Storage] ${pendingCounts.total} operacao(oes) aguardam confirmacao do backend; novos comandos serao pausados ate a sincronizacao.`
+        )
+      }
+      pendingQueueBlocked = true
+      return
+    }
+    pendingQueueBlocked = false
 
     if (
       synchronized >

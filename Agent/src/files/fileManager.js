@@ -23,9 +23,10 @@ export const createFileManager = ({
         printFile
       ),
   pin:
-    localPath =>
+    (localPath, metadata) =>
       pinPrintFileCache(
-        localPath
+        localPath,
+        metadata
       ),
   unpin:
     localPath =>

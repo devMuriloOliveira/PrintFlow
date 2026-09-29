@@ -127,6 +127,22 @@ const activePrintStates =
     'preparing'
   ])
 
+const idleOrTerminalPrintStates = new Set([
+  'idle',
+  'ready',
+  'operational',
+  'connected',
+  'standby',
+  'completed',
+  'complete',
+  'finish',
+  'finished',
+  'cancelled',
+  'canceled',
+  'failed',
+  'error'
+])
+
 export const isActivePrinterStatus = (
   status
 ) =>
@@ -136,6 +152,13 @@ export const isActivePrinterStatus = (
         status?.status ||
         ''
     )
+      .trim()
+      .toLowerCase()
+  )
+
+export const isKnownIdlePrinterStatus = status =>
+  idleOrTerminalPrintStates.has(
+    String(status?.state || status?.status || '')
       .trim()
       .toLowerCase()
   )

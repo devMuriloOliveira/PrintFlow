@@ -11,6 +11,7 @@
     "start:tray": "powershell -STA -ExecutionPolicy Bypass -File scripts/start-windows-agent-tray.ps1",
     "dev": "nodemon src/index.js",
     "test": "node --check src/index.js && node --test",
+    "diagnostics": "node scripts/printflow-agent-diagnostics.mjs",
     "generate:icon": "node scripts/generate-windows-icon.js",
     "build:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1",
     "build:windows:dev-signed": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1 -SignDev",
