@@ -105,6 +105,12 @@ Arquivos locais principais (todos sob `PRINTFLOW_AGENT_DATA_DIR`, ou no diretór
   outbox de eventos agregados e último estado local de impressoras/jobs.
 - `cache/files` e `cache/gcode`: arquivos temporários de impressão/slicing.
 - `logs`: logs locais do Agent.
+- `diagnostics.token`: token temporario de acesso ao endpoint local de
+  diagnostico; e substituido a cada inicializacao e removido ao encerrar.
+
+O endpoint `/diagnostics` exige o token. Em desenvolvimento, consulte-o com
+`npm.cmd run diagnostics` a partir de `Agent`; nao copie o arquivo de token
+para anexos de suporte.
 
 O conteúdo de `%APPDATA%\PrintFlow Agent` inclui credenciais e histórico
 operacional. Não o inclua em Git, anexos de suporte ou capturas de tela. A

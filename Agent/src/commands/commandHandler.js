@@ -507,6 +507,9 @@ export const handleCommand = async (
 
       let pinnedFilePath =
         null
+      const printJobId = String(
+        command.payload?.printJobId || job.id || ''
+      ).trim()
 
       const fileManager =
         createFileManager({
@@ -533,7 +536,7 @@ export const handleCommand = async (
           await fileManager.ensureCached(
             {
               ...job.printFile,
-              printJobId: job.id || command.payload?.printJobId
+              printJobId
             }
           )
 
@@ -544,7 +547,8 @@ export const handleCommand = async (
         }
 
         await fileManager.pin(
-          cachedFile.localPath
+          cachedFile.localPath,
+          { printJobId, printer }
         )
         pinnedFilePath =
           cachedFile.localPath
@@ -555,6 +559,7 @@ export const handleCommand = async (
       }
 
       let result
+      let keepPinnedForMonitor = false
 
       try {
         result =
@@ -562,10 +567,13 @@ export const handleCommand = async (
             printer,
             job
           )
+        keepPinnedForMonitor = result?.background === true
       } finally {
-        await fileManager.unpin(
-          pinnedFilePath
-        )
+        if (!keepPinnedForMonitor) {
+          await fileManager.unpin(
+            pinnedFilePath
+          )
+        }
       }
 
       console.log(

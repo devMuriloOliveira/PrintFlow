@@ -41,6 +41,15 @@ const defaultTempMaxAgeMs =
         1000
   )
 
+const defaultPinLeaseMs =
+  Number(
+    process.env.PRINTFLOW_AGENT_CACHE_PIN_LEASE_HOURS ||
+      24
+  ) *
+  60 *
+  60 *
+  1000
+
 const safeName =
   (value) =>
     String(
@@ -284,7 +293,8 @@ export const cleanupPrintFileCache =
 
 export const pinPrintFileCache =
   async (
-    localPath
+    localPath,
+    { printJobId = '', printer = null } = {}
   ) => {
     if (!localPath) {
       throw new Error(
@@ -292,12 +302,122 @@ export const pinPrintFileCache =
       )
     }
 
+    const safePrinter = printer && typeof printer === 'object'
+      ? Object.fromEntries(
+          ['protocol', 'connectionType', 'name', 'manufacturer', 'model', 'software', 'ip', 'port', 'baudRate', 'serial', 'firmware']
+            .filter(key => printer[key] != null)
+            .map(key => [key, printer[key]])
+        )
+      : null
     await fs.writeFile(
       `${localPath}.pin`,
-      'pinned\n',
+      JSON.stringify({
+        version: 1,
+        createdAt: new Date().toISOString(),
+        printJobId: String(printJobId || '').trim(),
+        printer: safePrinter
+      }),
       'utf8'
     )
   }
+
+export const unpinPrintFileCacheByPrintJobId = async (
+  printJobId,
+  { directory = cacheDirectory } = {}
+) => {
+  const expectedId = String(printJobId || '').trim()
+  if (!expectedId) return 0
+
+  let entries = []
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return 0
+    throw error
+  }
+
+  let removed = 0
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.pin')) continue
+    const markerPath = path.join(directory, entry.name)
+    try {
+      const marker = JSON.parse(await fs.readFile(markerPath, 'utf8'))
+      if (String(marker?.printJobId || '').trim() !== expectedId) continue
+      await fs.rm(markerPath, { force: true })
+      removed += 1
+    } catch (error) {
+      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+    }
+  }
+  return removed
+}
+
+export const recoverStalePrintFilePins = async ({
+  directory = cacheDirectory,
+  activePrintJobIds = [],
+  hasActivePrints = false,
+  now = Date.now(),
+  leaseMs = defaultPinLeaseMs,
+  isPrinterIdle = async () => false
+} = {}) => {
+  if (hasActivePrints) return { released: 0, retained: 0 }
+
+  let entries = []
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return { released: 0, retained: 0 }
+    throw error
+  }
+
+  const activeIds = new Set(activePrintJobIds.map(value => String(value || '').trim()).filter(Boolean))
+  let released = 0
+  let retained = 0
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.pin')) continue
+    const markerPath = path.join(directory, entry.name)
+    let info
+    let marker = null
+    try {
+      info = await fs.stat(markerPath)
+      marker = JSON.parse(await fs.readFile(markerPath, 'utf8'))
+    } catch (error) {
+      // Legacy or malformed markers have no reliable job/printer identity.
+      retained += 1
+      continue
+    }
+
+    const printJobId = String(marker?.printJobId || '').trim()
+    const printer = marker?.printer
+    const createdAt = Date.parse(marker?.createdAt || '')
+    const leaseStart = Number.isFinite(createdAt) ? createdAt : info.mtimeMs
+    if (
+      now - leaseStart < Math.max(60 * 60 * 1000, Number(leaseMs) || defaultPinLeaseMs) ||
+      !printJobId ||
+      !printer ||
+      activeIds.has(printJobId)
+    ) {
+      retained += 1
+      continue
+    }
+
+    let idle = false
+    try {
+      idle = await isPrinterIdle(printer, printJobId) === true
+    } catch {
+      idle = false
+    }
+    if (!idle) {
+      retained += 1
+      continue
+    }
+
+    await fs.rm(markerPath, { force: true })
+    released += 1
+  }
+
+  return { released, retained }
+}
 
 export const unpinPrintFileCache =
   async (

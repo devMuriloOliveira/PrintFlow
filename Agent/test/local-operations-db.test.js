@@ -223,7 +223,7 @@ test(
 
     assert.equal(
       operations.schemaVersion,
-      5
+      6
     )
     assert.deepEqual(
       operations.begin({
@@ -542,6 +542,54 @@ test('remove estados locais antigos sem tocar em filas pendentes', async () => {
   assert.equal(operations.getLocalState('job', 'old-job'), null)
   assert.deepEqual(operations.getLocalState('job', 'recent-job').state, { status: 'printing' })
   assert.equal(operations.listPendingEvents().length, 1)
+
+  operations.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
+
+test('retencao apaga comandos reconhecidos pelo backend e preserva conclusoes pendentes', async () => {
+  const { directory, operations } = await createStore()
+  for (const commandId of ['acked-old', 'acked-middle', 'acked-new', 'pending-old']) {
+    operations.begin({ id: commandId, type: 'printer_status' })
+    operations.recordResult(commandId, { success: true, commandId })
+  }
+  operations.acknowledgeCompletion('acked-old')
+  operations.acknowledgeCompletion('acked-middle')
+  operations.acknowledgeCompletion('acked-new')
+
+  const legacy = new DatabaseSync(operations.databasePath)
+  const setCompletedAt = legacy.prepare('update processed_commands set completed_at = ? where command_id = ?')
+  setCompletedAt.run('2025-01-01T00:00:00.000Z', 'acked-old')
+  setCompletedAt.run('2026-09-27T00:00:00.000Z', 'acked-middle')
+  setCompletedAt.run('2026-09-28T00:00:00.000Z', 'acked-new')
+  setCompletedAt.run('2025-01-03T00:00:00.000Z', 'pending-old')
+  legacy.close()
+
+  const result = operations.pruneLocalData({
+    now: Date.parse('2026-09-29T00:00:00.000Z'),
+    completedCommandMaxAgeMs: 30 * 24 * 60 * 60 * 1000,
+    maxCompletedCommands: 1
+  })
+  assert.equal(result.processedCommandsRemoved, 2)
+  assert.equal(operations.begin({ id: 'acked-old', type: 'printer_status' }).status, 'new')
+  assert.equal(operations.begin({ id: 'acked-middle', type: 'printer_status' }).status, 'new')
+  assert.equal(operations.begin({ id: 'acked-new', type: 'printer_status' }).status, 'completed')
+  assert.deepEqual(operations.begin({ id: 'pending-old', type: 'printer_status' }), {
+    status: 'completed',
+    result: { success: true, commandId: 'pending-old' }
+  })
+  assert.equal(operations.listPendingCompletions().length, 1)
+  operations.queueEvent('retention.pending')
+  operations.queueProductionMetrics({
+    printJobId: 'job-pending',
+    payload: { status: 'completed', idempotencyKey: 'metric-pending' }
+  })
+  assert.deepEqual(operations.getPendingCounts(), {
+    completions: 1,
+    events: 1,
+    metrics: 1,
+    total: 3
+  })
 
   operations.close()
   await fs.rm(directory, { recursive: true, force: true })

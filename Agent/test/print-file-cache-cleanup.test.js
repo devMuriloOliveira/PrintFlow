@@ -7,6 +7,8 @@ import test from 'node:test'
 import {
   cleanupPrintFileCache,
   pinPrintFileCache,
+  recoverStalePrintFilePins,
+  unpinPrintFileCacheByPrintJobId,
   unpinPrintFileCache
 } from '../src/files/printFileCache.js'
 
@@ -285,5 +287,71 @@ test('limpeza do cache preserva arquivo pinado', async () => {
   )
 
   await unpinPrintFileCache(filePath)
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+test('recupera pin vencido somente quando o monitor nao existe e a impressora confirma ociosa', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-agent-cache-recovery-'))
+  const filePath = path.join(root, 'recover-me.3mf')
+  const printJobId = 'job-recovery-1'
+  const printer = {
+    protocol: 'octoprint',
+    connectionType: 'network',
+    ip: '192.168.5.42',
+    port: 80,
+    apiKey: 'must-not-be-persisted'
+  }
+  await writeCacheFile(filePath, 'payload', new Date(Date.now() - 3 * 24 * 60 * 60 * 1000))
+  await pinPrintFileCache(filePath, { printJobId, printer })
+
+  const markerPath = `${filePath}.pin`
+  const marker = JSON.parse(await fs.readFile(markerPath, 'utf8'))
+  marker.createdAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+  await fs.writeFile(markerPath, JSON.stringify(marker), 'utf8')
+  const persistedMarker = await fs.readFile(markerPath, 'utf8')
+  assert.equal(persistedMarker.includes('must-not-be-persisted'), false)
+  assert.equal(await unpinPrintFileCacheByPrintJobId(printJobId, { directory: root }), 1)
+  await pinPrintFileCache(filePath, { printJobId, printer })
+  const repinnedMarker = JSON.parse(await fs.readFile(markerPath, 'utf8'))
+  repinnedMarker.createdAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+  await fs.writeFile(markerPath, JSON.stringify(repinnedMarker), 'utf8')
+
+  let probes = 0
+  const monitored = await recoverStalePrintFilePins({
+    directory: root,
+    activePrintJobIds: [printJobId],
+    leaseMs: 24 * 60 * 60 * 1000,
+    isPrinterIdle: async () => { probes += 1; return true }
+  })
+  assert.deepEqual(monitored, { released: 0, retained: 1 })
+  assert.equal(probes, 0)
+
+  const anotherPrintActive = await recoverStalePrintFilePins({
+    directory: root,
+    hasActivePrints: true,
+    leaseMs: 24 * 60 * 60 * 1000,
+    isPrinterIdle: async () => { probes += 1; return true }
+  })
+  assert.deepEqual(anotherPrintActive, { released: 0, retained: 0 })
+  assert.equal(probes, 0)
+
+  const unverifiable = await recoverStalePrintFilePins({
+    directory: root,
+    leaseMs: 24 * 60 * 60 * 1000,
+    isPrinterIdle: async () => false
+  })
+  assert.deepEqual(unverifiable, { released: 0, retained: 1 })
+  assert.equal(await fs.readFile(filePath, 'utf8'), 'payload')
+
+  const idle = await recoverStalePrintFilePins({
+    directory: root,
+    leaseMs: 24 * 60 * 60 * 1000,
+    isPrinterIdle: async candidate => candidate.ip === printer.ip
+  })
+  assert.deepEqual(idle, { released: 1, retained: 0 })
+  assert.equal(await unpinPrintFileCacheByPrintJobId(printJobId, { directory: root }), 0)
+
+  const cleanup = await cleanupPrintFileCache({ directory: root, maxAgeMs: 1, maxTotalBytes: 0 })
+  assert.equal(cleanup.removed, 1)
   await fs.rm(root, { recursive: true, force: true })
 })

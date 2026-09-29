@@ -20,6 +20,11 @@ const {
 } = await import(
   '../src/localServer.js'
 )
+const {
+  createDiagnosticsToken,
+  readDiagnosticsToken,
+  removeDiagnosticsToken
+} = await import('../src/storage/diagnosticsToken.js')
 
 test(
   'health local bloqueia atualizacao durante impressao monitorada',
@@ -60,6 +65,8 @@ test(
       'active_print'
     )
     assert.equal(payload.activePrintJobs, 2)
+    const diagnostics = await fetch(`http://127.0.0.1:${address.port}/diagnostics`)
+    assert.equal(diagnostics.status, 503)
   }
 )
 
@@ -68,6 +75,7 @@ test(
   async t => {
     const server = startLocalServer({
       port: 0,
+      diagnosticsToken: 'diagnostics-test-token-0123456789abcdef',
       getRuntimeStatus: () => ({
         updateBlocked: false,
         activePrintJobs: 0
@@ -100,9 +108,19 @@ test(
     const response = await fetch(
       `http://127.0.0.1:${address.port}/diagnostics`
     )
-    const payload = await response.json()
+    assert.equal(response.status, 401)
 
-    assert.equal(response.status, 200)
+    const unauthorized = await fetch(`http://127.0.0.1:${address.port}/diagnostics`, {
+      headers: { 'x-printflow-diagnostics-token': 'wrong-token' }
+    })
+    assert.equal(unauthorized.status, 401)
+
+    const authorized = await fetch(`http://127.0.0.1:${address.port}/diagnostics`, {
+      headers: { 'x-printflow-diagnostics-token': 'diagnostics-test-token-0123456789abcdef' }
+    })
+    const payload = await authorized.json()
+
+    assert.equal(authorized.status, 200)
     assert.equal(payload.ok, true)
     assert.equal(
       payload.connections[0].printer.ip,
@@ -127,6 +145,7 @@ test(
   async t => {
     const server = startLocalServer({
       port: 0,
+      diagnosticsToken: 'diagnostics-test-token-0123456789abcdef',
       allowedOrigins: ['https://app.example.com'],
       canAcceptPairing: () => false
     })
@@ -169,3 +188,21 @@ test(
     assert.equal(pairing.status, 409)
   }
 )
+
+test('token de diagnostico e rotacionado no armazenamento local', async () => {
+  const first = await createDiagnosticsToken()
+  assert.match(first.token, /^[A-Za-z0-9_-]{40,64}$/)
+  assert.equal(await readDiagnosticsToken(), first.token)
+  const stored = await fs.readFile(first.tokenPath, 'utf8')
+  assert.equal(stored.includes(first.token), process.platform !== 'win32')
+  if (process.platform !== 'win32') {
+    assert.equal((await fs.stat(first.tokenPath)).mode & 0o777, 0o600)
+  } else {
+    assert.match(stored, /windows-dpapi/)
+  }
+
+  const second = await createDiagnosticsToken()
+  assert.notEqual(second.token, first.token)
+  assert.equal(await readDiagnosticsToken(), second.token)
+  removeDiagnosticsToken()
+})

@@ -42,7 +42,7 @@ const now = () =>
     .toISOString()
 
 const CURRENT_SCHEMA_VERSION =
-  5
+  6
 
 const migrateSchema = (
   database
@@ -134,6 +134,12 @@ const migrateSchema = (
       );
 
       pragma user_version = 5;
+
+      create index if not exists processed_commands_completed_idx
+        on processed_commands (completed_at)
+        where state = 'completed';
+
+      pragma user_version = 6;
       commit;
     `
   )
@@ -367,6 +373,40 @@ export const createLocalOperationsDb = (
   const deleteStaleLocalStates = database.prepare(
     'delete from local_states where updated_at < ?'
   )
+  const deleteOldCompletedCommands = database.prepare(`
+    delete from processed_commands
+     where state = 'completed'
+       and completed_at < ?
+       and not exists (
+         select 1 from command_completions
+          where command_completions.command_id = processed_commands.command_id
+       )
+  `)
+  const deleteExcessCompletedCommands = database.prepare(`
+    delete from processed_commands
+     where state = 'completed'
+       and not exists (
+         select 1 from command_completions
+          where command_completions.command_id = processed_commands.command_id
+       )
+       and command_id in (
+         select command_id
+           from processed_commands as retained
+          where retained.state = 'completed'
+            and not exists (
+              select 1 from command_completions
+               where command_completions.command_id = retained.command_id
+            )
+          order by retained.completed_at desc, retained.command_id desc
+          limit -1 offset ?
+       )
+  `)
+  const countPendingOperations = database.prepare(`
+    select
+      (select count(*) from command_completions) as completions,
+      (select count(*) from agent_events) as events,
+      (select count(*) from production_metrics) as metrics
+  `)
 
   const begin = (
     command
@@ -672,6 +712,40 @@ export const createLocalOperationsDb = (
       const age = Math.max(24 * 60 * 60 * 1000, Number(maxAgeMs) || 0)
       const cutoff = new Date(Date.now() - age).toISOString()
       return Number(deleteStaleLocalStates.run(cutoff).changes)
+    },
+    pruneLocalData: ({
+      now: currentTime = Date.now(),
+      completedCommandMaxAgeMs = 90 * 24 * 60 * 60 * 1000,
+      maxCompletedCommands = 10_000,
+      localStateMaxAgeMs = 30 * 24 * 60 * 60 * 1000
+    } = {}) => {
+      const ageMs = Math.max(30 * 24 * 60 * 60 * 1000, Number(completedCommandMaxAgeMs) || 0)
+      const retainedCount = Math.max(1, Math.floor(Number(maxCompletedCommands) || 10_000))
+      const stateAgeMs = Math.max(24 * 60 * 60 * 1000, Number(localStateMaxAgeMs) || 0)
+      const commandCutoff = new Date(currentTime - ageMs).toISOString()
+      const stateCutoff = new Date(currentTime - stateAgeMs).toISOString()
+
+      database.exec('begin immediate')
+      try {
+        const localStatesRemoved = Number(deleteStaleLocalStates.run(stateCutoff).changes)
+        const agedCommandsRemoved = Number(deleteOldCompletedCommands.run(commandCutoff).changes)
+        const excessCommandsRemoved = Number(deleteExcessCompletedCommands.run(retainedCount).changes)
+        database.exec('commit')
+        return {
+          localStatesRemoved,
+          processedCommandsRemoved: agedCommandsRemoved + excessCommandsRemoved
+        }
+      } catch (error) {
+        database.exec('rollback')
+        throw error
+      }
+    },
+    getPendingCounts: () => {
+      const row = countPendingOperations.get()
+      const completions = Number(row.completions || 0)
+      const events = Number(row.events || 0)
+      const metrics = Number(row.metrics || 0)
+      return { completions, events, metrics, total: completions + events + metrics }
     },
     listPendingCompletions: (
       limit = 20
