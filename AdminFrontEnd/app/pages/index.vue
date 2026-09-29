@@ -1,61 +1,125 @@
 <script setup lang="ts">
+import type { SupportSlaRule } from '~/types/platform-admin'
+
 const {
-  overview, tenants, requests, error, activeRequests, closedRequests,
-  supportMetrics, supportSlaRules, tenantFor, formatDate, isChatOpen, load, loadSupportMetrics, loadSupportSlaRules, updateSupportSlaRule
+  overview, tenants, requests, loading, error, activeRequests,
+  supportMetrics, supportSlaRules, tenantFor, formatDate, load, loadSupportMetrics, loadSupportSlaRules, updateSupportSlaRule
 } = usePlatformAdminWorkspace()
 const search = ref('')
+const refreshing = ref(false)
+const partialError = ref('')
 const slaSaving = ref('')
 const slaError = ref('')
+const slaFeedback = ref('')
 
 const recentRequests = computed(() => {
   const term = search.value.trim().toLowerCase()
-  if (!term) return requests.value.slice(0, 5)
-  return requests.value.filter(request => `${request.id} ${request.reason} ${tenantFor(request.tenantId)?.name || ''}`.toLowerCase().includes(term)).slice(0, 5)
+  return requests.value.filter(request => !term || `${request.id} ${request.subject || ''} ${request.reason} ${tenantFor(request.tenantId)?.name || ''}`.toLowerCase().includes(term)).slice(0, 5)
 })
-
-const operationalSummary = computed(() => {
+const operatingRates = computed(() => {
   if (!overview.value) return []
   return [
     { label: 'Empresas ativas', value: overview.value.activeTenants, total: overview.value.tenants },
     { label: 'Agents online', value: overview.value.onlineAgents, total: overview.value.agents },
     { label: 'Impressoras conectadas', value: overview.value.connectedPrinters, total: overview.value.printers }
-  ].map(item => ({ ...item, percentage: item.total > 0 ? Math.round((item.value / item.total) * 100) : 0 }))
+  ].map(item => ({ ...item, percentage: item.total ? Math.min(100, Math.round(item.value / item.total * 100)) : 0 }))
 })
+const attentionItems = computed(() => [
+  { label: 'Atendimentos em aberto', value: supportMetrics.value?.open ?? activeRequests.value.length, to: '/solicitacoes', tone: 'blue' },
+  { label: 'Atendimentos em atraso', value: supportMetrics.value?.overdue ?? 0, to: '/solicitacoes', tone: 'orange' },
+  { label: 'Empresas com cobrança pendente', value: overview.value?.paymentAttention ?? 0, to: '/empresas', tone: 'orange' },
+  { label: 'LGPD fora do prazo', value: supportMetrics.value?.lgpd.overdue ?? 0, to: '/solicitacoes', tone: 'red' }
+])
+const primaryMetrics = computed(() => [
+  { label: 'Empresas na plataforma', value: overview.value?.tenants ?? 0, note: `${overview.value?.activeTenants ?? 0} ativas`, icon: 'companies', to: '/empresas' },
+  { label: 'Atendimentos abertos', value: supportMetrics.value?.open ?? activeRequests.value.length, note: `${supportMetrics.value?.waitingInternal ?? 0} aguardando equipe`, icon: 'support', to: '/solicitacoes' },
+  { label: 'Usuários ativos', value: tenants.value.reduce((sum, tenant) => sum + tenant.activeUsers, 0), note: 'Nas empresas desta página', icon: 'overview', to: '/empresas' },
+  { label: 'Agents online', value: overview.value?.onlineAgents ?? 0, note: `De ${overview.value?.agents ?? 0} pareados`, icon: 'reports', to: '/empresas' }
+])
 
-const openChat = (requestId: string) => navigateTo({ path: '/solicitacoes', query: { protocolo: requestId } })
-const saveSlaRule = async (rule: any) => {
-  slaSaving.value = rule.id; slaError.value = ''
-  try { await updateSupportSlaRule(rule.id, { category: rule.category, priority: rule.priority, firstResponseMinutes: Number(rule.firstResponseMinutes), resolutionMinutes: Number(rule.resolutionMinutes), active: rule.active }) }
-  catch (cause: any) { slaError.value = cause?.data?.error || cause?.message || 'Nao foi possivel salvar a regra de SLA.' }
+const refresh = async () => {
+  refreshing.value = true
+  slaError.value = ''
+  partialError.value = ''
+  try {
+    if (!await load({ overview: true, tenants: true, requests: true }, true)) return
+    const [metrics, rules] = await Promise.allSettled([loadSupportMetrics(true), loadSupportSlaRules(true)])
+    if (metrics.status === 'rejected') partialError.value = 'Não foi possível atualizar as métricas de suporte.'
+    if (rules.status === 'rejected') partialError.value = 'Não foi possível atualizar as regras de SLA.'
+  } finally { refreshing.value = false }
+}
+const saveSlaRule = async (rule: SupportSlaRule) => {
+  slaSaving.value = rule.id
+  slaError.value = ''
+  slaFeedback.value = ''
+  try {
+    if (!Number.isFinite(Number(rule.firstResponseMinutes)) || !Number.isFinite(Number(rule.resolutionMinutes)) || Number(rule.firstResponseMinutes) < 1 || Number(rule.resolutionMinutes) < 1) {
+      throw new Error('Informe prazos válidos em minutos.')
+    }
+    await updateSupportSlaRule(rule.id, {
+      category: rule.category, priority: rule.priority,
+      firstResponseMinutes: Number(rule.firstResponseMinutes),
+      resolutionMinutes: Number(rule.resolutionMinutes), active: rule.active
+    })
+    slaFeedback.value = `Regra de ${rule.category} / ${rule.priority} atualizada.`
+  } catch (cause: any) { slaError.value = cause?.data?.error || cause?.message || 'Não foi possível salvar a regra de SLA.' }
   finally { slaSaving.value = '' }
 }
-onMounted(async () => {
-  await load({ overview: true, tenants: true, requests: true })
-  const [metricsResult, slaResult] = await Promise.allSettled([loadSupportMetrics(), loadSupportSlaRules()])
-  if (metricsResult.status === 'rejected' && !error.value) error.value = 'Nao foi possivel carregar as metricas do suporte.'
-  if (slaResult.status === 'rejected') slaError.value = 'Nao foi possivel carregar as regras de SLA.'
-})
+onMounted(() => void refresh())
 </script>
 
 <template>
-  <AdminShell v-model:search="search" title="Central da plataforma" subtitle="Indicadores atuais consultados na plataforma" :request-count="activeRequests.length">
-    <p v-if="error" class="feedback feedback--error">{{ error }}</p>
-    <section v-if="overview" class="metrics-grid">
-      <article><span>Solicitacoes</span><strong>{{ requests.length }}</strong><small>{{ activeRequests.length }} aguardando acao</small></article>
-      <article><span>Em atendimento</span><strong>{{ supportMetrics?.open ?? activeRequests.length }}</strong><small>Conversas em andamento</small></article>
-      <article><span>Empresas</span><strong>{{ overview.tenants }}</strong><small>{{ overview.activeTenants }} ativas</small></article>
-      <article><span>Usuarios ativos</span><strong>{{ tenants.reduce((sum, tenant) => sum + tenant.activeUsers, 0) }}</strong><small>Em todos os tenants</small></article>
-      <article><span>Agents online</span><strong>{{ overview.onlineAgents }}</strong><small>de {{ overview.agents }} pareados</small></article>
-      <article><span>Impressoras</span><strong>{{ overview.connectedPrinters }}</strong><small>de {{ overview.printers }} conectadas</small></article>
-      <article><span>Atencao financeira</span><strong>{{ overview.paymentAttention }}</strong><small>Empresas com pendencias</small></article>
-      <article><span>Encerrados</span><strong>{{ closedRequests.length }}</strong><small>Protocolos preservados</small></article>
-    </section>
-    <section class="dashboard-columns">
-      <article class="panel"><div class="panel-head"><div><h2>Disponibilidade operacional</h2><p>Valores retornados pela API nesta consulta</p></div></div><div class="live-summary"><div v-for="item in operationalSummary" :key="item.label" class="live-summary__row"><div><span>{{ item.label }}</span><strong>{{ item.value }} de {{ item.total }}</strong></div><div class="live-summary__track"><span :style="{ width: `${item.percentage}%` }"></span></div><small>{{ item.percentage }}%</small></div><p v-if="!operationalSummary.length" class="empty-state">Dados operacionais indisponiveis.</p></div></article>
-      <article class="panel"><div class="panel-head"><div><h2>Solicitacoes recentes</h2><p>Ultimos protocolos abertos</p></div><NuxtLink class="table-action" to="/solicitacoes">Ver todas</NuxtLink></div><button v-for="request in recentRequests" :key="request.id" class="activity-row" @click="openChat(request.id)"><span class="activity-icon">S</span><div><strong>{{ tenantFor(request.tenantId)?.name || request.tenantId }}</strong><small>{{ request.id }}</small></div><time>{{ formatDate(request.createdAt) }}</time></button><p v-if="!recentRequests.length" class="empty-state">Nenhuma solicitacao registrada.</p></article>
-    </section>
-    <section v-if="supportMetrics" class="dashboard-columns"><article class="panel"><div class="panel-head"><div><h2>Desempenho do suporte</h2><p>Indicadores comerciais separados do SLA de LGPD</p></div></div><div class="metrics-grid metrics-grid--compact"><article><span>1ª resposta média</span><strong>{{ Math.round(supportMetrics.averageFirstResponseMinutes) }} min</strong></article><article><span>Resolução média</span><strong>{{ Math.round(supportMetrics.averageResolutionMinutes) }} min</strong></article><article><span>Em atraso</span><strong>{{ supportMetrics.overdue }}</strong></article><article><span>Reabertos</span><strong>{{ supportMetrics.reopened }}</strong></article></div></article><article class="panel"><div class="panel-head"><div><h2>Fila e conformidade</h2><p>Distribuição atual dos protocolos</p></div></div><div class="live-summary"><div class="live-summary__row"><span>Aguardando cliente</span><strong>{{ supportMetrics.waitingCustomer }}</strong></div><div class="live-summary__row"><span>Aguardando equipe</span><strong>{{ supportMetrics.waitingInternal }}</strong></div><div class="live-summary__row"><span>LGPD dentro do prazo</span><strong>{{ supportMetrics.lgpd.withinDeadline }}</strong></div><div class="live-summary__row"><span>LGPD atrasadas</span><strong>{{ supportMetrics.lgpd.overdue }}</strong></div></div></article></section>
-    <section v-if="supportMetrics" class="dashboard-columns"><article class="panel"><div class="panel-head"><div><h2>Volume por empresa</h2><p>Tenants com maior volume de suporte</p></div></div><div class="live-summary"><div v-for="item in supportMetrics.byTenant" :key="item.tenantId" class="live-summary__row"><span>{{ tenantFor(item.tenantId)?.name || item.tenantId }}</span><strong>{{ item.total }}</strong></div><p v-if="!supportMetrics.byTenant.length" class="empty-state">Nenhum atendimento no período.</p></div></article><article class="panel"><div class="panel-head"><div><h2>Volume por responsável</h2><p>Distribuição dos atendimentos</p></div></div><div class="live-summary"><div v-for="item in supportMetrics.byAssignee" :key="item.id || item.name" class="live-summary__row"><span>{{ item.name }}</span><strong>{{ item.total }}</strong></div><p v-if="!supportMetrics.byAssignee.length" class="empty-state">Nenhum atendimento atribuído.</p></div></article></section>
-    <section class="panel"><div class="panel-head"><div><h2>Regras de SLA do suporte</h2><p>Prazos comerciais separados dos prazos legais de LGPD.</p></div></div><p v-if="slaError" class="feedback feedback--error">{{ slaError }}</p><div class="table-wrap"><table><thead><tr><th>Categoria</th><th>Prioridade</th><th>1a resposta (min)</th><th>Resolucao (min)</th><th>Ativa</th><th></th></tr></thead><tbody><tr v-for="rule in supportSlaRules" :key="rule.id"><td>{{ rule.category }}</td><td>{{ rule.priority }}</td><td><input v-model.number="rule.firstResponseMinutes" type="number" min="1" max="43200"></td><td><input v-model.number="rule.resolutionMinutes" type="number" min="1" max="43200"></td><td><input v-model="rule.active" type="checkbox"></td><td><button class="table-action" :disabled="slaSaving === rule.id" @click="saveSlaRule(rule)">{{ slaSaving === rule.id ? 'Salvando...' : 'Salvar' }}</button></td></tr><tr v-if="!supportSlaRules.length"><td colspan="6" class="empty-state">Nenhuma regra configurada.</td></tr></tbody></table></div></section>
+  <AdminShell v-model:search="search" searchable title="Central da plataforma" subtitle="Acompanhe a operação e priorize o que precisa de atenção." :request-count="activeRequests.length">
+    <template #actions><button class="button button--quiet" type="button" :disabled="refreshing" @click="refresh"><AdminIcon name="refresh" :size="16" />{{ refreshing ? 'Atualizando...' : 'Atualizar dados' }}</button></template>
+    <p v-if="error" class="feedback feedback--error" role="alert">{{ error }}</p>
+    <p v-if="partialError" class="feedback feedback--error" role="alert">{{ partialError }}</p>
+    <section v-if="loading && !overview" class="panel dashboard-loading" aria-live="polite">Carregando visão geral da plataforma...</section>
+    <template v-else-if="overview">
+      <section class="dashboard-intro">
+        <div><span class="section-kicker">VISÃO OPERACIONAL</span><h2>O que precisa da sua atenção</h2><p>Indicadores da plataforma e da fila de suporte nesta consulta.</p></div>
+        <NuxtLink class="dashboard-intro__link" to="/solicitacoes">Abrir fila de suporte <AdminIcon name="arrow" :size="17" /></NuxtLink>
+      </section>
+
+      <section class="dashboard-priority" aria-label="Prioridades">
+        <NuxtLink v-for="item in attentionItems" :key="item.label" :to="item.to" class="priority-card" :class="`priority-card--${item.tone}`">
+          <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>Ver detalhes <AdminIcon name="arrow" :size="14" /></small>
+        </NuxtLink>
+      </section>
+
+      <div class="dashboard-section-heading"><div><span class="section-kicker">PLATAFORMA</span><h2>Panorama geral</h2></div></div>
+      <section class="metrics-grid dashboard-metrics" aria-label="Indicadores gerais">
+        <NuxtLink v-for="item in primaryMetrics" :key="item.label" :to="item.to" class="metric-link">
+          <span class="metric-link__icon"><AdminIcon :name="item.icon" :size="20" /></span>
+          <span class="metric-link__label">{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.note }}</small>
+        </NuxtLink>
+      </section>
+
+      <section class="dashboard-columns">
+        <article class="panel"><div class="panel-head"><div><span class="section-kicker">INFRAESTRUTURA</span><h2>Disponibilidade operacional</h2><p>Proporção de recursos ativos na plataforma.</p></div></div>
+          <div class="live-summary"><div v-for="item in operatingRates" :key="item.label" class="live-summary__row"><div><span>{{ item.label }}</span><strong>{{ item.value }} de {{ item.total }}</strong></div><div class="live-summary__track" role="meter" :aria-label="item.label" :aria-valuenow="item.percentage" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${item.percentage}%` }"></span></div><small>{{ item.percentage }}%</small></div></div>
+        </article>
+        <article class="panel"><div class="panel-head"><div><span class="section-kicker">FILA RECENTE</span><h2>Solicitações recentes</h2><p>Os cinco protocolos mais recentes nesta consulta.</p></div><NuxtLink class="table-action" to="/solicitacoes">Ver todas</NuxtLink></div>
+          <NuxtLink v-for="request in recentRequests" :key="request.id" class="activity-row" :to="{ path: '/solicitacoes', query: { protocolo: request.id } }"><span class="activity-icon"><AdminIcon name="support" :size="17" /></span><div><strong>{{ tenantFor(request.tenantId)?.name || 'Empresa indisponível' }}</strong><small>{{ request.subject || request.id }}</small></div><time>{{ formatDate(request.createdAt) }}</time></NuxtLink>
+          <p v-if="!recentRequests.length" class="empty-state">{{ search ? 'Nenhum protocolo corresponde à busca.' : 'Nenhuma solicitação registrada.' }}</p>
+        </article>
+      </section>
+
+      <section v-if="supportMetrics" class="dashboard-columns dashboard-columns--balanced">
+        <article class="panel"><div class="panel-head"><div><span class="section-kicker">SUPORTE</span><h2>Desempenho da equipe</h2><p>Tempos médios dos atendimentos comerciais.</p></div></div>
+          <div class="dashboard-stat-list"><div><span>Primeira resposta</span><strong>{{ Math.round(supportMetrics.averageFirstResponseMinutes) }} min</strong></div><div><span>Resolução</span><strong>{{ Math.round(supportMetrics.averageResolutionMinutes) }} min</strong></div><div><span>Reabertos</span><strong>{{ supportMetrics.reopened }}</strong></div></div>
+        </article>
+        <article class="panel"><div class="panel-head"><div><span class="section-kicker">CONFORMIDADE</span><h2>Fila e LGPD</h2><p>Prazos legais acompanhados separadamente.</p></div></div>
+          <div class="dashboard-stat-list"><div><span>Aguardando cliente</span><strong>{{ supportMetrics.waitingCustomer }}</strong></div><div><span>Aguardando equipe</span><strong>{{ supportMetrics.waitingInternal }}</strong></div><div><span>LGPD dentro do prazo</span><strong>{{ supportMetrics.lgpd.withinDeadline }}</strong></div><div><span>LGPD em atraso</span><strong>{{ supportMetrics.lgpd.overdue }}</strong></div></div>
+        </article>
+      </section>
+
+      <details class="panel dashboard-sla"><summary><span><span class="section-kicker">CONFIGURAÇÕES</span><strong>Regras de SLA do suporte</strong><small>Editar prazos comerciais. Alterações são salvas individualmente.</small></span><span class="dashboard-sla__expand">Gerenciar</span></summary>
+        <p v-if="slaError" class="feedback feedback--error" role="alert">{{ slaError }}</p><p v-if="slaFeedback" class="feedback feedback--success" role="status">{{ slaFeedback }}</p>
+        <div class="table-wrap"><table><thead><tr><th>Categoria</th><th>Prioridade</th><th>1ª resposta (min)</th><th>Resolução (min)</th><th>Ativa</th><th>Ação</th></tr></thead><tbody>
+          <tr v-for="rule in supportSlaRules" :key="rule.id"><td>{{ rule.category }}</td><td>{{ rule.priority }}</td><td><input v-model.number="rule.firstResponseMinutes" type="number" min="1" max="43200" :aria-label="`Primeira resposta de ${rule.category} / ${rule.priority}`"></td><td><input v-model.number="rule.resolutionMinutes" type="number" min="1" max="43200" :aria-label="`Resolução de ${rule.category} / ${rule.priority}`"></td><td><input v-model="rule.active" type="checkbox" :aria-label="`Regra ativa para ${rule.category} / ${rule.priority}`"></td><td><button class="button button--quiet" type="button" :disabled="slaSaving === rule.id" @click="saveSlaRule(rule)">{{ slaSaving === rule.id ? 'Salvando...' : 'Salvar' }}</button></td></tr>
+          <tr v-if="!supportSlaRules.length"><td colspan="6" class="empty-state">Nenhuma regra configurada.</td></tr>
+        </tbody></table></div>
+      </details>
+    </template>
   </AdminShell>
 </template>

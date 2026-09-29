@@ -164,7 +164,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AdminShell v-model:search="search" title="Suporte e solicitações" subtitle="Receba, organize e conclua os contatos enviados pelo PrintFlow" :request-count="activeRequests.length">
+  <AdminShell v-model:search="search" searchable title="Suporte e solicitações" subtitle="Receba, organize e conclua os contatos enviados pelo PrintFlow" :request-count="activeRequests.length">
     <template #actions><select v-model="categoryFilter" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option><option value="technical">Suporte</option><option value="financial">Financeiro</option><option value="integration">Integrações</option><option value="account">Conta</option><option value="data_backup">Backup e dados</option><option value="privacy">LGPD</option><option value="audit">Auditoria</option></select><button class="button button--quiet" :disabled="reportLoading" @click="exportRequestsReport">Exportar CSV</button><button class="button button--quiet" :disabled="refreshing" @click="update">{{ refreshing ? 'Atualizando...' : 'Atualizar' }}</button></template>
     <p v-if="error" class="feedback feedback--error">{{ error }}</p>
 

@@ -32,6 +32,7 @@ export const usePlatformAdminWorkspace = () => {
   const supportHistory = useState<Record<string, PlatformAudit[]>>('platform-admin-support-history', () => ({}))
   const supportAttachments = useState<Record<string, SupportAttachment[]>>('platform-admin-support-attachments', () => ({}))
   const tenantDetails = useState<TenantDetails | null>('platform-admin-tenant-details', () => null)
+  const tenantDetailsScope = useState('platform-admin-tenant-details-scope', () => '')
   const tenantUsers = useState<TenantUser[]>('platform-admin-tenant-users', () => [])
   const tenantSubscriptionEvents = useState<TenantSubscriptionEvent[]>('platform-admin-tenant-subscription-events', () => [])
   const platformPlans = useState<PlatformPlan[]>('platform-admin-plans', () => [])
@@ -70,6 +71,7 @@ export const usePlatformAdminWorkspace = () => {
     supportHistory.value = {}
     supportAttachments.value = {}
     tenantDetails.value = null
+    tenantDetailsScope.value = ''
     tenantUsers.value = []
     tenantSubscriptionEvents.value = []
     platformPlans.value = []
@@ -186,15 +188,15 @@ export const usePlatformAdminWorkspace = () => {
   }
   const downloadSupportAttachment = (requestId: string, attachment: SupportAttachment) => session.download(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/attachments/${encodeURIComponent(attachment.id)}`, attachment.originalName)
 
-  const load = async (options: LoadOptions) => {
+  const load = async (options: LoadOptions, force = false) => {
     if (!await ensureSession()) return false
     loading.value = true
     error.value = ''
     try {
       const jobs: Promise<unknown>[] = []
-      if (options.overview) jobs.push(loadOverview())
-      if (options.tenants) jobs.push(loadTenants())
-      if (options.requests) jobs.push(loadRequests())
+      if (options.overview) jobs.push(loadOverview(force))
+      if (options.tenants) jobs.push(loadTenants(force))
+      if (options.requests) jobs.push(loadRequests(force))
       await Promise.all(jobs)
       return true
     } catch (cause) {
@@ -270,12 +272,12 @@ export const usePlatformAdminWorkspace = () => {
     platformPlans.value = platformPlans.value.map(plan => plan.id === updated.id ? updated : plan)
     return updated
   }
-  const loadTenantDetails = async (tenantId: string) => { tenantDetails.value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/details`); return tenantDetails.value }
-  const loadTenantUsers = async (tenantId: string) => { tenantUsers.value = await session.request<TenantUser[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/users`); return tenantUsers.value }
-  const loadTenantSubscriptionEvents = async (tenantId: string) => { tenantSubscriptionEvents.value = await session.request<TenantSubscriptionEvent[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription-events`); return tenantSubscriptionEvents.value }
-  const loadTenantBillingRecords = async (tenantId: string) => { tenantBillingRecords.value = await session.request<TenantBillingRecord[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/billing-records`); return tenantBillingRecords.value }
-  const updateTenantSubscription = async (tenantId: string, body: Record<string, unknown>) => { const value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription`, { method: 'POST', body }); tenantDetails.value = value; await loadTenantSubscriptionEvents(tenantId); return value }
-  const createTenantBillingRecord = async (tenantId: string, body: Record<string, unknown>) => { const value = await session.request<TenantBillingRecord>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/billing-records`, { method: 'POST', body }); tenantBillingRecords.value = [value, ...tenantBillingRecords.value]; await loadTenantSubscriptionEvents(tenantId); return value }
+  const loadTenantDetails = async (tenantId: string) => { tenantDetailsScope.value = tenantId; const value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/details`); if (tenantDetailsScope.value === tenantId) tenantDetails.value = value; return value }
+  const loadTenantUsers = async (tenantId: string) => { const value = await session.request<TenantUser[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/users`); if (tenantDetailsScope.value === tenantId) tenantUsers.value = value; return value }
+  const loadTenantSubscriptionEvents = async (tenantId: string) => { const value = await session.request<TenantSubscriptionEvent[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription-events`); if (tenantDetailsScope.value === tenantId) tenantSubscriptionEvents.value = value; return value }
+  const loadTenantBillingRecords = async (tenantId: string) => { const value = await session.request<TenantBillingRecord[]>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/billing-records`); if (tenantDetailsScope.value === tenantId) tenantBillingRecords.value = value; return value }
+  const updateTenantSubscription = async (tenantId: string, body: Record<string, unknown>) => { const value = await session.request<TenantDetails>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/subscription`, { method: 'POST', body }); if (tenantDetailsScope.value === tenantId) tenantDetails.value = value; await loadTenantSubscriptionEvents(tenantId); return value }
+  const createTenantBillingRecord = async (tenantId: string, body: Record<string, unknown>) => { const value = await session.request<TenantBillingRecord>(`/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/billing-records`, { method: 'POST', body }); if (tenantDetailsScope.value === tenantId) tenantBillingRecords.value = [value, ...tenantBillingRecords.value]; await loadTenantSubscriptionEvents(tenantId); return value }
   const updateSupportSlaRule = async (ruleId: string, body: Partial<SupportSlaRule>) => {
     const updated = await session.request<SupportSlaRule>(`/api/platform-admin/support-sla-rules/${encodeURIComponent(ruleId)}`, { method: 'POST', body })
     supportSlaRules.value = supportSlaRules.value.map(rule => rule.id === ruleId ? updated : rule)

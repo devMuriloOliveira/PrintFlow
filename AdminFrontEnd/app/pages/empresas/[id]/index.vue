@@ -29,13 +29,20 @@ const usageRows = computed(() => {
     { label: 'Produtos', value: usage.products, total: Number(limits.products || 0) }
   ]
 })
+let loadVersion = 0
 const load = async () => {
+  const version = ++loadVersion
   loading.value = true; error.value = ''
+  tenantDetails.value = null
+  tenantUsers.value = []
+  tenantSubscriptionEvents.value = []
+  tenantBillingRecords.value = []
   try {
     await Promise.all([loadTenantDetails(tenantId.value), loadPlatformPlans()])
+    if (version !== loadVersion) return
     if (tenantDetails.value?.subscription) Object.assign(form, { status: tenantDetails.value.subscription.status, billingCycle: tenantDetails.value.subscription.billingCycle, planId: tenantDetails.value.subscription.planId || '', currentPeriodEnd: tenantDetails.value.subscription.currentPeriodEnd?.slice(0, 16) || '', trialEndsAt: tenantDetails.value.subscription.trialEndsAt?.slice(0, 16) || '', graceEndsAt: tenantDetails.value.subscription.graceEndsAt?.slice(0, 16) || '', notes: tenantDetails.value.subscription.notes || '' })
-  } catch (cause: any) { error.value = cause?.data?.error || cause?.message || 'Nao foi possivel carregar a empresa.' }
-  finally { loading.value = false }
+  } catch (cause: any) { if (version === loadVersion) error.value = cause?.data?.error || cause?.message || 'Nao foi possivel carregar a empresa.' }
+  finally { if (version === loadVersion) loading.value = false }
 }
 const loadTabData = async (tab: string) => {
   if (loading.value || tabLoading.value) return
@@ -48,6 +55,7 @@ const loadTabData = async (tab: string) => {
   try { await Promise.all(jobs) } catch (cause: any) { error.value = cause?.data?.error || cause?.message || 'Nao foi possivel carregar esta aba.' } finally { tabLoading.value = false }
 }
 watch(activeTab, (tab) => { void loadTabData(tab) })
+watch(tenantId, () => { activeTab.value = 'overview'; void load() })
 onMounted(load)
 </script>
 

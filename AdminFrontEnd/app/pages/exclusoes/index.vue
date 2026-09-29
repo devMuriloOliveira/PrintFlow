@@ -32,7 +32,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AdminShell v-model:search="search" title="Exclusoes auditadas" subtitle="Consulte evidencias preservadas de exclusao" :request-count="activeRequests.length">
+  <AdminShell v-model:search="search" searchable title="Exclusões auditadas" subtitle="Consulte evidências preservadas de exclusão" :request-count="activeRequests.length">
     <p v-if="error || actionError" class="feedback feedback--error">{{ actionError || error }}</p>
     <section class="panel table-panel"><div class="table-wrap"><table><thead><tr><th>Data</th><th>Etapa</th><th>Protocolo</th><th>Evidencia preservada</th></tr></thead><tbody><tr v-for="event in filteredDeletionAudit" :key="event.id"><td>{{ formatDate(event.createdAt) }}</td><td><strong>{{ event.summary }}</strong><small>{{ event.context }}</small></td><td><code>{{ event.requestId }}</code></td><td>{{ evidenceLabel(event) }}</td></tr><tr v-if="!filteredDeletionAudit.length"><td colspan="4" class="empty-state">Nenhuma exclusao registrada.</td></tr></tbody></table></div></section>
   </AdminShell>

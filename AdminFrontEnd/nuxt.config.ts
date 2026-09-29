@@ -9,7 +9,7 @@ export default defineNuxtConfig({
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com'
     }
   },
-  css: ['~/assets/css/admin.css'],
+  css: ['~/assets/css/admin.css', '~/assets/css/admin-refresh.css'],
   app: {
     head: {
       htmlAttrs: { lang: 'pt-BR' },
