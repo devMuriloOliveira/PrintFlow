@@ -526,3 +526,23 @@ test(
     )
   }
 )
+
+test('remove estados locais antigos sem tocar em filas pendentes', async () => {
+  const { directory, operations } = await createStore()
+  operations.upsertLocalState('job', 'old-job', { status: 'completed' })
+  operations.upsertLocalState('job', 'recent-job', { status: 'printing' })
+  operations.queueEvent('test.pending', { retained: true })
+
+  const legacy = new DatabaseSync(operations.databasePath)
+  legacy.prepare('update local_states set updated_at = ? where entity_id = ?')
+    .run(new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(), 'old-job')
+  legacy.close()
+
+  assert.equal(operations.pruneLocalStates(), 1)
+  assert.equal(operations.getLocalState('job', 'old-job'), null)
+  assert.deepEqual(operations.getLocalState('job', 'recent-job').state, { status: 'printing' })
+  assert.equal(operations.listPendingEvents().length, 1)
+
+  operations.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})

@@ -25,6 +25,7 @@ const dataDirectory = process.env.PRINTFLOW_AGENT_DATA_DIR
   : resolveDefaultDataDirectory()
 const credentialsFile = path.join(dataDirectory, 'agent.json')
 const pendingPairingFile = path.join(dataDirectory, 'pending-pairing.json')
+const PENDING_PAIRING_MAX_AGE_MS = 10 * 60 * 1000
 const testDpapiValues = new Map()
 const isNodeTest = Boolean(process.env.NODE_TEST_CONTEXT)
 
@@ -280,17 +281,26 @@ export const savePendingPairingCode = async (code) => {
     recursive: true
   })
 
+  const payload = Buffer.from(JSON.stringify({
+    code: normalizedCode,
+    createdAt: new Date().toISOString()
+  }), 'utf8')
+  const protectedValue = await protectWithWindowsDpapi(payload)
+  const stored = protectedValue
+    ? {
+        version: 1,
+        protection: 'windows-dpapi',
+        payload: protectedValue.toString('base64')
+      }
+    : JSON.parse(payload.toString('utf8'))
+
   await fs.writeFile(
     pendingPairingFile,
-    JSON.stringify(
-      {
-        code: normalizedCode,
-        createdAt: new Date().toISOString()
-      },
-      null,
-      2
-    ),
-    'utf8'
+    JSON.stringify(stored, null, 2),
+    {
+      encoding: 'utf8',
+      mode: 0o600
+    }
   )
 }
 
@@ -308,7 +318,17 @@ export const consumePendingPairingCode = async () => {
       }
     )
 
-    const data = parseJson(content)
+    const stored = parseJson(content)
+    const payload = stored?.protection === 'windows-dpapi' && stored.payload
+      ? await unprotectWithWindowsDpapi(Buffer.from(stored.payload, 'base64'))
+      : Buffer.from(content, 'utf8')
+    const data = parseJson(payload.toString('utf8'))
+    const createdAt = Date.parse(data?.createdAt || '')
+    const ageMs = Date.now() - createdAt
+
+    if (!Number.isFinite(createdAt) || ageMs < -60_000 || ageMs > PENDING_PAIRING_MAX_AGE_MS) {
+      return ''
+    }
 
     return String(data?.code || '')
       .trim()
