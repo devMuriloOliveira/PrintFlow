@@ -1,6 +1,6 @@
 # PrintFlow BackEnd
 
-API HTTP do PrintFlow 3D. Ela centraliza autenticacao, isolamento por tenant, cadastros, fila de impressao, arquivos de impressao, marketplaces e comunicacao com o PrintFlow Agent.
+API HTTP do PrintFlow 3D. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o PrintFlow Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
 
 ## Para Que Serve
 
@@ -27,19 +27,32 @@ O BackEnd e o ponto confiavel do sistema. Ele:
 
 ## Variaveis de Ambiente
 
-Crie um `.env` local a partir de `.env.example`, quando existir, e preencha os valores reais somente no ambiente local ou no provedor de hospedagem.
+O carregador em `src/config/env.js` lê **`BackEnd/.env.local`** fora de produção e fora dos testes. No CMD, a partir da raiz do repositório:
 
-```powershell
-Copy-Item .env.example .env
+```bat
+copy BackEnd\.env.example BackEnd\.env.local
 ```
+
+Edite esse arquivo antes de iniciar a API. O `DATABASE_URL` do exemplo é um
+placeholder, não um banco utilizável. Use apenas banco local ou de homologação:
+`src/server.js` executa migrações e inicia jobs automaticamente ao subir.
+Se `DATABASE_URL` estiver definido, `AUTH_SECRET`, `DATA_ENCRYPTION_KEY` e
+`WEBHOOK_SHARED_SECRET` precisam ter pelo menos 32 caracteres e
+`CORS_ALLOWED_ORIGINS` é obrigatório. Não copie segredos para o README, Git,
+logs ou chat.
+
+Se os dois painéis estiverem rodando nas portas sugeridas nestes README, use
+`CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001` **somente no
+ambiente local**. Mantenha os domínios HTTPS reais separados na configuração
+do ambiente publicado.
 
 Variaveis principais:
 
 - `DATABASE_URL`: string privada de conexao PostgreSQL.
 - `PORT`: porta HTTP da API.
 - `AUTH_SECRET`: segredo forte para assinatura dos access tokens.
-- `AUTH_TOKEN_TTL_SECONDS`: duracao do access token.
-- `REFRESH_TOKEN_TTL_SECONDS`: duracao do refresh token.
+- `AUTH_TOKEN_TTL_SECONDS`: duração do access token (padrão do código: 15 minutos, se não configurado).
+- `REFRESH_TOKEN_TTL_SECONDS`: duração do refresh token (padrão do código: 30 dias, se não configurado).
 - `DATA_ENCRYPTION_KEY`: chave privada para criptografia de dados sensiveis.
 - `LEGACY_DATA_ENCRYPTION_KEYS`: chaves antigas usadas apenas para rotacao.
 - `WEBHOOK_SHARED_SECRET`: segredo compartilhado para webhooks.
@@ -59,6 +72,8 @@ Variaveis principais:
 - `EXPENSE_RECURRING_INTERVAL_MS`: intervalo da geração automática de despesas recorrentes vencidas.
 - `PRINT_FILE_STORAGE_DIR`: diretorio local dos arquivos de impressao.
 - `PRINT_FILE_MAX_BYTES`: tamanho maximo permitido para upload de arquivo de impressao.
+- `OBJECT_STORAGE_PROVIDER`: `local` para desenvolvimento ou `r2` em produção.
+- `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: necessários quando R2 está habilitado; mantenha-os privados.
 - `MERCADO_LIVRE_CLIENT_ID`: App ID privado da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_CLIENT_SECRET`: Secret Key privada da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_REDIRECT_URI`: callback fixa registrada no Mercado Livre.
@@ -68,6 +83,7 @@ Variaveis principais:
 - `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `PrintFlow <acesso@seudominio.com>`.
 - `AUTH_REQUIRE_EMAIL_VERIFICATION`: use `true` para exigir confirmacao de e-mail em novos cadastros.
 - `AUTH_REQUIRE_MFA_FOR_PRIVILEGED`: use `true` para exigir MFA em Owner e Superadmin; cada perfil configura o aplicativo autenticador em Configuracoes > Seguranca.
+- `PLATFORM_SUPER_ADMIN_EMAILS`: allowlist privada de superadmins. A API sincroniza essas funções ao iniciar; altere somente com controle administrativo.
 
 Para Mercado Livre, cadastre a mesma callback informada em
 `MERCADO_LIVRE_REDIRECT_URI` no painel de desenvolvedores. Em producao ela deve
@@ -93,15 +109,17 @@ somente depois de preparar os administradores.
 
 ## Publicacao
 
-O repositorio possui verificacao continua em `.github/workflows/ci.yml`: a cada
-push para `main` ou pull request, executa os testes do BackEnd e Agent e os
-builds dos dois FrontEnds. A publicacao continua separada da verificacao e deve
-ser feita somente depois que esses checks estiverem verdes.
+O repositório possui verificação contínua em `.github/workflows/ci.yml` para
+pushes e pull requests: varredura de segredos, testes do BackEnd e Agent,
+builds dos dois FrontEnds e validação do pacote Windows do Agent. CI verde e
+push no GitHub não comprovam que Render, Vercel, banco, webhooks ou dispositivos
+reais estejam funcionando.
 
-No Render, configure o servico da API com diretorio raiz `BackEnd`, comando de
-build `npm ci` e comando de inicio `npm start`. O inicio da API executa as
-migracoes de forma idempotente antes de abrir a porta; confirme o backup do
-banco e a saude do deploy antes de enviar trafego real.
+No Render, configure o serviço da API com diretório raiz `BackEnd`, build
+`npm ci` e início `npm start`. O início da API executa migrações antes de abrir
+a porta e inicia jobs operacionais; confirme backup recuperável, variáveis e
+saúde do deploy antes de enviar tráfego real. Produção exige
+`OBJECT_STORAGE_PROVIDER=r2` e credenciais R2 privadas válidas.
 
 Checklist de producao:
 
@@ -123,17 +141,20 @@ Checklist de producao:
   Copiar o segredo `whsec_...` exibido pelo Stripe para `STRIPE_WEBHOOK_SECRET` no
   Render. O retorno do Checkout nao confirma a assinatura: somente o webhook com
   assinatura valida altera o acesso.
-- Antes da primeira cobranca, no Superadmin > Empresas, informe os valores e
-  o periodo de teste. A plataforma cria o produto e os precos mensal/anual pela
-  API do Stripe e guarda os identificadores com alteracao auditada; a chave
-  continua apenas nas variaveis privadas do Render.
+- Antes da primeira cobrança, configure o preço mensal em Superadmin >
+  Empresas e valide o ambiente Stripe. Novos checkouts não oferecem trial;
+  ciclos anuais existentes permanecem históricos e não são oferecidos para
+  novas assinaturas. A chave privada continua somente no Render.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 
 ## Rodar Localmente
 
-```powershell
-npm.cmd install
+No CMD, dentro de `BackEnd`, depois de preparar um banco local e
+`BackEnd/.env.local`:
+
+```bat
+npm.cmd ci
 npm.cmd run dev
 ```
 
@@ -141,21 +162,30 @@ Por padrao, a API local usa a porta configurada em `PORT` ou `3333`.
 
 Rodar migracoes:
 
-```powershell
+```bat
 npm.cmd run migrate
 ```
 
+Esse comando altera o banco indicado por `DATABASE_URL`; confirme a URL antes
+de executá-lo. `npm.cmd run dev` e `npm.cmd start` já chamam as migrações na
+inicialização do servidor.
+
 Limpar dados demonstrativos em ambiente local:
 
-```powershell
+```bat
 npm.cmd run clean:demo
 ```
 
+Use limpeza de dados demonstrativos somente no banco local destinado a isso.
+
 ## Testes
 
-```powershell
+```bat
 npm.cmd test
 ```
+
+Os testes automatizados não substituem a validação de RLS no banco de destino,
+webhooks Stripe assinados, OAuth real ou desempenho de homologação.
 
 ## Backup e Restauracao
 
@@ -221,7 +251,7 @@ Agent:
 
 ## Arquivos de Impressao
 
-Arquivos de impressao nao devem ser salvos diretamente no banco. O banco guarda metadados, como nome, formato, hash, tamanho e chave de armazenamento. O arquivo fica em storage local ou externo, conforme configuracao.
+Arquivos de impressão não são salvos diretamente no banco. O banco guarda metadados, como nome, formato, hash, tamanho e chave de armazenamento. O storage pode ser local no desenvolvimento; em produção, a configuração exige R2.
 
 Antes de enviar um arquivo ao Agent, o BackEnd valida:
 

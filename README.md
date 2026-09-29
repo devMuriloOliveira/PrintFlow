@@ -1,15 +1,17 @@
 ﻿# PrintFlow 3D
 
-PrintFlow 3D e uma plataforma para gestao operacional e financeira de negocios de impressao 3D. O projeto organiza produtos, pedidos, custos, filamentos, impressoras, marketplaces e fila de impressao em uma mesma aplicacao.
+PrintFlow 3D é uma plataforma para gestão operacional e financeira de negócios de impressão 3D. O projeto reúne produtos, custos, estoque, pedidos, clientes, impressoras, marketplaces e fila de produção.
 
 ## Visao Geral
 
-O sistema e dividido em tres partes:
+O repositório contém quatro aplicações independentes:
 
-- `FrontEnd`: interface web em Nuxt/Vue usada pelo usuario.
-- `BackEnd`: API HTTP responsavel por autenticacao, dados do tenant, validacoes, fila de impressao e comandos para o Agent.
-- `Agent`: programa local para Windows que conecta o computador do usuario as impressoras 3D por rede ou USB.
-- `AdminFrontEnd`: portal interno separado para administracao da plataforma. Nao deve ser publicado junto ao painel de clientes.
+- [FrontEnd](./FrontEnd/README.md): painel do cliente em Nuxt/Vue.
+- [BackEnd](./BackEnd/README.md): API, autenticação, isolamento por empresa, persistência e regras de negócio.
+- [Agent](./Agent/README.md): aplicativo Windows que conecta impressoras locais por rede ou USB.
+- [AdminFrontEnd](./AdminFrontEnd/README.md): portal interno de administração, publicado separadamente do painel do cliente.
+
+O FrontEnd e o AdminFrontEnd usam a API; o Agent se comunica com o BackEnd e expõe apenas um serviço local em `127.0.0.1:17873` para detecção pelo navegador. O portal administrativo não é uma extensão do painel do cliente nem substitui a autorização no servidor.
 
 ## Pilares Consolidados
 
@@ -41,10 +43,12 @@ Agent quando nao houver automacao local.
 
 ### 4. Integracoes de Marketplace
 
-O BackEnd centraliza as integracoes e trata o Mercado Livre com OAuth PKCE e
-tentativas temporarias de uso unico. Tokens, codigos de autorizacao e secrets
-ficam fora do FrontEnd, dos logs e do repositorio. A validacao real do provedor
-continua dependendo das variaveis protegidas e da callback registrada.
+O BackEnd centraliza as integrações. Mercado Livre usa OAuth PKCE e tentativas
+temporárias de uso único; a conexão real depende de credenciais protegidas e
+da callback registrada no provedor. Shopee e Amazon podem ser usados como
+canais manuais, mas a integração automática ainda aparece como «Em breve».
+Tokens, códigos de autorização e segredos não devem ir para o Git ou para o
+navegador.
 
 ### 5. Confiabilidade Operacional
 
@@ -60,6 +64,10 @@ com o hardware e as APIs reais antes de serem considerados suporte final.
   PrusaLink ainda requerem validacao com dispositivos e versoes reais das APIs.
 - OAuth de marketplace exige credenciais protegidas e callback configurada no
   ambiente de destino.
+- FREE mantém fluxos manuais úteis; automação e integrações dependem das
+  permissões do plano PRO. O modo mock do FrontEnd não comprova esses contratos.
+- Build, testes locais e push no GitHub não comprovam deploy, cobrança Stripe,
+  isolamento RLS em produção nem operação com hardware real.
 
 ## Como Funciona
 
@@ -93,55 +101,78 @@ Bambu e Marlin/mock estao mais prontos para testes locais. OctoPrint, Moonraker 
 ```text
 .
 |-- Agent
+|-- AdminFrontEnd
 |-- BackEnd
 |-- FrontEnd
+|-- .github/workflows/ci.yml
 |-- package.json
 `-- README.md
 ```
 
-## Rodar Localmente
+## Começar no Windows
 
-Instale as dependencias em cada modulo conforme necessario:
+Use Node.js 24 e npm. O Agent aceita runtime a partir de Node.js 22.13, mas o
+empacotamento Windows atual exige a versão indicada em seu script de build.
+Para a API real, providencie um PostgreSQL **local ou de homologação**: o
+servidor executa migrações e jobs ao iniciar. Não aponte uma sessão de
+desenvolvimento para o banco de produção.
 
-```powershell
-npm.cmd install
-npm.cmd --prefix BackEnd install
-npm.cmd --prefix FrontEnd install
-npm.cmd --prefix Agent install
+No CMD, a partir da raiz do repositório:
+
+```bat
+npm.cmd --prefix BackEnd ci
+npm.cmd --prefix FrontEnd ci
+npm.cmd --prefix AdminFrontEnd ci
+npm.cmd --prefix Agent ci
+copy BackEnd\.env.example BackEnd\.env.local
 ```
 
-Rodar API:
+Edite `BackEnd\.env.local` com **valores locais válidos**, especialmente
+`DATABASE_URL` e os segredos necessários. O arquivo de exemplo contém apenas
+placeholders e não é uma configuração pronta para subir a API. Execute em
+terminais separados:
 
-```powershell
-npm.cmd run dev:back
+```bat
+npm.cmd --prefix BackEnd run dev
 ```
 
-Rodar FrontEnd:
-
-```powershell
-npm.cmd run dev:front
+```bat
+cd FrontEnd
+set NUXT_PUBLIC_API_BASE=http://localhost:3333
+npm.cmd run dev
 ```
 
-Rodar FrontEnd apontando para API local:
+Para o painel administrativo ou o Agent, consulte os README dos respectivos
+módulos antes de iniciar. Não é necessário instalar dependências na raiz: os
+quatro módulos têm seus próprios `package-lock.json`.
 
-```powershell
-npm.cmd run dev:front:local-api
+### Dados fictícios para revisão visual
+
+O FrontEnd possui dados mockados para desenvolvimento. No **CMD do FrontEnd**,
+defina a variável antes de iniciar o Nuxt:
+
+```bat
+cd FrontEnd
+set NUXT_PUBLIC_USE_MOCK_DATA=true
+npm.cmd run dev
 ```
 
-Rodar Agent local:
-
-```powershell
-npm.cmd --prefix Agent run start
-```
+O mock é usado por `useAppData` somente em modo `dev`; ele ajuda a revisar
+gráficos, listas e estados de interface. **Não desativa o login**, não simula
+todas as chamadas da aplicação e não valida backend, persistência, permissões
+ou integrações reais. Para retornar à API, abra outro terminal ou execute
+`set NUXT_PUBLIC_USE_MOCK_DATA=false` antes de reiniciar o servidor.
 
 ## Configuracao
 
 As configuracoes sensiveis devem ficar em variaveis de ambiente locais ou no provedor de hospedagem. Nao coloque senhas, tokens, URLs privadas de banco, chaves de API ou Access Codes de impressoras nos READMEs ou no Git.
 
-Consulte os READMEs especificos:
+Consulte as instruções específicas:
 
+- [FrontEnd](./FrontEnd/README.md)
 - [BackEnd](./BackEnd/README.md)
 - [Agent](./Agent/README.md)
+- [AdminFrontEnd](./AdminFrontEnd/README.md)
 
 ## FrontEnd
 
@@ -200,10 +231,21 @@ FrontEnd build:
 npm.cmd --prefix FrontEnd run build
 ```
 
+AdminFrontEnd build:
+
+```powershell
+npm.cmd --prefix AdminFrontEnd run build
+```
+
+O CI em [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) verifica
+segredos/configuração, testes de BackEnd e Agent, builds dos dois painéis e
+o pacote Windows do Agent. Um push não substitui a conferência do deploy e
+dos fluxos autenticados no ambiente de destino.
+
 ## Seguranca
 
 - O tenant deve ser resolvido no BackEnd a partir do token autenticado.
 - Dados sensiveis ficam em variaveis de ambiente ou armazenamento local protegido.
 - Credenciais de impressoras nao devem ser retornadas para o FrontEnd depois de salvas.
-- Arquivos de impressao devem ser armazenados fora do banco; o banco deve guardar apenas metadados e chave de armazenamento.
+- Arquivos de impressão ficam fora do banco; o banco guarda metadados e chave de armazenamento. Em produção, o BackEnd exige o provedor de object storage configurado.
 - Validacoes de formato, volume, material e perfil devem acontecer antes de enviar um arquivo para impressao.

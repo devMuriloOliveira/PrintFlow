@@ -1,6 +1,6 @@
 # PrintFlow Agent
 
-Programa local para Windows que conecta o PrintFlow as impressoras 3D do usuario. Ele roda no computador do usuario, aparece na bandeja do sistema e executa comandos enviados pelo BackEnd.
+Programa local para Windows que conecta o PrintFlow às impressoras 3D do usuário. Ele roda no computador do usuário, aparece na bandeja do sistema quando iniciado pelo instalador/tray e executa comandos enviados pelo [BackEnd](../BackEnd/README.md). A versão do pacote neste repositório está em `package.json`; a versão mínima aceita pela API é configurável e tem padrão `0.1.10`.
 
 ## Para Que Serve
 
@@ -93,19 +93,23 @@ Adapter com base para conectar, ler status, pausar, retomar, cancelar, enviar ar
 
 ## Armazenamento Local
 
-O Agent salva dados locais em um diretorio proprio. Por padrao, usa a pasta `data` dentro do Agent, ou o diretorio definido por `PRINTFLOW_AGENT_DATA_DIR`.
+No Windows, o diretório padrão é `%APPDATA%\PrintFlow Agent`. Para um ambiente de desenvolvimento isolado, defina `PRINTFLOW_AGENT_DATA_DIR` **antes de iniciar** o processo. O Agent não usa, por padrão, uma pasta `data` dentro do código-fonte.
 
 Arquivos locais principais (todos sob `PRINTFLOW_AGENT_DATA_DIR`, ou no diretório gerenciado do Agent):
 
-- `agent.json`: envelope protegido por DPAPI no Windows com a credencial de
-  pareamento do Agent; instalações antigas são migradas ao carregar.
-- `printer-credentials.json`: credenciais de impressoras salvas localmente.
+- `agent.json`: credencial de pareamento protegida por DPAPI `CurrentUser` no
+  Windows; arquivos antigos com `LocalMachine` podem ser lidos e migrados.
+- `printer-credentials.json`: cofre local de credenciais de impressoras,
+  protegido por DPAPI no Windows.
 - `agent-operations.sqlite`: comandos processados, confirmações pendentes,
   outbox de eventos agregados e último estado local de impressoras/jobs.
-- `cache/files`: arquivos de impressão baixados e validados por hash.
+- `cache/files` e `cache/gcode`: arquivos temporários de impressão/slicing.
 - `logs`: logs locais do Agent.
 
-As credenciais de impressora sao armazenadas criptografadas localmente. Elas nao devem ser copiadas para README, logs ou telas do usuario.
+O conteúdo de `%APPDATA%\PrintFlow Agent` inclui credenciais e histórico
+operacional. Não o inclua em Git, anexos de suporte ou capturas de tela. A
+proteção DPAPI `CurrentUser` vincula os envelopes à conta Windows; copiar os
+arquivos para outro usuário não é um procedimento de migração suportado.
 
 ## Bandeja do Windows
 
@@ -130,23 +134,37 @@ Nao documente codigos reais de pareamento. Eles sao temporarios e devem ser usad
 
 ## Desenvolvimento Local
 
-O Agent requer Node.js 22.13 ou superior, pois usa o SQLite nativo do Node para
-manter comandos concluídos e confirmações pendentes após reinício.
+O runtime do Agent requer Node.js 22.13 ou superior, pois usa o SQLite nativo
+do Node para manter comandos concluídos e confirmações pendentes após reinício.
+No CMD, a partir da raiz do repositório:
 
-```powershell
-npm.cmd install
-$env:PRINTFLOW_API_URL="http://localhost:3333"
+```bat
+cd Agent
+npm.cmd ci
+set PRINTFLOW_API_URL=http://localhost:3333
 npm.cmd run start
 ```
 
-Teste com Bambu simulada:
+Use uma API local ou de homologação. Para não misturar pareamento e credenciais
+com uma instalação existente, escolha um diretório de dados de teste próprio:
 
-```powershell
-$env:PRINTFLOW_DEV_MOCK_BAMBU="true"
+```bat
+set PRINTFLOW_AGENT_DATA_DIR=%LOCALAPPDATA%\PrintFlowAgent-Teste
 npm.cmd run start
 ```
 
-O mock permite validar descoberta, conexao, status, pausa, retomada, cancelamento, desconexao e reconexao sem impressora fisica.
+Teste com Bambu simulada, em ambiente de desenvolvimento:
+
+```bat
+set PRINTFLOW_DEV_MOCK_BAMBU=true
+npm.cmd run start
+```
+
+O mock permite validar descoberta, conexão, status e comandos sem impressora
+física. Ele não demonstra compatibilidade com um equipamento real. Com o Agent
+rodando, `curl.exe http://127.0.0.1:17873/healthz` consulta o serviço local;
+isso não prova que o heartbeat chegou à API nem que um comando de impressão foi
+executado no hardware.
 
 ### OrcaSlicer local
 
@@ -180,7 +198,7 @@ ha fallback entre modelos: sem perfil correspondente o slicing e recusado.
 
 ## Compatibilidade
 
-- Versao minima suportada do Agent: `0.1.10`.
+- Versão mínima padrão aceita pelo BackEnd: `0.1.10` (`MINIMUM_SUPPORTED_AGENT_VERSION`).
 - Versoes anteriores devem usar o instalador completo/de transicao para chegar a uma versao atual; elas nao fazem parte do contrato funcional suportado.
 
 ## Scripts
@@ -200,7 +218,11 @@ ha fallback entre modelos: sem perfil correspondente o slicing e recusado.
 
 ## Gerar Pacote Windows
 
-```powershell
+O script de empacotamento Windows exige **Node.js 24.19.0** por padrão e uma
+URL de API adequada ao pacote. Não use uma URL local em artefatos destinados a
+clientes. Para gerar um pacote no ambiente apropriado:
+
+```bat
 npm.cmd run build:windows
 ```
 
@@ -212,7 +234,7 @@ Agent/dist/PrintFlow-Agent-Windows.zip
 
 Quando gerado com assinatura local de desenvolvimento:
 
-```powershell
+```bat
 npm.cmd run build:windows:dev-signed
 ```
 
@@ -225,7 +247,7 @@ Agent/dist/PrintFlow-Agent-Dev-Certificate.cer
 
 Para uma maquina de teste confiar nesse certificado antes de executar o instalador:
 
-```powershell
+```bat
 powershell -ExecutionPolicy Bypass -File scripts/trust-windows-agent-dev-certificate.ps1 -CertificatePath "dist\PrintFlow-Agent-Dev-Certificate.cer"
 ```
 
@@ -263,9 +285,13 @@ Nao use valores reais de producao nos exemplos do README.
 
 ## Testes
 
-```powershell
+```bat
 npm.cmd test
 ```
+
+O teste inclui `node --check src/index.js` e contratos automatizados. Antes de
+declarar uma instalação funcional, confirme também o processo persistente, o
+`/healthz` local e, em homologação, heartbeat e processamento de um comando.
 
 Os testes atuais cobrem:
 
