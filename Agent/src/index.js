@@ -44,6 +44,9 @@ import {
   removeDiagnosticsToken
 } from './storage/diagnosticsToken.js'
 import {
+  recordOperationalMetric
+} from './runtime/operationalMetrics.js'
+import {
   executeAgentCommand,
   flushPendingCommandCompletions,
   flushPendingEvents,
@@ -55,6 +58,9 @@ import {
 import {
   startAgentWebSocket
 } from './cloud/websocket.js'
+import {
+  startCommandRealtime
+} from './cloud/commandRealtime.js'
 import {
   ensurePrinterConnectionForMonitor,
   monitorPrintJobCompletion
@@ -215,7 +221,7 @@ let pairingAllowed = false
 
 startCacheCleanup()
 
-startLocalServer({
+const localServer = startLocalServer({
   allowedOrigins: config.appOrigins,
   diagnosticsToken: diagnosticsAccess.token,
   canAcceptPairing: () => pairingAllowed && !fatalShutdown.isShutdownRequested(),
@@ -255,10 +261,22 @@ startLocalServer({
   })
 })
 
+await localServer.ready
+
 // Atualiza periodicamente conexoes abertas para detectar
 // impressoes iniciadas fora do Agent e bloquear atualizacoes
 // durante o trabalho ativo.
-startPrinterStatusPolling()
+startPrinterStatusPolling({
+  onStatusChecked: ({ protocol, durationMs, failed }) => {
+    recordOperationalMetric({
+      operations: localOperations,
+      category: 'printer_status',
+      key: protocol,
+      durationMs,
+      failed
+    })
+  }
+})
 
 const recoveredCommands =
   localOperations.recoverInterruptedCommands()
@@ -663,6 +681,7 @@ const checkCommands = async () => {
         apiUrl,
         credentials,
         orcaSlicerPath: process.env.PRINTFLOW_ORCA_SLICER_PATH || '',
+        operations: localOperations,
         uploadSlicedPrintArtifact,
         onPrintJobStarted: ({ command }) => {
           startProductionJobMonitor(
@@ -734,35 +753,25 @@ const commandScheduler = createSingleFlightScheduler({
 
 commandScheduler.schedule(0)
 
-    startCommandEvents({
-      apiUrl,
-      credentials,
-
-      onCommandAvailable: async () => {
-        commandPollDelay =
-          5_000
-
-        commandScheduler.schedule(0)
-      },
-
-      onError: error => {
-        console.log(
-          '[Events] Canal em tempo real indisponivel; polling permanece ativo:',
-          error.message ||
-            error
-        )
-      }
-    })
-
-    startAgentWebSocket({
-      apiUrl,
-      credentials,
-      onCommandAvailable: async () => {
+    const onCommandAvailable = async () => {
         commandPollDelay = 5_000
         commandScheduler.schedule(0)
-      },
+    }
+
+    startCommandRealtime({
+      startWebSocket: callbacks => startAgentWebSocket({
+        apiUrl,
+        credentials,
+        onCommandAvailable,
+        ...callbacks
+      }),
+      startSse: () => startCommandEvents({
+        apiUrl,
+        credentials,
+        onCommandAvailable
+      }),
       onError: error => {
-        console.log('[WebSocket] Canal indisponivel; SSE e polling permanecem ativos:', error.message || error)
+        console.log('[Events] WebSocket indisponivel; SSE e polling permanecem ativos:', error.message || error)
       }
     })
 

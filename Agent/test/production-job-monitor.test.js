@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { measuredMetricsFromStatus, monitorPrintJobCompletion, normalizeCompletionState } from '../src/printing/productionJobMonitor.js'
+import { getNextPollDelay, measuredMetricsFromStatus, monitorPrintJobCompletion, normalizeCompletionState } from '../src/printing/productionJobMonitor.js'
 
 test('monitor de Production Job transforma estado terminal em conclusão idempotente', async () => {
   const calls = []
@@ -19,6 +19,12 @@ test('monitor de Production Job transforma estado terminal em conclusão idempot
 test('monitor nao inventa filamento quando o adapter nao fornece telemetria', () => {
   assert.equal(normalizeCompletionState({ state: 'CANCELLED' }), 'cancelled')
   assert.deepEqual(measuredMetricsFromStatus({ status: { state: 'FINISH' }, startedAt: null }), { actualPrintSeconds: null, actualFilamentGrams: null, actualFilamentMillimeters: null })
+})
+
+test('monitor reduz polling em impressao estavel e preserva resposta rapida perto do fim ou em pausa', () => {
+  assert.equal(getNextPollDelay({ status: { state: 'RUNNING', progress: 42 }, pollMs: 5000, stablePollMs: 15000 }), 15000)
+  assert.equal(getNextPollDelay({ status: { state: 'RUNNING', progress: 95 }, pollMs: 5000, stablePollMs: 15000 }), 5000)
+  assert.equal(getNextPollDelay({ status: { state: 'PAUSED' }, pollMs: 5000, stablePollMs: 15000 }), 5000)
 })
 
 test('monitor reconecta e continua depois de falha transitoria', async () => {

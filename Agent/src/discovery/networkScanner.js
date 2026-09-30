@@ -115,6 +115,19 @@ const checkPort = (
   })
 }
 
+export const findOpenPrinterPorts = async (
+  ip,
+  {
+    ports = [80, 7125, 5000, 8883],
+    check = checkPort
+  } = {}
+) => {
+  const results = await Promise.all(
+    ports.map(async port => ({ port, open: await check(ip, port) }))
+  )
+  return results.filter(result => result.open).map(result => result.port)
+}
+
 // ======================================================
 // MOONRAKER / KLIPPER
 // ======================================================
@@ -522,26 +535,9 @@ export const discoverBambuSsdp = ({
 const identifyPrinter = async (
   ip
 ) => {
-  const commonPorts = [
-    80,
-    7125,
-    5000,
-    8883
-  ]
+  const openPorts = await findOpenPrinterPorts(ip)
 
-  for (
-    const port
-    of commonPorts
-  ) {
-    const open =
-      await checkPort(
-        ip,
-        port
-      )
-
-    if (!open) {
-      continue
-    }
+  for (const port of openPorts) {
 
     console.log(
       `[Discovery] Porta aberta: ${ip}:${port}`

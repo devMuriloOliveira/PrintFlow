@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import {
   discoverBambuSsdp,
+  findOpenPrinterPorts,
   parseSsdpHeaders,
   getNetworkHostRange
 } from '../src/discovery/networkScanner.js'
@@ -19,6 +20,25 @@ test('SSDP extrai serial Bambu e normaliza headers', () => {
 
   assert.equal(headers.server, 'Bambu Lab X1C')
   assert.equal(headers.serial, 'ABC123')
+})
+
+test('descoberta consulta portas de um host em paralelo', async () => {
+  const started = []
+  const releases = []
+  const checks = [80, 7125, 5000, 8883].map(port => new Promise(resolve => {
+    releases.push(resolve)
+  }))
+  const pending = findOpenPrinterPorts('192.168.1.20', {
+    check: async (_ip, port) => {
+      started.push(port)
+      await checks[[80, 7125, 5000, 8883].indexOf(port)]
+      return port === 7125
+    }
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(started.sort((a, b) => a - b), [80, 5000, 7125, 8883])
+  releases.forEach(release => release())
+  assert.deepEqual(await pending, [7125])
 })
 
 test('SSDP extrai serial quando a resposta usa XML de dispositivo', async () => {

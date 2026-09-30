@@ -354,15 +354,16 @@ export const startLocalServer = ({
     )
   })
 
-  server.listen(
-    localPort,
-    '127.0.0.1',
-    () => {
-      console.log(
-        `[Local] Agent local ouvindo em http://127.0.0.1:${localPort}`
-      )
-    }
-  )
+  const ready = new Promise((resolve, reject) => {
+    server.once('listening', resolve)
+    server.once('error', reject)
+  })
+
+  server.listen(localPort, '127.0.0.1', () => {
+    console.log(`[Local] Agent local ouvindo em http://127.0.0.1:${localPort}`)
+  })
+
+  server.ready = ready
 
   return server
 }

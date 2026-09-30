@@ -8,7 +8,7 @@ export const webSocketUrlFor = apiUrl => {
   return url.toString()
 }
 
-export const startAgentWebSocket = ({ apiUrl, credentials, onCommandAvailable, onError = () => {}, WebSocketImpl = WebSocket, waitImpl = wait, randomImpl = Math.random }) => {
+export const startAgentWebSocket = ({ apiUrl, credentials, onCommandAvailable, onError = () => {}, onOpen = () => {}, onClose = () => {}, WebSocketImpl = WebSocket, waitImpl = wait, randomImpl = Math.random }) => {
   let stopped = false
   let socket = null
   let reconnectDelay = 1_000
@@ -18,7 +18,7 @@ export const startAgentWebSocket = ({ apiUrl, credentials, onCommandAvailable, o
         await new Promise((resolve, reject) => {
           let opened = false
           socket = new WebSocketImpl(webSocketUrlFor(apiUrl), { headers: { 'x-agent-id': credentials.agentId, 'x-agent-secret': credentials.agentSecret }, perMessageDeflate: false })
-          socket.once('open', () => { opened = true; reconnectDelay = 1_000 })
+          socket.once('open', () => { opened = true; reconnectDelay = 1_000; onOpen() })
           socket.once('error', error => { if (!opened) reject(error); else onError(error) })
           socket.on('message', async raw => {
             try {
@@ -26,7 +26,7 @@ export const startAgentWebSocket = ({ apiUrl, credentials, onCommandAvailable, o
               if (event?.type === 'command_available') await onCommandAvailable()
             } catch {}
           })
-          socket.once('close', () => resolve())
+          socket.once('close', () => { if (!stopped) onClose(); resolve() })
         })
       } catch (error) {
         if (!stopped) onError(error)

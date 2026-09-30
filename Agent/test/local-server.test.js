@@ -206,3 +206,12 @@ test('token de diagnostico e rotacionado no armazenamento local', async () => {
   assert.equal(await readDiagnosticsToken(), second.token)
   removeDiagnosticsToken()
 })
+
+test('server informa falha de bind para impedir uma segunda instancia do Agent', async () => {
+  const first = startLocalServer({ port: 0 })
+  await first.ready
+  const port = first.address().port
+  const duplicate = startLocalServer({ port })
+  await assert.rejects(duplicate.ready, /EADDRINUSE/)
+  await new Promise(resolve => first.close(resolve))
+})

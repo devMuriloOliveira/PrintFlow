@@ -89,6 +89,47 @@ test('polling tolera falha transitoria e remove conexao apos limite consecutivo'
   )
 })
 
+test('polling consulta conexoes independentes em paralelo', async t => {
+  const firstPrinter = { ...printer, serial: 'PFMOCKPOLLPARALLEL001' }
+  const secondPrinter = { ...printer, serial: 'PFMOCKPOLLPARALLEL002' }
+  await connectPrinter(firstPrinter, { accessCode: 'mock-access-code' })
+  await connectPrinter(secondPrinter, { accessCode: 'mock-access-code' })
+
+  const firstEntry = getActiveConnection(firstPrinter)
+  const secondEntry = getActiveConnection(secondPrinter)
+  const originalFirstStatus = firstEntry.adapter.getStatus
+  let firstRequested
+  let secondRequested
+  let releaseFirst
+  let releaseSecond
+
+  t.after(async () => {
+    firstEntry.adapter.getStatus = originalFirstStatus
+    await disconnectPrinter(firstPrinter)
+    await disconnectPrinter(secondPrinter)
+  })
+
+  firstEntry.adapter.getStatus = async connection => {
+    if (connection === firstEntry.connection) {
+      firstRequested()
+      await new Promise(resolve => { releaseFirst = resolve })
+      return { state: 'IDLE' }
+    }
+    secondRequested()
+    await new Promise(resolve => { releaseSecond = resolve })
+    return { state: 'IDLE' }
+  }
+
+  const firstStarted = new Promise(resolve => { firstRequested = resolve })
+  const secondStarted = new Promise(resolve => { secondRequested = resolve })
+  const refresh = refreshActivePrinterStatuses()
+  await Promise.all([firstStarted, secondStarted])
+
+  releaseFirst()
+  releaseSecond()
+  assert.deepEqual(await refresh, { refreshed: 2, failed: 0, skipped: false })
+})
+
 test('queda persistente durante impressao preserva bloqueio de atualizacao', async t => {
   const activePrinter = {
     ...printer,

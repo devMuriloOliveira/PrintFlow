@@ -230,7 +230,8 @@ export const getDisconnectedActivePrintCount = () => {
 export const refreshActivePrinterStatuses = async ({
   failureThreshold = Number(
     process.env.PRINTFLOW_PRINTER_STATUS_FAILURE_THRESHOLD || 3
-  )
+  ),
+  onStatusChecked = () => {}
 } = {}) => {
   if (statusPollingInFlight) {
     return {
@@ -249,16 +250,17 @@ export const refreshActivePrinterStatuses = async ({
   let failed = 0
 
   try {
-    for (const [key, entry] of activeConnections.entries()) {
+    await Promise.all(Array.from(activeConnections.entries(), async ([key, entry]) => {
       if (!isConnectionEntryActive(entry)) {
         removeStaleConnection(key)
-        continue
+        return
       }
 
       if (typeof entry.adapter?.getStatus !== 'function') {
-        continue
+        return
       }
 
+      const startedAt = Date.now()
       try {
         entry.lastStatus = await entry.adapter.getStatus(entry.connection)
         entry.lastStatusAt = new Date()
@@ -268,8 +270,10 @@ export const refreshActivePrinterStatuses = async ({
           status: 'connected',
           lastStatus: entry.lastStatus
         })
+        onStatusChecked({ protocol: entry.printer?.protocol || 'unknown', durationMs: Date.now() - startedAt, failed: false })
         refreshed += 1
       } catch (error) {
+        onStatusChecked({ protocol: entry.printer?.protocol || 'unknown', durationMs: Date.now() - startedAt, failed: true })
         failed += 1
         entry.statusFailureCount = Number(entry.statusFailureCount || 0) + 1
 
@@ -281,7 +285,7 @@ export const refreshActivePrinterStatuses = async ({
           !connectionClosed &&
           entry.statusFailureCount < requiredFailures
         ) {
-          continue
+          return
         }
 
         if (entry.connection) {
@@ -292,7 +296,7 @@ export const refreshActivePrinterStatuses = async ({
           'Impressora indisponivel ou fora da rede.'
         )
       }
-    }
+    }))
   } finally {
     statusPollingInFlight = false
   }
@@ -301,7 +305,8 @@ export const refreshActivePrinterStatuses = async ({
 }
 
 export const startPrinterStatusPolling = ({
-  intervalMs = Number(process.env.PRINTFLOW_PRINTER_STATUS_POLL_MS || 15000)
+  intervalMs = Number(process.env.PRINTFLOW_PRINTER_STATUS_POLL_MS || 15000),
+  onStatusChecked
 } = {}) => {
   if (statusPollingTimer) {
     return () => stopPrinterStatusPolling()
@@ -309,7 +314,7 @@ export const startPrinterStatusPolling = ({
 
   const delay = Math.max(5000, Number(intervalMs) || 15000)
   statusPollingTimer = setInterval(() => {
-    refreshActivePrinterStatuses().catch(error => {
+    refreshActivePrinterStatuses({ onStatusChecked }).catch(error => {
       console.log(`[PrinterManager] Falha ao atualizar estados: ${error.message}`)
     })
   }, delay)
