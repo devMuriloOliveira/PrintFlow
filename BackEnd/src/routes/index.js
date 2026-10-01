@@ -76,6 +76,7 @@ import {
   handleMercadoPagoWebhook,
   handleMercadoPagoWebhookProbe,
   handleStripeBillingSummary,
+  handleSubscriptionAccess,
   handleStripeCheckoutCreate,
   handleStripeSubscriptionCancellation,
   handleStripeSubscriptionPlanChange,
@@ -724,6 +725,7 @@ export const handleRequest =
       }
 
       if (req.method === 'GET' && url.pathname === '/api/billing/stripe') return await handleStripeBillingSummary(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/subscription/access') return await handleSubscriptionAccess(req, res)
       if (req.method === 'POST' && url.pathname === '/api/billing/stripe/checkout') return await handleStripeCheckoutCreate(req, res)
       if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/cancel') return await handleStripeSubscriptionCancellation(req, res, true)
       if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/resume') return await handleStripeSubscriptionCancellation(req, res, false)

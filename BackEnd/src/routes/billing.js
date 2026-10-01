@@ -1,6 +1,7 @@
 import { readJsonBody, readRawBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { getAuthUser } from './auth.js'
+import { getTenantSubscriptionAccess } from '../services/subscriptionEntitlements.js'
 import {
   createMercadoPagoCheckout,
   getMercadoPagoBillingSummary,
@@ -63,6 +64,12 @@ export const handleMercadoPagoWebhookProbe = async (_req, res) => sendJson(res, 
 export const handleStripeBillingSummary = async (req, res) => {
   const user = await owner(req, res); if (!user) return
   return sendJson(res, 200, await getStripeBillingSummary(user.tenantId))
+}
+
+export const handleSubscriptionAccess = async (req, res) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Login necessario.' })
+  return sendJson(res, 200, await getTenantSubscriptionAccess({ tenantId: user.tenantId, user }))
 }
 
 export const handleStripeCheckoutCreate = async (req, res) => {

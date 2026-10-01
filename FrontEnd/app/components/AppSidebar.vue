@@ -20,6 +20,8 @@ const childIsActive = (to: string) => {
 const isLocked = (to: string) => subscriptionAccess.isLocked(to)
 const targetFor = (to: string) => isLocked(to) ? subscriptionAccess.upgradePath : to
 
+onMounted(() => { void subscriptionAccess.load() })
+
 const sections = [
   {
     label: 'PRINCIPAL',

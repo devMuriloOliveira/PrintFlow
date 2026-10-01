@@ -145,3 +145,33 @@ export const assertTenantResourceLimit = async (client, tenantId, resource, { in
 
 export const supportsSubscriptionFeature = (entitlement, feature) =>
   !managedFeatures.has(feature) || !entitlement.configured || entitlement.features[feature] === true
+
+export const subscriptionAccessFromEntitlement = (entitlement, usage = {}) => ({
+  planCode: entitlement.planCode || '',
+  status: entitlement.status,
+  mode: entitlement.mode,
+  features: entitlement.features,
+  limits: entitlement.limits,
+  usage
+})
+
+export const getTenantSubscriptionAccess = async ({ tenantId, user = null }) => {
+  const entitlement = await resolveTenantEntitlement(tenantId, null, user)
+  if (!hasDatabase || isPlatformDeveloper(user)) return subscriptionAccessFromEntitlement(entitlement)
+
+  const limitedResources = Object.entries(resourceLimits)
+    .map(([resource, config]) => ({ resource, config, limit: numberLimit(entitlement.limits[resource]) }))
+    .filter((item) => item.limit)
+
+  const usageEntries = await withTenant(tenantId, async (client) => Promise.all(
+    limitedResources.map(async ({ resource, config, limit }) => {
+      const result = await client.query(
+        `select count(*)::int as count from ${config.table} where tenant_id = $1 and ${config.where}`,
+        [tenantId]
+      )
+      return [resource, { used: Number(result.rows[0]?.count || 0), limit }]
+    })
+  ))
+
+  return subscriptionAccessFromEntitlement(entitlement, Object.fromEntries(usageEntries))
+}

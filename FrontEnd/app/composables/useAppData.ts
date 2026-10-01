@@ -136,6 +136,15 @@ export type AppData = {
   settings?: Record<string, unknown> | null
 }
 
+export type SubscriptionAccess = {
+  planCode: string;
+  status: string;
+  mode: 'full' | 'read_only';
+  features: Record<string, boolean>;
+  limits: Record<string, number>;
+  usage: Record<string, { used: number; limit: number }>;
+}
+
 export type DashboardSummary = {
   totals: { revenue: number; netRevenue: number; profit: number; fees: number; shipping: number; manualExpenses: number; recipeCost: number; expenseTotal: number; orderCount: number; ticket: number; margin: number }
   monthlyRevenue: number[]
@@ -854,6 +863,14 @@ export const useAppData = () => {
     headers: resourceHeaders()
   })
 
+  const getSubscriptionAccess = () => mockEnabled ? Promise.resolve({
+    planCode: 'starter', status: 'active', mode: 'full' as const,
+    features: { coreOperations: true, marketplaces: true, advancedReports: true, manualPrinters: true, agent: true, team: true },
+    limits: {}, usage: {}
+  }) : $fetch<SubscriptionAccess>(apiUrl('/api/subscription/access'), {
+    headers: resourceHeaders()
+  })
+
   const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
     $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
@@ -944,6 +961,7 @@ export const useAppData = () => {
     , lookupCompanyByCnpj
     , exportTenantData
     , getStripeBilling
+    , getSubscriptionAccess
     , createStripeCheckout, changeStripeSubscriptionPlan
     , cancelStripeSubscription
     , resumeStripeSubscription

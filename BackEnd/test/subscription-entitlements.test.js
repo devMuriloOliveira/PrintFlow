@@ -9,6 +9,7 @@ const {
   canUseSubscriptionRequest,
   entitlementFromSubscription,
   isPlatformDeveloper,
+  subscriptionAccessFromEntitlement,
   subscriptionFeatureForRequest,
   supportsSubscriptionFeature
 } = await import('../src/services/subscriptionEntitlements.js')
@@ -62,6 +63,18 @@ test('FREE permite a operacao manual e bloqueia somente recursos PRO', () => {
   assert.equal(supportsSubscriptionFeature(entitlement, 'agent'), false)
   assert.equal(supportsSubscriptionFeature(entitlement, 'advancedReports'), false)
   assert.equal(canUseSubscriptionRequest({ method: 'GET', pathname: '/api/orders', entitlement }), true)
+})
+
+test('resumo de acesso expoe somente limites, recursos e uso do tenant', () => {
+  const entitlement = entitlementFromSubscription({
+    status: 'active', plan_code: 'free', limits: { products: 10 }, features: { agent: false }
+  })
+  const access = subscriptionAccessFromEntitlement(entitlement, { products: { used: 8, limit: 10 } })
+
+  assert.deepEqual(access, {
+    planCode: 'free', status: 'active', mode: 'full',
+    features: { agent: false }, limits: { products: 10 }, usage: { products: { used: 8, limit: 10 } }
+  })
 })
 
 test('PRO mantem acesso durante grace, mas nao quando o provider encerra o acesso', () => {
