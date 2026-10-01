@@ -196,6 +196,7 @@ import {
   handleAgentDiscoverCreate,
   handleAgentCommandsPending,
   handleAgentCommandComplete,
+  handleAgentCommandProgress,
   handleAgentCommandGet,
   handleAgentPrintFileGet,
   handleAgentConnectPrinterCreate,
@@ -595,6 +596,11 @@ export const handleRequest =
         )
       }
 
+      const agentCommandProgressMatch = url.pathname.match(/^\/api\/agents\/commands\/([^/]+)\/progress$/)
+      if (req.method === 'POST' && agentCommandProgressMatch) {
+        return await handleAgentCommandProgress(req, res, agentCommandProgressMatch[1])
+      }
+
       // ==================================================
       // DEFINIR ROTAS PÚBLICAS DO AGENT
       // ==================================================
@@ -616,6 +622,7 @@ export const handleRequest =
             /^\/api\/agents\/commands\/[^/]+\/complete$/.test(
               url.pathname
             ) ||
+            /^\/api\/agents\/commands\/[^/]+\/progress$/.test(url.pathname) ||
             /^\/api\/agents\/print-jobs\/[^/]+\/metrics$/.test(url.pathname)
           )
         ) ||

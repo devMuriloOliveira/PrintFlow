@@ -156,7 +156,8 @@ export const prusaLinkAdapter = {
 
   async connect(
     printer,
-    options = {}
+    options = {},
+    { signal } = {}
   ) {
     const baseUrl =
       buildBaseUrl(
@@ -184,6 +185,7 @@ export const prusaLinkAdapter = {
         `${baseUrl}/api/version`,
         {
           timeout: 8000,
+          signal,
           auth: {
             username,
             password
@@ -208,7 +210,8 @@ export const prusaLinkAdapter = {
   },
 
   async disconnect(
-    connection
+    connection,
+    { signal } = {}
   ) {
     if (connection) {
       connection.connected =
@@ -222,7 +225,8 @@ export const prusaLinkAdapter = {
   },
 
   async getStatus(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -233,6 +237,7 @@ export const prusaLinkAdapter = {
         `${connection.baseUrl}/api/printer`,
         {
           timeout: 8000,
+          signal,
           auth:
             auth(
               connection
@@ -248,6 +253,7 @@ export const prusaLinkAdapter = {
           `${connection.baseUrl}/api/job`,
           {
             timeout: 8000,
+            signal,
             auth:
               auth(
                 connection
@@ -273,7 +279,8 @@ export const prusaLinkAdapter = {
 
   async startPrint(
     connection,
-    job
+    job,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -300,6 +307,7 @@ export const prusaLinkAdapter = {
         buffer,
         {
           timeout: 120_000,
+          signal,
           maxBodyLength: Infinity,
           maxContentLength: Infinity,
           auth:
@@ -335,7 +343,8 @@ export const prusaLinkAdapter = {
   },
 
   async pause(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -343,7 +352,8 @@ export const prusaLinkAdapter = {
 
     const status =
       await this.getStatus(
-        connection
+        connection,
+        { signal }
       )
 
     const jobId =
@@ -362,6 +372,7 @@ export const prusaLinkAdapter = {
       null,
       {
         timeout: 8000,
+        signal,
         auth:
           auth(
             connection
@@ -376,7 +387,8 @@ export const prusaLinkAdapter = {
   },
 
   async resume(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -384,7 +396,8 @@ export const prusaLinkAdapter = {
 
     const status =
       await this.getStatus(
-        connection
+        connection,
+        { signal }
       )
 
     const jobId =
@@ -403,6 +416,7 @@ export const prusaLinkAdapter = {
       null,
       {
         timeout: 8000,
+        signal,
         auth:
           auth(
             connection
@@ -417,7 +431,8 @@ export const prusaLinkAdapter = {
   },
 
   async cancel(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -425,7 +440,8 @@ export const prusaLinkAdapter = {
 
     const status =
       await this.getStatus(
-        connection
+        connection,
+        { signal }
       )
 
     const jobId =
@@ -443,6 +459,7 @@ export const prusaLinkAdapter = {
       `${connection.baseUrl}/api/v1/job/${jobId}`,
       {
         timeout: 8000,
+        signal,
         auth:
           auth(
             connection

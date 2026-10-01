@@ -68,7 +68,7 @@ export const handleIntegrationsOverview = async (req, res) => {
   const [marketplaces, agents] = await Promise.all([
     listMarketplaceIntegrations(user.tenantId),
     tenantQuery(user.tenantId, `
-      select id, name, machine_name, platform, status, last_seen_at
+      select id, name, machine_name, platform, status, last_seen_at, runtime_health
         from agents
        where tenant_id = $1
        order by created_at desc
@@ -80,7 +80,8 @@ export const handleIntegrationsOverview = async (req, res) => {
     agents: agents.rows.map((agent) => ({
       id: String(agent.id), name: agent.name || agent.machine_name,
       machineName: agent.machine_name, platform: agent.platform,
-      status: agent.status, lastSeenAt: agent.last_seen_at
+      status: agent.status, lastSeenAt: agent.last_seen_at,
+      runtimeHealth: agent.runtime_health || null
     })),
     email: {
       provider: 'Resend',

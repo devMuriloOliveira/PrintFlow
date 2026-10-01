@@ -112,6 +112,10 @@ O endpoint `/diagnostics` exige o token. Em desenvolvimento, consulte-o com
 `npm.cmd run diagnostics` a partir de `Agent`; nao copie o arquivo de token
 para anexos de suporte.
 
+Para gerar um pacote JSON seguro com o snapshot local, sem logs brutos nem
+credenciais, execute `npm.cmd run support-bundle -- "C:\\Temp\\printflow-support.json"`.
+O comando recusa sobrescrever um arquivo existente.
+
 O conteúdo de `%APPDATA%\PrintFlow Agent` inclui credenciais e histórico
 operacional. Não o inclua em Git, anexos de suporte ou capturas de tela. A
 proteção DPAPI `CurrentUser` vincula os envelopes à conta Windows; copiar os
@@ -286,6 +290,33 @@ credenciais de impressoras, cache, historico e logs.
 - `PRINTFLOW_AGENT_DATA_DIR`: diretorio local de dados e credenciais.
 - `PRINTFLOW_AGENT_LOG_DIR`: diretorio local dos logs.
 - `PRINTFLOW_DEV_MOCK_BAMBU`: ativa impressora Bambu simulada quando `true`.
+- `MAX_CONCURRENT_PRINTER_COMMANDS` (padrao `4`): limite global de comandos de impressora; cada impressora continua serializada.
+- `MAX_CONCURRENT_SLICING_JOBS` (padrao `1`): limite separado para comandos de slicing.
+- `PRINTFLOW_AGENT_OUTBOX_MAX_ATTEMPTS` (padrao `10`): tentativas de envio antes de marcar eventos/metricas invalidos como dead-letter.
+- `PRINTFLOW_AGENT_MAX_PENDING_OPERATIONS` (padrao `5000`, minimo efetivo `100`): pausa temporariamente a busca de novos comandos quando o total local pendente atinge o limite, preservando comandos ja recebidos.
+- `PRINTFLOW_AGENT_HEALTH_SNAPSHOT_MS` (padrao/minimo `60000`): intervalo minimo para enviar health agregado junto ao heartbeat, sem uma requisicao por metrica.
+- As metricas operacionais guardam buckets limitados de duracao; o Cloud estima p50/p95/p99 pelo limite superior de cada faixa e ignora contadores antigos que ainda nao tinham histograma.
+- `PRINTFLOW_AGENT_DISCOVERY_TIMEOUT_MS` (padrao `120000`, aceito entre `1000` e `600000`): limite total da descoberta de impressoras; cancelamento fecha conexoes de rede e interrompe sondas seriais.
+- `PRINTFLOW_AGENT_CONNECT_TIMEOUT_MS` (padrao `30000`), `PRINTFLOW_AGENT_STATUS_TIMEOUT_MS` (padrao `30000`), `PRINTFLOW_AGENT_CONTROL_TIMEOUT_MS` (padrao `15000`), `PRINTFLOW_AGENT_DISCONNECT_TIMEOUT_MS` (padrao `15000`) e `PRINTFLOW_AGENT_START_PRINT_TIMEOUT_MS` (padrao `180000`): limites centralizados por operacao de adapter.
+- `PRINTFLOW_AGENT_WS_POLL_MS` (padrao `90000`) e `PRINTFLOW_AGENT_SSE_POLL_MS` (padrao `45000`): polling de seguranca enquanto WebSocket ou SSE estao conectados; sem realtime o polling usa backoff ate `30000` ms. O agendamento recebe jitter de aproximadamente 10% para espalhar consultas entre Agents.
+- `PRINTFLOW_AGENT_SHUTDOWN_TIMEOUT_MS` (padrao `20000`): limite do encerramento gracioso.
+- `PRINTFLOW_PRINT_EVENT_WAIT_MS` (padrao `15000`): quanto o monitor aguarda um status normalizado antes de consultar a impressora como fallback.
+
+## Concorrencia e recuperacao
+
+Comandos chegam do Cloud por polling/realtime e entram em um dispatcher local com pools separados para impressoras e slicing. Comandos da mesma impressora preservam a ordem; impressoras diferentes podem executar em paralelo ate `MAX_CONCURRENT_PRINTER_COMMANDS`. O `PrinterManager` tambem serializa operacoes fisicas por chave estavel e compartilha uma conexao em andamento para chamadas simultaneas.
+
+Operacoes dos adapters recebem um `AbortSignal` e um timeout central. Os adapters HTTP OctoPrint, Moonraker e PrusaLink propagam o sinal ao Axios; protocolos/bibliotecas que nao aceitam cancelamento podem terminar em background, mantendo o lock daquela impressora ate a Promise original finalizar. A falha fica registrada no health local e o restante das impressoras continua trabalhando.
+
+Falhas consecutivas degradam a saude por impressora e abrem um circuito para novas conexoes por um backoff exponencial com jitter e teto de 60 segundos. Uma operacao bem-sucedida limpa as falhas consecutivas.
+
+Eventos e metricas locais usam retry individual com backoff, classificacao de respostas 4xx permanentes e dead-letter apos o limite configurado. Uma falha nao interrompe o restante do lote. Conclusoes de comandos permanecem persistidas e tambem usam retry agendado para nao bloquearem outros itens.
+
+`SIGINT` e `SIGTERM` param novas buscas, timers e realtime, drenam comandos, tentam sincronizar filas, desconectam adapters e fecham o servidor local e SQLite dentro do timeout configurado. O endpoint local de diagnostico inclui versoes/runtime, conectividade do backend, modo realtime, estado SQLite, uso agregado do cache (contagem/tamanho/pins/temporarios), contagens/outbox dead-letter e health de impressoras; ele continua protegido pelo token local e sanitiza campos sensiveis. O heartbeat envia um snapshot agregado, sem identificadores de impressora nem segredos; o Backend normaliza e mantém o último snapshot por Agent para a visão de integrações.
+
+O barramento interno publica eventos normalizados de conexao e mudanca de status/progresso pelo `PrinterManager`, sem payloads crus nem credenciais. O MQTT da Bambu tambem publica telemetria diretamente no barramento, com remocao do listener no disconnect. O Production Job Monitor consome esses eventos quando disponiveis e consulta o adapter apos `PRINTFLOW_PRINT_EVENT_WAIT_MS` sem evento. Moonraker WebSocket e eventos nativos de plugins OctoPrint ainda nao estao ligados; o polling de reserva continua necessario para eles, PrusaLink e Marlin.
+
+Durante a descoberta, o Agent agrupa e envia atualizacoes limitadas ao endpoint autenticado do comando; a tela existente mescla os candidatos enquanto a busca continua. O payload aceita no maximo 50 impressoras e whitelist de campos, sem codigos ou tokens. O banco guarda apenas o progresso atual do comando, nao um historico de eventos.
 
 Nao use valores reais de producao nos exemplos do README.
 

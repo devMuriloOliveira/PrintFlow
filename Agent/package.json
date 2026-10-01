@@ -1,6 +1,6 @@
 {
   "name": "printflow-agent",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,6 +12,7 @@
     "dev": "nodemon src/index.js",
     "test": "node --check src/index.js && node --test",
     "diagnostics": "node scripts/printflow-agent-diagnostics.mjs",
+    "support-bundle": "node scripts/printflow-agent-support-bundle.mjs",
     "generate:icon": "node scripts/generate-windows-icon.js",
     "build:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1",
     "build:windows:dev-signed": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1 -SignDev",

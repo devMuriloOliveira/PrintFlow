@@ -39,6 +39,28 @@ const createStore = async () => {
   }
 }
 
+test('lista metricas locais por tipo com limite seguro para heartbeat', async () => {
+  const { directory, operations } = await createStore()
+  try {
+    operations.upsertLocalState('operational_metric', 'printer_status:moonraker', { category: 'printer_status', count: 4 })
+    operations.upsertLocalState('other', 'private', { password: 'not-selected' })
+
+    assert.deepEqual(operations.listLocalStatesByType('operational_metric', 50).map(item => ({
+      entityType: item.entityType,
+      entityId: item.entityId,
+      state: item.state
+    })), [{
+      entityType: 'operational_metric',
+      entityId: 'printer_status:moonraker',
+      state: { category: 'printer_status', count: 4 }
+    }])
+    assert.equal(operations.listLocalStatesByType('operational_metric', 0).length, 1)
+  } finally {
+    operations.close()
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
 test(
   'persiste resultado e impede executar novamente o mesmo command_id',
   async () => {
@@ -223,7 +245,7 @@ test(
 
     assert.equal(
       operations.schemaVersion,
-      6
+      8
     )
     assert.deepEqual(
       operations.begin({
@@ -273,25 +295,19 @@ test(
 
     const attempts = []
 
-    await assert.rejects(
-      flushPendingCommandCompletions({
-        operations,
-        complete: async (
-          commandId
-        ) => {
-          attempts.push(
-            commandId
-          )
-          throw new Error(
-            'rede indisponivel'
-          )
-        }
-      }),
-      /rede indisponivel/
-    )
+    const initialTime = Date.now()
+    const failed = await flushPendingCommandCompletions({
+      operations,
+      now: () => initialTime,
+      complete: async commandId => {
+        attempts.push(commandId)
+        throw new Error('rede indisponivel')
+      }
+    })
+    assert.equal(failed, 0)
 
     assert.equal(
-      operations.listPendingCompletions()
+      operations.listPendingCompletions(20, new Date(initialTime + 10_000).toISOString())
         .length,
       1
     )
@@ -299,6 +315,7 @@ test(
     const flushed =
       await flushPendingCommandCompletions({
         operations,
+        now: () => initialTime + 10_000,
         complete: async (
           commandId,
           result
@@ -418,30 +435,28 @@ test(
       }
     )
 
-    await assert.rejects(
-      flushPendingEvents({
-        operations,
-        publish: async () => {
-          throw new Error(
-            'rede indisponivel'
-          )
-        }
-      }),
-      /rede indisponivel/
-    )
+    const initialTime = Date.now()
+    const failed = await flushPendingEvents({
+      operations,
+      now: () => initialTime,
+      random: () => 0.5,
+      publish: async () => { throw new Error('rede indisponivel') }
+    })
+    assert.equal(failed, 0)
 
     assert.equal(
-      operations.listPendingEvents().length,
+      operations.listPendingEvents(20, new Date(initialTime + 10_000).toISOString()).length,
       1
     )
     assert.equal(
-      operations.listPendingEvents()[0].attempts,
+      operations.listPendingEvents(20, new Date(initialTime + 10_000).toISOString())[0].attempts,
       1
     )
 
     const synchronized =
       await flushPendingEvents({
         operations,
+        now: () => initialTime + 10_000,
         publish: async event => {
           assert.equal(
             event.type,
@@ -473,6 +488,70 @@ test(
     )
   }
 )
+
+test('evento defeituoso vai para dead-letter e não bloqueia eventos posteriores', async () => {
+  const { directory, operations } = await createStore()
+  operations.queueEvent('test.valid.first', { order: 1 })
+  operations.queueEvent('test.invalid', { order: 2 })
+  operations.queueEvent('test.valid.last', { order: 3 })
+  const delivered = []
+
+  const synchronized = await flushPendingEvents({
+    operations,
+    publish: async event => {
+      if (event.type === 'test.invalid') {
+        const error = new Error('payload rejected')
+        error.statusCode = 400
+        throw error
+      }
+      delivered.push(event.type)
+    }
+  })
+
+  assert.equal(synchronized, 2)
+  assert.deepEqual(delivered, ['test.valid.first', 'test.valid.last'])
+  assert.deepEqual(operations.getOutboxEventCounts(), { pending: 0, retrying: 0, dead_letter: 1 })
+  assert.deepEqual(operations.listPendingEvents(), [])
+  assert.equal(operations.listDeadLetterEvents()[0].eventType, 'test.invalid')
+  assert.deepEqual(operations.listDeadLetterEvents()[0].payload, { order: 2 })
+
+  operations.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
+
+test('falha de uma métrica ou conclusão não bloqueia os itens seguintes', async () => {
+  const { directory, operations } = await createStore()
+  operations.queueProductionMetrics({ printJobId: 'job-a', payload: { idempotencyKey: 'metric-a' } })
+  operations.queueProductionMetrics({ printJobId: 'job-b', payload: { idempotencyKey: 'metric-b' } })
+  const metricResult = await flushPendingProductionMetrics({
+    operations,
+    report: async (_id, payload) => {
+      if (payload.idempotencyKey === 'metric-a') {
+        const error = new Error('invalid metric')
+        error.statusCode = 422
+        throw error
+      }
+    }
+  })
+  assert.equal(metricResult, 1)
+  assert.equal(operations.getDeadLetterProductionMetricCount(), 1)
+  assert.equal(operations.listPendingProductionMetrics().length, 0)
+
+  for (const commandId of ['completion-a', 'completion-b']) {
+    await executeAgentCommand({ command: { id: commandId, type: 'printer_status' }, operations, execute: async () => ({ success: true }) })
+  }
+  const completed = []
+  const completionResult = await flushPendingCommandCompletions({ operations, complete: async id => {
+    if (id === 'completion-a') throw new Error('temporarily offline')
+    completed.push(id)
+  } })
+  assert.equal(completionResult, 1)
+  assert.deepEqual(completed, ['completion-b'])
+  assert.equal(operations.listPendingCompletions(20, new Date(Date.now() + 10_000).toISOString()).length, 1)
+
+  operations.close()
+  await fs.rm(directory, { recursive: true, force: true })
+})
 
 test(
   'persiste ultimo estado local de impressora e job',

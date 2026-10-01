@@ -1,4 +1,5 @@
-import { connectPrinter, getPrinterStatus, hasActiveConnection } from '../printers/printerManager.js'
+import { connectPrinter, getPrinterKey, getPrinterStatus, hasActiveConnection } from '../printers/printerManager.js'
+import { waitForPrinterStatusEvent } from '../printers/printerEventBus.js'
 import { reportPrintJobMetrics } from '../cloud/productionJobMetrics.js'
 import { loadPrinterCredentials } from '../storage/printerCredentials.js'
 
@@ -39,7 +40,7 @@ export const ensurePrinterConnectionForMonitor = async (printer) => {
   return { connected: true, reused: false }
 }
 
-export const monitorPrintJobCompletion = async ({ command, context, getStatus = getPrinterStatus, ensureConnection = getStatus === getPrinterStatus ? ensurePrinterConnectionForMonitor : async () => ({ connected: true, reused: true }), report = reportPrintJobMetrics, wait = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds)), pollMs = Math.max(1000, Number(process.env.PRINTFLOW_PRINT_COMPLETION_POLL_MS) || 5000), stablePollMs = Math.max(pollMs, Number(process.env.PRINTFLOW_PRINT_STABLE_POLL_MS) || 15000), maxPolls = Math.max(1, Number(process.env.PRINTFLOW_PRINT_COMPLETION_MAX_POLLS) || Math.ceil(30 * 24 * 60 * 60 * 1000 / pollMs)) }) => {
+export const monitorPrintJobCompletion = async ({ command, context, getStatus = getPrinterStatus, ensureConnection = getStatus === getPrinterStatus ? ensurePrinterConnectionForMonitor : async () => ({ connected: true, reused: true }), report = reportPrintJobMetrics, wait = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds)), waitForStatusEvent = waitForPrinterStatusEvent, pollMs = Math.max(1000, Number(process.env.PRINTFLOW_PRINT_COMPLETION_POLL_MS) || 5000), stablePollMs = Math.max(pollMs, Number(process.env.PRINTFLOW_PRINT_STABLE_POLL_MS) || 15000), eventWaitMs = Math.max(1000, Number(process.env.PRINTFLOW_PRINT_EVENT_WAIT_MS) || 15000), maxPolls = Math.max(1, Number(process.env.PRINTFLOW_PRINT_COMPLETION_MAX_POLLS) || Math.ceil(30 * 24 * 60 * 60 * 1000 / pollMs)) }) => {
   const printJobId = command?.payload?.printJobId
   const printer = command?.payload?.printer
   if (!printJobId || !printer || !context?.apiUrl || !context?.credentials) return { skipped: true }
@@ -47,9 +48,15 @@ export const monitorPrintJobCompletion = async ({ command, context, getStatus = 
   let lastError = null
   let nextPollDelay = pollMs
   for (let poll = 0; poll < maxPolls; poll += 1) {
+    let receivedEvent = false
     try {
       await ensureConnection(printer)
-      const status = await getStatus(printer)
+      let status = null
+      if (getStatus === getPrinterStatus) {
+        status = await waitForStatusEvent(getPrinterKey(printer), eventWaitMs)
+        receivedEvent = Boolean(status)
+      }
+      if (!status) status = await getStatus(printer)
       const state = normalizeCompletionState(status)
       if (state) return report(context.apiUrl, context.credentials, printJobId, { status: state, idempotencyKey: `agent-${command.id}-completion`, attemptNo: 1, ...measuredMetricsFromStatus({ status, startedAt }) })
       lastError = null
@@ -58,6 +65,7 @@ export const monitorPrintJobCompletion = async ({ command, context, getStatus = 
       lastError = error
       nextPollDelay = pollMs
     }
+    if (receivedEvent) continue
     await wait(nextPollDelay)
   }
   throw new Error(`Monitoramento do Production Job ${printJobId} excedeu o limite de polling.${lastError?.message ? ` Ultimo erro: ${lastError.message}` : ''}`)

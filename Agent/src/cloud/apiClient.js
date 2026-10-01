@@ -72,6 +72,21 @@ export const completeCommand = async (
   return response.data
 }
 
+export const reportCommandProgress = async (apiUrl, credentials, commandId, progress) => {
+  const response = await cloudHttp.post(
+    `${apiUrl}/api/agents/commands/${commandId}/progress`,
+    { progress },
+    {
+      headers: {
+        'x-agent-id': credentials.agentId,
+        'x-agent-secret': credentials.agentSecret,
+        'Content-Type': 'application/json'
+      }
+    }
+  )
+  return response.data
+}
+
 export const syncAgentEvents = async (
   apiUrl,
   credentials,

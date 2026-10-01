@@ -17,6 +17,8 @@ test('metricas locais agregam duracao e falhas sem registrar payload sensivel', 
   assert.equal(result.consecutiveFailures, 1)
   assert.equal(result.totalDurationMs, 117)
   assert.equal(result.maxDurationMs, 75)
+  assert.equal(result.histogramCount, 2)
+  assert.deepEqual(result.durationBuckets.slice(0, 3), [1, 1, 0])
   assert.equal(JSON.stringify(result).includes('secret'), false)
 
   const secondFailure = recordOperationalMetric({
@@ -35,6 +37,7 @@ test('metricas locais agregam duracao e falhas sem registrar payload sensivel', 
     durationMs: 10
   })
   assert.equal(recovered.consecutiveFailures, 0)
+  assert.equal(recovered.histogramCount, 4)
 })
 
 test('falha ao persistir metrica nao afeta o fluxo do Agent', () => {

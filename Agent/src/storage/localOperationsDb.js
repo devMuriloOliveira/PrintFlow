@@ -42,7 +42,7 @@ const now = () =>
     .toISOString()
 
 const CURRENT_SCHEMA_VERSION =
-  6
+  8
 
 const migrateSchema = (
   database
@@ -93,7 +93,11 @@ const migrateSchema = (
         event_type text not null,
         payload_json text not null,
         created_at text not null,
-        attempts integer not null default 0
+        attempts integer not null default 0,
+        status text not null default 'pending',
+        next_retry_at text,
+        last_error text,
+        updated_at text
       );
 
       create index if not exists agent_events_created_idx
@@ -143,6 +147,34 @@ const migrateSchema = (
       commit;
     `
   )
+
+  database.exec('begin immediate')
+  try {
+  const eventColumns = database.prepare('pragma table_info(agent_events)').all().map(column => column.name)
+  if (!eventColumns.includes('status')) database.exec("alter table agent_events add column status text not null default 'pending'")
+  if (!eventColumns.includes('next_retry_at')) database.exec('alter table agent_events add column next_retry_at text')
+  if (!eventColumns.includes('last_error')) database.exec('alter table agent_events add column last_error text')
+  if (!eventColumns.includes('updated_at')) database.exec('alter table agent_events add column updated_at text')
+  database.exec("update agent_events set status = coalesce(status, 'pending'), updated_at = coalesce(updated_at, created_at)")
+  database.exec('create index if not exists agent_events_retry_idx on agent_events (status, next_retry_at, id)')
+
+  const completionColumns = database.prepare('pragma table_info(command_completions)').all().map(column => column.name)
+  if (!completionColumns.includes('attempts')) database.exec('alter table command_completions add column attempts integer not null default 0')
+  if (!completionColumns.includes('next_retry_at')) database.exec('alter table command_completions add column next_retry_at text')
+  if (!completionColumns.includes('last_error')) database.exec('alter table command_completions add column last_error text')
+
+  const metricColumns = database.prepare('pragma table_info(production_metrics)').all().map(column => column.name)
+  if (!metricColumns.includes('next_retry_at')) database.exec('alter table production_metrics add column next_retry_at text')
+  if (!metricColumns.includes('last_error')) database.exec('alter table production_metrics add column last_error text')
+  if (!metricColumns.includes('status')) database.exec("alter table production_metrics add column status text not null default 'pending'")
+  database.exec("update production_metrics set status = coalesce(status, 'pending')")
+  database.exec('create index if not exists production_metrics_retry_idx on production_metrics (status, next_retry_at, id)')
+  database.exec(`pragma user_version = ${CURRENT_SCHEMA_VERSION}`)
+    database.exec('commit')
+  } catch (error) {
+    database.exec('rollback')
+    throw error
+  }
 
   return CURRENT_SCHEMA_VERSION
 }
@@ -241,8 +273,12 @@ export const createLocalOperationsDb = (
         select
           command_id,
           result_json,
-          created_at
+          created_at,
+          attempts,
+          next_retry_at,
+          last_error
         from command_completions
+        where next_retry_at is null or next_retry_at <= ?
         order by created_at asc
         limit ?
       `
@@ -274,8 +310,9 @@ export const createLocalOperationsDb = (
         insert into agent_events (
           event_type,
           payload_json,
-          created_at
-        ) values (?, ?, ?)
+          created_at,
+          updated_at
+        ) values (?, ?, ?, ?)
       `
     )
 
@@ -286,9 +323,10 @@ export const createLocalOperationsDb = (
           id,
           event_type,
           payload_json,
-          created_at,
-          attempts
+          created_at, attempts, status, next_retry_at, last_error, updated_at
         from agent_events
+        where status in ('pending', 'retrying')
+          and (next_retry_at is null or next_retry_at <= ?)
         order by id asc
         limit ?
       `
@@ -306,10 +344,30 @@ export const createLocalOperationsDb = (
     database.prepare(
       `
         update agent_events
-        set attempts = attempts + 1
+        set attempts = attempts + 1,
+            status = 'retrying',
+            next_retry_at = ?,
+            last_error = ?,
+            updated_at = ?
         where id = ?
       `
     )
+
+  const retryCompletion = database.prepare(`
+    update command_completions set attempts = attempts + 1, next_retry_at = ?, last_error = ? where command_id = ?
+  `)
+  const listDeadLetterProductionMetrics = database.prepare("select count(*) as count from production_metrics where status = 'dead_letter'")
+  const listDeadLetterProductionMetricDetails = database.prepare("select id, print_job_id, idempotency_key, payload_json, created_at, attempts, last_error from production_metrics where status = 'dead_letter' order by id desc limit ?")
+
+  const deadLetterEvent = database.prepare(`
+    update agent_events set attempts = attempts + 1, status = 'dead_letter', next_retry_at = null,
+      last_error = ?, updated_at = ? where id = ?
+  `)
+  const listDeadLetterEvents = database.prepare("select id, event_type, payload_json, created_at, attempts, last_error, updated_at from agent_events where status = 'dead_letter' order by updated_at desc limit ?")
+
+  const outboxEventCounts = database.prepare(`
+    select status, count(*) as count from agent_events group by status
+  `)
 
   const insertProductionMetric = database.prepare(`
     insert into production_metrics (print_job_id, idempotency_key, payload_json, created_at)
@@ -317,10 +375,12 @@ export const createLocalOperationsDb = (
     on conflict (idempotency_key) do update set payload_json = excluded.payload_json
   `)
   const listProductionMetrics = database.prepare(`
-    select id, print_job_id, idempotency_key, payload_json, created_at, attempts
-      from production_metrics order by id asc limit ?
+    select id, print_job_id, idempotency_key, payload_json, created_at, attempts, next_retry_at, last_error, status
+      from production_metrics where status = 'pending' and (next_retry_at is null or next_retry_at <= ?) order by id asc limit ?
   `)
   const incrementProductionMetricAttempts = database.prepare('update production_metrics set attempts = attempts + 1 where id = ?')
+  const retryProductionMetric = database.prepare('update production_metrics set attempts = attempts + 1, next_retry_at = ?, last_error = ? where id = ?')
+  const deadLetterProductionMetric = database.prepare("update production_metrics set attempts = attempts + 1, status = 'dead_letter', next_retry_at = null, last_error = ? where id = ?")
   const deleteProductionMetric = database.prepare('delete from production_metrics where id = ?')
   const upsertProductionJobMonitor = database.prepare(`
     insert into production_job_monitors (
@@ -370,6 +430,14 @@ export const createLocalOperationsDb = (
       `
     )
 
+  const listLocalStatesByType = database.prepare(`
+    select entity_type, entity_id, state_json, updated_at
+      from local_states
+     where entity_type = ?
+     order by updated_at desc
+     limit ?
+  `)
+
   const deleteStaleLocalStates = database.prepare(
     'delete from local_states where updated_at < ?'
   )
@@ -404,8 +472,8 @@ export const createLocalOperationsDb = (
   const countPendingOperations = database.prepare(`
     select
       (select count(*) from command_completions) as completions,
-      (select count(*) from agent_events) as events,
-      (select count(*) from production_metrics) as metrics
+      (select count(*) from agent_events where status in ('pending', 'retrying')) as events,
+      (select count(*) from production_metrics where status = 'pending') as metrics
   `)
 
   const begin = (
@@ -573,6 +641,7 @@ export const createLocalOperationsDb = (
           JSON.stringify(
             payload || {}
           ),
+          now(),
           now()
         )
 
@@ -581,9 +650,11 @@ export const createLocalOperationsDb = (
       )
     },
     listPendingEvents: (
-      limit = 20
+      limit = 20,
+      asOf = now()
     ) =>
       listEvents.all(
+        String(asOf),
         Math.max(
           1,
           Math.min(
@@ -604,16 +675,37 @@ export const createLocalOperationsDb = (
           createdAt:
             event.created_at,
           attempts:
-            Number(event.attempts || 0)
+            Number(event.attempts || 0),
+          status: event.status || 'pending',
+          nextRetryAt: event.next_retry_at || null,
+          lastError: event.last_error || null,
+          updatedAt: event.updated_at || event.created_at
         })
       ),
-    markEventAttempted: (
-      eventId
-    ) => {
+    markEventAttempted: (eventId, { nextRetryAt = null, error = '' } = {}) => {
       incrementEventAttempts.run(
+        nextRetryAt,
+        String(error || '').slice(0, 500),
+        now(),
         Number(eventId)
       )
     },
+    deadLetterEvent: (eventId, error = '') => {
+      deadLetterEvent.run(String(error || '').slice(0, 500), now(), Number(eventId))
+    },
+    getOutboxEventCounts: () => outboxEventCounts.all().reduce((counts, item) => {
+      counts[item.status] = Number(item.count || 0)
+      return counts
+    }, { pending: 0, retrying: 0, dead_letter: 0 }),
+    listDeadLetterEvents: (limit = 20) => listDeadLetterEvents.all(Math.max(1, Math.min(100, Number(limit) || 20))).map(event => ({
+      id: Number(event.id),
+      eventType: event.event_type,
+      payload: parseResult(event.payload_json),
+      createdAt: event.created_at,
+      attempts: Number(event.attempts || 0),
+      lastError: event.last_error || null,
+      updatedAt: event.updated_at || null
+    })),
     acknowledgeEvent: (
       eventId
     ) => {
@@ -627,14 +719,28 @@ export const createLocalOperationsDb = (
       if (!id || !key) throw new Error('Production metric idempotente invalida.')
       return Number(insertProductionMetric.run(id, key, JSON.stringify(payload), now()).lastInsertRowid)
     },
-    listPendingProductionMetrics: (limit = 20) => listProductionMetrics.all(Math.max(1, Math.min(100, Number(limit) || 20))).map((item) => ({
+    listPendingProductionMetrics: (limit = 20, asOf = now()) => listProductionMetrics.all(String(asOf), Math.max(1, Math.min(100, Number(limit) || 20))).map((item) => ({
       id: Number(item.id),
       printJobId: item.print_job_id,
       payload: parseResult(item.payload_json),
       createdAt: item.created_at,
-      attempts: Number(item.attempts || 0)
+      attempts: Number(item.attempts || 0),
+      nextRetryAt: item.next_retry_at || null,
+      lastError: item.last_error || null
     })),
     markProductionMetricAttempted: (id) => { incrementProductionMetricAttempts.run(Number(id)) },
+    retryProductionMetric: (id, { nextRetryAt = null, error = '' } = {}) => { retryProductionMetric.run(nextRetryAt, String(error || '').slice(0, 500), Number(id)) },
+    deadLetterProductionMetric: (id, error = '') => { deadLetterProductionMetric.run(String(error || '').slice(0, 500), Number(id)) },
+    getDeadLetterProductionMetricCount: () => Number(listDeadLetterProductionMetrics.get().count || 0),
+    listDeadLetterProductionMetrics: (limit = 20) => listDeadLetterProductionMetricDetails.all(Math.max(1, Math.min(100, Number(limit) || 20))).map(item => ({
+      id: Number(item.id),
+      printJobId: item.print_job_id,
+      idempotencyKey: item.idempotency_key,
+      payload: parseResult(item.payload_json),
+      createdAt: item.created_at,
+      attempts: Number(item.attempts || 0),
+      lastError: item.last_error || null
+    })),
     acknowledgeProductionMetric: (id) => { deleteProductionMetric.run(Number(id)) },
     queueProductionJobMonitor: ({ printJobId, commandId, printer, startedAt } = {}) => {
       const jobId = String(printJobId || '').trim()
@@ -708,6 +814,16 @@ export const createLocalOperationsDb = (
           state.updated_at
       }
     },
+    listLocalStatesByType: (entityType, limit = 100) =>
+      listLocalStatesByType.all(
+        String(entityType || ''),
+        Math.max(1, Math.min(500, Number(limit) || 100))
+      ).map(state => ({
+        entityType: state.entity_type,
+        entityId: state.entity_id,
+        state: parseResult(state.state_json),
+        updatedAt: state.updated_at
+      })),
     pruneLocalStates: (maxAgeMs = 30 * 24 * 60 * 60 * 1000) => {
       const age = Math.max(24 * 60 * 60 * 1000, Number(maxAgeMs) || 0)
       const cutoff = new Date(Date.now() - age).toISOString()
@@ -748,9 +864,11 @@ export const createLocalOperationsDb = (
       return { completions, events, metrics, total: completions + events + metrics }
     },
     listPendingCompletions: (
-      limit = 20
+      limit = 20,
+      asOf = now()
     ) =>
       listCompletions.all(
+        String(asOf),
         Math.max(
           1,
           Math.min(
@@ -767,9 +885,14 @@ export const createLocalOperationsDb = (
               completion.result_json
             ),
             createdAt:
-              completion.created_at
+              completion.created_at,
+            attempts: Number(completion.attempts || 0),
+            lastError: completion.last_error || null
           })
         ),
+    retryCompletion: (commandId, { nextRetryAt = null, error = '' } = {}) => {
+      retryCompletion.run(nextRetryAt, String(error || '').slice(0, 500), requiredCommandId(commandId))
+    },
     acknowledgeCompletion: (
       commandId
     ) => {

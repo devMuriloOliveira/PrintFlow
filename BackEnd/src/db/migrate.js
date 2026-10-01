@@ -3189,6 +3189,7 @@ export const migrate =
     )
 
     await query(`alter table agent_commands add column if not exists accepted_at timestamptz`)
+    await query(`alter table agent_commands add column if not exists progress jsonb`)
     await query(`alter table agent_commands add column if not exists lease_expires_at timestamptz`)
     await query(`alter table agent_commands add column if not exists attempt integer not null default 0`)
     await query(`create index if not exists agent_commands_lease_idx on agent_commands (tenant_id, agent_id, status, lease_expires_at)`)
@@ -3197,6 +3198,7 @@ export const migrate =
     await query(`alter table agents add column if not exists pending_credential_version integer`)
     await query(`alter table agents add column if not exists pending_secret_expires_at timestamptz`)
     await query(`alter table agents add column if not exists secret_rotated_at timestamptz`)
+    await query(`alter table agents add column if not exists runtime_health jsonb`)
 
     // Production Job and slicing metrics are additive so existing jobs remain compatible.
     await query(`alter table print_jobs add column if not exists slicer_profile_id text`)

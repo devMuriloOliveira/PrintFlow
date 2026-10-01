@@ -852,7 +852,8 @@ const formatPairingExpiration =
 
 const waitForCommandResult =
   async (
-    commandId: string
+    commandId: string,
+    onProgress?: (progress: any) => void
   ) => {
       const token = auth.token.value
 
@@ -863,7 +864,7 @@ const waitForCommandResult =
     }
 
     const maxAttempts =
-      40
+      onProgress ? 150 : 40
 
     const intervalMs =
       1000
@@ -896,6 +897,10 @@ const waitForCommandResult =
 
       const command =
         data.command
+
+      if (command.progress?.type === 'discovery') {
+        onProgress?.(command.progress)
+      }
 
       if (
         command.status ===
@@ -1375,7 +1380,13 @@ const discoverPrinters =
 
       const result =
         await waitForCommandResult(
-          commandId
+          commandId,
+          (progress: any) => {
+            discoveredPrinters.value = Array.isArray(progress.printers)
+              ? progress.printers
+              : []
+            discoveryMessage.value = `${progress.discoveredCount || discoveredPrinters.value.length} impressora(s) encontrada(s) até agora...`
+          }
         )
 
       const found =
@@ -3312,8 +3323,7 @@ const cancel = () => {
 
               <div
                 v-if="
-                  discoveryStatus ===
-                    'completed' &&
+                  (discoveryStatus === 'completed' || discoveryStatus === 'running') &&
                   visibleDiscoveredPrinters.length >
                   0
                 "

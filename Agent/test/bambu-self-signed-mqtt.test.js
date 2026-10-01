@@ -11,6 +11,7 @@ import mqttPacket from 'mqtt-packet'
 import {
   bambuAdapter
 } from '../src/printers/adapters/bambuAdapter.js'
+import { waitForPrinterStatusEvent } from '../src/printers/printerEventBus.js'
 
 const opensslCandidates = () => {
   const candidates = ['openssl']
@@ -229,7 +230,9 @@ test(
       assert.equal(broker.wasAuthenticated(), true)
       assert.equal(broker.wasSubscribed(), true)
 
+      const realtimeStatus = waitForPrinterStatusEvent(`bambu:${serial}`, 1000)
       const status = await bambuAdapter.getStatus(connection)
+      assert.deepEqual(await realtimeStatus, { state: 'IDLE', progress: 0 })
       assert.equal(status.connected, true)
       assert.equal(status.protocol, 'bambu')
       assert.equal(status.serial, serial)

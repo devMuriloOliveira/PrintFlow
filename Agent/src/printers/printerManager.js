@@ -22,6 +22,11 @@ import {
   normalizePrinterConfig
 } from './printerProfiles.js'
 
+import {
+  createPrinterOperationRunner
+} from './printerOperation.js'
+import { publishPrinterEvent } from './printerEventBus.js'
+
 // ======================================================
 // ADAPTERS DISPONIVEIS
 // ======================================================
@@ -64,6 +69,9 @@ const adapters = {
 
 const activeConnections =
   new Map()
+
+const connectingPrinters = new Map()
+const printerOperations = createPrinterOperationRunner()
 
 const printerConnectionStates =
   new Map()
@@ -227,7 +235,7 @@ export const getDisconnectedActivePrintCount = () => {
   return count
 }
 
-export const refreshActivePrinterStatuses = async ({
+const refreshActivePrinterStatusesUnsafe = async ({
   failureThreshold = Number(
     process.env.PRINTFLOW_PRINTER_STATUS_FAILURE_THRESHOLD || 3
   ),
@@ -262,7 +270,7 @@ export const refreshActivePrinterStatuses = async ({
 
       const startedAt = Date.now()
       try {
-        entry.lastStatus = await entry.adapter.getStatus(entry.connection)
+        entry.lastStatus = await getPrinterStatus(entry.printer)
         entry.lastStatusAt = new Date()
         entry.statusFailureCount = 0
         recordPrinterConnectionState({
@@ -303,6 +311,17 @@ export const refreshActivePrinterStatuses = async ({
 
   return { refreshed, failed, skipped: false }
 }
+
+let statusPollingPromise = null
+
+export const refreshActivePrinterStatuses = options => {
+  if (statusPollingPromise) return statusPollingPromise.then(() => ({ refreshed: 0, failed: 0, skipped: true }))
+  statusPollingPromise = refreshActivePrinterStatusesUnsafe(options)
+    .finally(() => { statusPollingPromise = null })
+  return statusPollingPromise
+}
+
+export const waitForPrinterStatusPolling = () => statusPollingPromise || Promise.resolve()
 
 export const startPrinterStatusPolling = ({
   intervalMs = Number(process.env.PRINTFLOW_PRINTER_STATUS_POLL_MS || 15000),
@@ -690,9 +709,10 @@ export const listActiveConnections =
 // CONECTAR IMPRESSORA
 // ======================================================
 
-export const connectPrinter = async (
+const connectPrinterUnsafe = async (
   printer,
-  options = {}
+  options = {},
+  { signal } = {}
 ) => {
   const normalized =
     normalizePrinterConfig(
@@ -814,7 +834,8 @@ export const connectPrinter = async (
   const connection =
     await adapter.connect(
       printer,
-      options
+      options,
+      { signal }
     )
 
   // ==================================================
@@ -891,6 +912,7 @@ export const connectPrinter = async (
     key,
     status: 'connected'
   })
+  publishPrinterEvent({ printerKey: key, protocol: normalizeProtocol(printer.protocol), type: 'printer.connected' })
 
   console.log(
     `[PrinterManager] Conexao registrada: ${key}`
@@ -920,9 +942,10 @@ export const connectPrinter = async (
 // DESCONECTAR IMPRESSORA
 // ======================================================
 
-export const disconnectPrinter =
+const disconnectPrinterUnsafe =
   async (
-    printer
+    printer,
+    { signal } = {}
   ) => {
     const key =
       getPrinterKey(
@@ -963,7 +986,8 @@ export const disconnectPrinter =
         await entry
           .adapter
           .disconnect(
-            entry.connection
+            entry.connection,
+            { signal }
           )
       }
     } finally {
@@ -979,6 +1003,7 @@ export const disconnectPrinter =
         key,
         status: 'disconnected'
       })
+      publishPrinterEvent({ printerKey: key, protocol: entry.printer?.protocol, type: 'printer.disconnected' })
     }
 
     console.log(
@@ -998,9 +1023,10 @@ export const disconnectPrinter =
 // OBTER STATUS
 // ======================================================
 
-export const getPrinterStatus =
+const getPrinterStatusUnsafe =
   async (
-    printer
+    printer,
+    { signal } = {}
   ) => {
     const key =
       getPrinterKey(
@@ -1029,7 +1055,8 @@ export const getPrinterStatus =
         await entry
           .adapter
           .getStatus(
-            entry.connection
+            entry.connection,
+            { signal }
           )
 
       entry.lastStatus =
@@ -1070,10 +1097,11 @@ export const getPrinterStatus =
 // INICIAR IMPRESSAO
 // ======================================================
 
-export const startPrinterJob =
+const startPrinterJobUnsafe =
   async (
     printer,
-    job
+    job,
+    { signal } = {}
   ) => {
     const entry =
       getActiveConnection(
@@ -1099,9 +1127,10 @@ export const startPrinterJob =
     try {
       return await entry
         .adapter
-        .startPrint(
-          entry.connection,
-          job
+          .startPrint(
+            entry.connection,
+            job,
+            { signal }
         )
     } catch (
       error
@@ -1129,9 +1158,10 @@ export const startPrinterJob =
 // PAUSAR
 // ======================================================
 
-export const pausePrinter =
+const pausePrinterUnsafe =
   async (
-    printer
+    printer,
+    { signal } = {}
   ) => {
     const entry =
       getActiveConnection(
@@ -1157,8 +1187,9 @@ export const pausePrinter =
     try {
       return await entry
         .adapter
-        .pause(
-          entry.connection
+          .pause(
+          entry.connection,
+          { signal }
         )
     } catch (
       error
@@ -1186,9 +1217,10 @@ export const pausePrinter =
 // RETOMAR
 // ======================================================
 
-export const resumePrinter =
+const resumePrinterUnsafe =
   async (
-    printer
+    printer,
+    { signal } = {}
   ) => {
     const entry =
       getActiveConnection(
@@ -1214,8 +1246,9 @@ export const resumePrinter =
     try {
       return await entry
         .adapter
-        .resume(
-          entry.connection
+          .resume(
+          entry.connection,
+          { signal }
         )
     } catch (
       error
@@ -1243,9 +1276,10 @@ export const resumePrinter =
 // CANCELAR
 // ======================================================
 
-export const cancelPrinter =
+const cancelPrinterUnsafe =
   async (
-    printer
+    printer,
+    { signal } = {}
   ) => {
     const entry =
       getActiveConnection(
@@ -1271,8 +1305,9 @@ export const cancelPrinter =
     try {
       return await entry
         .adapter
-        .cancel(
-          entry.connection
+          .cancel(
+          entry.connection,
+          { signal }
         )
     } catch (
       error
@@ -1295,3 +1330,52 @@ export const cancelPrinter =
       throw error
     }
   }
+
+const printerOperation = (printer, operation, execute) => {
+  const key = getPrinterKey(printer)
+  if (!key) throw new Error('Impressora invalida.')
+  return printerOperations.run({ printerKey: key, operation, execute })
+}
+
+export const connectPrinter = async (printer, options = {}) => {
+  const normalized = normalizePrinterConfig(printer, options)
+  const key = getPrinterKey(normalized.printer)
+  if (!key) throw new Error('Nao foi possivel gerar a identificacao da impressora.')
+  const inFlight = connectingPrinters.get(key)
+  if (inFlight) return inFlight
+
+  const attempt = printerOperations.run({
+    printerKey: key,
+    operation: 'connect',
+    execute: signal => connectPrinterUnsafe(normalized.printer, normalized.options, { signal })
+  })
+  connectingPrinters.set(key, attempt)
+  try {
+    return await attempt
+  } finally {
+    if (connectingPrinters.get(key) === attempt) connectingPrinters.delete(key)
+  }
+}
+
+export const disconnectPrinter = printer =>
+  printerOperation(printer, 'disconnect', signal => disconnectPrinterUnsafe(printer, { signal }))
+
+export const getPrinterStatus = async printer => {
+  const status = await printerOperation(printer, 'status', signal => getPrinterStatusUnsafe(printer, { signal }))
+  publishPrinterEvent({ printerKey: getPrinterKey(printer), protocol: printer?.protocol, status })
+  return status
+}
+
+export const startPrinterJob = (printer, job) =>
+  printerOperation(printer, 'startPrint', signal => startPrinterJobUnsafe(printer, job, { signal }))
+
+export const pausePrinter = printer =>
+  printerOperation(printer, 'control', signal => pausePrinterUnsafe(printer, { signal }))
+
+export const resumePrinter = printer =>
+  printerOperation(printer, 'control', signal => resumePrinterUnsafe(printer, { signal }))
+
+export const cancelPrinter = printer =>
+  printerOperation(printer, 'control', signal => cancelPrinterUnsafe(printer, { signal }))
+
+export const listPrinterHealth = () => printerOperations.listHealth()

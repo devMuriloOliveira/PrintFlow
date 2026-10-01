@@ -63,7 +63,8 @@ export const getLocalNetworks = () => {
 const checkPort = (
   host,
   port,
-  timeout = 350
+  timeout = 350,
+  signal
 ) => {
   return new Promise((resolve) => {
     const socket =
@@ -77,11 +78,19 @@ const checkPort = (
       }
 
       finished = true
+      signal?.removeEventListener('abort', onAbort)
 
       socket.destroy()
 
       resolve(result)
     }
+
+    const onAbort = () => finish(false)
+    if (signal?.aborted) {
+      finish(false)
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     socket.setTimeout(
       timeout
@@ -119,12 +128,14 @@ export const findOpenPrinterPorts = async (
   ip,
   {
     ports = [80, 7125, 5000, 8883],
-    check = checkPort
+    check = checkPort,
+    signal
   } = {}
 ) => {
   const results = await Promise.all(
-    ports.map(async port => ({ port, open: await check(ip, port) }))
+    ports.map(async port => ({ port, open: await check(ip, port, 350, signal) }))
   )
+  if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
   return results.filter(result => result.open).map(result => result.port)
 }
 
@@ -134,14 +145,16 @@ export const findOpenPrinterPorts = async (
 
 const detectMoonraker = async (
   ip,
-  port
+  port,
+  signal
 ) => {
   try {
     const response =
       await axios.get(
         `http://${ip}:${port}/server/info`,
         {
-          timeout: 1000
+          timeout: 1000,
+          signal
         }
       )
 
@@ -195,7 +208,8 @@ const detectMoonraker = async (
 
 const detectOctoPrint = async (
   ip,
-  port
+  port,
+  signal
 ) => {
   try {
     const response =
@@ -203,6 +217,7 @@ const detectOctoPrint = async (
         `http://${ip}:${port}/api/version`,
         {
           timeout: 1000,
+          signal,
 
           validateStatus:
             status =>
@@ -273,7 +288,8 @@ const detectOctoPrint = async (
 
 const detectPrusaLink = async (
   ip,
-  port
+  port,
+  signal
 ) => {
   try {
     const response =
@@ -281,6 +297,7 @@ const detectPrusaLink = async (
         `http://${ip}:${port}/api/version`,
         {
           timeout: 1000,
+          signal,
 
           validateStatus:
             status =>
@@ -481,7 +498,8 @@ const parseSsdpBambuResponse = (
 
 export const discoverBambuSsdp = ({
   socketFactory = () => dgram.createSocket('udp4'),
-  timeoutMs = Number(process.env.PRINTFLOW_BAMBU_SSDP_TIMEOUT_MS || 1200)
+  timeoutMs = Number(process.env.PRINTFLOW_BAMBU_SSDP_TIMEOUT_MS || 1200),
+  signal
 } = {}) => new Promise((resolve) => {
   const socket = socketFactory()
   const found = new Map()
@@ -491,11 +509,17 @@ export const discoverBambuSsdp = ({
     if (settled) return
     settled = true
     clearTimeout(timer)
+    signal?.removeEventListener('abort', finish)
     try { socket.close() } catch { /* socket already closed */ }
     resolve([...found.values()])
   }
 
   const timer = setTimeout(finish, Math.max(100, timeoutMs))
+  if (signal?.aborted) {
+    finish()
+    return
+  }
+  signal?.addEventListener('abort', finish, { once: true })
   const request = Buffer.from([
     'M-SEARCH * HTTP/1.1',
     `HOST: ${SSDP_ADDRESS}:${SSDP_PORT}`,
@@ -524,7 +548,7 @@ export const discoverBambuSsdp = ({
 
   socket.once('error', finish)
   socket.bind(() => {
-    socket.send(request, 0, request.length, SSDP_PORT, SSDP_ADDRESS)
+    if (!settled) socket.send(request, 0, request.length, SSDP_PORT, SSDP_ADDRESS)
   })
 })
 
@@ -533,9 +557,10 @@ export const discoverBambuSsdp = ({
 // ======================================================
 
 const identifyPrinter = async (
-  ip
+  ip,
+  { signal } = {}
 ) => {
-  const openPorts = await findOpenPrinterPorts(ip)
+  const openPorts = await findOpenPrinterPorts(ip, { signal })
 
   for (const port of openPorts) {
 
@@ -566,7 +591,8 @@ const identifyPrinter = async (
     const moonraker =
       await detectMoonraker(
         ip,
-        port
+        port,
+        signal
       )
 
     if (moonraker) {
@@ -580,7 +606,8 @@ const identifyPrinter = async (
     const octoprint =
       await detectOctoPrint(
         ip,
-        port
+        port,
+        signal
       )
 
     if (octoprint) {
@@ -594,7 +621,8 @@ const identifyPrinter = async (
     const prusaLink =
       await detectPrusaLink(
         ip,
-        port
+        port,
+        signal
       )
 
     if (prusaLink) {
@@ -709,7 +737,8 @@ export const getNetworkHostRange = (
 // ======================================================
 
 const scanNetworkRange = async (
-  network
+  network,
+  { signal, onPrinterDiscovered } = {}
 ) => {
   const range =
     getNetworkHostRange(
@@ -752,6 +781,7 @@ const scanNetworkRange = async (
     start <= endInt;
     start += batchSize
   ) {
+    if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
     const end =
       Math.min(
         start +
@@ -779,11 +809,7 @@ const scanNetworkRange = async (
         continue
       }
 
-      tasks.push(
-        identifyPrinter(
-          ip
-        )
-      )
+      tasks.push(identifyPrinter(ip, { signal }))
     }
 
     const results =
@@ -817,6 +843,7 @@ const scanNetworkRange = async (
       printers.push(
         result
       )
+      onPrinterDiscovered?.(result)
 
       console.log('')
 
@@ -945,8 +972,9 @@ const addMockBambu = (
 // SCANNER PRINCIPAL
 // ======================================================
 
-export const scanNetworkWithDiagnostics = async () => {
+export const scanNetworkWithDiagnostics = async ({ signal, onPrinterDiscovered } = {}) => {
   const warnings = []
+  if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
 
   if (
     isMockBambuEnabled()
@@ -956,6 +984,7 @@ export const scanNetworkWithDiagnostics = async () => {
     addMockBambu(
       printers
     )
+    for (const printer of printers) onPrinterDiscovered?.(printer)
 
     return {
       printers,
@@ -999,10 +1028,12 @@ export const scanNetworkWithDiagnostics = async () => {
   // ====================================================
 
   try {
-    const ssdpPrinters = await discoverBambuSsdp()
+    const ssdpPrinters = await discoverBambuSsdp({ signal })
+    if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
     printers.push(...ssdpPrinters)
 
     for (const result of ssdpPrinters) {
+      onPrinterDiscovered?.(result)
       console.log('')
       console.log('[Discovery] Bambu encontrada por SSDP.')
       console.log(`- IP: ${result.ip}`)
@@ -1025,6 +1056,7 @@ export const scanNetworkWithDiagnostics = async () => {
     const network
     of networks
   ) {
+    if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
     const range = getNetworkHostRange(
       network.address,
       network.netmask
@@ -1037,12 +1069,17 @@ export const scanNetworkWithDiagnostics = async () => {
 
     const found =
       await scanNetworkRange(
-        network
+        network,
+        { signal, onPrinterDiscovered: printer => {
+          if (!printers.some(existing => existing.ip === printer.ip && existing.protocol === printer.protocol)) {
+            printers.push(printer)
+            onPrinterDiscovered?.(printer)
+          }
+        } }
       )
-
-    printers.push(
-      ...found
-    )
+    for (const printer of found) {
+      if (!printers.some(existing => existing.ip === printer.ip && existing.protocol === printer.protocol)) printers.push(printer)
+    }
   }
 
   // ====================================================
@@ -1052,6 +1089,12 @@ export const scanNetworkWithDiagnostics = async () => {
   addMockBambu(
     printers
   )
+  if (isMockBambuEnabled()) {
+    const mockPrinter = printers.find(printer => printer.mock === true)
+    if (mockPrinter) onPrinterDiscovered?.(mockPrinter)
+  }
+
+  if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
 
   if (printers.length === 0 && warnings.length === 0) {
     warnings.push(

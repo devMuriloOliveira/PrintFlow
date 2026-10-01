@@ -96,7 +96,8 @@ const normalizeWindowsPort = (device) => {
 
 const testMarlin = async (
   device,
-  baudRate
+  baudRate,
+  signal
 ) => {
   return new Promise((resolve) => {
     let finished = false
@@ -114,6 +115,8 @@ const testMarlin = async (
       }
 
       finished = true
+      signal?.removeEventListener('abort', onAbort)
+      clearTimeout(timeout)
 
       try {
         if (serial.isOpen) {
@@ -129,6 +132,12 @@ const testMarlin = async (
     const timeout = setTimeout(() => {
       finish(null)
     }, 3000)
+    const onAbort = () => finish(null)
+    if (signal?.aborted) {
+      finish(null)
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     serial.on('data', (data) => {
       received += data.toString()
@@ -195,7 +204,8 @@ const testMarlin = async (
 // ======================================================
 
 const identifySerialPrinter = async (
-  device
+  device,
+  signal
 ) => {
   const baudRates = [
     115200,
@@ -203,6 +213,7 @@ const identifySerialPrinter = async (
   ]
 
   for (const baudRate of baudRates) {
+    if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
     console.log(
       `[USB] Testando ${device.port} em ${baudRate} baud...`
     )
@@ -210,7 +221,8 @@ const identifySerialPrinter = async (
     const result =
       await testMarlin(
         device,
-        baudRate
+        baudRate,
+        signal
       )
 
     if (result) {
@@ -238,7 +250,7 @@ const identifySerialPrinter = async (
 // SCANNER USB
 // ======================================================
 
-export const scanUsb = async () => {
+export const scanUsb = async ({ signal, onPrinterDiscovered } = {}) => {
   console.log('')
   console.log(
     '[Discovery] Procurando dispositivos USB / Serial...'
@@ -278,6 +290,7 @@ export const scanUsb = async () => {
   const printers = []
 
   for (const device of serialDevices) {
+    if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
     console.log('')
     console.log(
       '[USB] Dispositivo serial encontrado'
@@ -299,13 +312,15 @@ export const scanUsb = async () => {
 
     const printer =
       await identifySerialPrinter(
-        device
+        device,
+        signal
       )
 
     if (printer) {
       printers.push(
         printer
       )
+      onPrinterDiscovered?.(printer)
     } else {
       console.log(
         `[USB] ${device.port} nao foi identificada como impressora Marlin.`

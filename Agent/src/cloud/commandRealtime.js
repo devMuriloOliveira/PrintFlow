@@ -1,7 +1,8 @@
 export const startCommandRealtime = ({
   startWebSocket,
   startSse,
-  onError = () => {}
+  onError = () => {},
+  onModeChange = () => {}
 }) => {
   let stopSse = null
   let stopped = false
@@ -14,11 +15,16 @@ export const startCommandRealtime = ({
   const startFallback = error => {
     if (stopped || stopSse) return
     if (error) onError(error)
-    stopSse = startSse()
+    onModeChange('sse')
+    stopSse = startSse({
+      onOpen: () => onModeChange('sse'),
+      onClose: () => { if (!stopped) onModeChange('offline') },
+      onError: () => { if (!stopped) onModeChange('offline') }
+    })
   }
 
   const stopWebSocket = startWebSocket({
-    onOpen: stopFallback,
+    onOpen: () => { stopFallback(); onModeChange('websocket') },
     onClose: startFallback,
     onError: startFallback
   })
@@ -27,5 +33,6 @@ export const startCommandRealtime = ({
     stopped = true
     stopFallback()
     stopWebSocket?.()
+    onModeChange('offline')
   }
 }

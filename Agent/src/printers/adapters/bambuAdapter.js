@@ -1,4 +1,5 @@
 import mqtt from 'mqtt'
+import { publishPrinterEvent } from '../printerEventBus.js'
 
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -1365,6 +1366,18 @@ export const bambuAdapter = {
         connection.topics.report
       )
 
+      connection.onStatusMessage = (topic, buffer) => {
+        if (topic !== connection.topics.report) return
+        const payload = safeJsonParse(buffer.toString())
+        if (!payload) return
+        publishPrinterEvent({
+          printerKey: `bambu:${connection.serial}`,
+          protocol: 'bambu',
+          status: normalizeStatus(payload, connection.printer)
+        })
+      }
+      connection.client.on('message', connection.onStatusMessage)
+
       console.log(
         '[Bambu] Canal de telemetria assinado'
       )
@@ -1484,6 +1497,11 @@ export const bambuAdapter = {
     console.log(
       `[Bambu] Desconectando ${connection.printer?.ip || connection.serial || ''}...`
     )
+
+    if (connection.onStatusMessage) {
+      connection.client.removeListener('message', connection.onStatusMessage)
+      connection.onStatusMessage = null
+    }
 
     await closeClient(
       connection.client

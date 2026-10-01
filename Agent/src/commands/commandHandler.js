@@ -171,7 +171,17 @@ export const handleCommand = async (
     const startedAt = Date.now()
     let failed = false
     try {
-      const discovery = await discoverPrintersWithDiagnostics()
+      const timeoutMs = Number(process.env.PRINTFLOW_AGENT_DISCOVERY_TIMEOUT_MS || 120_000)
+      const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1_000 && timeoutMs <= 600_000
+        ? timeoutMs
+        : 120_000
+      const signal = context.signal
+        ? AbortSignal.any([context.signal, AbortSignal.timeout(boundedTimeoutMs)])
+        : AbortSignal.timeout(boundedTimeoutMs)
+      const discovery = await discoverPrintersWithDiagnostics({
+        signal,
+        onPrinterDiscovered: context.onDiscoveryProgress
+      })
       return {
         success: true,
         printers:

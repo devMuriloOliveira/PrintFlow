@@ -91,11 +91,39 @@ $runtimeNodePath = Join-Path $runtimeRoot "node.exe"
 Copy-Item -LiteralPath $buildNodeExecutable -Destination $runtimeNodePath -Force
 
 $runtimeLicensePath = Join-Path $runtimeRoot "LICENSE.node.txt"
+$nodeRuntimeDirectory = Split-Path $buildNodeExecutable -Parent
 $localLicenseCandidates = @(
-  (Join-Path (Split-Path $buildNodeExecutable -Parent) "LICENSE"),
-  (Join-Path (Split-Path $buildNodeExecutable -Parent) "LICENSE.txt")
+  (Join-Path $nodeRuntimeDirectory "LICENSE.node.txt"),
+  (Join-Path $nodeRuntimeDirectory "LICENSE"),
+  (Join-Path $nodeRuntimeDirectory "LICENSE.txt")
 )
 $localLicense = $localLicenseCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+if (-not $localLicense) {
+  $cachedRuntimeRoot = Join-Path $agentRoot "dist\PrintFlow-Agent-Windows\runtime"
+  $cachedRuntimeMetadataPath = Join-Path $cachedRuntimeRoot "runtime.json"
+  $cachedRuntimeNodePath = Join-Path $cachedRuntimeRoot "node.exe"
+  $cachedRuntimeLicensePath = Join-Path $cachedRuntimeRoot "LICENSE.node.txt"
+
+  if (
+    (Test-Path -LiteralPath $cachedRuntimeMetadataPath) -and
+    (Test-Path -LiteralPath $cachedRuntimeNodePath) -and
+    (Test-Path -LiteralPath $cachedRuntimeLicensePath)
+  ) {
+    $cachedRuntimeMetadata = Get-Content -LiteralPath $cachedRuntimeMetadataPath -Raw | ConvertFrom-Json
+    $cachedRuntimeHash = (Get-FileHash -LiteralPath $cachedRuntimeNodePath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $cachedLicenseLength = (Get-Item -LiteralPath $cachedRuntimeLicensePath).Length
+
+    if (
+      [string]$cachedRuntimeMetadata.version -eq $buildNodeVersion -and
+      [string]$cachedRuntimeMetadata.sha256 -eq $cachedRuntimeHash -and
+      $cachedLicenseLength -ge 1000
+    ) {
+      $localLicense = $cachedRuntimeLicensePath
+      Write-Host "Usando a licenca Node.js do pacote local validado ($buildNodeVersion)."
+    }
+  }
+}
 
 if ($localLicense) {
   Copy-Item -LiteralPath $localLicense -Destination $runtimeLicensePath -Force
