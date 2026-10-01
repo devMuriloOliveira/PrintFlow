@@ -259,6 +259,15 @@ export const getMockFinancialHistory = (options: { resource?: string; limit?: nu
 export const getMockOrdersSummary = () => {
   const active = mockOrders.filter(item => item.status !== 'Cancelado')
   const cancelled = mockOrders.filter(item => item.status === 'Cancelado')
+  const marketplaceTotals = new Map<string, number>()
+  const dailyTotals = new Map<string, { key: string; gross: number; net: number; profit: number; orders: number; cancelledGross: number; cancelledOrders: number }>()
+  for (const order of mockOrders) {
+    const key = order.date.includes('/') ? order.date.split('/').reverse().join('-') : order.date.slice(0, 10)
+    const row = dailyTotals.get(key) || { key, gross: 0, net: 0, profit: 0, orders: 0, cancelledGross: 0, cancelledOrders: 0 }
+    if (order.status === 'Cancelado') { row.cancelledGross += order.gross; row.cancelledOrders += 1 }
+    else { row.gross += order.gross; row.net += order.net; row.profit += order.profit; row.orders += 1; marketplaceTotals.set(order.marketplace || 'Sem marketplace', (marketplaceTotals.get(order.marketplace || 'Sem marketplace') || 0) + order.gross) }
+    dailyTotals.set(key, row)
+  }
   return {
     orderCount: active.length,
     gross: active.reduce((sum, item) => sum + item.gross, 0),
@@ -269,7 +278,10 @@ export const getMockOrdersSummary = () => {
     ticket: active.reduce((sum, item) => sum + item.gross, 0) / active.length,
     cancelledCount: cancelled.length,
     cancelledGross: cancelled.reduce((sum, item) => sum + item.gross, 0),
-    byStatus: ['Aguardando', 'Producao', 'Envio', 'Concluido', 'Cancelado'].map(status => ({ status, count: mockOrders.filter(item => item.status === status).length }))
+    byStatus: ['Aguardando', 'Producao', 'Envio', 'Concluido', 'Cancelado'].map(status => ({ status, count: mockOrders.filter(item => item.status === status).length })),
+    byMarketplace: [...marketplaceTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })),
+    daily: [...dailyTotals.values()].sort((a, b) => a.key.localeCompare(b.key)),
+    options: { marketplaces: [...new Set(mockOrders.map(item => item.marketplace || 'Sem marketplace'))].sort(), products: [...new Set(mockOrders.map(item => item.product))].sort() }
   }
 }
 

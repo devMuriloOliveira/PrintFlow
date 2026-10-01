@@ -68,7 +68,7 @@ import {
   handleCompanyCnpjLookup
 } from './settings.js'
 
-import { handleFinancialReportExport } from './reports.js'
+import { handleFinancialReportExport, handleReportSummary } from './reports.js'
 import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } from './calculator.js'
 import {
   handleMercadoPagoBillingSummary,
@@ -1098,6 +1098,10 @@ export const handleRequest =
 
       if (req.method === 'GET' && url.pathname === '/api/reports/financial-export') {
         return await handleFinancialReportExport(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/reports/summary') {
+        return await handleReportSummary(req, res, url)
       }
 
       if (req.method === 'GET' && url.pathname === '/api/calculator/simulations') {

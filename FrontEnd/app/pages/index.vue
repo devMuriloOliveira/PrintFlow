@@ -1,79 +1,42 @@
 <script setup lang="ts">
-const { products, orders, expenses, expenseSegments, filaments, goals, printers, printJobs, pending } = useAppData()
-const metrics = useBusinessMetrics()
+const { loadDashboardSummary } = useAppData()
 const { unreadCount } = useOperationalNotifications()
+const summary = ref<DashboardSummary>(emptyDashboardSummary())
+const pending = ref(true)
 
 const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-const monthlyRevenue = computed(() => {
-  const values = Array.from({ length: 12 }, () => 0)
-  for (const order of orders.value) {
-    if (order.status === 'Cancelado') continue
-    const parts = String(order.date).split('/').map(Number)
-    const month = parts.length >= 2 ? parts[1] : Number(String(order.date).slice(5, 7))
-    if (month >= 1 && month <= 12) values[month - 1] += order.gross / 1000
-  }
-  return values
-})
-const monthlyExpenses = computed(() => {
-  const values = Array.from({ length: 12 }, () => 0)
-  for (const expense of expenses.value) {
-    const parts = String(expense.date).split('/').map(Number)
-    const month = parts.length >= 2 ? parts[1] : Number(String(expense.date).slice(5, 7))
-    if (month >= 1 && month <= 12) values[month - 1] += expense.value / 1000
-  }
-  return values
-})
-const monthlyOrders = computed(() => {
-  const values = Array.from({ length: 12 }, () => 0)
-  for (const order of orders.value) {
-    if (order.status === 'Cancelado') continue
-    const parts = String(order.date).split('/').map(Number)
-    const month = parts.length >= 2 ? parts[1] : Number(String(order.date).slice(5, 7))
-    if (month >= 1 && month <= 12) values[month - 1] += Number(order.qty || 1)
-  }
-  return values
-})
-const productPerformance = computed(() => {
-  const totals = new Map<string, { sales: number, profit: number }>()
-  for (const order of orders.value) {
-    if (order.status === 'Cancelado') continue
-    const current = totals.get(order.product) || { sales: 0, profit: 0 }
-    current.sales += order.qty
-    current.profit += order.profit
-    totals.set(order.product, current)
-  }
-  return products.value.map((product) => {
-    const item = totals.get(product.name) || { sales: 0, profit: 0 }
-    return { ...product, sales: item.sales, orderProfit: item.profit }
-  }).sort((a, b) => b.orderProfit - a.orderProfit)
-})
+const totals = computed(() => summary.value.totals)
+const monthlyRevenue = computed(() => summary.value.monthlyRevenue.map(value => value / 1000))
+const monthlyExpenses = computed(() => summary.value.monthlyExpenses.map(value => value / 1000))
+const monthlyOrders = computed(() => summary.value.monthlyOrders)
+const productPerformance = computed(() => summary.value.productPerformance)
+const expenseSegments = computed(() => summary.value.expenseSegments)
 const alerts = computed(() => [
-  ...filaments.value.filter(f => f.remaining < 300).map(f => ({ icon: 'box', title: `${f.name} próximo do fim`, text: `Restam ${formatNumber(f.remaining)} g em estoque`, badge: 'Estoque baixo', cls: 'badge--orange' })),
-  ...goals.value.filter(g => g.target > 0).map(g => ({ icon: 'target', title: g.title, text: `${metrics.percent(Math.min(g.current / g.target * 100, 100))} da meta`, badge: g.status, cls: 'badge--green' }))
+  ...summary.value.lowStockItems.map(f => ({ icon: 'box', title: `${f.name} próximo do fim`, text: `Restam ${formatNumber(f.remaining)} g em estoque`, badge: 'Estoque baixo', cls: 'badge--orange' })),
+  ...summary.value.goals.filter(g => g.target > 0).map(g => ({ icon: 'target', title: g.name, text: `${percent(Math.min(g.current / g.target * 100, 100))} da meta`, badge: g.status, cls: 'badge--green' }))
 ])
-const activePrintJobs = computed(() => printJobs.value.filter(job => ['starting', 'printing', 'paused'].includes(String(job.status || ''))))
-const queuedPrintJobs = computed(() => printJobs.value.filter(job => ['queued', 'awaiting_confirmation'].includes(String(job.status || ''))))
-const activePrinterIds = computed(() => new Set(activePrintJobs.value.map(job => String(job.printerId || '')).filter(Boolean)))
-const operationalPrinters = computed(() => printers.value.map(printer => {
-  const activeJob = activePrintJobs.value.find(job => String(job.printerId || '') === String(printer.id || ''))
-  const queued = printJobs.value.filter(job => String(job.printerId || '') === String(printer.id || '') && ['queued', 'awaiting_confirmation'].includes(String(job.status || ''))).length
-  const progress = Number((activeJob?.agentLastStatus as any)?.progress || 0)
-  return { ...printer, activeJob, queued, progress: Number.isFinite(progress) ? progress : 0 }
-}).sort((a, b) => Number(Boolean(b.activeJob)) - Number(Boolean(a.activeJob)) || b.queued - a.queued))
+const operationalPrinters = computed(() => summary.value.queuePrinters)
 const orderStageSummary = computed(() => {
-  const stages = [
-    { label: 'Aguardando', statuses: ['Pendente', 'Aguardando confirmação'], color: '#f59e0b' },
-    { label: 'Produção', statuses: ['Produção', 'Impresso', 'Embalando'], color: '#1768f2' },
-    { label: 'Envio', statuses: ['Enviado'], color: '#0da566' },
-    { label: 'Concluídos', statuses: ['Entregue'], color: '#7c3aed' }
+  const counts = summary.value.orderStages
+  return [
+    { label: 'Aguardando', count: counts.awaiting, color: '#f59e0b' },
+    { label: 'Produção', count: counts.production, color: '#1768f2' },
+    { label: 'Envio', count: counts.shipping, color: '#0da566' },
+    { label: 'Concluídos', count: counts.completed, color: '#7c3aed' }
   ]
-  return stages.map(stage => ({ ...stage, count: orders.value.filter(order => stage.statuses.includes(String(order.status || ''))).length }))
 })
-const lowStockItems = computed(() => [...filaments.value].filter(filament => Number(filament.remaining || 0) < 300).sort((a, b) => Number(a.remaining || 0) - Number(b.remaining || 0)).slice(0, 5))
+const lowStockItems = computed(() => [...summary.value.lowStockItems].sort((a, b) => a.remaining - b.remaining).slice(0, 5))
 const operationalAlerts = computed(() => [
-  ...printers.value.filter(printer => /manutenc/i.test(String(printer.status || ''))).map(printer => ({ icon: 'wrench', title: `${printer.name} em manutenção`, text: 'Verifique a disponibilidade antes de iniciar a fila.', badge: 'Atenção', cls: 'badge--orange' })),
-  ...orders.value.filter(order => ['Produção', 'Impresso', 'Embalando'].includes(String(order.status || '')) && !printJobs.value.some(job => String(job.orderId || '') === String(order.dbId || order.id || ''))).slice(0, 3).map(order => ({ icon: 'bag', title: `Pedido ${order.id} sem fila`, text: 'Vincule uma impressora para iniciar a produção.', badge: 'Ação', cls: 'badge--orange' }))
+  ...summary.value.maintenancePrinters.map(printer => ({ icon: 'wrench', title: `${printer.name} em manutenção`, text: 'Verifique a disponibilidade antes de iniciar a fila.', badge: 'Atenção', cls: 'badge--orange' })),
+  ...summary.value.pendingOrders.map(order => ({ icon: 'bag', title: `Pedido ${order.id} sem fila`, text: 'Vincule uma impressora para iniciar a produção.', badge: 'Ação', cls: 'badge--orange' }))
 ])
+const percent = (value: number) => `${value.toFixed(1).replace('.', ',')}%`
+
+onMounted(async () => {
+  try { summary.value = await loadDashboardSummary() }
+  catch { summary.value = emptyDashboardSummary() }
+  finally { pending.value = false }
+})
 </script>
 
 <template>
@@ -82,18 +45,18 @@ const operationalAlerts = computed(() => [
     <div v-if="pending" class="page-loading-hint" role="status">Carregando seus dados...</div>
 
     <div class="metrics-grid metrics-grid--5">
-      <MetricCard label="Faturamento total" :value="formatCurrency(metrics.revenue.value)" icon="trend" note="Vendas registradas" color="blue" :points="monthlyRevenue" />
-      <MetricCard label="Despesas totais" :value="formatCurrency(metrics.expenseTotal.value)" icon="receipt" note="Despesas registradas" color="red" negative :points="monthlyExpenses" />
-      <MetricCard label="Lucro Líquido" :value="formatCurrency(metrics.profit.value)" icon="money" :change="`Margem ${metrics.percent(metrics.margin.value)}`" color="green" :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
-      <MetricCard label="Pedidos" :value="formatNumber(metrics.orderCount.value)" icon="bag" note="Quantidade vendida por mês" color="purple" :points="monthlyOrders" />
-      <MetricCard label="Ticket Médio" :value="formatCurrency(metrics.ticket.value)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="monthlyRevenue.map((value, index) => monthlyOrders[index] ? value / monthlyOrders[index] : 0)" />
+      <MetricCard label="Faturamento total" :value="formatCurrency(totals.revenue)" icon="trend" note="Vendas registradas" color="blue" :points="monthlyRevenue" />
+      <MetricCard label="Despesas totais" :value="formatCurrency(totals.expenseTotal)" icon="receipt" note="Despesas registradas" color="red" negative :points="monthlyExpenses" />
+      <MetricCard label="Lucro Líquido" :value="formatCurrency(totals.profit)" icon="money" :change="`Margem ${percent(totals.margin)}`" color="green" :points="monthlyRevenue.map((x, i) => x - monthlyExpenses[i])" />
+      <MetricCard label="Pedidos" :value="formatNumber(totals.orderCount)" icon="bag" note="Quantidade vendida por mês" color="purple" :points="monthlyOrders" />
+      <MetricCard label="Ticket Médio" :value="formatCurrency(totals.ticket)" icon="tag" note="Faturamento / Pedidos" color="orange" :points="monthlyRevenue.map((value, index) => monthlyOrders[index] ? value / monthlyOrders[index] : 0)" />
     </div>
 
     <div class="operational-board">
       <PanelCard title="Operação agora" subtitle="Acompanhe o que precisa de ação neste momento.">
         <div class="operational-summary">
-          <NuxtLink class="operational-summary__item" to="/vendas?status=Acompanhar%20pedido"><span class="operational-summary__icon operational-summary__icon--blue"><UiIcon name="bag" :size="18" /></span><div><strong>{{ activePrintJobs.length + queuedPrintJobs.length }}</strong><small>Itens na produção</small></div></NuxtLink>
-          <NuxtLink class="operational-summary__item" to="/impressoras"><span class="operational-summary__icon operational-summary__icon--green"><UiIcon name="printer" :size="18" /></span><div><strong>{{ activePrinterIds.size }}/{{ printers.length }}</strong><small>Impressoras ocupadas</small></div></NuxtLink>
+          <NuxtLink class="operational-summary__item" to="/vendas?status=Acompanhar%20pedido"><span class="operational-summary__icon operational-summary__icon--blue"><UiIcon name="bag" :size="18" /></span><div><strong>{{ summary.jobCounts.active + summary.jobCounts.queued }}</strong><small>Itens na produção</small></div></NuxtLink>
+          <NuxtLink class="operational-summary__item" to="/impressoras"><span class="operational-summary__icon operational-summary__icon--green"><UiIcon name="printer" :size="18" /></span><div><strong>{{ summary.jobCounts.occupiedPrinters }}/{{ summary.printerCount }}</strong><small>Impressoras ocupadas</small></div></NuxtLink>
           <NuxtLink class="operational-summary__item" to="/estoque?secao=filamentos"><span class="operational-summary__icon operational-summary__icon--orange"><UiIcon name="spool" :size="18" /></span><div><strong>{{ lowStockItems.length }}</strong><small>Alertas de estoque</small></div></NuxtLink>
           <NuxtLink class="operational-summary__item" to="/notificacoes"><span class="operational-summary__icon operational-summary__icon--red"><UiIcon name="bell" :size="18" /></span><div><strong>{{ unreadCount }}</strong><small>Alertas operacionais</small></div></NuxtLink>
         </div>
@@ -121,12 +84,12 @@ const operationalAlerts = computed(() => [
     <div class="dashboard-grid">
       <PanelCard title="Faturamento Mensal"><LineChart :values="monthlyRevenue" :labels="revenueLabels" /></PanelCard>
       <PanelCard title="Receita x Despesas"><LineChart :values="monthlyRevenue" :second="monthlyExpenses" :labels="revenueLabels" /></PanelCard>
-      <PanelCard title="Despesas por Categoria"><DonutChart :segments="expenseSegments" :total="formatCurrency(metrics.expenseTotal.value)" /></PanelCard>
+      <PanelCard title="Despesas por Categoria"><DonutChart :segments="expenseSegments" :total="formatCurrency(totals.expenseTotal)" /></PanelCard>
     </div>
 
     <div class="dashboard-grid dashboard-grid--bottom">
       <PanelCard title="Produtos mais Lucrativos">
-        <div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Vendas</th><th>Lucro</th><th>Margem</th></tr></thead><tbody><tr v-if="!productPerformance.length"><td colspan="4"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado</h3><p>Cadastre produtos e vendas para ver o desempenho.</p></div></div></td></tr><tr v-for="p in productPerformance" :key="p.sku"><td><div class="table-product"><ProductThumb :type="p.thumb" :size="28"/><strong>{{ p.name }}</strong></div></td><td>{{ p.sales }}</td><td class="money-positive">{{ formatCurrency(p.orderProfit) }}</td><td><span class="badge badge--green">{{ metrics.percent(p.margin || 0) }}</span></td></tr></tbody></table></div>
+        <div class="table-scroll"><table class="data-table"><thead><tr><th>Produto</th><th>Vendas</th><th>Lucro</th><th>Margem</th></tr></thead><tbody><tr v-if="!productPerformance.length"><td colspan="4"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto cadastrado</h3><p>Cadastre produtos e vendas para ver o desempenho.</p></div></div></td></tr><tr v-for="p in productPerformance" :key="p.sku"><td><div class="table-product"><ProductThumb :type="p.thumb" :size="28"/><strong>{{ p.name }}</strong></div></td><td>{{ p.sales }}</td><td class="money-positive">{{ formatCurrency(p.orderProfit) }}</td><td><span class="badge badge--green">{{ percent(p.margin || 0) }}</span></td></tr></tbody></table></div>
       </PanelCard>
       <PanelCard title="Alertas e Recomendações">
         <template #actions><NuxtLink class="btn btn--ghost" to="/notificacoes">Ver todos</NuxtLink></template>

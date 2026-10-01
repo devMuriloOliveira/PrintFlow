@@ -410,6 +410,34 @@ test('resumo financeiro exclui vendas canceladas e conserva total cancelado', as
   assert.equal(summary.body.byStatus.find((item) => item.status === 'Cancelado').count, 1)
 })
 
+test('dashboard agregado exige autenticacao e retorna contrato resumido', async () => {
+  const denied = await request({ method: 'GET', path: '/api/dashboard-summary' })
+  assert.equal(denied.status, 401)
+
+  const session = await registerSession('dashboard-summary', '127.0.5.14')
+  const response = await request({ method: 'GET', path: '/api/dashboard-summary', token: session.accessToken })
+  assert.equal(response.status, 200)
+  assert.equal(typeof response.body.totals.revenue, 'number')
+  assert.equal(response.body.monthlyRevenue.length, 12)
+  assert.equal(response.body.monthlyExpenses.length, 12)
+  assert.equal(response.body.monthlyOrders.length, 12)
+  assert.ok(Array.isArray(response.body.productPerformance))
+  assert.ok(Array.isArray(response.body.queuePrinters))
+  assert.equal(response.body.orders, undefined)
+  assert.equal(response.body.expenses, undefined)
+  assert.equal(response.body.printJobs, undefined)
+})
+
+test('relatorio agregado exige autenticacao e explicita a dependencia de banco real', async () => {
+  const denied = await request({ method: 'GET', path: '/api/reports/summary?from=2026-01-01&to=2026-12-31' })
+  assert.equal(denied.status, 401)
+
+  const session = await registerSession('report-summary', '127.0.5.16')
+  const response = await request({ method: 'GET', path: '/api/reports/summary?from=2026-01-01&to=2026-12-31', token: session.accessToken })
+  assert.equal(response.status, 501)
+  assert.match(response.body.error, /banco de dados/i)
+})
+
 test('edicao generica nao permite pular a etapa operacional do pedido', async () => {
   const session = await registerSession('edicao-etapa-pedido', '127.0.5.15')
   const created = await request({

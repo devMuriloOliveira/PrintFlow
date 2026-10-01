@@ -4,6 +4,7 @@ import { hasDatabase, withTenant } from '../db/pool.js'
 import { sendBuffer, sendJson, sendText } from '../http/response.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { decryptField } from '../security/crypto.js'
+import { getReportSummary, normalizeReportSummaryOptions } from '../repositories/reportSummaryRepository.js'
 
 const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""').replace(/[\r\n]+/g, ' ')}"`
 const dateValue = (value, fallback) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : fallback
@@ -23,8 +24,8 @@ const loadReport = async (tenantId, filters, section = 'complete') => withTenant
   const [orders, expenses, products, filaments, printers, marketplaces, clients, goals, printJobs, integrations, movements, simulations, history] = await Promise.all([
     queryWhen(selected('financeiro') || selected('produtos'), `
       with sales_rows as (
-        select o.tenant_id, o.id, o.order_date, coalesce(m.name, case when o.sales_channel = 'direct' then 'Venda direta' else 'Sem marketplace' end) as marketplace,
-          coalesce(o.sales_channel, case when lower(coalesce(m.name, '')) = 'manual' then 'direct' else 'marketplace' end) as channel,
+        select o.tenant_id, o.id, o.order_date, coalesce(m.name, case when (case when o.marketplace_id is null then 'direct' else coalesce(nullif(o.sales_channel, ''), 'marketplace') end) = 'direct' then 'Venda direta' else 'Sem marketplace' end) as marketplace,
+          case when o.marketplace_id is null or lower(coalesce(m.name, '')) = 'manual' then 'direct' else coalesce(nullif(o.sales_channel, ''), 'marketplace') end as channel,
           o.product_name as product, o.quantity, o.gross, o.fee, o.shipping, o.net, o.profit
         from orders o
         left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
@@ -194,4 +195,13 @@ export const handleFinancialReportExport = async (req, res, url) => {
   const headers = { 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' }
   if (format === 'xlsx') return sendBuffer(res, 200, await workbookReport(report, filters, section), { ...headers, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   return sendText(res, 200, csvReport(report, filters, section), { ...headers, 'Content-Type': 'text/csv; charset=utf-8' })
+}
+
+export const handleReportSummary = async (req, res, url) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Login necessario' })
+  if (!hasDatabase) return sendJson(res, 501, { error: 'Relatorios agregados exigem banco de dados.' })
+  const options = normalizeReportSummaryOptions(Object.fromEntries(url.searchParams.entries()))
+  if (options.from > options.to) return sendJson(res, 400, { error: 'Periodo invalido' })
+  return sendJson(res, 200, await getReportSummary(user.tenantId, options))
 }

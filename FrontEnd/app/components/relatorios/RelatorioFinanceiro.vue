@@ -1,60 +1,21 @@
 <script setup lang="ts">
+import type { ReportSummary } from '~/composables/useAppData'
+
 type ReportFilters = { periodStart: string; periodEnd: string; grouping: 'day' | 'week' | 'month'; marketplace: string; product: string; category: string; channel: 'Todos' | 'direct' | 'marketplace' }
 const filters = defineModel<ReportFilters>('filters', { required: true })
-const { products, orders, expenses } = useAppData()
-
-const parseDate = (value: unknown) => {
-  const text = String(value || '')
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(text)) {
-    const [day, month, year] = text.split('/').map(Number)
-    return new Date(year, month - 1, day)
-  }
-  const date = new Date(text)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-const isCancelled = (value: unknown) => String(value || '').trim().toLowerCase() === 'cancelado'
-const inPeriod = (value: unknown) => {
-  const date = parseDate(value)
-  return Boolean(date && date >= new Date(`${filters.value.periodStart}T00:00:00`) && date <= new Date(`${filters.value.periodEnd}T23:59:59`))
-}
-const filteredOrders = computed(() => orders.value.filter(order =>
-  inPeriod(order.date) &&
-  !isCancelled(order.status) &&
-  (filters.value.marketplace === 'Todos' || (order.marketplace || 'Sem marketplace') === filters.value.marketplace) &&
-  (filters.value.product === 'Todos' || order.product === filters.value.product) &&
-  (filters.value.channel === 'Todos' || order.salesChannel === filters.value.channel)
-))
-const filteredExpenses = computed(() => expenses.value.filter(expense =>
-  inPeriod(expense.date) && !isCancelled(expense.status) &&
-  (filters.value.category === 'Todos' || expense.category === filters.value.category)
-))
-
-const revenueTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.gross || 0), 0))
-const feeTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.fee || 0), 0))
-const shippingTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.shipping || 0), 0))
-const estimatedCurrentCost = computed(() => filteredOrders.value.reduce((sum, item) => {
-  const product = products.value.find(candidate => String(candidate.id || '') === String(item.productId || '') || candidate.name === item.product)
-  return sum + Number(product?.cost || 0) * Number(item.qty || 0)
-}, 0))
-const expenseTotal = computed(() => filteredExpenses.value.reduce((sum, item) => sum + Number(item.value || 0), 0))
-const netTotal = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.net || 0), 0))
-const registeredOrderProfit = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.profit || 0), 0))
-const profitTotal = computed(() => registeredOrderProfit.value - expenseTotal.value)
+const props = defineProps<{ report: ReportSummary; loading?: boolean }>()
+const totals = computed(() => props.report.totals)
+const revenueTotal = computed(() => totals.value.revenue)
+const feeTotal = computed(() => totals.value.fees)
+const shippingTotal = computed(() => totals.value.shipping)
+const estimatedCurrentCost = computed(() => totals.value.estimatedCurrentCost)
+const expenseTotal = computed(() => totals.value.expenses)
+const netTotal = computed(() => totals.value.netRevenue)
+const registeredOrderProfit = computed(() => totals.value.registeredProfit)
+const profitTotal = computed(() => totals.value.profit)
 const margin = computed(() => revenueTotal.value ? profitTotal.value / revenueTotal.value * 100 : 0)
-const ticket = computed(() => filteredOrders.value.length ? revenueTotal.value / filteredOrders.value.length : 0)
-const itemCount = computed(() => filteredOrders.value.reduce((sum, item) => sum + Number(item.qty || 0), 0))
-
-const periodKey = (value: unknown) => {
-  const date = parseDate(value)
-  if (!date) return ''
-  if (filters.value.grouping === 'day') return date.toISOString().slice(0, 10)
-  if (filters.value.grouping === 'week') {
-    const monday = new Date(date)
-    monday.setDate(date.getDate() - ((date.getDay() + 6) % 7))
-    return monday.toISOString().slice(0, 10)
-  }
-  return date.toISOString().slice(0, 7)
-}
+const ticket = computed(() => totals.value.ticket)
+const itemCount = computed(() => totals.value.itemCount)
 const periodLabel = (key: string) => {
   const [year, month, day] = key.split('-').map(Number)
   if (!year || !month) return key
@@ -62,40 +23,16 @@ const periodLabel = (key: string) => {
   const date = new Date(year, month - 1, day || 1)
   return `${filters.value.grouping === 'week' ? 'sem. ' : ''}${new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(date)}`
 }
-const chartRows = computed(() => {
-  const rows = new Map<string, { revenue: number; expenses: number; profit: number }>()
-  for (const order of filteredOrders.value) {
-    const key = periodKey(order.date)
-    const row = rows.get(key) || { revenue: 0, expenses: 0, profit: 0 }
-    row.revenue += Number(order.gross || 0)
-    row.profit += Number(order.profit || 0)
-    rows.set(key, row)
-  }
-  for (const expense of filteredExpenses.value) {
-    const key = periodKey(expense.date)
-    const row = rows.get(key) || { revenue: 0, expenses: 0, profit: 0 }
-    row.expenses += Number(expense.value || 0)
-    row.profit -= Number(expense.value || 0)
-    rows.set(key, row)
-  }
-  return [...rows.entries()].sort(([a], [b]) => a.localeCompare(b))
-})
-const chartLabels = computed(() => chartRows.value.map(([key]) => periodLabel(key)))
-const revenueChart = computed(() => chartRows.value.map(([, row]) => row.revenue))
-const expenseChart = computed(() => chartRows.value.map(([, row]) => row.expenses))
-const profitChart = computed(() => chartRows.value.map(([, row]) => row.profit))
+const chartRows = computed(() => props.report.series)
+const chartLabels = computed(() => chartRows.value.map(row => periodLabel(row.key)))
+const revenueChart = computed(() => chartRows.value.map(row => row.revenue))
+const expenseChart = computed(() => chartRows.value.map(row => row.expenses))
+const profitChart = computed(() => chartRows.value.map(row => row.profit))
 const marketplaceBars = computed(() => {
-  const totals = new Map<string, number>()
-  for (const order of filteredOrders.value) totals.set(order.marketplace || 'Sem marketplace', (totals.get(order.marketplace || 'Sem marketplace') || 0) + Number(order.gross || 0))
-  const rows = [...totals.entries()].sort((a, b) => b[1] - a[1])
-  const max = rows[0]?.[1] || 0
-  return rows.map(([name, value]) => ({ name, value, percent: max ? value / max * 100 : 0 }))
+  const max = props.report.marketplaces[0]?.value || 0
+  return props.report.marketplaces.map(item => ({ ...item, percent: max ? item.value / max * 100 : 0 }))
 })
-const expenseSegments = computed(() => {
-  const totals = new Map<string, number>()
-  for (const expense of filteredExpenses.value) totals.set(expense.category || 'Outros', (totals.get(expense.category || 'Outros') || 0) + Number(expense.value || 0))
-  return [...totals.entries()].map(([label, total]) => ({ label, total }))
-})
+const expenseSegments = computed(() => props.report.expenseCategories)
 </script>
 
 <template>
@@ -148,10 +85,10 @@ const expenseSegments = computed(() => {
       </PanelCard>
       <PanelCard title="Volume comercial" subtitle="Indicadores do conjunto filtrado">
         <div class="report-breakdown">
-          <div><span>Pedidos</span><strong>{{ formatNumber(filteredOrders.length) }}</strong></div>
+          <div><span>Pedidos</span><strong>{{ formatNumber(totals.orderCount) }}</strong></div>
           <div><span>Itens vendidos</span><strong>{{ formatNumber(itemCount) }}</strong></div>
           <div><span>Ticket médio</span><strong>{{ formatCurrency(ticket) }}</strong></div>
-          <div><span>Produtos cadastrados</span><strong>{{ formatNumber(products.length) }}</strong></div>
+          <div><span>Produtos cadastrados</span><strong>{{ formatNumber(totals.productsCount) }}</strong></div>
         </div>
       </PanelCard>
     </div>

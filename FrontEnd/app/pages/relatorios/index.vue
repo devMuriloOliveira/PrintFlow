@@ -10,7 +10,7 @@ type ReportFilters = {
   channel: 'Todos' | 'direct' | 'marketplace'
 }
 
-const { exportFinancialReport, products, orders, expenses } = useAppData()
+const { exportFinancialReport, loadReportSummary } = useAppData()
 const { notify } = useUi()
 const route = useRoute()
 const today = new Date()
@@ -25,6 +25,13 @@ const filters = reactive<ReportFilters>({
 })
 const exportFormat = ref<'csv' | 'xlsx'>('xlsx')
 const exporting = ref(false)
+const report = ref(emptyReportSummary())
+const reportLoading = ref(false)
+const reportError = ref('')
+const reportPage = ref(0)
+const reportPageSize = ref(50)
+let reportTimer: ReturnType<typeof setTimeout> | null = null
+let reportRequest = 0
 const sections: Array<{ key: ReportSection; label: string; description: string; icon: string }> = [
   { key: 'financeiro', label: 'Resultado financeiro', description: 'Receitas, despesas e margem', icon: 'wallet' },
   { key: 'produtos', label: 'Produtos e vendas', description: 'Desempenho comercial', icon: 'box' },
@@ -39,10 +46,47 @@ const currentSection = computed(() => sections.find(item => item.key === reportS
 const sectionRenderKey = computed(() => `${reportSection.value}:${filters.periodStart}:${filters.periodEnd}`)
 const exportLabel = computed(() => `Exportar ${currentSection.value.label.toLowerCase()}`)
 const showCommercialFilters = computed(() => ['financeiro', 'produtos'].includes(reportSection.value))
-const marketplaceOptions = computed(() => ['Todos', ...new Set(orders.value.map(item => item.marketplace || 'Sem marketplace'))])
-const productOptions = computed(() => ['Todos', ...new Set(products.value.map(item => item.name))])
-const categoryOptions = computed(() => ['Todos', ...new Set(expenses.value.map(item => item.category || 'Sem categoria'))])
+const marketplaceOptions = computed(() => ['Todos', ...report.value.options.marketplaces])
+const productOptions = computed(() => ['Todos', ...report.value.options.products])
+const categoryOptions = computed(() => ['Todos', ...report.value.options.categories])
 const invalidPeriod = computed(() => !filters.periodStart || !filters.periodEnd || filters.periodStart > filters.periodEnd)
+
+const loadReport = async () => {
+  if (invalidPeriod.value || !['financeiro', 'produtos'].includes(reportSection.value)) {
+    report.value = emptyReportSummary()
+    reportLoading.value = false
+    return
+  }
+  const requestId = ++reportRequest
+  reportLoading.value = true
+  reportError.value = ''
+  try {
+    const next = await loadReportSummary({
+      from: filters.periodStart, to: filters.periodEnd, grouping: filters.grouping, section: reportSection.value,
+      marketplace: filters.marketplace === 'Todos' ? '' : filters.marketplace,
+      product: filters.product === 'Todos' ? '' : filters.product,
+      category: filters.category === 'Todos' ? '' : filters.category,
+      channel: filters.channel === 'Todos' ? '' : filters.channel,
+      limit: reportPageSize.value, offset: reportPage.value * reportPageSize.value
+    })
+    if (requestId === reportRequest) report.value = next
+  } catch (error: any) {
+    if (requestId === reportRequest) reportError.value = error?.data?.error || error?.message || 'Não foi possível carregar o relatório.'
+  } finally {
+    if (requestId === reportRequest) reportLoading.value = false
+  }
+}
+const scheduleReport = () => {
+  if (reportTimer) clearTimeout(reportTimer)
+  reportTimer = setTimeout(() => void loadReport(), 180)
+}
+watch(() => [reportSection.value, filters.periodStart, filters.periodEnd, filters.grouping, filters.marketplace, filters.product, filters.category, filters.channel], () => {
+  reportPage.value = 0
+  scheduleReport()
+})
+watch([reportPage, reportPageSize], scheduleReport)
+onMounted(() => void loadReport())
+onBeforeUnmount(() => { if (reportTimer) clearTimeout(reportTimer) })
 
 const clearContextFilters = () => {
   filters.marketplace = 'Todos'
@@ -126,8 +170,9 @@ const exportReport = async () => {
     </section>
 
     <div v-if="invalidPeriod" class="report-blocked-state">Corrija o período para carregar este relatório.</div>
-    <RelatoriosRelatorioFinanceiro v-else-if="reportSection === 'financeiro'" :key="sectionRenderKey" v-model:filters="filters" />
-    <RelatoriosRelatorioProdutos v-else-if="reportSection === 'produtos'" :key="sectionRenderKey" :filters="filters" />
+    <div v-if="reportError && ['financeiro', 'produtos'].includes(reportSection)" class="report-blocked-state">{{ reportError }}</div>
+    <RelatoriosRelatorioFinanceiro v-else-if="reportSection === 'financeiro'" :key="sectionRenderKey" v-model:filters="filters" :report="report" :loading="reportLoading" />
+    <RelatoriosRelatorioProdutos v-else-if="reportSection === 'produtos'" :key="sectionRenderKey" :report="report" :loading="reportLoading" :page="reportPage" :page-size="reportPageSize" @update:page="reportPage = $event" @update:page-size="reportPageSize = $event" />
     <RelatoriosRelatorioEstoque v-else-if="reportSection === 'estoque'" :key="sectionRenderKey" :period-start="filters.periodStart" :period-end="filters.periodEnd" />
     <RelatoriosRelatorioHistorico v-else :key="sectionRenderKey" :period-start="filters.periodStart" :period-end="filters.periodEnd" />
   </div>

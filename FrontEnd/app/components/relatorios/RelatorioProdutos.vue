@@ -1,57 +1,32 @@
 <script setup lang="ts">
-type ReportFilters = { periodStart: string; periodEnd: string; marketplace: string; product: string; channel: 'Todos' | 'direct' | 'marketplace' }
-const props = defineProps<{ filters: ReportFilters }>()
-const { products, orders } = useAppData()
+import type { ReportSummary } from '~/composables/useAppData'
 
-const parseDate = (value: unknown) => {
-  const text = String(value || '')
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(text)) {
-    const [day, month, year] = text.split('/').map(Number)
-    return new Date(year, month - 1, day)
-  }
-  const date = new Date(text)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-const isCancelled = (value: unknown) => String(value || '').trim().toLowerCase() === 'cancelado'
-const filteredSales = computed(() => {
-  const start = new Date(`${props.filters.periodStart}T00:00:00`)
-  const end = new Date(`${props.filters.periodEnd}T23:59:59`)
-  return orders.value.filter(order => {
-    const date = parseDate(order.date)
-    return date && date >= start && date <= end && !isCancelled(order.status) &&
-      (props.filters.marketplace === 'Todos' || (order.marketplace || 'Sem marketplace') === props.filters.marketplace) &&
-      (props.filters.product === 'Todos' || order.product === props.filters.product) &&
-      (props.filters.channel === 'Todos' || order.salesChannel === props.filters.channel)
-  }).sort((a, b) => Number(parseDate(b.date)) - Number(parseDate(a.date)))
-})
-const productRows = computed(() => {
-  const totals = new Map<string, { qty: number; orders: number; revenue: number; profit: number }>()
-  for (const order of filteredSales.value) {
-    const name = order.product || 'Produto não informado'
-    const row = totals.get(name) || { qty: 0, orders: 0, revenue: 0, profit: 0 }
-    row.qty += Number(order.qty || 0)
-    row.orders += 1
-    row.revenue += Number(order.gross || 0)
-    row.profit += Number(order.profit || 0)
-    totals.set(name, row)
-  }
-  return [...totals.entries()].map(([name, totalsRow]) => {
-    const product = products.value.find(item => item.name === name)
-    return { name, product, ...totalsRow, realizedMargin: totalsRow.revenue ? totalsRow.profit / totalsRow.revenue * 100 : 0 }
-  }).sort((a, b) => b.revenue - a.revenue)
-})
-const revenueTotal = computed(() => filteredSales.value.reduce((sum, item) => sum + Number(item.gross || 0), 0))
-const profitTotal = computed(() => filteredSales.value.reduce((sum, item) => sum + Number(item.profit || 0), 0))
-const quantityTotal = computed(() => filteredSales.value.reduce((sum, item) => sum + Number(item.qty || 0), 0))
-const averageTicket = computed(() => filteredSales.value.length ? revenueTotal.value / filteredSales.value.length : 0)
+const props = defineProps<{ report: ReportSummary; loading?: boolean; page: number; pageSize: number }>()
+const emit = defineEmits<{ 'update:page': [value: number]; 'update:pageSize': [value: number] }>()
+const filteredSales = computed(() => props.report.sales.items)
+const productRows = computed(() => props.report.products.map(item => ({ ...item, qty: item.quantity, product: item, realizedMargin: item.revenue ? item.profit / item.revenue * 100 : 0 })))
+const revenueTotal = computed(() => props.report.totals.revenue)
+const profitTotal = computed(() => props.report.totals.registeredProfit)
+const quantityTotal = computed(() => props.report.totals.itemCount)
+const averageTicket = computed(() => props.report.totals.ticket)
 const bestProduct = computed(() => productRows.value[0]?.name || 'Sem vendas')
+const pageCount = computed(() => Math.max(1, Math.ceil(props.report.sales.total / props.pageSize)))
+const pageSummary = computed(() => {
+  const total = props.report.sales.total
+  if (!total) return 'Nenhuma venda encontrada'
+  const start = props.page * props.pageSize + 1
+  const end = Math.min(start + filteredSales.value.length - 1, total)
+  return `Mostrando ${start} a ${end} de ${total} vendas`
+})
+const changePage = (next: number) => emit('update:page', Math.min(Math.max(0, next), pageCount.value - 1))
+const changePageSize = (event: Event) => { emit('update:page', 0); emit('update:pageSize', Number((event.target as HTMLSelectElement).value)) }
 const channelLabel = (value: string) => value === 'direct' ? 'Venda direta' : 'Marketplace'
 </script>
 
 <template>
   <div class="report-section product-report">
     <div class="metrics-grid metrics-grid--4">
-      <MetricCard label="Vendas" :value="formatNumber(filteredSales.length)" icon="cart" note="Pedidos não cancelados" />
+      <MetricCard label="Vendas" :value="formatNumber(report.totals.orderCount)" icon="cart" note="Pedidos não cancelados" />
       <MetricCard label="Itens vendidos" :value="formatNumber(quantityTotal)" icon="box" note="Soma das quantidades" color="cyan" />
       <MetricCard label="Faturamento" :value="formatCurrency(revenueTotal)" icon="trend" note="Valor bruto das vendas" color="purple" />
       <MetricCard label="Lucro das vendas" :value="formatCurrency(profitTotal)" icon="money" note="Antes das despesas gerais" :color="profitTotal >= 0 ? 'green' : 'red'" />
@@ -81,6 +56,7 @@ const channelLabel = (value: string) => value === 'direct' ? 'Venda direta' : 'M
           <tbody><tr v-for="sale in filteredSales" :key="sale.dbId || sale.id"><td>{{ sale.date }}</td><td><strong>{{ sale.id }}</strong></td><td>{{ sale.product }}</td><td>{{ channelLabel(sale.salesChannel) }}<small class="sale-marketplace">{{ sale.marketplace }}</small></td><td>{{ formatNumber(Number(sale.qty || 0)) }}</td><td>{{ formatCurrency(Number(sale.gross || 0)) }}</td><td :class="Number(sale.profit || 0) >= 0 ? 'money-positive' : 'money-negative'">{{ formatCurrency(Number(sale.profit || 0)) }}</td><td><span class="badge">{{ sale.status }}</span></td></tr></tbody>
         </table>
       </div>
+      <div class="table-footer"><span>{{ loading ? 'Carregando vendas...' : pageSummary }}</span><div class="pagination"><button class="page-btn" :disabled="page === 0 || loading" @click="changePage(page - 1)">Anterior</button><button class="page-btn" :disabled="page + 1 >= pageCount || loading" @click="changePage(page + 1)">Próxima</button></div><select class="select-compact" :value="pageSize" :disabled="loading" @change="changePageSize"><option :value="25">25 por página</option><option :value="50">50 por página</option><option :value="100">100 por página</option></select></div>
     </PanelCard>
   </div>
 </template>

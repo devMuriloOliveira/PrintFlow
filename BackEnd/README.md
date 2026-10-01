@@ -222,6 +222,8 @@ Assinatura Stripe (restrita ao Owner):
 Dados do aplicativo:
 
 - `GET /api/app-data`
+- `GET /api/dashboard-summary`: totais, séries e estado operacional agregados para o dashboard, sem retornar os históricos completos.
+- `GET /api/reports/summary`: relatórios financeiro e de produtos agregados por tenant, com vendas paginadas quando há detalhamento.
 - `GET /api/products`
 - `POST /api/products`
 - `GET /api/orders`
