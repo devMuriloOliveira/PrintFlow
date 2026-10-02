@@ -4,14 +4,46 @@ export const useSubscriptionAccess = () => {
   const access = useState<Awaited<ReturnType<typeof getSubscriptionAccess>> | null>('subscription-access', () => null)
   const loading = useState('subscription-access-loading', () => false)
   const loaded = useState('subscription-access-loaded', () => false)
+  const error = useState<string | null>('subscription-access-error', () => null)
   const isDeveloper = computed(() => auth.user.value?.platformRole === 'platform_super_admin' || auth.user.value?.role === 'platform_super_admin')
   const isFree = computed(() => access.value?.planCode === 'free')
+  const isLimitReached = (resource: string) => {
+    const usage = access.value?.usage?.[resource]
+    return Boolean(isFree.value && usage && usage.used >= usage.limit)
+  }
 
-  const load = async () => {
-    if (loaded.value || loading.value || !auth.user.value || isDeveloper.value) return
+  const load = async (force = false) => {
+    if (force) loaded.value = false
+    if (loading.value) {
+      if (!force) return
+      await new Promise<void>((resolve) => {
+        const stop = watch(loading, (active) => {
+          if (!active) {
+            stop()
+            resolve()
+          }
+        })
+      })
+      return load(true)
+    }
+    if (loaded.value || !auth.user.value || isDeveloper.value) return
     loading.value = true
-    try { access.value = await getSubscriptionAccess() } catch { /* O backend continua sendo a fonte de autorizacao. */ }
+    error.value = null
+    try {
+      access.value = await getSubscriptionAccess()
+    } catch {
+      access.value = null
+      error.value = 'Não foi possível consultar o plano agora.'
+    }
     finally { loaded.value = true; loading.value = false }
+  }
+
+  const refreshAfterLimitError = async (error: unknown) => {
+    const apiError = error as { data?: { error?: string }; message?: string }
+    const message = apiError?.data?.error || apiError?.message || ''
+    if (!/plano atual permite no maximo/i.test(String(message))) return false
+    await load(true)
+    return true
   }
 
   const isLocked = (to: string) => {
@@ -21,5 +53,5 @@ export const useSubscriptionAccess = () => {
     return false
   }
 
-  return { access, loading, loaded, isFree, isDeveloper, load, isLocked, upgradePath: '/perfil?upgrade=1' }
+  return { access, loading, loaded, error, isFree, isDeveloper, load, refreshAfterLimitError, isLocked, isLimitReached, upgradePath: '/perfil?upgrade=1' }
 }

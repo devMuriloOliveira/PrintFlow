@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const { products, printers, printJobs, clients, apiBase, createItem, updateItem, deleteItem, loadOrdersPage, loadOrdersSummary, advanceOrderStage: advanceOrderStageRequest } = useAppData()
 const auth = useAuth()
+const subscription = useSubscriptionAccess()
 const { notify } = useUi()
 const router = useRouter()
 const search = ref('')
@@ -61,7 +62,7 @@ const loadSummary = async () => {
 const loadDailyOrders = async () => {
   try { dailyOrders.value = (await loadOrdersPage({ from: today(), to: today(), salesChannel: 'direct', limit: 100, offset: 0 })).items } catch { dailyOrders.value = [] }
 }
-onMounted(() => { void loadTableOrders(); void loadSummary(); void loadDailyOrders() })
+onMounted(() => { void subscription.load(); void loadTableOrders(); void loadSummary(); void loadDailyOrders() })
 watch([search, status], () => { if (tableSearchTimer) clearTimeout(tableSearchTimer); tableSearchTimer = setTimeout(() => void loadTableOrders(), 250) })
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const metricCards = computed(() => [
@@ -362,7 +363,8 @@ const marketplaceBars = computed(() => {
 </script>
 <template>
   <div>
-    <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" to="/vendas/novo"><UiIcon name="plus"/>Nova Venda</NuxtLink></PageHeader>
+    <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" :to="subscription.isLimitReached('ordersMonthly') ? subscription.upgradePath : '/vendas/novo'"><UiIcon :name="subscription.isLimitReached('ordersMonthly') ? 'lock' : 'plus'"/>{{ subscription.isLimitReached('ordersMonthly') ? 'Limite atingido · Upgrade' : 'Nova Venda' }}</NuxtLink></PageHeader>
+    <PlanLimitNotice resource="ordersMonthly" label="pedidos deste mês" remaining-text="Pedidos já registrados, produção, envio e histórico continuam disponíveis normalmente." />
     <div class="metrics-grid metrics-grid--5 sales-metrics">
       <MetricCard
         v-for="card in metricCardsWithSummary"

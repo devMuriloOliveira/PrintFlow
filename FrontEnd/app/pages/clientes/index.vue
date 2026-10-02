@@ -3,6 +3,7 @@ const { clients, loadClientOrders, updateItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
+const subscription = useSubscriptionAccess()
 
 const search = ref('')
 const clientOrder = ref('name')
@@ -27,6 +28,7 @@ const clientsWithOrders = computed(() => clients.value.filter(client => Number(c
 const totalClientRevenue = computed(() => clients.value.reduce((total, client) => total + Number(client.revenue || 0), 0))
 const bestClient = computed(() => Number(metrics.bestClient.value?.revenue || 0) > 0 ? metrics.bestClient.value : null)
 const originOptions = computed(() => [...new Set(clients.value.map(client => client.origin || 'Outro'))].sort((a, b) => a.localeCompare(b, 'pt-BR')))
+onMounted(() => { void subscription.load() })
 
 const filtered = computed(() => {
   const term = normalizeSearch(search.value)
@@ -108,8 +110,9 @@ const statusClass = (status: unknown) => {
 <template>
   <main class="clients-page">
     <PageHeader title="Clientes" subtitle="Relacionamento, histórico e valor gerado pelas vendas diretas.">
-      <button class="btn btn--primary" type="button" @click="navigateTo('/clientes/novo')"><UiIcon name="plus" :size="16" />Novo cliente</button>
+      <NuxtLink class="btn btn--primary" :to="subscription.isLimitReached('clients') ? subscription.upgradePath : '/clientes/novo'"><UiIcon :name="subscription.isLimitReached('clients') ? 'lock' : 'plus'" :size="16" />{{ subscription.isLimitReached('clients') ? 'Limite atingido · Upgrade' : 'Novo cliente' }}</NuxtLink>
     </PageHeader>
+    <PlanLimitNotice resource="clients" label="clientes" remaining-text="Seus clientes atuais, histórico e vendas continuam disponíveis para consulta e edição." />
 
     <div class="metrics-grid metrics-grid--4 clients-metrics">
       <MetricCard label="Clientes ativos" :value="formatNumber(activeClients.length)" icon="users" :note="`${clients.length - activeClients.length} inativo(s)`" :points="clientOrderPoints" />
@@ -165,7 +168,7 @@ const statusClass = (status: unknown) => {
           <thead><tr><th>Cliente</th><th>Contato</th><th>Origem</th><th>Pedidos</th><th>Faturamento</th><th>Ticket médio</th><th>Última compra</th><th>Status</th><th></th></tr></thead>
           <tbody>
             <tr v-if="!filtered.length"><td colspan="9"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="users" /></div><h3>Nenhum cliente encontrado</h3><p>{{ clients.length ? 'Ajuste ou limpe os filtros para ver outros cadastros.' : 'Cadastre seu primeiro cliente para começar o histórico de relacionamento.' }}</p><button v-if="clients.length" class="btn" type="button" @click="clearFilters">Limpar filtros</button><NuxtLink v-else class="btn btn--primary" to="/clientes/novo">Cadastrar cliente</NuxtLink></div></div></td></tr>
-            <tr v-for="client in filtered" :key="client.id" :class="{ 'clients-table__row--selected': selectedClientId === String(client.id || '') }" @click="selectClient(client)">
+            <tr v-for="client in filtered" :key="client.id" :class="{ 'clients-table__row--selected': selectedClientId === String(client.id || '') }" tabindex="0" @click="selectClient(client)" @keydown.enter.self="selectClient(client)" @keydown.space.self.prevent="selectClient(client)">
               <td><div class="table-product"><span class="avatar">{{ initials(client.name) }}</span><div><strong>{{ client.name }}</strong><small>{{ client.type || 'Pessoa Física' }}</small></div></div></td>
               <td><div class="client-contact"><strong>{{ contactLabel(client.email) }}</strong><small>{{ contactLabel(client.phone) }}</small></div></td>
               <td><span class="badge badge--blue">{{ client.origin || 'Outro' }}</span></td>
@@ -184,6 +187,7 @@ const statusClass = (status: unknown) => {
 </template>
 
 <style scoped>
+.clients-table tbody tr:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
 .clients-page{width:100%}.clients-metrics{margin-bottom:14px}.clients-toolbar{margin-bottom:14px;border:1px solid var(--line);border-radius:12px;background:#fff;box-shadow:var(--shadow)}.clients-toolbar__heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px 0}.clients-toolbar__heading span,.client-insight__eyebrow,.client-history__heading span{display:block;color:var(--blue);font-size:8px;font-weight:800;letter-spacing:.09em}.clients-toolbar__heading strong{display:block;margin-top:3px;color:#253247;font-size:11px}.clients-filters{margin:0;border:0;box-shadow:none}.client-insight{overflow:hidden;margin-bottom:14px;border:1px solid #d7e2f3;border-radius:13px;background:#fff;box-shadow:var(--shadow)}.client-insight__header{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid #e8edf4;background:linear-gradient(135deg,#fbfdff,#f2f7ff)}.client-insight__avatar{width:46px;height:46px;font-size:14px}.client-insight__header h2{margin:2px 0 3px;color:#172033;font-size:16px}.client-insight__header p{margin:0;color:var(--muted);font-size:9px}.client-insight__stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}.client-insight__stats article{display:grid;gap:4px;padding:14px 18px;border-right:1px solid var(--line)}.client-insight__stats article:last-child{border-right:0}.client-insight__stats span,.client-insight__details>div>span{color:var(--muted);font-size:9px}.client-insight__stats strong{font-size:14px}.client-insight__details{display:grid;grid-template-columns:.7fr 1.5fr 1fr 1.4fr;gap:14px;padding:14px 18px;background:#fbfcfe}.client-insight__details>div{min-width:0}.client-insight__details strong{display:block;overflow-wrap:anywhere;margin-top:4px;color:#2c3a50;font-size:9.5px;line-height:1.45}.client-tags{display:flex!important;flex-wrap:wrap;gap:4px;margin-top:5px}.client-tags em{border-radius:999px;color:#36577d;background:#eaf2fc;padding:3px 7px;font-size:8px;font-style:normal;font-weight:700}.client-history{padding:16px 18px}.client-history__heading{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:10px}.client-history__heading h3{margin:2px 0 0;font-size:12px}.client-history__heading small{color:var(--muted);font-size:8px}.client-history__loading,.client-history__empty{display:flex;align-items:center;gap:11px;min-height:64px;border:1px dashed #d7e0ec;border-radius:10px;color:var(--muted);background:#fafcff;padding:12px;font-size:9px}.client-history__empty>span{display:grid;width:36px;height:36px;flex:0 0 auto;place-items:center;border-radius:10px;color:var(--blue);background:var(--blue-soft)}.client-history__empty>div{flex:1}.client-history__empty strong{color:#26354a;font-size:10px}.client-history__empty p{margin:3px 0 0}.clients-table tbody tr{cursor:pointer}.clients-table__row--selected td{background:#f2f7ff}.table-product>div strong,.table-product>div small,.client-contact strong,.client-contact small{display:block}.table-product>div small,.client-contact small{color:var(--muted);margin-top:3px;font-size:8px}.client-contact strong{max-width:210px;overflow:hidden;color:#34415c;font-size:9px;text-overflow:ellipsis}.clients-table__actions{display:flex;justify-content:flex-end;gap:5px}.row-action--restore{color:#087b54;background:#e8f8f0}
 @media(max-width:1050px){.client-insight__details{grid-template-columns:1fr 1fr}.client-insight__header{grid-template-columns:auto minmax(0,1fr) auto}.client-insight__header>.btn{grid-column:2}.client-insight__header>.row-action{grid-column:3;grid-row:1}}
 @media(max-width:720px){.clients-filters{display:grid;grid-template-columns:1fr 1fr}.clients-filters .field--search{grid-column:1/-1}.client-insight__header{grid-template-columns:auto 1fr auto;padding:14px}.client-insight__header>.badge{grid-column:2}.client-insight__header>.btn{grid-column:1/-1}.client-insight__stats{grid-template-columns:1fr 1fr}.client-insight__stats article:nth-child(2){border-right:0}.client-insight__stats article:nth-child(-n+2){border-bottom:1px solid var(--line)}.client-insight__details{grid-template-columns:1fr}.client-history__heading{align-items:start;flex-direction:column}.client-history__empty{align-items:flex-start;flex-wrap:wrap}.client-history__empty .btn{width:100%}}

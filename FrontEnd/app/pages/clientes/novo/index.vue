@@ -4,6 +4,7 @@ import { navigateTo } from '#app'
 
 const { clients, createItem, updateItem } = useAppData()
 const { notify } = useUi()
+const subscription = useSubscriptionAccess()
 const route = useRoute()
 
 const defaultForm = () => ({
@@ -90,6 +91,10 @@ const save = async (again = false) => {
     if (again) return resetForm()
     await navigateTo('/clientes')
   } catch (error: any) {
+    if (await subscription.refreshAfterLimitError(error)) {
+      notify('Limite do plano FREE atingido. Revise o aviso ou conheça o PRO.', 'info')
+      return
+    }
     notify(error?.data?.error || error?.message || 'Não foi possível salvar o cliente.', 'info')
   } finally {
     saving.value = false
@@ -99,6 +104,7 @@ const save = async (again = false) => {
 const cancel = () => {
   if (!hasChanges.value || window.confirm('Descartar alterações?\n\nAs informações preenchidas ainda não foram salvas.')) navigateTo('/clientes')
 }
+onMounted(() => { void subscription.load() })
 </script>
 
 <template>
@@ -110,6 +116,7 @@ const cancel = () => {
       <div><span>RELACIONAMENTO COMERCIAL</span><h1>{{ isEditing ? 'Editar cliente' : 'Novo cliente' }}</h1><p>{{ isEditing ? 'Atualize os dados sem perder o histórico de compras vinculado.' : 'Crie um cadastro para conectar vendas, contatos e histórico comercial.' }}</p></div>
       <span class="client-editor__status"><i :class="{ inactive: form.status === 'inactive' }" />{{ form.status === 'inactive' ? 'INATIVO' : isEditing ? 'CADASTRO ATIVO' : 'NOVO CADASTRO' }}</span>
     </header>
+    <PlanLimitNotice v-if="!isEditing" resource="clients" label="clientes" remaining-text="Clientes atuais, histórico e vendas continuam disponíveis. A edição dos cadastros existentes não é bloqueada." />
 
     <div class="client-editor__layout">
       <form class="client-editor__form" @submit.prevent="save(false)">

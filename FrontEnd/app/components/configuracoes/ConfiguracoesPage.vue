@@ -27,7 +27,7 @@ const companyLookupLoading = ref(false)
 const exportingData = ref(false)
 const exportHistory = ref<Array<{ id: string; fileName: string; format: string; recordCount: number; status: string; createdAt: string }>>([])
 const backupLoading = ref(false)
-const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
+const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string }; operational: { lastCompletedAt: string | null; lastStatus: string; history: Array<{ status: string; startedAt: string | null; completedAt: string | null }> } }>({ databaseAvailable: false, export: { enabled: false, format: 'csv', excludes: [] }, restore: { enabled: false, reason: '' }, operational: { lastCompletedAt: null, lastStatus: 'unknown', history: [] } })
 const submittingSupport = ref(false)
 const submittedSupportProtocol = ref('')
 const supportDraft = reactive({
@@ -69,6 +69,16 @@ const pageTitle = computed(() => props.standalone && currentPresentation.value ?
 const pageSubtitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.subtitle : 'Gerencie os dados essenciais da empresa e da plataforma.')
 const canExportCompanyData = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
 const latestExport = computed(() => exportHistory.value[0] || null)
+const operationalBackupAge = computed(() => {
+  const value = backupStatus.value.operational.lastCompletedAt
+  if (!value) return backupStatus.value.operational.lastStatus === 'failed' ? 'Última execução falhou · sem cópia concluída' : 'Sem cópia concluída registrada'
+  const ageMs = Math.max(0, Date.now() - new Date(value).getTime())
+  const minutes = Math.floor(ageMs / 60_000)
+  const age = minutes < 1 ? 'agora' : minutes < 60 ? `há ${minutes} min` : minutes < 1440 ? `há ${Math.floor(minutes / 60)} h` : `há ${Math.floor(minutes / 1440)} dia(s)`
+  return backupStatus.value.operational.lastStatus === 'failed' ? `Última execução falhou · cópia concluída ${age}` : `Cópia concluída ${age}`
+})
+const backupRunStatusLabel = (status: string) => ({ success: 'Concluído', completed: 'Concluído', failed: 'Falhou', running: 'Em andamento' }[status] || 'Desconhecido')
+const backupRunStatusClass = (status: string) => ['success', 'completed'].includes(status) ? 'badge--green' : status === 'failed' ? 'badge--red' : 'badge--orange'
 const privacyExportGroups = ref<string[]>(['company', 'customers', 'catalog', 'production', 'financial', 'marketplaces'])
 const privacyExportOptions = [
   { value: 'company', label: 'Cadastro e configurações da empresa', description: 'Dados cadastrais e preferências.' },
@@ -91,7 +101,7 @@ const selectedPrivacyRequest = computed(() => privacyRequestOptions.find((option
 const allPrivacyExportGroupsSelected = computed(() => privacyExportGroups.value.length === privacyExportOptions.length)
 const selectAllPrivacyExportGroups = () => { privacyExportGroups.value = privacyExportOptions.map(option => option.value) }
 const clearPrivacyExportGroups = () => { privacyExportGroups.value = [] }
-const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0, documentLocked: false, documentType: '' })
+const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0, nameLocked: false, documentLocked: false, documentType: '' })
 const companyDocumentKind = ref<'cpf' | 'cnpj'>('cnpj')
 const companyDocumentLabel = computed(() => companyDocumentKind.value === 'cpf' ? 'CPF' : 'CNPJ')
 const companyDocumentPlaceholder = computed(() => companyDocumentKind.value === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00')
@@ -350,7 +360,7 @@ const syncSettings = () => {
   Object.assign(company, {
     name: String(value.name || ''), cnpj: String(value.document || ''), phone: String(value.phone || ''), email: String(value.email || ''),
     address: String(value.address || ''), district: String(value.district || ''), city: String(value.city || ''), state: String(value.state || ''), zip: String(value.zip || ''),
-    country: String(value.country || 'Brasil'), currency: String(value.currency || 'Real (R$)'), timezone: String(value.timezone || '(GMT-03:00) Brasilia'), kwh: Number(value.kwh || 0), documentLocked: Boolean(value.documentLocked), documentType: String(value.documentType || '')
+    country: String(value.country || 'Brasil'), currency: String(value.currency || 'Real (R$)'), timezone: String(value.timezone || '(GMT-03:00) Brasilia'), kwh: Number(value.kwh || 0), nameLocked: Boolean(value.nameLocked), documentLocked: Boolean(value.documentLocked), documentType: String(value.documentType || '')
   })
   companyDocumentKind.value = companyDocumentKindFrom(company.cnpj, company.documentType)
   Object.assign(preferences, (value.preferences && typeof value.preferences === 'object' ? value.preferences : {}))
@@ -555,7 +565,8 @@ const loadSectionOnce = (key: string, loader: () => Promise<unknown>, force = fa
   sectionRequests[key] = request
   return request
 }
-const openDocumentChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: 'Solicitação de troca de CPF para CNPJ' } })
+const openDocumentChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: company.documentType === 'cpf' ? 'Solicitação de troca de CPF para CNPJ' : 'Solicitação de alteração do documento da empresa' } })
+const openCompanyNameChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: 'Solicitação de alteração do nome da empresa' } })
 
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes' && canManageMembers.value) void loadSectionOnce('members', loadMembers)
@@ -603,8 +614,8 @@ watch(() => supportDraft.category, (category) => {
             <section class="company-settings__section">
               <div class="company-settings__section-head"><span><UiIcon name="building" :size="17" /></span><div><h3>Identificação</h3><p>Nome e documento usados no cadastro da conta.</p></div></div>
               <div class="form-grid">
-                <div class="field col-7"><label for="company-name">Nome da empresa *</label><input id="company-name" v-model="company.name" autocomplete="organization" placeholder="Nome da sua empresa"></div>
-                <div class="field col-5"><label for="company-document">{{ companyDocumentLabel }} <small v-if="company.documentLocked" class="company-settings__locked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input id="company-document" v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Depois de salvo, o documento fica protegido contra alterações diretas.</small><small v-if="company.documentLocked && company.documentType === 'cpf'">Para substituir o CPF por CNPJ, <button class="link-button" type="button" @click="openDocumentChangeRequest">abra uma solicitação</button>.</small></div>
+                <div class="field col-7"><label for="company-name">Nome da empresa * <small v-if="company.nameLocked" class="company-settings__locked">· informado no cadastro</small></label><input id="company-name" v-model="company.name" autocomplete="organization" placeholder="Nome da sua empresa" :disabled="company.nameLocked"><small v-if="company.nameLocked">Para solicitar uma alteração, <button class="link-button" type="button" @click="openCompanyNameChangeRequest">fale com o suporte</button>.</small></div>
+                <div class="field col-5"><label for="company-document">{{ companyDocumentLabel }} <small v-if="company.documentLocked" class="company-settings__locked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input id="company-document" v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Depois de salvo, o documento fica protegido contra alterações diretas.</small><small v-if="company.documentLocked">Para solicitar uma alteração, <button class="link-button" type="button" @click="openDocumentChangeRequest">fale com o suporte</button>.</small></div>
               </div>
             </section>
 
@@ -819,6 +830,13 @@ watch(() => supportDraft.category, (category) => {
                 <article><span><UiIcon name="check" :size="17" /></span><div><small>Exportação</small><strong>{{ backupStatus.export.enabled ? 'Disponível' : 'Indisponível' }}</strong></div></article>
                 <article><span><UiIcon name="receipt" :size="17" /></span><div><small>Formato</small><strong>{{ backupStatus.export.enabled ? backupStatus.export.format.toUpperCase() : '—' }}</strong></div></article>
                 <article><span><UiIcon name="history" :size="17" /></span><div><small>Última exportação</small><strong>{{ latestExport ? new Date(latestExport.createdAt).toLocaleDateString('pt-BR') : 'Nenhuma' }}</strong></div></article>
+                <article><span><UiIcon name="shield" :size="17" /></span><div><small>Último backup operacional</small><strong>{{ operationalBackupAge }}</strong><small v-if="backupStatus.operational.lastCompletedAt">{{ new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(backupStatus.operational.lastCompletedAt)) }}</small></div></article>
+              </section>
+
+              <section class="backup-history-card" aria-labelledby="backup-runs-title">
+                <div class="backup-section-heading"><div><small>ExecuÃ§Ãµes do sistema</small><h3 id="backup-runs-title">HistÃ³rico de backups</h3><p>Ãšltimas execuÃ§Ãµes registradas, separadas das exportaÃ§Ãµes da empresa.</p></div><span>{{ backupStatus.operational.history.length }} {{ backupStatus.operational.history.length === 1 ? 'execuÃ§Ã£o' : 'execuÃ§Ãµes' }}</span></div>
+                <div v-if="backupStatus.operational.history.length" class="table-scroll"><table class="data-table"><thead><tr><th>Status</th><th>Iniciado em</th><th>ConcluÃ­do em</th></tr></thead><tbody><tr v-for="(run, index) in backupStatus.operational.history" :key="`${run.startedAt || 'backup'}-${index}`"><td><span class="badge" :class="backupRunStatusClass(run.status)">{{ backupRunStatusLabel(run.status) }}</span></td><td>{{ run.startedAt ? new Date(run.startedAt).toLocaleString('pt-BR') : '—' }}</td><td>{{ run.completedAt ? new Date(run.completedAt).toLocaleString('pt-BR') : '—' }}</td></tr></tbody></table></div>
+                <div v-else class="backup-history-empty"><span><UiIcon name="history" :size="21" /></span><div><strong>Nenhuma execuÃ§Ã£o de backup registrada</strong><p>Este histÃ³rico mostra cÃ³pias operacionais, nÃ£o os arquivos CSV exportados abaixo.</p></div></div>
               </section>
 
               <section class="backup-export-card" :class="{ 'backup-export-card--disabled': !backupStatus.export.enabled }">

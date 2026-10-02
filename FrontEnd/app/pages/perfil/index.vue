@@ -5,6 +5,8 @@ const auth = useAuth()
 const route = useRoute()
 const { getStripeBilling } = useAppData()
 const subscriptionAccess = useSubscriptionAccess()
+const subscriptionLoading = computed(() => subscriptionAccess.loading.value)
+const subscriptionError = computed(() => subscriptionAccess.error.value)
 const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'PF')
 const billing = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
 const billingLoading = ref(false)
@@ -49,7 +51,7 @@ const profileSections = [
     <PageHeader title="Minha conta e assinatura" subtitle="Centralize os dados da sua conta, assinatura, segurança e solicitações." />
     <section class="profile-overview-grid">
       <div class="profile-summary"><span class="avatar profile-summary__avatar">{{ initials }}</span><div class="profile-summary__content"><h2>{{ auth.user.value?.name || 'Usuário' }}</h2><p>{{ auth.user.value?.email || 'E-mail não informado' }}</p><span class="badge">{{ auth.user.value?.role === 'owner' ? 'Owner da empresa' : 'Usuário da empresa' }}</span><button class="profile-signout" type="button" @click="auth.logout"><UiIcon name="logout" :size="15" />Sair da conta</button></div></div>
-      <div class="profile-plan-highlight" :class="{ 'profile-plan-highlight--active': hasManagedSubscription }"><span class="profile-plan-highlight__icon"><UiIcon name="crown" :size="30" /></span><small>Seu plano</small><strong>{{ subscriptionAccess.loading ? 'Consultando...' : planNameFromAccess }}</strong><span :class="['badge', { 'badge--green': hasManagedSubscription }]">{{ subscriptionAccess.loading ? 'Aguarde' : (isFree ? 'Plano gratuito' : (hasManagedSubscription ? subscriptionStatus(subscription?.status) : 'Plano contratado')) }}</span></div>
+      <div class="profile-plan-highlight" :class="{ 'profile-plan-highlight--active': hasManagedSubscription }"><span class="profile-plan-highlight__icon"><UiIcon name="crown" :size="30" /></span><small>Seu plano</small><strong>{{ subscriptionLoading ? 'Consultando...' : subscriptionError ? 'Indisponível' : planNameFromAccess }}</strong><span :class="['badge', { 'badge--green': hasManagedSubscription, 'badge--red': subscriptionError }]">{{ subscriptionLoading ? 'Aguarde' : subscriptionError ? 'Falha ao consultar' : (isFree ? 'Plano gratuito' : (hasManagedSubscription ? subscriptionStatus(subscription?.status) : 'Plano contratado')) }}</span><button v-if="subscriptionError && !subscriptionLoading" class="profile-plan-retry" type="button" @click="subscriptionAccess.load(true)">Tentar novamente</button></div>
     </section>
 
     <section class="profile-billing-card">
@@ -74,3 +76,8 @@ const profileSections = [
     <section class="profile-section-grid" aria-label="Opções do perfil"><NuxtLink v-for="section in profileSections" :key="section.to" class="profile-section-card" :class="{ 'profile-section-card--danger': section.danger }" :to="section.to"><span class="profile-section-card__icon"><UiIcon :name="section.icon" /></span><span class="profile-section-card__content"><strong>{{ section.title }}</strong><small>{{ section.description }}</small></span><UiIcon name="chevron" :size="17" /></NuxtLink></section>
   </div>
 </template>
+
+<style scoped>
+.profile-plan-retry{border:0;border-radius:5px;background:transparent;color:var(--blue);padding:3px 6px;font:inherit;font-size:10px;font-weight:700;text-decoration:underline;cursor:pointer}
+.profile-plan-retry:focus-visible{outline:3px solid rgba(23,104,242,.25);outline-offset:2px}
+</style>

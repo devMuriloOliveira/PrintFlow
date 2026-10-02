@@ -2,6 +2,7 @@
 import { calculatePricing } from '../../../utils/pricing.js'
 const { products, printers, filaments, settings, createProduct, updateItem, uploadProductPrintFile, uploadProductImage } = useAppData()
 const { notify } = useUi()
+const subscription = useSubscriptionAccess()
 const router = useRouter()
 const route = useRoute()
 const saving = ref(false)
@@ -329,11 +330,16 @@ const save = async () => {
     notify(isEditing.value ? 'Produto atualizado com sucesso' : 'Produto salvo com sucesso')
     router.push('/produtos')
   } catch (error) {
+    if (await subscription.refreshAfterLimitError(error)) {
+      notify('Limite do plano FREE atingido. Revise o aviso ou conheça o PRO.', 'info')
+      return
+    }
     notify(error instanceof Error ? error.message : 'Não foi possível salvar o produto.', 'info')
   } finally {
     saving.value = false
   }
 }
+onMounted(() => { void subscription.load() })
 </script>
 <template>
   <div class="product-editor">
@@ -343,6 +349,7 @@ const save = async () => {
     >
       <NuxtLink class="btn" to="/produtos">Cancelar</NuxtLink>
     </PageHeader>
+    <PlanLimitNotice v-if="!isEditing" resource="products" label="produtos" remaining-text="Seu catálogo, custos e vendas dos produtos atuais continuam disponíveis. A edição dos produtos existentes não é bloqueada." />
 
     <form class="product-editor__layout" @submit.prevent="save">
       <main class="product-editor__main">

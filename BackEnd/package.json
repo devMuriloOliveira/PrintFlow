@@ -8,6 +8,7 @@
     "clean:demo": "node src/db/cleanDemoData.js",
     "migrate": "node src/db/runMigrations.js",
     "test": "node --test",
+    "test:backup-restore": "node --test test/backup-restore.integration.test.js",
     "start": "node src/server.js",
     "backup": "node src/db/backupDatabase.js",
     "restore": "node src/db/restoreDatabase.js",

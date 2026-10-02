@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const { orders, products, clients, createItem, updateItem } = useAppData()
 const { notify } = useUi()
+const subscription = useSubscriptionAccess()
 const route = useRoute()
 const saving = ref(false)
 const errors = reactive<Record<string, string>>({})
@@ -15,6 +16,7 @@ const form = reactive({
 })
 const editId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const isEditing = computed(() => Boolean(editId.value))
+const monthlyLimitReached = computed(() => !isEditing.value && subscription.isLimitReached('ordersMonthly'))
 const hydrated = ref(false)
 const selectedProduct = computed(() => products.value.find(item => String(item.id || '') === form.productId))
 const net = computed(() => Number(form.gross || 0) - Number(form.fee || 0) - Number(form.shipping || 0))
@@ -83,17 +85,25 @@ const save = async () => {
     notify(isEditing.value ? 'Venda atualizada com sucesso.' : 'Venda cadastrada com sucesso.')
     await navigateTo('/vendas')
   } catch (error: any) {
-    notify(error?.data?.error || (error instanceof Error ? error.message : 'Não foi possível salvar a venda.'), 'info')
+    const message = error?.data?.error || (error instanceof Error ? error.message : '')
+    const limitReached = await subscription.refreshAfterLimitError(error)
+    if (limitReached) {
+      notify('Limite do plano FREE atingido. Revise o aviso ou conheça o PRO.', 'info')
+      return
+    }
+    notify(message || 'Não foi possível salvar a venda.', 'info')
   } finally {
     saving.value = false
   }
 }
+onMounted(() => { void subscription.load() })
 </script>
 
 <template>
   <div class="sale-editor">
     <div class="breadcrumb"><span>Vendas</span><UiIcon name="chevron" :size="12" /><strong>{{ isEditing ? 'Editar venda' : 'Nova venda' }}</strong></div>
     <PageHeader :title="isEditing ? 'Editar venda' : 'Nova venda'" :subtitle="isEditing ? 'Atualize os dados comerciais sem alterar a etapa operacional.' : 'Registre o pedido e confira o resultado antes de salvar.'" />
+    <PlanLimitNotice v-if="!isEditing" resource="ordersMonthly" label="pedidos deste mês" remaining-text="Pedidos já registrados, produção, envio e histórico continuam disponíveis normalmente." />
 
     <div class="sale-editor__layout">
       <form class="sale-editor__form" @submit.prevent="save">
@@ -136,7 +146,7 @@ const save = async () => {
           </div>
         </section>
 
-        <div class="form-actions sale-editor__actions"><NuxtLink class="btn" to="/vendas">Cancelar</NuxtLink><button class="btn btn--primary" :disabled="saving"><UiIcon name="check" :size="16" />{{ saving ? 'Salvando...' : isEditing ? 'Salvar alterações' : 'Salvar venda' }}</button></div>
+        <div class="form-actions sale-editor__actions"><NuxtLink class="btn" to="/vendas">Cancelar</NuxtLink><NuxtLink v-if="monthlyLimitReached" class="btn btn--primary" :to="subscription.upgradePath"><UiIcon name="lock" :size="16" />Conhecer o PRO</NuxtLink><button v-else class="btn btn--primary" :disabled="saving"><UiIcon name="check" :size="16" />{{ saving ? 'Salvando...' : isEditing ? 'Salvar alterações' : 'Salvar venda' }}</button></div>
       </form>
 
       <aside class="sale-summary">

@@ -20,6 +20,28 @@ const {
 
 const { notify } = useUi()
 const auth = useAuth()
+const subscription = useSubscriptionAccess()
+const agentFeatureLocked = computed(() =>
+  subscription.access.value?.features?.agent === false &&
+  !subscription.isDeveloper.value
+)
+const agentPlanReady = computed(() =>
+  subscription.loaded.value ||
+  subscription.isDeveloper.value
+)
+const canUseAgent = computed(() =>
+  agentPlanReady.value &&
+  !subscription.loading.value &&
+  !subscription.error.value &&
+  (subscription.isDeveloper.value ||
+    subscription.access.value?.features?.agent === true)
+)
+const canManageSubscription = computed(() =>
+  ['owner', 'platform_super_admin'].includes(
+    String(auth.user.value?.role || auth.user.value?.platformRole || '')
+  )
+)
+const retryAgentPlanCheck = () => subscription.load(true)
 
 const route = useRoute()
 const config = useRuntimeConfig()
@@ -1798,6 +1820,12 @@ const connectDiscoveredPrinter =
         '/impressoras'
       )
     } catch (error) {
+      if (await subscription.refreshAfterLimitError(error)) {
+        const message = 'Limite do plano FREE atingido. Revise o aviso ou conheça o PRO.'
+        discoveryMessage.value = message
+        notify(message, 'info')
+        return
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -2701,6 +2729,10 @@ const save =
         '/impressoras'
       )
     } catch (error) {
+      if (await subscription.refreshAfterLimitError(error)) {
+        notify('Limite do plano FREE atingido. Revise o aviso ou conheça o PRO.', 'info')
+        return
+      }
       notify(
         error instanceof Error
           ? error.message
@@ -2729,6 +2761,8 @@ const cancel = () => {
     )
   }
 }
+
+onMounted(() => { void subscription.load() })
 </script>
 
 <template>
@@ -2768,6 +2802,7 @@ const cancel = () => {
           : 'Cadastre manualmente no FREE. A conexão e automação pelo PrintFlow Agent estão disponíveis no PRO.'
       "
     />
+    <PlanLimitNotice v-if="!isEditing" resource="printers" label="impressoras" remaining-text="As impressoras existentes, seus dados e o controle manual continuam disponíveis no plano FREE." />
 
     <!-- ================================================= -->
     <!-- ESCOLHER MÉTODO                                   -->
@@ -2801,9 +2836,9 @@ const cancel = () => {
             <UiIcon name="settings" :size="24" />
           </span>
           <span class="printer-mode-card__copy">
-            <span class="printer-mode-card__eyebrow">Recomendado · PRO</span>
+            <span class="printer-mode-card__eyebrow">Exclusivo do PRO</span>
             <strong>Conectar com o Agent</strong>
-            <small>Detecte impressoras, acompanhe o status e envie trabalhos automaticamente.</small>
+            <small>Detecção, acompanhamento e envio automáticos exigem o plano PRO.</small>
           </span>
           <span class="printer-mode-card__check">✓</span>
         </button>
@@ -2842,7 +2877,8 @@ const cancel = () => {
       v-if="
         !isEditing &&
         connectionMode ===
-          'agent'
+          'agent' &&
+        canUseAgent
       "
       class="printer-agent-panel"
     >
@@ -4006,6 +4042,57 @@ const cancel = () => {
       </template>
     </div>
 
+    <section
+      v-else-if="!isEditing && connectionMode === 'agent'"
+      class="printer-agent-plan-gate"
+      :aria-busy="subscription.loading.value || !agentPlanReady"
+    >
+      <span class="printer-agent-plan-gate__icon">
+        <UiIcon :name="subscription.error.value ? 'alert' : 'lock'" :size="22" />
+      </span>
+      <div class="printer-agent-plan-gate__copy">
+        <template v-if="subscription.loading.value || !agentPlanReady">
+          <strong>Verificando seu plano…</strong>
+          <p>Aguarde enquanto confirmamos se a conexão pelo Agent está disponível.</p>
+        </template>
+        <template v-else-if="subscription.error.value">
+          <strong>Não foi possível confirmar seu plano</strong>
+          <p>{{ subscription.error.value }} A conexão pelo Agent permanece indisponível até a confirmação.</p>
+        </template>
+        <template v-else-if="agentFeatureLocked">
+          <strong>Conexão pelo Agent disponível no PRO</strong>
+          <p>No FREE, você pode cadastrar impressoras manualmente. A conexão automática, o monitoramento e o envio de trabalhos exigem o PRO.</p>
+          <small>Suas impressoras e os dados já cadastrados continuam disponíveis.</small>
+        </template>
+        <template v-else>
+          <strong>Não foi possível liberar a conexão pelo Agent</strong>
+          <p>Atualize a consulta do plano e tente novamente.</p>
+        </template>
+      </div>
+      <NuxtLink
+        v-if="agentFeatureLocked && canManageSubscription"
+        class="btn btn--primary printer-agent-plan-gate__action"
+        :to="subscription.upgradePath"
+      >
+        Conhecer o PRO
+      </NuxtLink>
+      <small
+        v-else-if="agentFeatureLocked"
+        class="printer-agent-plan-gate__owner-note"
+      >
+        Peça ao responsável pela conta para conhecer o PRO.
+      </small>
+      <button
+        v-else-if="subscription.error.value || (!subscription.loading.value && !canUseAgent)"
+        type="button"
+        class="btn printer-agent-plan-gate__action"
+        :disabled="subscription.loading.value"
+        @click="retryAgentPlanCheck"
+      >
+        Tentar novamente
+      </button>
+    </section>
+
     <!-- ================================================= -->
     <!-- CADASTRO MANUAL                                   -->
     <!-- ================================================= -->
@@ -4700,3 +4787,7 @@ const cancel = () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.printer-agent-plan-gate{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:14px;margin:0 0 18px;border:1px solid #f1d18a;border-radius:14px;background:#fffaf0;padding:18px}.printer-agent-plan-gate__icon{display:grid;width:42px;height:42px;place-items:center;border-radius:12px;background:#fff0c9;color:#9a6400}.printer-agent-plan-gate__copy{min-width:0}.printer-agent-plan-gate__copy strong{color:#273449}.printer-agent-plan-gate__copy p{margin:5px 0;color:#59677d;line-height:1.5}.printer-agent-plan-gate__copy small,.printer-agent-plan-gate__owner-note{color:#6d788a}.printer-agent-plan-gate__action{white-space:nowrap}@media(max-width:680px){.printer-agent-plan-gate{grid-template-columns:42px minmax(0,1fr)}.printer-agent-plan-gate__action,.printer-agent-plan-gate__owner-note{grid-column:2;justify-self:start}}
+</style>

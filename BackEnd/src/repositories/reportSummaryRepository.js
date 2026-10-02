@@ -31,6 +31,9 @@ export const emptyReportSummary = (options = {}) => ({
   totals: { revenue: 0, netRevenue: 0, fees: 0, shipping: 0, registeredProfit: 0, expenses: 0, profit: 0, estimatedCurrentCost: 0, orderCount: 0, itemCount: 0, ticket: 0, productsCount: 0 },
   series: [],
   marketplaces: [],
+  channels: [],
+  clients: [],
+  productionCostComparison: { jobCount: 0, estimatedCurrentRateCost: 0, actualRecordedCost: 0, variance: 0 },
   expenseCategories: [],
   products: [],
   sales: { items: [], total: 0, limit: Math.min(100, Math.max(1, Number(options.limit) || 50)), offset: Math.max(0, Number(options.offset) || 0) },
@@ -47,9 +50,11 @@ const reportSummarySql = `
       coalesce(m.name, case when (case when o.marketplace_id is null then 'direct' else coalesce(nullif(o.sales_channel, ''), 'marketplace') end) = 'direct' then 'Venda direta' else 'Sem marketplace' end) as marketplace,
       case when o.marketplace_id is null or lower(coalesce(m.name, '')) = 'manual' then 'direct' else coalesce(nullif(o.sales_channel, ''), 'marketplace') end as channel,
       o.product_name as product, o.quantity, o.gross, o.fee, o.shipping, o.net, o.profit, o.status,
-      coalesce(product_by_id.cost, product_by_name.cost, 0) * o.quantity as current_cost
+      coalesce(product_by_id.cost, product_by_name.cost, 0) * o.quantity as current_cost,
+      o.client_id, client.name as client_name
     from orders o
     left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
+    left join clients client on client.id = o.client_id and client.tenant_id = o.tenant_id
     left join product_catalog product_by_id on product_by_id.id = o.product_id
     left join product_by_name on product_by_name.name = o.product_name
     where o.tenant_id = $1 and coalesce(o.status, '') <> 'Cancelado'
@@ -59,7 +64,7 @@ const reportSummarySql = `
     select 'tracked:' || s.id::text, s.external_order_id, s.sold_at,
       coalesce(m.name, nullif(s.platform, ''), 'Sem marketplace'), 'marketplace', s.product_name, s.quantity,
       s.gross, s.marketplace_fee, s.shipping, s.net, s.profit, s.status,
-      coalesce(product_by_name.cost, 0) * s.quantity
+      coalesce(product_by_name.cost, 0) * s.quantity, null::bigint, null::text
     from tracked_sales s
     left join marketplaces m on m.id = s.marketplace_id and m.tenant_id = s.tenant_id
     left join product_by_name on product_by_name.name = s.product_name
@@ -86,6 +91,32 @@ const reportSummarySql = `
   ), product_rows as (
     select product, count(*)::int as orders, sum(quantity) as quantity, sum(gross) as revenue, sum(profit) as profit
     from filtered_sales group by product
+  ), client_rows as (
+    select client_id, max(client_name) as client_name, count(*)::int as orders,
+      sum(gross) as revenue, sum(profit) as profit
+    from filtered_sales group by client_id
+  ), channel_rows as (
+    select channel, count(*)::int as orders, sum(gross) as revenue, sum(profit) as profit
+    from filtered_sales group by channel
+  ), production_cost_rows as (
+    select j.id,
+      (j.estimated_filament_grams / nullif(f.initial_weight, 0) * f.cost)
+        + (j.estimated_print_seconds / 3600 * pr.power_w / 1000 * tenant.kwh_cost) as estimated_current_rate_cost,
+      j.actual_material_cost + j.actual_energy_cost as actual_recorded_cost
+    from print_jobs j
+    join tenants tenant on tenant.id = j.tenant_id
+    join products p on p.id = j.product_id and p.tenant_id = j.tenant_id
+    join filaments f on f.id = p.filament_id and f.tenant_id = j.tenant_id
+    join printers pr on pr.id = j.printer_id and pr.tenant_id = j.tenant_id
+    join filtered_sales sale on sale.resource_key = case
+      when j.order_id is not null then 'order:' || j.order_id::text
+      when j.tracked_sale_id is not null then 'tracked:' || j.tracked_sale_id::text
+      else '' end
+    where j.tenant_id = $1 and j.status = 'completed' and j.metrics_source = 'agent_measured'
+      and j.estimated_filament_grams > 0 and j.estimated_print_seconds > 0
+      and j.actual_filament_grams is not null and j.actual_print_seconds is not null
+      and j.actual_material_cost is not null and j.actual_energy_cost is not null
+      and f.initial_weight > 0 and f.cost is not null and pr.power_w is not null and tenant.kwh_cost is not null
   )
   select
     (select jsonb_build_object(
@@ -103,6 +134,15 @@ const reportSummarySql = `
       left join expense_series expenses on expenses.period = periods.period) as series,
     (select coalesce(jsonb_agg(jsonb_build_object('name', marketplace, 'value', value) order by value desc), '[]'::jsonb)
       from (select marketplace, sum(gross) as value from filtered_sales group by marketplace) rows) as marketplaces,
+    (select coalesce(jsonb_agg(jsonb_build_object('channel', channel, 'orders', orders, 'revenue', revenue, 'profit', profit) order by revenue desc), '[]'::jsonb)
+      from channel_rows) as channels,
+    (select coalesce(jsonb_agg(jsonb_build_object('id', client_id::text, 'name', client_name, 'orders', orders, 'revenue', revenue, 'profit', profit) order by revenue desc), '[]'::jsonb)
+      from (select * from client_rows order by revenue desc limit 20) rows) as clients,
+    (select jsonb_build_object('jobCount', count(*)::int,
+      'estimatedCurrentRateCost', coalesce(sum(estimated_current_rate_cost), 0),
+      'actualRecordedCost', coalesce(sum(actual_recorded_cost), 0),
+      'variance', coalesce(sum(actual_recorded_cost - estimated_current_rate_cost), 0))
+      from production_cost_rows) as production_cost_comparison,
     (select coalesce(jsonb_agg(jsonb_build_object('label', category, 'total', total) order by total desc), '[]'::jsonb)
       from (select category, sum(amount) as total from filtered_expenses group by category) rows) as expense_categories,
     (select coalesce(jsonb_agg(jsonb_build_object('name', rows.product, 'sku', product_by_name.sku, 'thumb', product_by_name.thumb,
@@ -142,6 +182,15 @@ const mapDatabaseReportSummary = (row, options) => {
   }
   result.series = (row.series || []).map((item) => ({ key: item.key, revenue: number(item.revenue), expenses: number(item.expenses), profit: number(item.profit) }))
   result.marketplaces = (row.marketplaces || []).map((item) => ({ name: item.name, value: number(item.value) }))
+  result.channels = (row.channels || []).map((item) => ({ channel: item.channel, orders: Number(item.orders || 0), revenue: number(item.revenue), profit: number(item.profit) }))
+  result.clients = (row.clients || []).map((item) => ({ id: item.id || '', name: decryptField(item.name) || 'Sem cliente vinculado', orders: Number(item.orders || 0), revenue: number(item.revenue), profit: number(item.profit) }))
+  const costComparison = row.production_cost_comparison || {}
+  result.productionCostComparison = {
+    jobCount: Number(costComparison.jobCount || 0),
+    estimatedCurrentRateCost: number(costComparison.estimatedCurrentRateCost),
+    actualRecordedCost: number(costComparison.actualRecordedCost),
+    variance: number(costComparison.variance)
+  }
   result.expenseCategories = (row.expense_categories || []).map((item) => ({ label: item.label, total: number(item.total) }))
   result.products = (row.products || []).map((item) => ({ ...item, orders: Number(item.orders || 0), quantity: number(item.quantity), revenue: number(item.revenue), profit: number(item.profit) }))
   result.sales = {

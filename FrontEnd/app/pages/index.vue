@@ -1,8 +1,10 @@
 <script setup lang="ts">
-const { loadDashboardSummary } = useAppData()
+const { loadDashboardSummary, setOnboardingPrinterMode } = useAppData()
 const { unreadCount } = useOperationalNotifications()
+const { notify } = useUi()
 const summary = ref<DashboardSummary>(emptyDashboardSummary())
 const pending = ref(true)
+const savingOnboardingMode = ref(false)
 
 const revenueLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 const totals = computed(() => summary.value.totals)
@@ -27,9 +29,30 @@ const orderStageSummary = computed(() => {
 })
 const lowStockItems = computed(() => [...summary.value.lowStockItems].sort((a, b) => a.remaining - b.remaining).slice(0, 5))
 const operationalAlerts = computed(() => [
-  ...summary.value.maintenancePrinters.map(printer => ({ icon: 'wrench', title: `${printer.name} em manutenção`, text: 'Verifique a disponibilidade antes de iniciar a fila.', badge: 'Atenção', cls: 'badge--orange' })),
-  ...summary.value.pendingOrders.map(order => ({ icon: 'bag', title: `Pedido ${order.id} sem fila`, text: 'Vincule uma impressora para iniciar a produção.', badge: 'Ação', cls: 'badge--orange' }))
+  ...summary.value.offlinePrinters.map(printer => ({ icon: 'printer', title: `${printer.name} offline`, text: 'Confira a conexão antes de iniciar a produção.', badge: 'Offline', cls: 'badge--red', to: '/impressoras' })),
+  ...summary.value.maintenancePrinters.map(printer => ({ icon: 'wrench', title: `${printer.name} em manutenção`, text: 'Verifique a disponibilidade antes de iniciar a fila.', badge: 'Atenção', cls: 'badge--orange', to: '/impressoras' })),
+  ...summary.value.overdueOrders.map(order => ({ icon: 'clock', title: `Pedido ${order.id} precisa de atenção`, text: 'Pedido aberto há mais de 7 dias.', badge: 'Atrasado', cls: 'badge--red', to: '/vendas?status=Acompanhar%20pedido' })),
+  ...summary.value.pendingOrders.map(order => ({ icon: 'bag', title: `Pedido ${order.id} sem fila`, text: 'Vincule uma impressora para iniciar a produção.', badge: 'Ação', cls: 'badge--orange', to: '/vendas?status=Acompanhar%20pedido' })),
+  ...summary.value.integrationErrors.map(integration => ({ icon: 'alert', title: `${integration.name} com falha`, text: 'Revise a conexão e tente sincronizar novamente.', badge: 'Integração', cls: 'badge--red', to: '/marketplaces' }))
 ])
+const onboardingSteps = computed(() => [
+  { key: 'company', title: 'Configure sua empresa', text: 'Revise os dados usados nos cálculos e documentos.', done: summary.value.onboarding.companyConfigured, to: '/configuracoes/empresa', action: 'Configurar empresa', icon: 'building' },
+  { key: 'product', title: 'Cadastre seu primeiro produto', text: 'Defina custo, margem e dados de impressão.', done: summary.value.onboarding.productCount > 0, to: '/produtos/novo', action: 'Cadastrar produto', icon: 'box' },
+  { key: 'printer', title: 'Defina como vai produzir', text: summary.value.onboarding.printerMode === 'manual' ? 'Operação manual selecionada.' : 'Cadastre uma impressora ou continue com operação manual.', done: summary.value.printerCount > 0 || summary.value.onboarding.printerMode === 'manual', to: '/impressoras/nova', action: 'Cadastrar impressora', icon: 'printer' }
+])
+const onboardingCompleted = computed(() => onboardingSteps.value.filter(step => step.done).length)
+const onboardingDone = computed(() => onboardingCompleted.value === onboardingSteps.value.length)
+const chooseManualOperation = async () => {
+  if (savingOnboardingMode.value) return
+  savingOnboardingMode.value = true
+  try {
+    await setOnboardingPrinterMode('manual')
+    summary.value.onboarding.printerMode = 'manual'
+    notify('Operação manual selecionada. Você pode cadastrar uma impressora quando quiser.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Não foi possível salvar sua escolha.')
+  } finally { savingOnboardingMode.value = false }
+}
 const percent = (value: number) => `${value.toFixed(1).replace('.', ',')}%`
 
 onMounted(async () => {
@@ -43,6 +66,19 @@ onMounted(async () => {
   <div class="dashboard-page">
     <PageHeader title="Dashboard" subtitle="Vendas, custos e produção da sua empresa." />
     <div v-if="pending" class="page-loading-hint" role="status">Carregando seus dados...</div>
+
+    <section v-if="!pending && !onboardingDone" class="onboarding" aria-labelledby="onboarding-title">
+      <div class="onboarding__head"><div><span class="onboarding__eyebrow">PRIMEIROS PASSOS</span><h2 id="onboarding-title">Prepare seu espaço de trabalho</h2><p>Conclua estas etapas para começar com dados e produção organizados.</p></div><strong>{{ onboardingCompleted }}/{{ onboardingSteps.length }}</strong></div>
+      <div class="onboarding__progress" role="progressbar" :aria-valuenow="onboardingCompleted" :aria-valuemax="onboardingSteps.length"><span :style="{ width: `${onboardingCompleted / onboardingSteps.length * 100}%` }" /></div>
+      <div class="onboarding__steps">
+        <article v-for="step in onboardingSteps" :key="step.key" class="onboarding-step" :class="{ 'onboarding-step--done': step.done }">
+          <span class="onboarding-step__icon"><UiIcon :name="step.done ? 'check' : step.icon" :size="18" /></span>
+          <div><strong>{{ step.title }}</strong><small>{{ step.text }}</small></div>
+          <span v-if="step.done" class="badge badge--green">Concluído</span>
+          <div v-else class="onboarding-step__actions"><NuxtLink class="btn" :to="step.to">{{ step.action }}</NuxtLink><button v-if="step.key === 'printer'" class="btn btn--ghost" type="button" :disabled="savingOnboardingMode" @click="chooseManualOperation">{{ savingOnboardingMode ? 'Salvando...' : 'Usar modo manual' }}</button></div>
+        </article>
+      </div>
+    </section>
 
     <div class="metrics-grid metrics-grid--5">
       <MetricCard label="Faturamento total" :value="formatCurrency(totals.revenue)" icon="trend" note="Vendas registradas" color="blue" :points="monthlyRevenue" />
@@ -75,8 +111,8 @@ onMounted(async () => {
       <PanelCard title="Ações pendentes" subtitle="Alertas operacionais que podem bloquear a produção.">
         <div v-if="!operationalAlerts.length && !lowStockItems.length" class="empty-state empty-state--compact"><div><div class="empty-state__icon"><UiIcon name="check" /></div><h3>Operação em dia</h3><p>Nenhuma ação crítica identificada.</p></div></div>
         <div v-else class="alerts-list">
-          <NuxtLink v-for="alert in operationalAlerts" :key="alert.title" class="alert-row" to="/vendas"><span class="alert-row__icon"><UiIcon :name="alert.icon" :size="17" /></span><div><strong>{{ alert.title }}</strong><small>{{ alert.text }}</small></div><span class="badge" :class="alert.cls">{{ alert.badge }}</span></NuxtLink>
-          <NuxtLink v-for="filament in lowStockItems" :key="filament.id || filament.name" class="alert-row" to="/estoque?secao=filamentos"><span class="alert-row__icon"><UiIcon name="spool" :size="17" /></span><div><strong>{{ filament.name }} próximo do fim</strong><small>Restam {{ formatNumber(filament.remaining) }} g em estoque</small></div><span class="badge badge--orange">Repor</span></NuxtLink>
+          <NuxtLink v-for="alert in operationalAlerts" :key="alert.title" class="alert-row" :to="alert.to"><span class="alert-row__icon"><UiIcon :name="alert.icon" :size="17" /></span><div><strong>{{ alert.title }}</strong><small>{{ alert.text }}</small></div><span class="badge" :class="alert.cls">{{ alert.badge }}</span></NuxtLink>
+          <NuxtLink v-for="filament in lowStockItems" :key="filament.id || filament.name" class="alert-row" to="/estoque?secao=filamentos"><span class="alert-row__icon"><UiIcon name="spool" :size="17" /></span><div><strong>{{ filament.name }} próximo do fim</strong><small>Restam {{ formatNumber(filament.remaining) }} g · mínimo {{ formatNumber(filament.minStock) }} g</small></div><span class="badge badge--orange">Repor</span></NuxtLink>
         </div>
       </PanelCard>
     </div>
@@ -103,6 +139,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.onboarding { margin-bottom: 20px; border: 1px solid #cfe0ff; border-radius: 14px; background: linear-gradient(135deg,#f8fbff,#fff); padding: 20px; box-shadow: 0 8px 26px rgba(23,104,242,.06); }
+.onboarding__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }.onboarding__head h2 { margin: 4px 0; font-size: 20px; }.onboarding__head p { margin: 0; color: var(--muted); font-size: 12px; }.onboarding__head > strong { color: var(--blue); font-size: 18px; }.onboarding__eyebrow { color: var(--blue); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.onboarding__progress { overflow: hidden; height: 6px; margin: 16px 0; border-radius: 999px; background: #e8eef8; }.onboarding__progress span { display: block; height: 100%; border-radius: inherit; background: var(--blue); transition: width .25s ease; }
+.onboarding__steps { display: grid; gap: 8px; }.onboarding-step { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }.onboarding-step__icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 9px; color: var(--blue); background: var(--blue-soft); }.onboarding-step--done .onboarding-step__icon { color: var(--green); background: #e6f8ef; }.onboarding-step strong,.onboarding-step small { display: block; }.onboarding-step strong { font-size: 12px; }.onboarding-step small { margin-top: 3px; color: var(--muted); font-size: 11px; }.onboarding-step__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .operational-board { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
 .operational-board > :deep(.panel) { min-height: 254px; }
 .operational-summary { display: grid; grid-template-columns: 1fr; gap: 0; }
@@ -124,4 +164,5 @@ onMounted(async () => {
 .alert-row strong { font-size: 12px; }
 .alert-row small { font-size: 11px; line-height: 1.5; }
 @media (max-width: 700px) { .operational-board { grid-template-columns: 1fr; }.operational-board > :last-child { grid-column: auto; }.operational-summary { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .onboarding { padding: 16px; }.onboarding-step { grid-template-columns: 36px minmax(0,1fr); }.onboarding-step > .badge,.onboarding-step__actions { grid-column: 2; justify-self: start; }.onboarding-step__actions { justify-content: flex-start; }.onboarding-step__actions .btn { min-height: 38px; } }
 </style>

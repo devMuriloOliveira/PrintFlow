@@ -65,6 +65,7 @@ import {
   handleSettingsExportHistory,
   handleSettingsBackupStatus,
   handleSettingsUpdate,
+  handleOnboardingModeUpdate,
   handleCompanyCnpjLookup
 } from './settings.js'
 
@@ -1061,6 +1062,10 @@ export const handleRequest =
         return await handleSettingsUpdate(req, res)
       }
 
+      if (req.method === 'PUT' && url.pathname === '/api/settings/onboarding-mode') {
+        return await handleOnboardingModeUpdate(req, res)
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/settings/company-lookup') {
         return await handleCompanyCnpjLookup(req, res, url)
       }
@@ -1649,6 +1654,8 @@ export const handleRequest =
           'Registro nao encontrado',
           'Membro nao encontrado',
           'E-mail ou senha invalidos.',
+          'O nome informado no cadastro nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.',
+          'O documento cadastrado nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.',
           'Informe a senha atual.',
           'Senha atual invalida.',
           'A nova senha deve ser diferente da senha atual.',

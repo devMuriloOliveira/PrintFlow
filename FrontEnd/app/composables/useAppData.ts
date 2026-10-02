@@ -29,7 +29,8 @@ export type PrintJob = {
   printFileName?: string; printFileFormat?: string; validationStatus?: string; validationMessage?: string;
   agentLastStatus?: Record<string, unknown>; source: string; title: string; quantity: number; priority: number;
   status: string; notes?: string; scheduledAt?: string | null; startedAt?: string | null; completedAt?: string | null;
-  cancelledAt?: string | null; createdAt?: string | null; updatedAt?: string | null
+  cancelledAt?: string | null; createdAt?: string | null; updatedAt?: string | null;
+  estimatedPrintSeconds?: number | null; attempts?: Array<{ attemptNo: number; status: string; errorCode?: string; createdAt?: string; completedAt?: string | null }>
 }
 
 export type Product = {
@@ -157,8 +158,12 @@ export type DashboardSummary = {
   printerCount: number
   queuePrinters: Array<{ id: string; name: string; code: string; queued: number; progress: number; activeJob: null | { title?: string; productName?: string; agentLastStatus?: Record<string, unknown> } }>
   maintenancePrinters: Array<{ name: string }>
+  offlinePrinters: Array<{ name: string }>
+  overdueOrders: Array<{ id: string }>
+  integrationErrors: Array<{ name: string }>
+  onboarding: { companyConfigured: boolean; productCount: number; printerMode: '' | 'manual' | 'agent' }
   orderStages: { awaiting: number; production: number; shipping: number; completed: number }
-  lowStockItems: Array<{ id: string; name: string; remaining: number }>
+  lowStockItems: Array<{ id: string; name: string; remaining: number; minStock: number }>
   pendingOrders: Array<{ id: string }>
 }
 
@@ -167,6 +172,9 @@ export type ReportSummary = {
   totals: { revenue: number; netRevenue: number; fees: number; shipping: number; registeredProfit: number; expenses: number; profit: number; estimatedCurrentCost: number; orderCount: number; itemCount: number; ticket: number; productsCount: number }
   series: Array<{ key: string; revenue: number; expenses: number; profit: number }>
   marketplaces: Array<{ name: string; value: number }>
+  channels: Array<{ channel: string; orders: number; revenue: number; profit: number }>
+  clients: Array<{ id: string; name: string; orders: number; revenue: number; profit: number }>
+  productionCostComparison: { jobCount: number; estimatedCurrentRateCost: number; actualRecordedCost: number; variance: number }
   expenseCategories: Array<{ label: string; total: number }>
   products: Array<{ name: string; sku?: string; thumb?: string; orders: number; quantity: number; revenue: number; profit: number }>
   sales: { items: Order[]; total: number; limit: number; offset: number }
@@ -193,7 +201,8 @@ export const emptyDashboardSummary = (): DashboardSummary => ({
   totals: { revenue: 0, netRevenue: 0, profit: 0, fees: 0, shipping: 0, manualExpenses: 0, recipeCost: 0, expenseTotal: 0, orderCount: 0, ticket: 0, margin: 0 },
   monthlyRevenue: Array(12).fill(0), monthlyExpenses: Array(12).fill(0), monthlyOrders: Array(12).fill(0),
   expenseSegments: [], productPerformance: [], goals: [],
-  jobCounts: { active: 0, queued: 0, occupiedPrinters: 0 }, printerCount: 0, queuePrinters: [], maintenancePrinters: [],
+  jobCounts: { active: 0, queued: 0, occupiedPrinters: 0 }, printerCount: 0, queuePrinters: [], maintenancePrinters: [], offlinePrinters: [], overdueOrders: [], integrationErrors: [],
+  onboarding: { companyConfigured: false, productCount: 0, printerMode: '' },
   orderStages: { awaiting: 0, production: 0, shipping: 0, completed: 0 }, lowStockItems: [], pendingOrders: []
 })
 
@@ -290,6 +299,14 @@ const mockDashboardSummary = (source: AppData): DashboardSummary => {
   summary.expenseSegments = [...categories.entries()].sort((a, b) => b[1] - a[1]).map(([label, value], index) => ({ label, value: summary.totals.manualExpenses ? Number((value / summary.totals.manualExpenses * 100).toFixed(1)) : 0, color: colors[index % colors.length] }))
   summary.productPerformance = source.products.map(product => { const item = performance.get(product.name) || { sales: 0, profit: 0 }; return { id: String(product.id || ''), name: product.name, sku: product.sku, thumb: product.thumb, margin: Number(product.margin || 0), sales: item.sales, orderProfit: item.profit } }).sort((a, b) => b.orderProfit - a.orderProfit)
   summary.goals = source.goals || []
+  const settings = source.settings && typeof source.settings === 'object' ? source.settings : null
+  const preferences = settings?.preferences && typeof settings.preferences === 'object' ? settings.preferences as Record<string, unknown> : {}
+  const printerMode = String(preferences.onboardingPrinterMode || '')
+  summary.onboarding = {
+    companyConfigured: Boolean(settings && String(settings.name || '').trim() && String(settings.email || '').trim()),
+    productCount: source.products.length,
+    printerMode: printerMode === 'manual' || printerMode === 'agent' ? printerMode : ''
+  }
   const activeJobs = source.printJobs.filter(job => ['starting', 'printing', 'paused'].includes(String(job.status || '')))
   const queuedJobs = source.printJobs.filter(job => ['queued', 'awaiting_confirmation'].includes(String(job.status || '')))
   summary.jobCounts = { active: activeJobs.length, queued: queuedJobs.length, occupiedPrinters: new Set(activeJobs.map(job => String(job.printerId || '')).filter(Boolean)).size }
@@ -299,7 +316,12 @@ const mockDashboardSummary = (source: AppData): DashboardSummary => {
   for (const job of queuedJobs) { const id = String(job.printerId || ''); queuedByPrinter.set(id, (queuedByPrinter.get(id) || 0) + 1) }
   summary.queuePrinters = source.printers.map(printer => { const id = String(printer.id || ''); const activeJob = activeByPrinter.get(id) || null; return { id, name: printer.name, code: printer.code, activeJob, queued: queuedByPrinter.get(id) || 0, progress: Number((activeJob?.agentLastStatus as any)?.progress || 0) } }).sort((a, b) => Number(Boolean(b.activeJob)) - Number(Boolean(a.activeJob)) || b.queued - a.queued).slice(0, 5)
   summary.maintenancePrinters = source.printers.filter(printer => /manuten[cç]/i.test(String(printer.status || ''))).map(printer => ({ name: printer.name }))
-  summary.lowStockItems = source.filaments.filter(filament => Number(filament.remaining || 0) < 300).map(filament => ({ id: String(filament.id || ''), name: filament.name, remaining: Number(filament.remaining || 0) }))
+  summary.offlinePrinters = source.printers.filter(printer => /offline|desconect/i.test(`${printer.status || ''} ${printer.agentPrinterStatus || ''}`)).map(printer => ({ name: printer.name }))
+  const now = Date.now()
+  const orderTimestamp = (value: string) => { const parts = String(value || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); const parsed = parts ? new Date(`${parts[3]}-${parts[2]}-${parts[1]}T12:00:00`).getTime() : new Date(value).getTime(); return Number.isFinite(parsed) ? parsed : now }
+  summary.overdueOrders = source.orders.filter(order => !['Cancelado', 'Entregue', 'Concluido', 'Concluído'].includes(String(order.status || '')) && now - orderTimestamp(order.date) > 7 * 86400000).slice(0, 3).map(order => ({ id: order.id }))
+  summary.integrationErrors = (source.marketplaceIntegrations || []).filter(integration => integration.status === 'error' || integration.lastError).slice(0, 3).map(integration => ({ name: integration.connectionName || integration.platform || 'Marketplace' }))
+  summary.lowStockItems = source.filaments.filter(filament => Number(filament.remaining || 0) <= Number(filament.minStock ?? 300)).map(filament => ({ id: String(filament.id || ''), name: filament.name, remaining: Number(filament.remaining || 0), minStock: Number(filament.minStock ?? 300) }))
   const jobOrders = new Set(source.printJobs.flatMap(job => [String(job.orderId || ''), job.trackedSaleId ? `marketplace:${job.trackedSaleId}` : '']))
   summary.pendingOrders = source.orders.filter(order => activeOrderStatuses.has(String(order.status || '')) && !jobOrders.has(String(order.dbId || order.id || ''))).slice(0, 3).map(order => ({ id: order.id }))
   return summary
@@ -327,8 +349,9 @@ export type OrdersPage = {
 
 export type BackupStatus = {
   databaseAvailable: boolean
-  export: { enabled: boolean; format: 'json'; excludes: string[] }
+  export: { enabled: boolean; format: string; excludes: string[] }
   restore: { enabled: false; reason: string }
+  operational: { lastCompletedAt: string | null; lastStatus: string; history: Array<{ status: string; startedAt: string | null; completedAt: string | null }> }
 }
 export type SupportRequest = { id: string; protocolNumber: string; status: string; supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; supportFirstResponseDueAt?: string | null; supportResolutionDueAt?: string | null; supportReopenUntil?: string | null; supportReopenedAt?: string | null; supportParentRequestId?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
 export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
@@ -461,7 +484,7 @@ export const useAppData = () => {
         loadedScope.value = scopeKey
         return nextData
       } catch (err) {
-        error.value = err instanceof Error ? err.message : 'NÃ£o foi possÃ­vel carregar os dados.'
+        error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
         return data.value
       }
     }
@@ -611,8 +634,8 @@ export const useAppData = () => {
   const enqueuePrintJob = (item: Partial<PrintJob> & Record<string, unknown>) =>
     requestPrintJobAction('/api/print-jobs/enqueue', item, 'Nao foi possivel adicionar na fila.')
 
-  const reorderPrintJob = (id: string, direction: 'up' | 'down') =>
-    requestPrintJobAction(`/api/print-jobs/${id}/reorder`, { direction }, 'Nao foi possivel atualizar a ordem da fila.')
+  const reorderPrintJob = (id: string, direction: 'up' | 'down', targetId = '') =>
+    requestPrintJobAction(`/api/print-jobs/${id}/reorder`, { direction, targetId }, 'Nao foi possivel atualizar a ordem da fila.')
 
   const movePrintJobPrinter = (id: string, printerId: string, agentPrinterId = '') =>
     requestPrintJobAction(`/api/print-jobs/${id}/move-printer`, { printerId, agentPrinterId }, 'Nao foi possivel mover o item da fila.')
@@ -842,6 +865,18 @@ export const useAppData = () => {
     return saved
   }
 
+  const setOnboardingPrinterMode = async (mode: 'manual' | 'agent') => {
+    if (mockEnabled) {
+      const current = data.value.settings || {}
+      const preferences = current.preferences && typeof current.preferences === 'object' ? current.preferences as Record<string, unknown> : {}
+      data.value.settings = { ...current, preferences: { ...preferences, onboardingPrinterMode: mode } }
+      return { mode }
+    }
+    return $fetch<{ mode: 'manual' | 'agent' }>(apiUrl('/api/settings/onboarding-mode'), {
+      method: 'PUT', body: { mode }, headers: resourceHeaders()
+    })
+  }
+
   const lookupCompanyByCnpj = (cnpj: string) => mockEnabled ? Promise.resolve({
     name: 'Empresa Mock LTDA', legalName: 'Empresa Mock LTDA', phone: '(11) 4000-0000', email: 'mock@example.test',
     address: 'Rua Visual', district: 'Centro', city: 'Sao Paulo', state: 'SP', zip: '01000-000', status: 'Ativa'
@@ -868,7 +903,8 @@ export const useAppData = () => {
     features: { coreOperations: true, marketplaces: true, advancedReports: true, manualPrinters: true, agent: true, team: true },
     limits: {}, usage: {}
   }) : $fetch<SubscriptionAccess>(apiUrl('/api/subscription/access'), {
-    headers: resourceHeaders()
+    headers: resourceHeaders(),
+    timeout: 15_000
   })
 
   const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
@@ -958,6 +994,7 @@ export const useAppData = () => {
     , syncMarketplaceOrder
     , linkMarketplaceOrderProduct
     , updateSettings
+    , setOnboardingPrinterMode
     , lookupCompanyByCnpj
     , exportTenantData
     , getStripeBilling

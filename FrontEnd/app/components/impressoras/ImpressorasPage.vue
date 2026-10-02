@@ -4,6 +4,7 @@ const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
 const config = useRuntimeConfig()
+const subscription = useSubscriptionAccess()
 const selectedIndex = ref(0)
 const printerStatusFilter = ref('Todos')
 const printerMakerFilter = ref('Todos')
@@ -37,6 +38,7 @@ const statusRefreshTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const queueProductId = ref('')
 const queueQuantity = ref(1)
 const queueLoadingId = ref('')
+const draggedQueueJobId = ref('')
 const qualityApproved = reactive<Record<string, number>>({})
 const displayStatus=(s:string)=>s.replace('Disponivel', 'Disponível').replace('Em Impressao', 'Em Impressão').replace('Em Manutencao', 'Em Manutenção')
 const badgeClass=(s:string)=>/Disponivel|Disponível/.test(s)?'badge--green':/Em Manutencao|Em Manutenção/.test(s)?'badge--orange':''
@@ -54,6 +56,12 @@ const selectedAgentStatus = computed(() => {
   if (!selectedAgent.value) return 'Agent não encontrado'
   return agentIsOnline(selectedAgent.value) ? 'Agent online' : 'Agent offline'
 })
+const connectionGuidance = computed(() => {
+  if (selectedAgentStatus.value === 'Agent não encontrado') return 'Este vínculo não aparece entre os Agents desta empresa. Confira se o Agent ainda está pareado e se a impressora está vinculada ao computador correto.'
+  if (selectedAgentStatus.value === 'Agent offline') return 'Abra o PrintFlow Agent no computador e confira a conexão com a internet. O acompanhamento volta quando ele enviar um novo sinal.'
+  if (selectedLiveStatus.value?.lastConnectionError) return 'Confira se a impressora está ligada e conectada ao Agent. Depois, tente atualizar a leitura.'
+  return ''
+})
 const selectedPrinterJobs = computed(() => printJobs.value
   .filter((job: any) => String(job.printerId || '') === String((selected.value as any).id || '') && (String(job.status || '') !== 'cancelled') && (String(job.status || '') !== 'completed' || String(job.productionOutputStatus || '') === 'pending_quality'))
   .sort((a: any, b: any) => Number(b.priority || 0) - Number(a.priority || 0) || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
@@ -64,6 +72,38 @@ const maintenancePoints = computed(() => printers.value.map(printer => Number(/m
 const printerHoursPoints = computed(() => printers.value.map(printer => Number(printer.hours || 0)))
 const activePrintJob = computed(() => selectedPrinterJobs.value.find((job: any) => ['starting', 'printing', 'paused'].includes(String(job.status || ''))))
 const queuedPrintJobs = computed(() => selectedPrinterJobs.value.filter((job: any) => String(job.status || '') === 'queued'))
+const durationSeconds = (value: unknown) => {
+  const text = String(value || '').toLowerCase()
+  const hours = Number(text.match(/(\d+(?:[.,]\d+)?)\s*h/)?.[1]?.replace(',', '.') || 0)
+  const minutes = Number(text.match(/(\d+)\s*(?:min|m\b)/)?.[1] || 0)
+  return Math.round(hours * 3600 + minutes * 60)
+}
+const estimatedSecondsForJob = (job: any) => {
+  const reported = Number(job?.estimatedPrintSeconds || 0)
+  if (reported > 0) return reported
+  return durationSeconds(productForJob(job)?.time) * Math.max(1, Number(job?.quantity || 1))
+}
+const remainingSecondsForJob = (job: any) => {
+  const total = estimatedSecondsForJob(job)
+  const progress = Number(job?.agentLastStatus?.progress || 0)
+  return total > 0 ? Math.round(total * Math.max(0, 1 - Math.min(100, progress) / 100)) : 0
+}
+const formatDuration = (seconds: number) => {
+  if (!seconds) return 'estimativa indisponível'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.max(1, Math.round((seconds % 3600) / 60))
+  return hours ? `${hours}h ${minutes}min` : `${minutes} min`
+}
+const queueEstimate = (job: any) => {
+  const active = activePrintJob.value ? remainingSecondsForJob(activePrintJob.value) : 0
+  const index = queuedPrintJobs.value.findIndex((item: any) => String(item.id) === String(job.id))
+  const before = queuedPrintJobs.value.slice(0, Math.max(0, index)).reduce((sum: number, item: any) => sum + estimatedSecondsForJob(item), 0)
+  const own = estimatedSecondsForJob(job)
+  if (!own && !active && !before) return 'Estimativa indisponível'
+  const startsAt = new Date(Date.now() + (active + before) * 1000)
+  return `Início previsto ${new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(startsAt)} · duração ${formatDuration(own)}`
+}
+const monitoringPaused = computed(() => Boolean(activePrintJob.value && selectedAgentPrinterId.value && !agentIsOnline(selectedAgent.value)))
 const selectedQueueProduct = computed(() => products.value.find((product: any) => String(product.id || '') === String(queueProductId.value || '')))
 const productForJob = (job: any) => products.value.find((product: any) => String(product.id || '') === String(job.productId || ''))
 const jobNeedsGcodePreparation = (job: any) => {
@@ -528,7 +568,25 @@ const retryJob = async (job: any) => {
     queueLoadingId.value = ''
   }
 }
+const startQueueDrag = (job: any, event: DragEvent) => {
+  if (String(job?.status || '') !== 'queued') return
+  draggedQueueJobId.value = String(job.id || '')
+  event.dataTransfer?.setData('text/plain', draggedQueueJobId.value)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+const dropQueueJob = async (target: any) => {
+  const sourceId = draggedQueueJobId.value
+  draggedQueueJobId.value = ''
+  if (!sourceId || sourceId === String(target?.id || '') || queueLoadingId.value) return
+  queueLoadingId.value = sourceId
+  try {
+    await reorderPrintJob(sourceId, 'up', String(target.id))
+    notify('Ordem da fila atualizada.')
+  } catch (error: any) { notify(error?.message || 'Não foi possível reorganizar a fila.', 'info') }
+  finally { queueLoadingId.value = '' }
+}
 onMounted(() => {
+  void subscription.load()
   seedPrinterStatusCache()
   loadAgents().then(() => refreshAllPrinterStatuses()).catch(() => {})
   statusRefreshTimer.value = setInterval(() => {
@@ -549,8 +607,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="printer-page">
     <PageHeader title="Impressoras" subtitle="Acompanhe o parque de máquinas, a produção em andamento e as próximas peças da fila.">
-      <NuxtLink class="btn btn--primary" :to="newPrinterPath"><UiIcon name="plus" />Nova impressora</NuxtLink>
+      <NuxtLink class="btn btn--primary" :to="subscription.isLimitReached('printers') ? subscription.upgradePath : newPrinterPath"><UiIcon :name="subscription.isLimitReached('printers') ? 'lock' : 'plus'" />{{ subscription.isLimitReached('printers') ? 'Limite atingido · Upgrade' : 'Nova impressora' }}</NuxtLink>
     </PageHeader>
+    <PlanLimitNotice resource="printers" label="impressoras manuais" remaining-text="A impressora cadastrada, seus dados e a operação manual continuam disponíveis no plano FREE." />
 
     <section v-if="pendingQualityJobs.length" class="quality-workbench">
       <div class="quality-workbench__intro">
@@ -653,6 +712,7 @@ onBeforeUnmount(() => {
               <div><strong>{{ selectedAgentStatus }}</strong><small>{{ selectedAgentPrinterId ? `Último contato: ${formatDateTime(selectedLiveStatus?.fetchedAt)}` : 'Controle e apontamento feitos manualmente' }}</small></div>
               <span class="badge" :class="activePrintJob ? 'badge--orange' : badgeClass(selected.status)">{{ activePrintJob ? printJobStatusLabel(activePrintJob.status) : displayStatus(selected.status) }}</span>
             </div>
+            <p v-if="connectionGuidance" class="machine-diagnostic" role="status">{{ connectionGuidance }}</p>
 
             <div v-if="nextJobNeedingGcode && selected?.agentId && selected?.agentPrinterId" class="machine-callout">
               <div><strong>3MF aguardando preparo</strong><small>O OrcaSlicer pode gerar o G-code do próximo item sem iniciar a impressora.</small></div>
@@ -677,7 +737,7 @@ onBeforeUnmount(() => {
                 <div><small>Progresso</small><strong>{{ selectedLiveStatus?.progress ?? '—' }}<span>%</span></strong></div>
                 <div><small>Estado</small><strong class="telemetry-grid__state">{{ selectedLiveStatus?.state || 'Sem leitura' }}</strong></div>
               </div>
-              <p v-if="selectedLiveStatus?.lastConnectionError" class="machine-error">{{ selectedLiveStatus.lastConnectionError }}</p>
+              <p v-if="selectedLiveStatus?.lastConnectionError" class="machine-error"><strong>Falha na leitura:</strong> {{ selectedLiveStatus.lastConnectionError }} {{ connectionGuidance }}</p>
               <div class="machine-controls">
                 <button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'pause')">Pausar</button>
                 <button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'resume')">Retomar</button>
@@ -689,18 +749,20 @@ onBeforeUnmount(() => {
 
             <section class="queue-workbench">
               <div class="section-label"><span>Fila desta máquina</span><small>{{ selectedPrinterJobs.length }} item(ns)</small></div>
+              <p v-if="monitoringPaused" class="queue-agent-notice"><UiIcon name="info" :size="15" /><span>O Agent está offline. O monitoramento será retomado quando ele reconectar; a impressão física não é reiniciada automaticamente para evitar duplicidade.</span></p>
               <div class="queue-composer">
                 <label><span>Produto</span><select v-model="queueProductId"><option value="">Selecionar produto</option><option v-for="product in products" :key="product.id || product.sku" :value="product.id">{{ product.name }}</option></select></label>
                 <label class="queue-composer__qty"><span>Qtd.</span><input v-model.number="queueQuantity" type="number" min="1"></label>
                 <button type="button" class="btn btn--primary" :disabled="!queueProductId || queueLoadingId !== ''" @click="addProductToQueue">Adicionar</button>
               </div>
               <div v-if="!selectedPrinterJobs.length" class="queue-empty"><strong>Fila livre</strong><small>Adicione um produto para preparar o próximo trabalho.</small></div>
-              <article v-for="(job, index) in selectedPrinterJobs" :key="job.id" class="queue-item">
+              <article v-for="(job, index) in selectedPrinterJobs" :key="job.id" class="queue-item" :class="{ 'queue-item--dragging': draggedQueueJobId === String(job.id) }" :draggable="job.status === 'queued'" @dragstart="startQueueDrag(job, $event)" @dragend="draggedQueueJobId = ''" @dragover.prevent @drop.prevent="dropQueueJob(job)">
                 <div class="queue-item__order">{{ index + 1 }}</div>
                 <div class="queue-item__body">
-                  <div class="queue-item__head"><div><strong>{{ job.title || job.productName }}</strong><small>{{ job.quantity }} unidade(s)</small></div><span class="badge" :class="printJobBadgeClass(job.status)">{{ printJobStatusLabel(job.status) }}</span></div>
+                  <div class="queue-item__head"><div><strong>{{ job.title || job.productName }}</strong><small>{{ job.quantity }} unidade(s) <template v-if="job.status === 'queued'">· {{ queueEstimate(job) }}</template></small></div><span class="badge" :class="printJobBadgeClass(job.status)">{{ printJobStatusLabel(job.status) }}</span></div>
                   <div class="queue-item__checks"><span class="badge" :class="productValidationBadgeClass(productForJob(job))">Receita: {{ productValidationLabel(productForJob(job)) }}</span><select :value="job.printerId" @change="changePrintJobPrinter(job, ($event.target as HTMLSelectElement).value)"><option v-for="printer in printers" :key="printer.id || printer.code" :value="printer.id">{{ printer.name }}</option></select></div>
-                  <p v-if="printReadinessError(job)" class="queue-item__error">{{ printReadinessError(job) }}</p>
+                  <p v-if="printReadinessError(job)" class="queue-item__error"><strong>Bloqueio:</strong> {{ printReadinessError(job) }}</p>
+                  <details v-if="job.attempts?.length || job.retryOfJobId" class="queue-item__attempts"><summary>Histórico de tentativas{{ job.retryOfJobId ? ' · reimpressão' : '' }}</summary><ol v-if="job.attempts?.length"><li v-for="attempt in job.attempts" :key="attempt.attemptNo"><strong>Tentativa {{ attempt.attemptNo }}</strong><span>{{ attempt.status }}<template v-if="attempt.errorCode"> · {{ attempt.errorCode }}</template></span><time>{{ formatDateTime(attempt.completedAt || attempt.createdAt) }}</time></li></ol><p v-else>Esta é uma nova tentativa criada a partir de uma impressão anterior.</p></details>
                   <div class="queue-item__actions">
                     <button v-if="job.status === 'queued'" type="button" class="text-action" :disabled="queueLoadingId !== ''" @click="movePrintJob(job, 'up')">Subir</button>
                     <button v-if="job.status === 'queued'" type="button" class="text-action" :disabled="queueLoadingId !== ''" @click="movePrintJob(job, 'down')">Descer</button>
@@ -773,8 +835,10 @@ onBeforeUnmount(() => {
 .current-job { border-radius:13px; color:#fff; background:linear-gradient(135deg,#101a2c,#1e3456); padding:16px; box-shadow:0 12px 26px rgba(16,26,44,.18); }.current-job__top { display:flex; justify-content:space-between; gap:16px; }.current-job__top small { color:#aebbd0; font-size:9px; }.current-job__top h3 { margin:4px 0 0; font-size:15px; }.current-job__top > strong { font-size:24px; font-variant-numeric:tabular-nums; }.current-job__track { height:6px; overflow:hidden; border-radius:99px; background:rgba(255,255,255,.16); margin:14px 0; }.current-job__track i { display:block; height:100%; border-radius:inherit; background:#4c9bff; }.current-job__meta { display:grid; grid-template-columns:.7fr .9fr 1.4fr; gap:10px; }.current-job__meta small,.current-job__meta strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.current-job__meta small { color:#91a1ba; font-size:8px; }.current-job__meta strong { margin-top:3px; font-size:9px; }
 .production-idle { display:flex; align-items:center; gap:12px; border:1px dashed #bfd0e7; border-radius:12px; background:#f8fbff; padding:16px; }.production-idle > span { display:grid; width:38px; height:38px; place-items:center; border-radius:50%; color:var(--green); background:var(--green-soft); }.production-idle strong,.production-idle small { display:block; }.production-idle strong { font-size:11px; }.production-idle small { margin-top:3px; color:var(--muted); font-size:9px; }
 .telemetry-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }.telemetry-grid > div { min-width:0; border:1px solid var(--line); border-radius:10px; background:var(--machine-panel); padding:11px; }.telemetry-grid small { display:block; color:var(--muted); font-size:8px; text-transform:uppercase; }.telemetry-grid strong { display:block; margin-top:7px; font-size:19px; font-variant-numeric:tabular-nums; }.telemetry-grid strong span { margin-left:2px; color:var(--muted); font-size:9px; }.telemetry-grid__state { overflow:hidden; font-size:11px !important; text-overflow:ellipsis; white-space:nowrap; }.text-action { border:0; color:var(--blue); background:transparent; padding:3px; font-size:9px; font-weight:800; cursor:pointer; }.text-action:disabled { opacity:.45; cursor:not-allowed; }.text-action--danger { color:var(--red); }.machine-error { border-radius:8px; color:#a32931; background:#fff0f0; margin:10px 0 0; padding:9px; font-size:9px; }.machine-controls { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+.machine-diagnostic { border-bottom:1px solid #f1dada; color:#823d42; background:#fffafa; margin:0; padding:8px 20px; font-size:9px; line-height:1.45; }
 .queue-composer { display:grid; grid-template-columns:minmax(0,1fr) 74px auto; align-items:end; gap:8px; margin-bottom:12px; }.queue-composer label { display:grid; gap:5px; }.queue-composer label span { color:var(--muted); font-size:9px; font-weight:700; }.queue-composer select,.queue-composer input { width:100%; }.queue-empty { display:grid; place-items:center; min-height:90px; border:1px dashed #cbd5e1; border-radius:10px; color:var(--muted); text-align:center; }.queue-empty strong,.queue-empty small { display:block; }.queue-empty strong { color:var(--ink); font-size:11px; }.queue-empty small { margin-top:3px; font-size:9px; }
 .queue-item { display:grid; grid-template-columns:28px minmax(0,1fr); gap:10px; border-top:1px solid #edf0f4; padding:12px 0; }.queue-item__order { display:grid; width:28px; height:28px; place-items:center; border-radius:8px; color:#52627a; background:#eef2f7; font-size:10px; font-weight:850; }.queue-item__body { min-width:0; }.queue-item__head,.queue-item__checks,.queue-item__actions { display:flex; align-items:center; justify-content:space-between; gap:8px; }.queue-item__head strong,.queue-item__head small { display:block; }.queue-item__head strong { font-size:11px; }.queue-item__head small { margin-top:3px; color:var(--muted); font-size:9px; }.queue-item__checks { justify-content:flex-start; margin-top:8px; }.queue-item__checks select { max-width:170px; height:28px; font-size:9px; }.queue-item__error { color:var(--red); margin:8px 0 0; font-size:9px; line-height:1.45; }.queue-item__actions { justify-content:flex-end; margin-top:9px; }
+.queue-agent-notice { display:flex; align-items:flex-start; gap:7px; margin:0 0 12px; border:1px solid #f2d09a; border-radius:9px; color:#855100; background:#fffaf0; padding:9px 10px; font-size:9px; line-height:1.45; }.queue-agent-notice .ui-icon { flex:0 0 auto; margin-top:1px; }.queue-item[draggable="true"] { cursor:grab; }.queue-item--dragging { opacity:.52; }.queue-item__attempts { margin-top:9px; border-left:2px solid #dfe8f6; padding-left:9px; color:#52627a; font-size:9px; }.queue-item__attempts summary { color:var(--blue); cursor:pointer; font-weight:800; }.queue-item__attempts ol { display:grid; gap:4px; margin:7px 0 0; padding:0; list-style:none; }.queue-item__attempts li { display:grid; grid-template-columns:auto 1fr auto; gap:6px; }.queue-item__attempts time { color:var(--muted); white-space:nowrap; }.queue-item__attempts p { margin:6px 0 0; }
 .machine-specs { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); }.machine-specs > div { min-width:0; padding:13px 16px; background:#fafbfd; }.machine-specs small,.machine-specs strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.machine-specs small { color:var(--muted); font-size:8px; text-transform:uppercase; }.machine-specs strong { margin-top:5px; font-size:10px; }.machine-console__empty { display:grid; min-height:620px; place-items:center; align-content:center; text-align:center; }
 @media (max-width:1180px) { .fleet-filterbar { align-items:flex-start; flex-direction:column; }.fleet-filters { width:100%; flex-wrap:wrap; }.fleet-filters label { flex:1; }.fleet-filters select { width:100%; }.fleet-grid { grid-template-columns:340px minmax(0,1fr); }.machine-card__telemetry { grid-template-columns:1fr 1fr; }.telemetry-grid { grid-template-columns:1fr 1fr; } }
 @media (max-width:900px) { .fleet-grid { grid-template-columns:1fr; }.machine-roster { border-right:0; border-bottom:1px solid var(--line); }.machine-console__empty { min-height:260px; }.quality-job { grid-template-columns:1fr 90px 60px; }.quality-job .btn { grid-column:1/-1; }.machine-card__actions { opacity:1; } }

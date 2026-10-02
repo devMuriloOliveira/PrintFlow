@@ -18,13 +18,15 @@ test('resumo do dashboard preserva totais, series e exclusao de cancelados', () 
       { category: 'Energia', value: 20, date: '03/01/2026' },
       { category: 'Insumos', value: 30, date: '2026-02-04' }
     ],
-    filaments: [{ id: '1', name: 'PLA', remaining: 120 }, { id: '2', name: 'PETG', remaining: 500 }],
-    printers: [{ id: '1', name: 'A1', code: 'A1', status: 'Disponivel' }, { id: '2', name: 'K1', code: 'K1', status: 'Manutenção' }],
+    filaments: [{ id: '1', name: 'PLA', remaining: 120 }, { id: '2', name: 'PETG', remaining: 500, minStock: 300 }, { id: '3', name: 'ABS', remaining: 400, minStock: 500 }],
+    printers: [{ id: '1', name: 'A1', code: 'A1', status: 'Disponivel' }, { id: '2', name: 'K1', code: 'K1', status: 'Manutenção' }, { id: '3', name: 'P1', code: 'P1', status: 'Offline' }],
     printJobs: [
       { id: 'job-1', orderId: '10', printerId: '1', status: 'printing', title: 'Produto A', agentLastStatus: { progress: 42 } },
       { id: 'job-2', orderId: 'other', printerId: '1', status: 'queued', title: 'Fila' },
       { id: 'job-3', trackedSaleId: '50', printerId: '1', status: 'completed', title: 'Marketplace' }
     ],
+    settings: { name: 'Empresa', email: 'contato@example.test', preferences: { onboardingPrinterMode: 'agent' } },
+    marketplaceIntegrations: [{ connectionName: 'Loja ML', status: 'error', lastError: 'timeout' }],
     goals: [{ id: '1', name: 'Meta', current: 100, target: 200, color: '#fff', icon: 'target', status: 'Ativa' }]
   })
 
@@ -45,8 +47,11 @@ test('resumo do dashboard preserva totais, series e exclusao de cancelados', () 
   assert.deepEqual(summary.jobCounts, { active: 1, queued: 1, occupiedPrinters: 1 })
   assert.equal(summary.queuePrinters[0].progress, 42)
   assert.deepEqual(summary.maintenancePrinters, [{ name: 'K1' }])
-  assert.deepEqual(summary.lowStockItems, [{ id: '1', name: 'PLA', remaining: 120 }])
+  assert.deepEqual(summary.offlinePrinters, [{ name: 'P1' }])
+  assert.deepEqual(summary.integrationErrors, [{ name: 'Loja ML' }])
+  assert.deepEqual(summary.lowStockItems, [{ id: '1', name: 'PLA', remaining: 120, minStock: 300 }, { id: '3', name: 'ABS', remaining: 400, minStock: 500 }])
   assert.deepEqual(summary.pendingOrders, [])
+  assert.deepEqual(summary.onboarding, { companyConfigured: true, productCount: 2, printerMode: 'agent' })
   assert.equal(summary.expenseSegments.reduce((total, item) => total + item.value, 0), 100)
 })
 
@@ -60,6 +65,21 @@ test('resumo identifica pedido em producao sem fila e retorna forma vazia estave
   assert.deepEqual(buildDashboardSummary(), emptyDashboardSummary())
 })
 
+test('alerta de estoque usa mínimo configurado por filamento e inclui igualdade', () => {
+  const summary = buildDashboardSummary({
+    filaments: [
+      { id: 'at-minimum', name: 'PLA', remaining: 250, minStock: 250 },
+      { id: 'under-custom', name: 'ABS', remaining: 400, minStock: 500 },
+      { id: 'above-custom', name: 'PETG', remaining: 400, minStock: 300 }
+    ]
+  })
+
+  assert.deepEqual(summary.lowStockItems, [
+    { id: 'at-minimum', name: 'PLA', remaining: 250, minStock: 250 },
+    { id: 'under-custom', name: 'ABS', remaining: 400, minStock: 500 }
+  ])
+})
+
 test('consultas agregadas usam parametro de tenant e mapeiam somente o contrato resumido', async () => {
   const calls = []
   const rows = [
@@ -70,12 +90,13 @@ test('consultas agregadas usam parametro de tenant e mapeiam somente o contrato 
       monthly_expenses: [{ month: 1, value: 10 }],
       expense_categories: [{ label: 'Energia', total: 10 }],
       product_performance: [{ id: 1, name: 'Produto', sku: 'P', thumb: 'box', margin: 30, sales: 2, orderProfit: 30 }],
-      goals: [], stage_counts: { Novo: 1, Producao: 1 }, pending_orders: [{ id: 'PED-1' }], low_stock_items: []
+      goals: [], stage_counts: { Novo: 1, Producao: 1 }, pending_orders: [{ id: 'PED-1' }], low_stock_items: [{ id: 1, name: 'PLA', remaining: 100, minStock: 250 }], overdue_orders: [{ id: 'PED-2' }], integration_errors: [{ name: 'Mercado Livre' }],
+      product_count: 1, onboarding: { companyConfigured: true, printerMode: 'manual' }
     },
     {
       job_counts: { active: 1, queued: 2, occupiedPrinters: 1 }, printer_count: 2,
       queue_printers: [{ id: 1, name: 'A1', code: 'A1', queued: 2, activeJob: { title: 'Job', productName: 'Produto', agentLastStatus: { progress: 50 } } }],
-      maintenance_printers: []
+      maintenance_printers: [], offline_printers: [{ name: 'A1' }]
     }
   ]
   const client = {
@@ -93,5 +114,10 @@ test('consultas agregadas usam parametro de tenant e mapeiam somente o contrato 
   assert.equal(summary.monthlyRevenue[0], 100)
   assert.deepEqual(summary.orderStages, { awaiting: 1, production: 1, shipping: 0, completed: 0 })
   assert.equal(summary.queuePrinters[0].progress, 50)
+  assert.deepEqual(summary.lowStockItems, [{ id: '1', name: 'PLA', remaining: 100, minStock: 250 }])
+  assert.deepEqual(summary.offlinePrinters, [{ name: 'A1' }])
+  assert.deepEqual(summary.overdueOrders, [{ id: 'PED-2' }])
+  assert.deepEqual(summary.integrationErrors, [{ name: 'Mercado Livre' }])
+  assert.deepEqual(summary.onboarding, { companyConfigured: true, productCount: 1, printerMode: 'manual' })
   assert.equal(summary.orders, undefined)
 })

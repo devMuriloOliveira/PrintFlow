@@ -5,6 +5,8 @@ const props = defineProps<{ report: ReportSummary; loading?: boolean; page: numb
 const emit = defineEmits<{ 'update:page': [value: number]; 'update:pageSize': [value: number] }>()
 const filteredSales = computed(() => props.report.sales.items)
 const productRows = computed(() => props.report.products.map(item => ({ ...item, qty: item.quantity, product: item, realizedMargin: item.revenue ? item.profit / item.revenue * 100 : 0 })))
+const clientRows = computed(() => props.report.clients.map(item => ({ ...item, margin: item.revenue ? item.profit / item.revenue * 100 : 0 })))
+const channelRows = computed(() => props.report.channels.map(item => ({ ...item, label: item.channel === 'direct' ? 'Venda direta' : 'Marketplace', margin: item.revenue ? item.profit / item.revenue * 100 : 0 })))
 const revenueTotal = computed(() => props.report.totals.revenue)
 const profitTotal = computed(() => props.report.totals.registeredProfit)
 const quantityTotal = computed(() => props.report.totals.itemCount)
@@ -48,6 +50,36 @@ const channelLabel = (value: string) => value === 'direct' ? 'Venda direta' : 'M
       </div>
     </PanelCard>
 
+    <div class="report-margin-grid">
+      <PanelCard title="Margem por cliente" subtitle="20 maiores clientes por faturamento; pedidos sem vínculo ficam identificados">
+        <div v-if="!clientRows.length" class="empty-state">Nenhum cliente com vendas no período.</div>
+        <div v-else class="table-scroll">
+          <table class="data-table"><thead><tr><th>Cliente</th><th>Pedidos</th><th>Faturamento</th><th>Lucro registrado</th><th>Margem</th></tr></thead>
+            <tbody><tr v-for="item in clientRows" :key="item.id || item.name"><td>{{ item.name || 'Sem cliente vinculado' }}</td><td>{{ formatNumber(item.orders) }}</td><td>{{ formatCurrency(item.revenue) }}</td><td :class="item.profit >= 0 ? 'money-positive' : 'money-negative'">{{ formatCurrency(item.profit) }}</td><td>{{ item.margin.toFixed(1) }}%</td></tr></tbody>
+          </table>
+        </div>
+      </PanelCard>
+      <PanelCard title="Margem por canal" subtitle="Venda direta e marketplace, conforme o lucro registrado nos pedidos">
+        <div v-if="!channelRows.length" class="empty-state">Nenhuma venda no período.</div>
+        <div v-else class="table-scroll">
+          <table class="data-table"><thead><tr><th>Canal</th><th>Pedidos</th><th>Faturamento</th><th>Lucro registrado</th><th>Margem</th></tr></thead>
+            <tbody><tr v-for="item in channelRows" :key="item.channel"><td>{{ item.label }}</td><td>{{ formatNumber(item.orders) }}</td><td>{{ formatCurrency(item.revenue) }}</td><td :class="item.profit >= 0 ? 'money-positive' : 'money-negative'">{{ formatCurrency(item.profit) }}</td><td>{{ item.margin.toFixed(1) }}%</td></tr></tbody>
+          </table>
+        </div>
+      </PanelCard>
+    </div>
+    <p class="report-margin-note">Lucro e margem usam os valores gravados nos pedidos e não descontam despesas gerais da empresa.</p>
+
+    <PanelCard title="Custo estimado e custo registrado" subtitle="Somente trabalhos concluídos com tempo e material medidos pelo Agent">
+      <div v-if="!report.productionCostComparison.jobCount" class="empty-state"><div><h3>Sem medições completas neste período</h3><p>Quando o Agent registrar tempo e material medidos em uma impressão vinculada a um pedido, a comparação aparecerá aqui.</p></div></div>
+      <div v-else class="production-cost-comparison">
+        <div><small>Estimativa com tarifas atuais</small><strong>{{ formatCurrency(report.productionCostComparison.estimatedCurrentRateCost) }}</strong></div>
+        <div><small>Custo registrado ao concluir</small><strong>{{ formatCurrency(report.productionCostComparison.actualRecordedCost) }}</strong></div>
+        <div><small>Diferença (registrado − estimativa)</small><strong :class="report.productionCostComparison.variance > 0 ? 'money-negative' : 'money-positive'">{{ formatCurrency(report.productionCostComparison.variance) }}</strong></div>
+        <p>{{ formatNumber(report.productionCostComparison.jobCount) }} trabalho(s). A estimativa usa o preço atual do filamento e da energia; o custo registrado usa os valores gravados ao concluir cada impressão.</p>
+      </div>
+    </PanelCard>
+
     <PanelCard title="Vendas consideradas" subtitle="Confira quais pedidos compõem os totais acima">
       <div v-if="!filteredSales.length" class="empty-state">Nenhuma venda encontrada no período.</div>
       <div v-else class="table-scroll">
@@ -63,4 +95,6 @@ const channelLabel = (value: string) => value === 'direct' ? 'Venda direta' : 'M
 
 <style scoped>
 .product-report>.metrics-grid{width:100%;margin-bottom:0}.product-report__summary{display:grid;grid-template-columns:2fr 1fr 1fr;gap:1px;overflow:hidden;border:1px solid #dce4f0;border-radius:12px;background:#dce4f0}.product-report__summary>div{display:grid;gap:3px;padding:13px 16px;background:#fff}.product-report__summary small,.table-product small,.sale-marketplace{display:block;color:#687386;font-size:11px}.product-report__summary strong{overflow:hidden;color:#172033;text-overflow:ellipsis;white-space:nowrap}.table-product>div{display:grid;gap:2px}.sale-marketplace{margin-top:2px}@media(max-width:700px){.product-report__summary{grid-template-columns:1fr}.product-report__summary strong{white-space:normal}}
+.report-margin-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:0}.report-margin-note{margin:-4px 0 0;color:#64748b;font-size:10px;line-height:1.4}@media(max-width:900px){.report-margin-grid{grid-template-columns:1fr}}
+.production-cost-comparison{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.production-cost-comparison>div{min-width:0;border:1px solid var(--line);border-radius:10px;background:#fafbfd;padding:12px}.production-cost-comparison small,.production-cost-comparison strong{display:block}.production-cost-comparison small{color:#64748b;font-size:9px}.production-cost-comparison strong{margin-top:5px;font-size:15px}.production-cost-comparison p{grid-column:1/-1;margin:0;color:#64748b;font-size:9px;line-height:1.45}@media(max-width:640px){.production-cost-comparison{grid-template-columns:1fr}.production-cost-comparison p{grid-column:auto}}
 </style>

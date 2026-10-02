@@ -27,6 +27,9 @@ test('report summary maps aggregate and paginated contracts without raw historie
         products_count: 4,
         series: [{ key: '2026-09-01', revenue: 150, expenses: 30, profit: 35 }],
         marketplaces: [{ name: 'Venda direta', value: 150 }],
+        channels: [{ channel: 'direct', orders: 1, revenue: 150, profit: 65 }],
+        clients: [{ id: '17', name: 'Cliente A', orders: 1, revenue: 150, profit: 65 }],
+        production_cost_comparison: { jobCount: 2, estimatedCurrentRateCost: 20, actualRecordedCost: 24, variance: 4 },
         expense_categories: [{ label: 'Energia', total: 30 }],
         products: [{ name: 'Produto A', sku: 'A-1', thumb: 'vase', orders: 1, quantity: 2, revenue: 150, profit: 65 }],
         sales_items: [{ dbId: 'order:1', id: 'ORDER-A', date: '15/09/2026', marketplace: 'Venda direta', salesChannel: 'direct', product: 'Produto A', qty: 2, gross: 150, fee: 15, shipping: 10, net: 125, profit: 65, status: 'Producao' }],
@@ -39,9 +42,17 @@ test('report summary maps aggregate and paginated contracts without raw historie
   assert.equal(queryParams[0], 'tenant-a')
   assert.equal(queryParams[9], 25)
   assert.match(queryText, /where tenant_id = \$1/)
+  assert.match(queryText, /client\.tenant_id = o\.tenant_id/)
+  assert.match(queryText, /j\.metrics_source = 'agent_measured'/)
+  assert.match(queryText, /j\.actual_filament_grams is not null and j\.actual_print_seconds is not null/)
   assert.equal(summary.totals.profit, 35)
   assert.equal(summary.totals.ticket, 150)
   assert.equal(summary.products[0].quantity, 2)
+  assert.equal(summary.channels[0].channel, 'direct')
+  assert.equal(summary.channels[0].profit, 65)
+  assert.equal(summary.clients[0].name, 'Cliente A')
+  assert.equal(summary.clients[0].profit, 65)
+  assert.deepEqual(summary.productionCostComparison, { jobCount: 2, estimatedCurrentRateCost: 20, actualRecordedCost: 24, variance: 4 })
   assert.equal(summary.sales.items[0].id, 'ORDER-A')
   assert.equal(summary.sales.total, 1)
   assert.deepEqual(summary.options.categories, ['Energia'])

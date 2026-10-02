@@ -105,7 +105,7 @@ const saveMovement = async () => {
             <thead><tr><th></th><th>Nome</th><th>Fabricante</th><th>Material</th><th>Tipo</th><th>Cor</th><th>Peso Inicial</th><th>Peso Restante</th><th>Custo</th><th>Custo/g</th><th>Fornecedor</th><th>Compra</th><th>Status</th><th></th></tr></thead>
             <tbody>
               <tr v-for="f in paginatedFilaments" :key="f.id || f.name" :class="{selected:String(f.id || f.name)===String(selected.id || selected.name)}" @click="selectFilament(f)">
-                <td><input type="radio" :checked="String(f.id || f.name)===String(selected.id || selected.name)"></td>
+                <td><input type="radio" name="filament-selection" :value="String(f.id || f.name)" :checked="String(f.id || f.name)===String(selected.id || selected.name)" :aria-label="'Selecionar filamento ' + f.name" @change="selectFilament(f)"></td>
                 <td><div class="table-product table-product--editable"><span class="product-thumb" style="border-radius:50%"><UiIcon name="spool" :size="28" /></span><strong>{{f.name}}</strong><button class="row-action row-action--edit" title="Editar filamento" @click.stop="editFilament(f)"><UiIcon name="edit" :size="15" /></button></div></td>
                 <td>{{f.maker}}</td>
                 <td>{{f.material}}</td>

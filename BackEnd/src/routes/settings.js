@@ -1,14 +1,26 @@
 import { getAuthUser } from './auth.js'
 import { readJsonBody } from '../http/body.js'
 import { sendJson, sendText } from '../http/response.js'
-import { hasDatabase, withTenant } from '../db/pool.js'
-import { encryptField } from '../security/crypto.js'
+import { hasDatabase, query, withTenant } from '../db/pool.js'
+import { decryptField, encryptField } from '../security/crypto.js'
 import { validCompanyDocument } from '../services/companyDocument.js'
 import { lookupCompanyByCnpj } from '../services/companyLookup.js'
 import { loadAppData } from '../repositories/appDataRepository.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 
 const text = (value, max = 300) => String(value || '').trim().slice(0, max)
+export const registeredCompanyNameLockedError = 'O nome informado no cadastro nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.'
+export const registeredCompanyDocumentLockedError = 'O documento cadastrado nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.'
+export const validateRegisteredCompanyName = ({ incomingName, registeredName, locked }) => {
+  if (locked && text(registeredName, 160) && text(incomingName, 160) !== text(registeredName, 160)) {
+    throw new Error(registeredCompanyNameLockedError)
+  }
+}
+export const validateRegisteredCompanyDocument = (incomingDocument, storedIdentity) => {
+  if (storedIdentity?.hash && (!incomingDocument || incomingDocument.hash !== storedIdentity.hash)) {
+    throw new Error(registeredCompanyDocumentLockedError)
+  }
+}
 const hexColor = (value) => /^#[0-9a-f]{6}$/i.test(String(value || '').trim())
   ? String(value).trim().toLowerCase()
   : '#1768f2'
@@ -71,7 +83,8 @@ export const normalizedSettings = (payload = {}) => {
     accentColor: hexColor(preferences.accentColor),
     defaultMargin: Math.max(0, Math.min(1000, Number(preferences.defaultMargin ?? 40))),
     monthlyFixedCost: Math.max(0, Math.min(1_000_000, Number(preferences.monthlyFixedCost || 0))),
-    plannedMonthlyUnits: Math.max(0, Math.min(1_000_000, Math.floor(Number(preferences.plannedMonthlyUnits || 0))))
+    plannedMonthlyUnits: Math.max(0, Math.min(1_000_000, Math.floor(Number(preferences.plannedMonthlyUnits || 0)))),
+    onboardingPrinterMode: ['manual', 'agent'].includes(String(preferences.onboardingPrinterMode || '')) ? String(preferences.onboardingPrinterMode) : ''
   }
   return result
 }
@@ -85,10 +98,11 @@ export const handleSettingsUpdate = async (req, res) => {
   await withTenant(user.tenantId, async (client) => {
     const incomingDocument = values.document ? validCompanyDocument(values.document) : null
     if (values.document && !incomingDocument) throw new Error('Informe um CPF ou CNPJ valido.')
-    const current = await client.query(`select tenant.document, tenant.document_hash, tenant.document_type, settings.document as settings_document from tenants tenant left join company_settings settings on settings.tenant_id = tenant.id where tenant.id = $1 limit 1`, [user.tenantId])
+    const current = await client.query(`select tenant.name, tenant.document_locked_at, tenant.document, tenant.document_hash, tenant.document_type, settings.document as settings_document from tenants tenant left join company_settings settings on settings.tenant_id = tenant.id where tenant.id = $1 limit 1`, [user.tenantId])
     const stored = current.rows[0] || {}
+    validateRegisteredCompanyName({ incomingName: values.name, registeredName: decryptField(stored.name), locked: Boolean(stored.document_locked_at) })
     const storedIdentity = stored.document_hash ? { hash: stored.document_hash, type: stored.document_type || '' } : validCompanyDocument(stored.document || stored.settings_document || '')
-    if (storedIdentity?.hash && (!incomingDocument || incomingDocument.hash !== storedIdentity.hash)) throw new Error('O documento cadastrado nao pode ser alterado por esta tela. Solicite a troca para CNPJ ao suporte.')
+    validateRegisteredCompanyDocument(incomingDocument, storedIdentity)
     const documentIdentity = incomingDocument || storedIdentity
     // company_settings is the tenant's complete profile. Keep the small profile
     // duplicated in tenants in sync because the platform administration only
@@ -122,6 +136,28 @@ export const handleSettingsUpdate = async (req, res) => {
   return sendJson(res, 200, (await loadAppData(user.tenantId)).settings)
 }
 
+export const handleOnboardingModeUpdate = async (req, res) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Login necessario' })
+  if (!hasDatabase) return sendJson(res, 501, { error: 'Onboarding exige banco de dados.' })
+
+  const body = await readJsonBody(req)
+  const mode = String(body?.mode || '').trim().toLowerCase()
+  if (!['manual', 'agent'].includes(mode)) return sendJson(res, 400, { error: 'Escolha um modo de operacao valido.' })
+
+  await withTenant(user.tenantId, async (client) => {
+    await client.query(`
+      insert into company_settings (tenant_id, preferences)
+      values ($1, jsonb_build_object('onboardingPrinterMode', $2::text))
+      on conflict (tenant_id) do update set
+        preferences = coalesce(company_settings.preferences, '{}'::jsonb) || jsonb_build_object('onboardingPrinterMode', $2::text),
+        updated_at = now()
+    `, [user.tenantId, mode])
+    await writeAuditEvent(user.tenantId, { action: 'onboarding.mode_selected', actorType: 'user', actorId: user.id, entityType: 'company_settings', entityId: user.tenantId, details: { mode } }, client)
+  })
+  return sendJson(res, 200, { mode })
+}
+
 export const handleCompanyCnpjLookup = async (req, res, url) => {
   const user = await getAuthUser(req)
   if (!user) return sendJson(res, 401, { error: 'Login necessario' })
@@ -133,7 +169,7 @@ export const handleCompanyCnpjLookup = async (req, res, url) => {
   }
 }
 
-export const backupStatus = () => ({
+export const backupStatus = (runs = []) => ({
   databaseAvailable: hasDatabase,
   export: {
     enabled: hasDatabase,
@@ -143,13 +179,24 @@ export const backupStatus = () => ({
   restore: {
     enabled: false,
     reason: 'A restauracao exige validacao e confirmacao explicita para evitar sobrescrita de dados.'
+  },
+  operational: {
+    lastCompletedAt: runs.find((run) => ['success', 'completed'].includes(String(run.status || '').toLowerCase()) && run.completed_at)?.completed_at || null,
+    lastStatus: runs[0]?.status || 'unknown',
+    history: runs.slice(0, 5).map((run) => ({ status: run.status, startedAt: run.started_at || null, completedAt: run.completed_at || null }))
   }
 })
 
 export const handleSettingsBackupStatus = async (req, res) => {
   const user = await getAuthUser(req)
   if (!user) return sendJson(res, 401, { error: 'Login necessario' })
-  return sendJson(res, 200, backupStatus())
+  if (!hasDatabase) return sendJson(res, 200, backupStatus())
+  try {
+    const result = await query('select status, started_at, completed_at from backup_runs order by started_at desc limit 5')
+    return sendJson(res, 200, backupStatus(result.rows))
+  } catch {
+    return sendJson(res, 200, backupStatus())
+  }
 }
 
 export const handleSettingsExport = async (req, res, url = new URL(req.url, 'http://localhost')) => {

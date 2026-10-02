@@ -22,6 +22,10 @@ export const emptyDashboardSummary = () => ({
   printerCount: 0,
   queuePrinters: [],
   maintenancePrinters: [],
+  offlinePrinters: [],
+  overdueOrders: [],
+  integrationErrors: [],
+  onboarding: { companyConfigured: false, productCount: 0, printerMode: '' },
   orderStages: { awaiting: 0, production: 0, shipping: 0, completed: 0 },
   lowStockItems: [],
   pendingOrders: []
@@ -100,6 +104,13 @@ export const buildDashboardSummary = (data = {}) => {
     return { id: String(product.id || ''), name: product.name, sku: product.sku, thumb: product.thumb, margin: number(product.margin), sales: item.sales, orderProfit: item.profit }
   }).sort((a, b) => b.orderProfit - a.orderProfit)
   summary.goals = goals
+  const settings = data.settings && typeof data.settings === 'object' ? data.settings : null
+  const preferences = settings?.preferences && typeof settings.preferences === 'object' ? settings.preferences : {}
+  summary.onboarding = {
+    companyConfigured: Boolean(settings && String(settings.name || '').trim() && String(settings.email || '').trim()),
+    productCount: products.length,
+    printerMode: ['manual', 'agent'].includes(String(preferences.onboardingPrinterMode || '')) ? String(preferences.onboardingPrinterMode) : ''
+  }
 
   const activeJobs = printJobs.filter((job) => activeStatuses.has(String(job.status || '')))
   const queuedJobs = printJobs.filter((job) => queuedStatuses.has(String(job.status || '')))
@@ -124,7 +135,17 @@ export const buildDashboardSummary = (data = {}) => {
     return { id: printerId, name: printer.name, code: printer.code, activeJob, queued: queuedByPrinter.get(printerId) || 0, progress: Number.isFinite(progress) ? progress : 0 }
   }).sort((a, b) => Number(Boolean(b.activeJob)) - Number(Boolean(a.activeJob)) || b.queued - a.queued).slice(0, 5)
   summary.maintenancePrinters = printers.filter((printer) => /manuten[cç]/i.test(String(printer.status || ''))).map((printer) => ({ name: printer.name }))
-  summary.lowStockItems = filaments.filter((filament) => number(filament.remaining) < 300).map((filament) => ({ id: String(filament.id || ''), name: filament.name, remaining: number(filament.remaining) }))
+  summary.offlinePrinters = printers.filter((printer) => /offline|desconect/i.test(`${printer.status || ''} ${printer.agentPrinterStatus || ''}`)).map((printer) => ({ name: printer.name }))
+  const now = Date.now()
+  const orderTimestamp = (value) => {
+    const raw = String(value || '')
+    const parts = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+    const parsed = parts ? new Date(`${parts[3]}-${parts[2]}-${parts[1]}T12:00:00`).getTime() : new Date(raw).getTime()
+    return Number.isFinite(parsed) ? parsed : now
+  }
+  summary.overdueOrders = orders.filter((order) => !['Cancelado', ...completedOrderStatuses].includes(String(order.status || '')) && now - orderTimestamp(order.date) > 7 * 86400000).slice(0, 3).map((order) => ({ id: order.id }))
+  summary.integrationErrors = (Array.isArray(data.marketplaceIntegrations) ? data.marketplaceIntegrations : []).filter((integration) => integration.status === 'error' || integration.lastError).slice(0, 3).map((integration) => ({ name: integration.connectionName || integration.platform || 'Marketplace' }))
+  summary.lowStockItems = filaments.filter((filament) => number(filament.remaining) <= (filament.minStock == null ? 300 : number(filament.minStock))).map((filament) => ({ id: String(filament.id || ''), name: filament.name, remaining: number(filament.remaining), minStock: filament.minStock == null ? 300 : number(filament.minStock) }))
   const jobOrderIds = new Set(printJobs.flatMap((job) => [String(job.orderId || ''), job.trackedSaleId ? `marketplace:${job.trackedSaleId}` : '']))
   summary.pendingOrders = orders.filter((order) => productionOrderStatuses.has(String(order.status || '')) && !jobOrderIds.has(String(order.dbId || order.id || ''))).slice(0, 3).map((order) => ({ id: order.id }))
   return summary
@@ -197,8 +218,18 @@ const analyticsSql = `
         and not exists (select 1 from print_jobs j where j.tenant_id = $1
           and ((s.marketplace_order = false and j.order_id = s.direct_order_id) or (s.marketplace_order = true and j.tracked_sale_id = s.tracked_sale_id)))
         order by s.sold_at desc, s.resource_id desc limit 3) pending) as pending_orders,
-    (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'remaining', remaining_weight) order by created_at desc), '[]'::jsonb)
-      from filaments where tenant_id = $1 and remaining_weight < 300) as low_stock_items
+    (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'remaining', remaining_weight, 'minStock', min_stock_weight) order by created_at desc), '[]'::jsonb)
+      from filaments where tenant_id = $1 and remaining_weight <= min_stock_weight) as low_stock_items
+    ,(select count(*)::int from product_catalog) as product_count
+    ,(select jsonb_build_object(
+        'companyConfigured', length(settings.name) > 0 and length(settings.email) > 0,
+        'printerMode', coalesce(settings.preferences->>'onboardingPrinterMode', '')
+      ) from company_settings settings where settings.tenant_id = $1) as onboarding
+    ,(select coalesce(jsonb_agg(jsonb_build_object('id', external_id) order by sold_at asc), '[]'::jsonb) from
+      (select external_id, sold_at from sales where status not in ('Cancelado', 'Entregue', 'Concluido', 'Concluído')
+        and sold_at < now() - interval '7 days' order by sold_at asc limit 3) delayed) as overdue_orders
+    ,(select coalesce(jsonb_agg(jsonb_build_object('name', case when connection_name <> '' then connection_name else platform end) order by updated_at desc), '[]'::jsonb)
+      from marketplace_integrations where tenant_id = $1 and (status = 'error' or last_error <> '')) as integration_errors
 `
 
 const operationalSql = `
@@ -208,10 +239,11 @@ const operationalSql = `
       count(distinct printer_id) filter (where status in ('starting', 'printing', 'paused') and printer_id is not null)::int as occupied_printers
     from print_jobs where tenant_id = $1
   ), printer_rows as (
-    select p.id, p.name, p.code, p.status, p.created_at,
+    select p.id, p.name, p.code, p.status, p.created_at, agent_printer.status as agent_status,
       active.title as active_title, active.product_name, active.agent_last_status,
       coalesce(queue.queued, 0)::int as queued
     from printers p
+    left join agent_printers agent_printer on agent_printer.id = p.agent_printer_id and agent_printer.tenant_id = p.tenant_id
     left join lateral (
       select j.title, coalesce(product.name, j.title) as product_name, agent_printer.last_status as agent_last_status
       from print_jobs j
@@ -236,6 +268,8 @@ const operationalSql = `
       order by (active_title is not null) desc, queued desc, created_at desc), '[]'::jsonb) from queue_rows) as queue_printers,
     (select coalesce(jsonb_agg(jsonb_build_object('name', name) order by created_at desc), '[]'::jsonb)
       from printer_rows where lower(status) like '%manutenc%' or lower(status) like '%manutenç%') as maintenance_printers
+    ,(select coalesce(jsonb_agg(jsonb_build_object('name', name) order by created_at desc), '[]'::jsonb)
+      from printer_rows where lower(status) in ('offline', 'desconectada', 'desconectado') or lower(coalesce(agent_status, '')) = 'offline') as offline_printers
   from job_counts
 `
 
@@ -270,11 +304,19 @@ const mapDatabaseSummary = (analytics, operational) => {
     completed: Number(stages.Entregue || 0) + Number(stages.Concluido || 0) + Number(stages['Concluído'] || 0)
   }
   summary.pendingOrders = (analytics.pending_orders || []).map((order) => ({ id: decryptField(order.id) }))
-  summary.lowStockItems = (analytics.low_stock_items || []).map((item) => ({ id: String(item.id), name: item.name, remaining: number(item.remaining) }))
+  summary.lowStockItems = (analytics.low_stock_items || []).map((item) => ({ id: String(item.id), name: item.name, remaining: number(item.remaining), minStock: number(item.minStock) }))
   summary.jobCounts = { active: Number(operational.job_counts?.active || 0), queued: Number(operational.job_counts?.queued || 0), occupiedPrinters: Number(operational.job_counts?.occupiedPrinters || 0) }
   summary.printerCount = Number(operational.printer_count || 0)
   summary.queuePrinters = (operational.queue_printers || []).map((printer) => ({ ...printer, id: String(printer.id), progress: number(printer.activeJob?.agentLastStatus?.progress) }))
   summary.maintenancePrinters = operational.maintenance_printers || []
+  summary.offlinePrinters = operational.offline_printers || []
+  summary.overdueOrders = (analytics.overdue_orders || []).map((order) => ({ id: decryptField(order.id) }))
+  summary.integrationErrors = analytics.integration_errors || []
+  summary.onboarding = {
+    companyConfigured: analytics.onboarding?.companyConfigured === true,
+    productCount: Number(analytics.product_count || 0),
+    printerMode: ['manual', 'agent'].includes(String(analytics.onboarding?.printerMode || '')) ? String(analytics.onboarding.printerMode) : ''
+  }
   return summary
 }
 
