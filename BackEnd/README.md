@@ -170,6 +170,18 @@ Esse comando altera o banco indicado por `DATABASE_URL`; confirme a URL antes
 de executá-lo. `npm.cmd run dev` e `npm.cmd start` já chamam as migrações na
 inicialização do servidor.
 
+Criar dados fictícios para teste local:
+
+```bat
+npm.cmd run seed:demo
+```
+
+O seed recria somente o tenant fictício `demo` e inclui clientes, produtos,
+estoque, impressoras, pedidos, vendas de marketplace, despesas, metas e
+chamados. Para entrar localmente, use `demo.local@printflow.test` e a senha
+`DemoLocal#2026`. Ele aceita exclusivamente `DATABASE_URL` com host
+`localhost`, `127.0.0.1` ou `::1`; não há opção de liberar uma base remota.
+
 Limpar dados demonstrativos em ambiente local:
 
 ```bat
