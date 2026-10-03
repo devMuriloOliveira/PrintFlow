@@ -3,7 +3,8 @@ param(
   [string]$InstallDir = "$env:LOCALAPPDATA\PrintFlowAgent",
   [string]$TaskName = "PrintFlowAgent",
   [switch]$NoDesktopShortcut,
-  [switch]$NoStartMenuShortcut
+  [switch]$NoStartMenuShortcut,
+  [string]$DiagnosticLogPath = (Join-Path $env:LOCALAPPDATA ('PrintFlowAgentSetup\logs\orca-' + [guid]::NewGuid().ToString('N') + '.log'))
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,10 +72,7 @@ function Assert-BundledNodeRuntime {
 Assert-BundledNodeRuntime
 # Provision and exercise the Store-signed slicer before stopping the working Agent.
 & (Join-Path $sourceRoot 'scripts\ensure-orca-slicer.ps1')
-& (Join-Path $sourceRoot 'runtime\node.exe') (Join-Path $sourceRoot 'scripts\verify-orca-runtime.mjs')
-if ($LASTEXITCODE -ne 0) {
-  throw 'Instalacao cancelada: OrcaSlicer nao conseguiu gerar G-code. A instalacao existente foi preservada.'
-}
+& (Join-Path $sourceRoot 'scripts\test-windows-orca-runtime.ps1') -SourceRoot $sourceRoot -DiagnosticLogPath $DiagnosticLogPath
 Stop-ExistingAgentInstall
 
 if (-not (Test-Path $installRoot)) {

@@ -204,6 +204,13 @@ perfis dos modelos suportados e geram G-code de um cubo local usando o Node
 incluido. Nenhuma impressora e acessada. Uma falha bloqueia o build e cancela
 a instalacao antes de parar o Agent, copiar arquivos ou registrar tarefas.
 O ambiente de build/release tambem precisa permitir instalar aplicativos Store.
+Se o fatiamento falhar, o instalador oferece `Abrir diagnostico`. O registro
+fica em `%LOCALAPPDATA%\PrintFlowAgentSetup\logs\orca-*.log`, fora da pasta
+temporaria que e removida ao fechar o instalador. Ele inclui etapa, codigo de
+saida e mensagens do teste local; nao inclui credenciais nem inicia impressao.
+Para repetir somente esse teste no pacote extraido, execute
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\test-windows-orca-runtime.ps1`.
+Essa verificacao nao instala software nem altera o Agent existente.
 O Orca e independente: a reversao/desinstalacao do Agent nao remove o pacote
 Store nem as configuracoes do usuario. Publicacao, instalador assinado e
 validacao em outra maquina continuam sendo etapas separadas.
