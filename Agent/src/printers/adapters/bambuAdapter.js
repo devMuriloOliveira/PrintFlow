@@ -69,6 +69,14 @@ const requireValue = (
   return normalized
 }
 
+const normalizeBambuConnectionError = error => {
+  const message = String(error?.message || error || '')
+  if (/not authorized|not authorised|reason code\s*[:=]?\s*5/i.test(message)) {
+    return new Error('LAN Access Code da Bambu rejeitado. Confira o codigo no menu Rede > LAN Only Mode da impressora e cadastre-o novamente.')
+  }
+  return error instanceof Error ? error : new Error(message || 'Falha ao conectar na Bambu.')
+}
+
 const getTopics = (
   serial
 ) => ({
@@ -915,7 +923,7 @@ const waitForConnection = (
       const onError =
         error => {
           finish(
-            error
+            normalizeBambuConnectionError(error)
           )
         }
 

@@ -189,6 +189,7 @@ const printReadinessError = (job: any) => {
   const protocol = String(printer?.agentProtocol || '').toLowerCase()
   const allowed = allowedFormatsByProtocol[protocol] || readyPrintFormats
   if (protocol && !allowed.includes(format)) return `Formato ${format.toUpperCase()} não é recomendado para esta impressora.`
+  if (protocol === 'bambu' && format === '3mf' && !job?.slicingArtifactStorageKey) return 'Arquivo 3MF ainda nao foi fatiado. Prepare o G-code antes de iniciar na Bambu.'
   const productDimensions = parseDimensions(product.dimensions)
   if (!productDimensions) return 'Produto sem dimensoes reais informadas.'
   const printerVolume = parseDimensions(printer?.volume)

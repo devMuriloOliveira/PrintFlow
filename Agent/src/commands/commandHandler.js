@@ -77,6 +77,14 @@ const assertPrintFileFormat = (
   }
 }
 
+const assertBambuPrintArtifact = (printer, job) => {
+  if (normalizeText(printer?.protocol) !== 'bambu') return
+  const format = normalizeText(job?.printFile?.format)
+  if (format === '3mf' && !job?.printFile?.slicingArtifactStorageKey && !job?.slicingArtifactStorageKey) {
+    throw new Error('Arquivo 3MF ainda nao foi fatiado. Prepare o G-code antes de iniciar na Bambu.')
+  }
+}
+
 const getOptionsWithStoredCredentials =
   async (
     printer,
@@ -536,6 +544,11 @@ export const handleCommand = async (
       )
 
       assertPrintFileFormat(
+        printer,
+        job
+      )
+
+      assertBambuPrintArtifact(
         printer,
         job
       )

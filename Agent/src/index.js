@@ -102,6 +102,9 @@ let agentCredentials = null
 let commandDispatcher = null
 let commandScheduler = null
 let realtimeStop = null
+// O servidor local pode consultar os diagnosticos antes do primeiro heartbeat.
+// Declare o estado antes de registrar esse callback para evitar TDZ durante o startup.
+let realtimeMode = 'offline'
 let stopStatusPolling = null
 let cacheCleanupTimer = null
 let heartbeatTimer = null
@@ -591,7 +594,6 @@ console.log('')
 console.log('Iniciando busca de comandos...')
 
 let commandPollDelay = 5_000
-let realtimeMode = 'offline'
 const maxPendingLocalOperations = Math.max(
   100,
   Number(process.env.PRINTFLOW_AGENT_MAX_PENDING_OPERATIONS) || 5_000
