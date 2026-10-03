@@ -320,6 +320,31 @@ export const migrate =
 
     await query(
       `
+        alter table users
+        add column if not exists
+          platform_role
+          text
+          not null
+          default ''
+      `
+    )
+
+    await query(
+      `
+        update users
+           set platform_role = case
+             when role = 'platform_super_admin' then 'platform_super_admin'
+             else ''
+           end
+         where platform_role is distinct from case
+             when role = 'platform_super_admin' then 'platform_super_admin'
+             else ''
+           end
+      `
+    )
+
+    await query(
+      `
         create index if not exists
           users_tenant_id_idx
         on users (
