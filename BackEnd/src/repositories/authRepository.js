@@ -431,7 +431,7 @@ export const resetUserPassword = async (userId, newPassword) => {
     incrementMemoryTokenVersion(userId)
     return publicUser(stored)
   }
-  const tokenVersion = await query(`update users set password_hash = $1, token_version = token_version + 1, updated_at = now() where id::text = $2 and status = 'active' returning id, tenant_id, name, email, role, platform_role, status, token_version`, [hashPassword(newPassword), String(userId)])
+  const tokenVersion = await query(`update users set password_hash = $1, token_version = token_version + 1, updated_at = now() where id::text = $2 and status = 'active' returning id, tenant_id, name, email, role, case when role = 'platform_super_admin' then role else '' end as platform_role, status, token_version`, [hashPassword(newPassword), String(userId)])
   if (!tokenVersion.rows[0]) throw new Error('Usuario nao encontrado.')
   await query('update refresh_tokens set revoked_at = coalesce(revoked_at, now()) where user_id = $1 and revoked_at is null', [String(userId)])
   return publicUser(tokenVersion.rows[0])
@@ -444,7 +444,7 @@ export const findActiveUserByEmail = async (email) => {
     const stored = memoryUsers.get(normalizedEmail)
     return stored ? publicUser(stored) : null
   }
-  const result = await query(`select id, tenant_id, name, email, role, platform_role, status, token_version from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`, [blindIndexesForLookup(normalizedEmail), normalizedEmail])
+  const result = await query(`select id, tenant_id, name, email, role, case when role = 'platform_super_admin' then role else '' end as platform_role, status, token_version from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`, [blindIndexesForLookup(normalizedEmail), normalizedEmail])
   return result.rows[0] ? publicUser(result.rows[0]) : null
 }
 
@@ -453,7 +453,7 @@ export const findActiveUserById = async (userId) => {
     const stored = memoryUsersById.get(String(userId))
     return stored ? publicUser(stored) : null
   }
-  const result = await query(`select id, tenant_id, name, email, role, platform_role, status, token_version from users where id::text = $1 and status = 'active' limit 1`, [String(userId)])
+  const result = await query(`select id, tenant_id, name, email, role, case when role = 'platform_super_admin' then role else '' end as platform_role, status, token_version from users where id::text = $1 and status = 'active' limit 1`, [String(userId)])
   return result.rows[0] ? publicUser(result.rows[0]) : null
 }
 
