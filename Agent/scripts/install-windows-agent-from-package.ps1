@@ -108,6 +108,8 @@ Configuracao no Windows:
 - Inicia automaticamente quando este usuario entrar no Windows.
 - Cria atalhos e registra o protocolo printflow-agent://.
 - Usa o runtime Node.js incluido; nao exige Node.js instalado separadamente.
+- Instala ou reutiliza OrcaSlicer oficial pela Microsoft Store; a primeira instalacao exige internet e App Installer.
+- Valida o fatiamento local antes de substituir o Agent existente. Nao inicia impressao.
 - Mantem pareamento, credenciais protegidas e historico local durante atualizacoes.
 - Conecta-se ao PrintFlow Cloud por HTTPS.
 $certificateNotice

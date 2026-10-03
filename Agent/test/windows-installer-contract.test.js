@@ -9,6 +9,18 @@ const readScript = name =>
     'utf8'
   )
 
+test('build e instalador exigem fatiamento real antes de empacotar ou parar o Agent', async () => {
+  const build = await readScript('build-windows-package.ps1')
+  const install = await readScript('install-windows-agent.ps1')
+  const verifier = await readScript('verify-orca-runtime.mjs')
+  assert.ok(build.indexOf('scripts/verify-orca-runtime.mjs') < build.indexOf('Compress-Archive'))
+  assert.ok(install.indexOf('scripts\\verify-orca-runtime.mjs') < install.indexOf('\nStop-ExistingAgentInstall'))
+  assert.match(install, /Instalacao cancelada: OrcaSlicer nao conseguiu gerar G-code/)
+  assert.match(verifier, /discoverStoreOrcaPath\(\)/)
+  assert.ok(install.indexOf('scripts\\ensure-orca-slicer.ps1') < install.indexOf('\nStop-ExistingAgentInstall'))
+  assert.match(verifier, /sliceWithOrcaSlicer\(/)
+})
+
 test('instalador exibe versao e informa que o runtime esta incluido', async () => {
   const build = await readScript('build-windows-package.ps1')
   const bootstrap = await readScript('install-windows-agent-from-package.ps1')

@@ -157,6 +157,11 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Dependencias nativas falharam no runtime Node.js empacotado."
   }
+  & (Join-Path $stageRoot "scripts\ensure-orca-slicer.ps1")
+  & $runtimeNodePath "scripts/verify-orca-runtime.mjs"
+  if ($LASTEXITCODE -ne 0) {
+    throw "OrcaSlicer oficial Store nao passou no fatiamento real; release bloqueada."
+  }
 } finally {
   Pop-Location
 }
@@ -270,6 +275,7 @@ $iexpressPath = Join-Path $env:WINDIR "System32\iexpress.exe"
 $iexpressProcess = Start-Process `
   -FilePath $iexpressPath `
   -ArgumentList @('/N', '/Q', $installerSedPath) `
+  -WindowStyle Hidden `
   -PassThru
 
 $buildDeadline = [DateTime]::UtcNow.AddMinutes(3)

@@ -165,6 +165,28 @@ test('pipeline local analisa, seleciona perfil e fatia sem enviar a impressora',
   }
 })
 
+test('OrcaSlicer preserva diagnostico de falha publicado em stdout', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'printflow-orca-error-'))
+  try {
+    const executablePath = path.join(root, 'orca.exe')
+    const inputPath = path.join(root, 'cube.stl')
+    const profilePath = path.join(root, 'profile.json')
+    await Promise.all([executablePath, inputPath, profilePath].map(file => writeFile(file, 'fixture')))
+    await assert.rejects(sliceWithOrcaSlicer({
+      executablePath, inputPath, outputPath: path.join(root, 'cube.gcode'),
+      profile: { id: 'mock', version: '1', path: profilePath },
+      spawnImpl: () => ({
+        stdout: { on: (event, handler) => handler(Buffer.from('OrcaSlicer.dll was not loaded, error=4551')) },
+        stderr: { on: () => {} },
+        once: (event, handler) => { if (event === 'close') setImmediate(() => handler(4294967295)) },
+        kill: () => {}
+      })
+    }), /OrcaSlicer\.dll was not loaded, error=4551/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('OrcaSlicer exige perfil versionado e monta args sem shell', () => {
   const profile = { id: 'bambu-x1c-pla', version: '2026.09.1', path: 'profiles/bambu.json' }
   assert.deepEqual(normalizeOrcaProfile(profile), {

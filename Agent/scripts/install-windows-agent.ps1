@@ -69,6 +69,12 @@ function Assert-BundledNodeRuntime {
 }
 
 Assert-BundledNodeRuntime
+# Provision and exercise the Store-signed slicer before stopping the working Agent.
+& (Join-Path $sourceRoot 'scripts\ensure-orca-slicer.ps1')
+& (Join-Path $sourceRoot 'runtime\node.exe') (Join-Path $sourceRoot 'scripts\verify-orca-runtime.mjs')
+if ($LASTEXITCODE -ne 0) {
+  throw 'Instalacao cancelada: OrcaSlicer nao conseguiu gerar G-code. A instalacao existente foi preservada.'
+}
 Stop-ExistingAgentInstall
 
 if (-not (Test-Path $installRoot)) {

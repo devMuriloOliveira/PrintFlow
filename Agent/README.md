@@ -183,6 +183,31 @@ executado no hardware.
 
 ### OrcaSlicer local
 
+O instalador Windows instala ou reutiliza o OrcaSlicer oficial pela Microsoft
+Store (`9MV6GL23XM59`). A identidade verificada e
+`OrcaSlicer.OrcaSlicer_3qd7h69xpne0g`, com assinatura Store. A versao de pacote
+testada e 2.4.3.0, cujo motor gera G-code como OrcaSlicer 2.4.2. Outras versoes
+exigem nova validacao antes de serem aceitas automaticamente.
+
+A primeira instalacao exige internet, acesso a Microsoft Store e App Installer
+(WinGet). Uma instalacao existente validada e reutilizada sem novo download.
+O Agent resolve o caminho Store uma vez ao iniciar, incluindo a pasta da versao
+atual; `PRINTFLOW_ORCA_SLICER_PATH` explicito continua tendo prioridade.
+Nao ha fallback automatico para copias sem assinatura em Program Files.
+O instalador fica menor porque nao inclui o ZIP portatil de 171 MB.
+
+O ZIP oficial portatil foi descartado deste fluxo: seu `TKSTEPBase.dll` foi
+bloqueado pelo Code Integrity (evento 3077, erro 4551). A versao Store passou
+no fatiamento real neste Windows, sem alteracao nas protecoes do sistema.
+O build e o instalador executam `scripts/verify-orca-runtime.mjs`: verificam os
+perfis dos modelos suportados e geram G-code de um cubo local usando o Node
+incluido. Nenhuma impressora e acessada. Uma falha bloqueia o build e cancela
+a instalacao antes de parar o Agent, copiar arquivos ou registrar tarefas.
+O ambiente de build/release tambem precisa permitir instalar aplicativos Store.
+O Orca e independente: a reversao/desinstalacao do Agent nao remove o pacote
+Store nem as configuracoes do usuario. Publicacao, instalador assinado e
+validacao em outra maquina continuam sendo etapas separadas.
+
 O Agent possui um contrato local para executar o OrcaSlicer em modo headless.
 O perfil precisa referenciar arquivos de máquina/processo e filamento
 exportados pelo OrcaSlicer, sempre com uma versão identificável. O helper

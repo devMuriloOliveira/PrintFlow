@@ -1,4 +1,5 @@
 import os from 'node:os'
+import { resolveOrcaSlicerPath } from './slicing/orcaRuntime.js'
 
 import { config } from './config/config.js'
 import { installFileLogger } from './logging/fileLogger.js'
@@ -85,6 +86,8 @@ import {
   waitForPrinterStatusPolling,
   startPrinterStatusPolling
 } from './printers/printerManager.js'
+
+const orcaSlicerPath = resolveOrcaSlicerPath()
 
 const logger =
   installFileLogger()
@@ -736,7 +739,7 @@ const runDispatchedCommand = async (command, { signal } = {}) => {
     context: {
       apiUrl,
       credentials,
-      orcaSlicerPath: process.env.PRINTFLOW_ORCA_SLICER_PATH || '',
+      orcaSlicerPath,
       operations: localOperations,
       uploadSlicedPrintArtifact,
       onPrintJobStarted: ({ command: startedCommand }) => startProductionJobMonitor(startedCommand),
