@@ -4,11 +4,12 @@ import { sendJson } from '../http/response.js'
 import { env } from '../config/env.js'
 import { clearRefreshCookie, createRefreshCookie, readRefreshCookie } from '../http/cookies.js'
 import { getClientIp } from '../http/clientIp.js'
-import { changeUserPassword, consumeAuthEmailCode, consumeAuthEmailToken, consumeMfaChallenge, createAuthEmailCode, createAuthEmailToken, createMfaChallenge, createMfaSetup, createSession, disableUserMfa, enableUserMfa, findActiveUserByEmail, findActiveUserById, isUserMfaEnabled, listUserSessions, loginUser, markEmailVerified, registerUser, resetUserPassword, revokeAllUserSessions, revokeRefreshSession, revokeUserSession, rotateRefreshToken, touchUserSession, validateAccessPayload, verifyUserCurrentPassword, verifyUserMfa } from '../repositories/authRepository.js'
+import { changeUserPassword, consumeAuthEmailCode, consumeAuthEmailToken, consumeMfaChallenge, createAuthEmailCode, createAuthEmailToken, createMfaChallenge, createMfaSetup, createSession, disableUserMfa, enableUserMfa, findActiveUserByEmail, findActiveUserById, isUserMfaEnabled, listUserSessions, loginOrRegisterGoogleUser, loginUser, markEmailVerified, registerUser, resetUserPassword, revokeAllUserSessions, revokeRefreshSession, revokeUserSession, rotateRefreshToken, touchUserSession, validateAccessPayload, verifyUserCurrentPassword, verifyUserMfa } from '../repositories/authRepository.js'
 import { otpauthUri } from '../services/mfa.js'
 import { isEmailDeliveryConfigured, sendAuthEmail } from '../services/email.js'
 import { acceptInvitation } from '../repositories/invitationsRepository.js'
 import { cancelTenantDeletionOnLogin, requestTenantDeletion } from '../services/tenantDeletion.js'
+import { verifyGoogleCredential } from '../services/googleAuth.js'
 
 const authPayload = (user, session) => {
   const accessToken = createToken(user, session)
@@ -82,6 +83,20 @@ export const handleLogin = async (req, res) => {
   const deletionCancelled = await cancelTenantDeletionOnLogin(user, req)
   const session = await createSession(user, undefined, sessionMetadata(req))
   return sendAuth(res, 200, user, session, { deletionCancelled })
+}
+
+export const handleGoogleLogin = async (req, res) => {
+  const body = await readJsonBody(req)
+  const profile = await verifyGoogleCredential(body.credential)
+  try {
+    const user = await loginOrRegisterGoogleUser({ ...profile, company: body.company, document: body.document })
+    const deletionCancelled = await cancelTenantDeletionOnLogin(user, req)
+    const session = await createSession(user, undefined, sessionMetadata(req))
+    return sendAuth(res, 200, user, session, { deletionCancelled })
+  } catch (error) {
+    if (error?.code === 'GOOGLE_SIGNUP_REQUIRED') return sendJson(res, 409, { error: error.message, googleSignupRequired: true, profile: error.profile })
+    throw error
+  }
 }
 
 export const handleMfaSetup = async (req, res) => {

@@ -150,6 +150,14 @@ export const useAuth = () => {
     return session.user
   }
 
+  const loginWithGoogle = async (credential: string, payload: { company?: string; document?: string } = {}) => {
+    const session = await $fetch<AuthResponse & { googleSignupRequired?: boolean; profile?: { name: string; email: string } }>(apiUrl('/api/auth/google'), {
+      method: 'POST', body: { credential, ...payload }, credentials: 'include'
+    })
+    setSession(session)
+    return session.user
+  }
+
   const register = async (payload: { name: string; email: string; password: string; company: string; document: string }) => {
     const session = await $fetch<AuthResponse>(apiUrl('/api/auth/register'), {
       method: 'POST',
@@ -213,6 +221,7 @@ export const useAuth = () => {
     restore,
     refreshSession,
     login,
+    loginWithGoogle,
     completeMfaLogin,
     setupMfa,
     mfaStatus,

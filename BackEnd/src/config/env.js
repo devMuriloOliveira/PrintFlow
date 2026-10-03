@@ -148,6 +148,7 @@ export const env = {
   subscriptionWarningMs: Number(process.env.SUBSCRIPTION_WARNING_MS || 3 * 24 * 60 * 60 * 1000),
   subscriptionGraceMs: Number(process.env.SUBSCRIPTION_GRACE_MS || 3 * 24 * 60 * 60 * 1000),
   appPublicUrl: process.env.APP_PUBLIC_URL || '',
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || '')
     .split(',').map((value) => value.trim().replace(/\/$/, '')).filter(Boolean),
   resendApiKey: process.env.RESEND_API_KEY || '',

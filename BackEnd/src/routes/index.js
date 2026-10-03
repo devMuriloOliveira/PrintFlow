@@ -7,6 +7,7 @@ import {
 
 import {
   handleLogin,
+  handleGoogleLogin,
   handlePasswordChangeCodeRequest,
   handlePasswordChangeConfirm,
   handleTenantDeletionRequest,
@@ -405,6 +406,8 @@ export const handleRequest =
           res
         )
       }
+
+      if (req.method === 'POST' && url.pathname === '/api/auth/google') return await handleGoogleLogin(req, res)
 
       if (req.method === 'POST' && url.pathname === '/api/auth/verify-email') return await handleEmailVerification(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/request') return await handlePasswordResetRequest(req, res)

@@ -21,6 +21,53 @@ const passwordType = computed(() => showPassword.value ? 'text' : 'password')
 const title = computed(() => mode.value === 'login' ? 'Bem-vindo de volta' : 'Crie seu espaço de trabalho')
 const subtitle = computed(() => mode.value === 'login' ? 'Entre para continuar sua operação.' : 'Organize produção, pedidos e custos em um só lugar.')
 const actionLabel = computed(() => mode.value === 'login' ? 'Entrar no Filamind' : 'Criar conta e continuar')
+const googleButton = ref<HTMLElement | null>(null)
+const googleCredential = ref('')
+const googleClientId = String(useRuntimeConfig().public.googleClientId || '')
+
+const handleGoogleCredential = async (response: { credential?: string }) => {
+  const credential = String(response?.credential || '')
+  if (!credential) return
+  loading.value = true
+  error.value = ''
+  try {
+    await auth.loginWithGoogle(credential, { company: form.company, document: form.document })
+    notify('Login realizado com sucesso.')
+    await navigateTo('/')
+  } catch (err: any) {
+    if (err?.data?.googleSignupRequired) {
+      googleCredential.value = credential
+      mode.value = 'register'
+      form.name = err.data.profile?.name || form.name
+      form.email = err.data.profile?.email || form.email
+      error.value = 'Complete empresa e CPF/CNPJ para criar sua conta Google.'
+      await nextTick()
+      modeHeading.value?.focus({ preventScroll: true })
+    } else {
+      error.value = err?.data?.error || err?.message || 'Não foi possível entrar com o Google.'
+    }
+  } finally { loading.value = false }
+}
+
+const renderGoogleButton = () => {
+  if (!googleClientId || !googleButton.value || !(window as any).google?.accounts?.id) return
+  googleButton.value.innerHTML = ''
+  ;(window as any).google.accounts.id.initialize({ client_id: googleClientId, callback: handleGoogleCredential })
+  ;(window as any).google.accounts.id.renderButton(googleButton.value, { theme: 'outline', size: 'large', width: 430, text: 'continue_with', shape: 'rectangular', logo_alignment: 'left' })
+}
+
+onMounted(() => {
+  if (!googleClientId) return
+  const existing = document.querySelector('script[data-google-identity]')
+  if (existing) { renderGoogleButton(); return }
+  const script = document.createElement('script')
+  script.src = 'https://accounts.google.com/gsi/client'
+  script.async = true
+  script.defer = true
+  script.dataset.googleIdentity = 'true'
+  script.onload = renderGoogleButton
+  document.head.appendChild(script)
+})
 
 const formatDocument = (value: string, kind = documentKind.value) => {
   const digits = String(value || '').replace(/\D/g, '').slice(0, kind === 'cpf' ? 11 : 14)
@@ -69,6 +116,12 @@ const submit = async () => {
       }
       notify(auth.tenantDeletionCancelled.value ? 'A exclusão da empresa foi cancelada pelo seu login.' : 'Login realizado com sucesso.')
     } else {
+      if (googleCredential.value) {
+        await auth.loginWithGoogle(googleCredential.value, { company: form.company, document: form.document })
+        notify('Conta criada com sucesso.')
+        await navigateTo('/')
+        return
+      }
       const result = await auth.register({ name: form.name, company: form.company, document: form.document, email: form.email, password: form.password })
       if (result.verificationRequired) { notify('Verifique seu e-mail para ativar a conta.'); return }
       notify('Conta criada com sucesso.')
@@ -88,6 +141,7 @@ const submit = async () => {
         <header class="auth-access__header"><AppLogo /><span class="auth-access__badge"><i /> Ambiente seguro</span></header>
         <div class="auth-access__content" :inert="changingMode">
           <div class="auth-copy"><span class="auth-kicker">{{ mode === 'login' ? 'ACESSO À OPERAÇÃO' : 'COMECE SEM COMPLICAÇÃO' }}</span><h1 id="auth-title" ref="modeHeading" tabindex="-1">{{ title }}</h1><p>{{ subtitle }}</p></div>
+          <div v-if="googleClientId" class="google-access"><div ref="googleButton" class="google-access__button" /><span>ou use seu e-mail</span></div>
           <form class="auth-form" aria-labelledby="auth-title" @submit.prevent="submit">
             <template v-if="mode === 'register'">
               <label class="field"><span>Seu nome</span><input v-model="form.name" autocomplete="name" required placeholder="Como podemos chamar você?"></label>
@@ -96,8 +150,8 @@ const submit = async () => {
               <label class="field"><span>{{ documentLabel }}</span><input v-model="form.document" inputmode="numeric" autocomplete="off" required :maxlength="documentMaxLength" :placeholder="documentPlaceholder" @input="form.document = formatDocument(form.document)"><small class="auth-hint">Usamos esse documento apenas para identificar a conta.</small></label>
             </template>
             <label class="field"><span>E-mail</span><input v-model="form.email" type="email" autocomplete="email" required placeholder="voce@empresa.com"></label>
-            <label class="field"><span>Senha</span><span class="auth-password-input"><input v-model="form.password" :type="passwordType" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" required minlength="10" placeholder="Sua senha"><button type="button" @click="showPassword = !showPassword">{{ showPassword ? 'Ocultar' : 'Mostrar' }}</button></span></label>
-            <label v-if="mode === 'register'" class="field"><span>Confirmar senha</span><input v-model="form.passwordConfirmation" :type="passwordType" autocomplete="new-password" required minlength="10" placeholder="Repita sua senha"></label>
+            <label v-if="!googleCredential" class="field"><span>Senha</span><span class="auth-password-input"><input v-model="form.password" :type="passwordType" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" required minlength="10" placeholder="Sua senha"><button type="button" @click="showPassword = !showPassword">{{ showPassword ? 'Ocultar' : 'Mostrar' }}</button></span></label>
+            <label v-if="mode === 'register' && !googleCredential" class="field"><span>Confirmar senha</span><input v-model="form.passwordConfirmation" :type="passwordType" autocomplete="new-password" required minlength="10" placeholder="Repita sua senha"></label>
             <label v-if="mode === 'login' && mfaChallenge" class="field"><span>Código do aplicativo autenticador</span><input v-model="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="000000"></label>
             <p v-if="mode === 'register'" class="auth-hint">Use ao menos 10 caracteres, com maiúscula, minúscula, número e caractere especial.</p>
             <div v-if="mode === 'login' && !mfaChallenge" class="auth-form__support"><span>Use seu e-mail e senha cadastrados.</span><NuxtLink to="/redefinir-senha">Esqueci minha senha</NuxtLink></div>
@@ -149,4 +203,5 @@ const submit = async () => {
 }
 @media(max-width:380px){.auth-access{width:calc(100% - 24px);padding:24px 20px}.auth-access__badge{display:none}.auth-form__support{align-items:flex-start;flex-direction:column;gap:10px}.auth-document-kind{grid-template-columns:1fr}.auth-copy h1{font-size:26px}}
 @media(prefers-reduced-motion:reduce){.auth-access__content{transition:none}.auth-access--switching .auth-access__content{transform:none;opacity:1}}
+.google-access{display:grid;gap:10px;margin:0 0 2px;text-align:center}.google-access__button{display:flex;min-height:40px;justify-content:center;overflow:hidden}.google-access>span{color:var(--muted);font-size:10px;font-weight:600}.google-access :deep(iframe){max-width:100%}
 </style>

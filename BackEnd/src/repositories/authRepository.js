@@ -310,6 +310,73 @@ export const registerUser = async ({ name, email, password, company, document })
   })
 }
 
+export const loginOrRegisterGoogleUser = async ({ subject, email, name, company, document }) => {
+  const normalizedEmail = normalizeEmail(email)
+  const cleanName = String(name || '').trim()
+  const companyName = String(company || cleanName || 'Filamind').trim()
+
+  if (!subject || !normalizedEmail.includes('@')) throw new Error('Conta Google invalida.')
+
+  if (!hasDatabase) {
+    const existing = [...memoryUsers.values()].find((user) => user.google_subject === subject || user.email === normalizedEmail)
+    if (existing) {
+      existing.google_subject = subject
+      existing.email_verified_at = new Date()
+      return publicUser(existing)
+    }
+    const companyDocument = validCompanyDocument(document)
+    if (!companyDocument) {
+      const error = new Error('Informe um CPF ou CNPJ para concluir seu cadastro.')
+      error.code = 'GOOGLE_SIGNUP_REQUIRED'
+      error.profile = { name: cleanName, email: normalizedEmail }
+      throw error
+    }
+    const user = { id: createOpaqueId('user'), tenant_id: createOpaqueId('tenant'), name: cleanName, email: normalizedEmail, password_hash: '', google_subject: subject, role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '', status: 'active', token_version: 0, email_verified_at: new Date() }
+    memoryUsers.set(normalizedEmail, user)
+    memoryUsersById.set(String(user.id), user)
+    return publicUser(user)
+  }
+
+  const existing = await query(
+    `select id, tenant_id, name, email, role, status, token_version,
+      case when role = 'platform_super_admin' then role else '' end as platform_role
+       from users where google_subject = $1 or email_hash = any($2::text[]) or email = $3 limit 1`,
+    [subject, blindIndexesForLookup(normalizedEmail), normalizedEmail]
+  )
+  if (existing.rows[0]) {
+    const row = existing.rows[0]
+    await query('update users set google_subject = $1, email_verified_at = coalesce(email_verified_at, now()), updated_at = now() where id = $2', [subject, row.id])
+    const membership = await tenantQuery(row.tenant_id, 'select role, status from tenant_memberships where tenant_id = $1 and user_id = $2 limit 1', [row.tenant_id, row.id])
+    if (!membership.rows[0] || membership.rows[0].status !== 'active') throw new Error('Esta conta nao possui uma empresa ativa.')
+    return publicUser({ ...row, role: membership.rows[0].role })
+  }
+
+  const companyDocument = validCompanyDocument(document)
+  if (!companyDocument) {
+    const error = new Error('Informe um CPF ou CNPJ para concluir seu cadastro.')
+    error.code = 'GOOGLE_SIGNUP_REQUIRED'
+    error.profile = { name: cleanName, email: normalizedEmail }
+    throw error
+  }
+  const tenantId = createOpaqueId('tenant')
+  const emailHash = blindIndex(normalizedEmail)
+  await query(
+    `insert into tenants (id, name, document, document_hash, document_type, document_locked_at, email, is_initialized, billing_enforcement_exempt)
+     values ($1, $2, $3, $4, $5, now(), $6, false, false)`,
+    [tenantId, encryptField(companyName), encryptField(companyDocument.digits), companyDocument.hash, companyDocument.type, encryptField(normalizedEmail)]
+  )
+  const result = await query(
+    `insert into users (tenant_id, name, email, email_hash, password_hash, google_subject, role, status, token_version, email_verified_at)
+     values ($1, $2, $3, $4, '', $5, $6, 'active', 0, now())
+     returning id, tenant_id, name, email, role, status, token_version`,
+    [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, subject, isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin']
+  )
+  await tenantQuery(tenantId, `insert into tenant_memberships (tenant_id, user_id, role, status) values ($1, $2, 'owner', 'active') on conflict (tenant_id, user_id) do nothing`, [tenantId, result.rows[0].id])
+  await tenantQuery(tenantId, `insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, source) select $1, $2, id, 'active', 'manual', now(), 'manual' from platform_plans where code = 'free' and active = true on conflict (tenant_id) do nothing`, [`subscription_free_${tenantId}`, tenantId])
+  await writeAuditEvent(tenantId, { action: 'membership.owner.granted', actorType: 'user', actorId: result.rows[0].id, entityType: 'membership', entityId: result.rows[0].id, details: { role: 'owner', provider: 'google' } })
+  return publicUser({ ...result.rows[0], role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '' })
+}
+
 export const loginUser = async ({ email, password }) => {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail || !password) throw new Error('Informe e-mail e senha.')
