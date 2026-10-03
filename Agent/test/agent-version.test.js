@@ -37,7 +37,9 @@ test('separa DEVELOPMENT e rejeita endpoints inseguros em PRODUCTION', () => {
   })
   assert.equal(production.environment, 'PRODUCTION')
   assert.deepEqual(production.appOrigins, [
-    'https://print-flow-d5si.vercel.app'
+    'https://print-flow-d5si.vercel.app',
+    'https://filamind.com.br',
+    'https://www.filamind.com.br'
   ])
 
   const customOrigin = resolveRuntimeConfig({

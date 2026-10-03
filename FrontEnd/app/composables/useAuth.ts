@@ -170,12 +170,12 @@ export const useAuth = () => {
   const listSessions = () => $fetch<AuthSession[]>(apiUrl('/api/auth/sessions'), { headers: authHeaders.value })
   const revokeSession = (sessionId: string) => $fetch(apiUrl(`/api/auth/sessions/${encodeURIComponent(sessionId)}`), { method: 'DELETE', headers: authHeaders.value })
   const revokeAllSessions = () => $fetch(apiUrl('/api/auth/sessions/revoke-all'), { method: 'POST', headers: authHeaders.value })
-  const changePassword = async (currentPassword: string, newPassword: string) => {
-    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/change-password'), {
-      method: 'POST',
-      headers: authHeaders.value,
-      body: { currentPassword, newPassword },
-      credentials: 'include'
+  const requestPasswordChangeCode = (currentPassword: string) => $fetch<{ status: string }>(apiUrl('/api/auth/change-password/request-code'), {
+    method: 'POST', headers: authHeaders.value, body: { currentPassword }
+  })
+  const confirmPasswordChange = async (currentPassword: string, newPassword: string, code: string) => {
+    const session = await $fetch<AuthResponse>(apiUrl('/api/auth/change-password/confirm'), {
+      method: 'POST', headers: authHeaders.value, body: { currentPassword, newPassword, code }, credentials: 'include'
     })
     if (session.accessToken || session.token) setSession(session)
     return session.user
@@ -223,7 +223,8 @@ export const useAuth = () => {
     listSessions,
     revokeSession,
     revokeAllSessions,
-    changePassword,
+    requestPasswordChangeCode,
+    confirmPasswordChange,
     requestTenantDeletion,
     logout
   }

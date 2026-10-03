@@ -6,7 +6,7 @@ const subscriptionAccess = useSubscriptionAccess()
 const route = useRoute()
 const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Estoque: route.path === '/estoque', Configurações: route.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
-const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'PrintFlow 3D'))
+const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'Filamind'))
 const normalizePath = (path: string) => path.length > 1 ? path.replace(/\/+$/, '') : path
 const hasSectionQuery = (to: string) => new URLSearchParams(to.split('?')[1] || '').has('secao')
 const childIsActive = (to: string) => {

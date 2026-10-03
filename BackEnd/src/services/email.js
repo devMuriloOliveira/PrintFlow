@@ -23,7 +23,7 @@ export const sendInvitationEmail = async ({ email, invitationUrl, role }) => {
     body: JSON.stringify({
       from: env.emailFrom,
       to: [email],
-      subject: 'Convite para acessar o PrintFlow',
+      subject: 'Convite para acessar o Filamind',
       text: `Voce foi convidado como ${role}. Defina sua senha em ate 48 horas: ${invitationUrl}`
     })
   })

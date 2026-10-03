@@ -16,7 +16,7 @@ const submit = async () => {
 </script>
 <template>
   <main class="login-page"><form class="login-box" @submit.prevent="submit">
-    <span class="eyebrow">PRINTFLOW</span><h1>Administracao da plataforma</h1>
+    <span class="eyebrow">FILAMIND</span><h1>Administracao da plataforma</h1>
     <p>Area restrita a super administradores autorizados.</p>
     <label>E-mail<input v-model="email" type="email" autocomplete="username" required></label>
     <label>Senha<input v-model="password" type="password" autocomplete="current-password" required></label>

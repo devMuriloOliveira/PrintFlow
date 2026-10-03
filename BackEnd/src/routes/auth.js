@@ -4,7 +4,7 @@ import { sendJson } from '../http/response.js'
 import { env } from '../config/env.js'
 import { clearRefreshCookie, createRefreshCookie, readRefreshCookie } from '../http/cookies.js'
 import { getClientIp } from '../http/clientIp.js'
-import { changeUserPassword, consumeAuthEmailToken, consumeMfaChallenge, createAuthEmailToken, createMfaChallenge, createMfaSetup, createSession, disableUserMfa, enableUserMfa, findActiveUserByEmail, findActiveUserById, isUserMfaEnabled, listUserSessions, loginUser, markEmailVerified, registerUser, resetUserPassword, revokeAllUserSessions, revokeRefreshSession, revokeUserSession, rotateRefreshToken, touchUserSession, validateAccessPayload, verifyUserCurrentPassword, verifyUserMfa } from '../repositories/authRepository.js'
+import { changeUserPassword, consumeAuthEmailCode, consumeAuthEmailToken, consumeMfaChallenge, createAuthEmailCode, createAuthEmailToken, createMfaChallenge, createMfaSetup, createSession, disableUserMfa, enableUserMfa, findActiveUserByEmail, findActiveUserById, isUserMfaEnabled, listUserSessions, loginUser, markEmailVerified, registerUser, resetUserPassword, revokeAllUserSessions, revokeRefreshSession, revokeUserSession, rotateRefreshToken, touchUserSession, validateAccessPayload, verifyUserCurrentPassword, verifyUserMfa } from '../repositories/authRepository.js'
 import { otpauthUri } from '../services/mfa.js'
 import { isEmailDeliveryConfigured, sendAuthEmail } from '../services/email.js'
 import { acceptInvitation } from '../repositories/invitationsRepository.js'
@@ -54,6 +54,7 @@ export const getAuthUser = async (req) => {
     const user = await validateAccessPayload(payload)
     if (!user) return null
     await touchUserSession(user, payload.sid, sessionMetadata(req))
+    req.printflowTenantId = user.tenantId || null
     return user
   })()
   authUserByRequest.set(req, resolution)
@@ -65,7 +66,7 @@ export const handleRegister = async (req, res) => {
   const user = await registerUser(await readJsonBody(req))
   if (env.authRequireEmailVerification) {
     const { token } = await createAuthEmailToken(user.id, 'verify_email')
-    if (isEmailDeliveryConfigured()) await sendAuthEmail({ email: user.email, subject: 'Confirme seu e-mail no PrintFlow', text: `Confirme seu cadastro em ate 15 minutos: ${env.appPublicUrl}/verificar-email?token=${encodeURIComponent(token)}` })
+    if (isEmailDeliveryConfigured()) await sendAuthEmail({ email: user.email, subject: 'Confirme seu e-mail no Filamind', text: `Confirme seu cadastro em ate 15 minutos: ${env.appPublicUrl}/verificar-email?token=${encodeURIComponent(token)}` })
     return sendJson(res, 202, { user, verificationRequired: true })
   }
   const session = await createSession(user, undefined, sessionMetadata(req))
@@ -138,7 +139,7 @@ export const handlePasswordResetRequest = async (req, res) => {
   const user = await findActiveUserByEmail(body.email)
   if (user && isEmailDeliveryConfigured()) {
     const { token } = await createAuthEmailToken(user.id, 'reset_password')
-    await sendAuthEmail({ email: user.email, subject: 'Redefinicao de senha do PrintFlow', text: `Redefina sua senha em ate 15 minutos: ${env.appPublicUrl}/redefinir-senha?token=${encodeURIComponent(token)}` })
+    await sendAuthEmail({ email: user.email, subject: 'Redefinicao de senha do Filamind', text: `Redefina sua senha em ate 15 minutos: ${env.appPublicUrl}/redefinir-senha?token=${encodeURIComponent(token)}` })
   }
   return sendJson(res, 202, { message: 'Se o e-mail estiver cadastrado, voce recebera as instrucoes.' })
 }
@@ -150,11 +151,28 @@ export const handlePasswordResetConfirm = async (req, res) => {
   return sendJson(res, 200, { status: 'password_reset' })
 }
 
-export const handlePasswordChange = async (req, res) => {
+export const handlePasswordChangeCodeRequest = async (req, res) => {
   const user = await getAuthUser(req)
   if (!user) return sendJson(res, 401, { error: 'Sessao invalida ou expirada' })
+  if (!isEmailDeliveryConfigured()) return sendJson(res, 503, { error: 'O envio de codigo por e-mail ainda nao esta configurado.' })
+  const body = await readJsonBody(req)
+  if (!await verifyUserCurrentPassword(user.id, body.currentPassword)) return sendJson(res, 400, { error: 'Senha atual invalida.' })
+  const { code } = await createAuthEmailCode(user.id, 'change_password_email')
+  await sendAuthEmail({
+    email: user.email,
+    subject: 'Codigo para alterar sua senha no Filamind',
+    text: `Seu codigo para alterar a senha e ${code}. Ele expira em 10 minutos. Se voce nao solicitou esta alteracao, ignore esta mensagem.`
+  })
+  return sendJson(res, 202, { status: 'code_sent' })
+}
 
-  const updatedUser = await changeUserPassword(user, await readJsonBody(req))
+export const handlePasswordChangeConfirm = async (req, res) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Sessao invalida ou expirada' })
+  const body = await readJsonBody(req)
+  if (!await verifyUserCurrentPassword(user.id, body.currentPassword)) return sendJson(res, 400, { error: 'Senha atual invalida.' })
+  await consumeAuthEmailCode(user.id, 'change_password_email', body.code)
+  const updatedUser = await changeUserPassword(user, body)
   const session = await createSession(updatedUser, undefined, sessionMetadata(req))
   return sendAuth(res, 200, updatedUser, session)
 }

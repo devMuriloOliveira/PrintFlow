@@ -8,7 +8,7 @@ const auth = useAuth()
     <div class="app-bootstrap__card">
       <AppLogo />
       <span class="app-bootstrap__spinner" aria-hidden="true" />
-      <strong>Preparando o PrintFlow</strong>
+      <strong>Preparando o Filamind</strong>
       <small>Verificando sua sessão com segurança...</small>
     </div>
   </div>

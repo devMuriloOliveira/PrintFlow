@@ -52,7 +52,7 @@ const mapPlan = (row) => ({
 
 export const synchronizeStripePrices = async ({ name, monthly, yearly, yearlyEnabled = false, existingYearlyPriceId = '' }) => {
   if (monthly <= 0 || (yearlyEnabled && yearly <= 0)) throw new Error('O valor mensal precisa ser maior que zero.')
-  const product = await stripeRequest('/products', { method: 'POST', form: { name: `PrintFlow - ${text(name, 120)}`, 'metadata[managed_by]': 'printflow' } })
+  const product = await stripeRequest('/products', { method: 'POST', form: { name: `Filamind - ${text(name, 120)}`, 'metadata[managed_by]': 'printflow' } })
   const productId = text(product.id, 160)
   if (!productId) throw new Error('Stripe nao retornou o produto criado.')
   const monthlyPrice = await stripeRequest('/prices', { method: 'POST', form: { product: productId, currency: 'brl', unit_amount: String(Math.round(monthly * 100)), 'recurring[interval]': 'month', 'metadata[managed_by]': 'printflow' } })

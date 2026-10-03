@@ -112,7 +112,7 @@ const exportReport = async () => {
     const url = URL.createObjectURL(content)
     const link = document.createElement('a')
     link.href = url
-    link.download = `printflow-${reportSection.value}-${filters.periodStart}-${filters.periodEnd}.${exportFormat.value}`
+    link.download = `filamind-${reportSection.value}-${filters.periodStart}-${filters.periodEnd}.${exportFormat.value}`
     link.click()
     URL.revokeObjectURL(url)
     notify(`${currentSection.value.label} exportado com sucesso.`)

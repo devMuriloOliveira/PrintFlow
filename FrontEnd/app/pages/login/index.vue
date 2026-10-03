@@ -20,7 +20,7 @@ const documentMaxLength = computed(() => documentKind.value === 'cpf' ? 14 : 18)
 const passwordType = computed(() => showPassword.value ? 'text' : 'password')
 const title = computed(() => mode.value === 'login' ? 'Bem-vindo de volta' : 'Crie seu espaço de trabalho')
 const subtitle = computed(() => mode.value === 'login' ? 'Entre para continuar sua operação.' : 'Organize produção, pedidos e custos em um só lugar.')
-const actionLabel = computed(() => mode.value === 'login' ? 'Entrar no PrintFlow' : 'Criar conta e continuar')
+const actionLabel = computed(() => mode.value === 'login' ? 'Entrar no Filamind' : 'Criar conta e continuar')
 
 const formatDocument = (value: string, kind = documentKind.value) => {
   const digits = String(value || '').replace(/\D/g, '').slice(0, kind === 'cpf' ? 11 : 14)
@@ -104,10 +104,10 @@ const submit = async () => {
             <p v-if="error" class="auth-error" role="alert">{{ error }}</p>
             <button class="auth-submit" type="submit" :disabled="loading"><span>{{ loading ? 'Aguarde...' : (mfaChallenge ? 'Confirmar código' : actionLabel) }}</span><UiIcon name="chevron" :size="17" /></button>
           </form>
-          <p class="auth-switch">{{ mode === 'login' ? 'Ainda não usa o PrintFlow?' : 'Já tem uma conta?' }} <button type="button" :disabled="changingMode || loading" @click="changeMode(mode === 'login' ? 'register' : 'login')">{{ mode === 'login' ? 'Criar conta' : 'Entrar' }}</button></p>
+          <p class="auth-switch">{{ mode === 'login' ? 'Ainda não usa o Filamind?' : 'Já tem uma conta?' }} <button type="button" :disabled="changingMode || loading" @click="changeMode(mode === 'login' ? 'register' : 'login')">{{ mode === 'login' ? 'Criar conta' : 'Entrar' }}</button></p>
         </div>
       </div>
-      <aside class="auth-context" aria-label="Recursos do PrintFlow"><div class="auth-context__pattern" aria-hidden="true" /><div class="auth-context__top"><span class="auth-context__dot" /> PrintFlow 3D</div><div class="auth-context__content"><span class="auth-kicker">DO ORÇAMENTO À ENTREGA</span><h2>Mais clareza para transformar cada ideia em produção.</h2><p>Centralize pedidos, custos, materiais e a rotina das suas impressoras no fluxo que você já usa.</p><ul><li><UiIcon name="check" :size="15" /> Produção e filas organizadas</li><li><UiIcon name="check" :size="15" /> Custos e margem por produto</li><li><UiIcon name="check" :size="15" /> Estoque e pedidos no mesmo lugar</li></ul></div><div class="auth-context__footer"><UiIcon name="shield" :size="16" /> Seus dados ficam separados por empresa.</div></aside>
+      <aside class="auth-context" aria-label="Recursos do Filamind"><div class="auth-context__pattern" aria-hidden="true" /><div class="auth-context__top"><span class="auth-context__dot" /> Filamind</div><div class="auth-context__content"><span class="auth-kicker">DO ORÇAMENTO À ENTREGA</span><h2>Mais clareza para transformar cada ideia em produção.</h2><p>Centralize pedidos, custos, materiais e a rotina das suas impressoras no fluxo que você já usa.</p><ul><li><UiIcon name="check" :size="15" /> Produção e filas organizadas</li><li><UiIcon name="check" :size="15" /> Custos e margem por produto</li><li><UiIcon name="check" :size="15" /> Estoque e pedidos no mesmo lugar</li></ul></div><div class="auth-context__footer"><UiIcon name="shield" :size="16" /> Seus dados ficam separados por empresa.</div></aside>
     </section>
   </main>
 </template>

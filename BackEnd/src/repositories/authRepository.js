@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto'
 import { env } from '../config/env.js'
 import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, validatePasswordPolicy, verifyPassword } from '../auth/password.js'
@@ -20,6 +20,7 @@ const refreshTokenHash = (token) => createHash('sha256').update(String(token || 
 const createRefreshTokenValue = () => `refresh_${randomBytes(32).toString('base64url')}`
 const refreshExpiresAt = () => new Date(Date.now() + env.refreshTokenTtlSeconds * 1000)
 const authTokenHash = (token) => createHash('sha256').update(String(token || '')).digest('hex')
+const authCodeHash = (userId, purpose, code) => createHmac('sha256', env.authSecret).update(`${purpose}:${userId}:${code}`).digest('hex')
 const authTokenExpiresAt = () => new Date(Date.now() + 15 * 60 * 1000)
 
 const sessionMetadata = (metadata = {}) => ({
@@ -226,7 +227,7 @@ export const revokeRefreshSession = async (refreshToken) => {
 export const registerUser = async ({ name, email, password, company, document }) => {
   const normalizedEmail = normalizeEmail(email)
   const cleanName = String(name || '').trim()
-  const companyName = String(company || cleanName || 'PrintFlow 3D').trim()
+  const companyName = String(company || cleanName || 'Filamind').trim()
   const companyDocument = validCompanyDocument(document)
 
   if (!cleanName) throw new Error('Informe o nome.')
@@ -375,6 +376,37 @@ export const consumeAuthEmailToken = async (token, purpose) => {
   }
   const result = await query(`update auth_email_tokens set consumed_at = now() where token_hash = $1 and purpose = $2 and consumed_at is null and expires_at > now() returning user_id`, [tokenHash, purpose])
   if (!result.rows[0]) throw new Error('Token invalido ou expirado.')
+  return String(result.rows[0].user_id)
+}
+
+export const createAuthEmailCode = async (userId, purpose) => {
+  const code = String(randomInt(0, 100_000_000)).padStart(8, '0')
+  const tokenHash = authCodeHash(userId, purpose, code)
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+  if (!hasDatabase) {
+    for (const entry of memoryAuthTokens.values()) {
+      if (entry.userId === String(userId) && entry.purpose === purpose && !entry.consumedAt) entry.consumedAt = new Date()
+    }
+    memoryAuthTokens.set(tokenHash, { userId: String(userId), purpose, expiresAt, consumedAt: null })
+    return { code, expiresAt }
+  }
+  await query('update auth_email_tokens set consumed_at = now() where user_id = $1 and purpose = $2 and consumed_at is null', [String(userId), purpose])
+  await query('insert into auth_email_tokens (token_hash, user_id, purpose, expires_at) values ($1, $2, $3, $4)', [tokenHash, String(userId), purpose, expiresAt])
+  return { code, expiresAt }
+}
+
+export const consumeAuthEmailCode = async (userId, purpose, code) => {
+  const normalizedCode = String(code || '').trim()
+  if (!/^\d{8}$/.test(normalizedCode)) throw new Error('Codigo invalido ou expirado.')
+  const tokenHash = authCodeHash(userId, purpose, normalizedCode)
+  if (!hasDatabase) {
+    const entry = memoryAuthTokens.get(tokenHash)
+    if (!entry || entry.userId !== String(userId) || entry.purpose !== purpose || entry.consumedAt || entry.expiresAt <= new Date()) throw new Error('Codigo invalido ou expirado.')
+    entry.consumedAt = new Date()
+    return String(userId)
+  }
+  const result = await query(`update auth_email_tokens set consumed_at = now() where token_hash = $1 and user_id = $2 and purpose = $3 and consumed_at is null and expires_at > now() returning user_id`, [tokenHash, String(userId), purpose])
+  if (!result.rows[0]) throw new Error('Codigo invalido ou expirado.')
   return String(result.rows[0].user_id)
 }
 

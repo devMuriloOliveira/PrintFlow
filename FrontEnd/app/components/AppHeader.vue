@@ -2,7 +2,10 @@
 defineEmits<{ menu: [] }>()
 
 const { settings } = useAppData()
-const workspaceName = computed(() => settings.value?.name || 'PrintFlow 3D')
+const workspaceName = computed(() => {
+  const name = settings.value?.name || ''
+  return !name || /^PrintFlow(?: 3D)?$/i.test(name.trim()) ? 'Filamind' : name
+})
 const notificationsOpen = ref(false)
 const auth = useAuth()
 const { notifications, unreadCount, refreshNotifications, markNotificationRead } = useOperationalNotifications()
@@ -42,7 +45,7 @@ const initials = computed(() =>
     .map(part => part[0])
     .join('')
     .slice(0, 2)
-    .toUpperCase() || 'PF'
+    .toUpperCase() || 'FM'
 )
 </script>
 

@@ -15,7 +15,8 @@ const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string; 
 const sessionsLoading = ref(false)
 const endingSessionGroupKey = ref('')
 const changingPassword = ref(false)
-const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '' })
+const passwordChangeCodeSent = ref(false)
+const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '', code: '' })
 const mfaLoading = ref(false)
 const mfaSetup = ref<{ secret: string; otpauthUri: string } | null>(null)
 const mfaCode = ref('')
@@ -62,7 +63,7 @@ const sectionPresentation: Record<string, { title: string; subtitle: string; asi
   Integracoes: { title: 'Integrações', subtitle: 'Acompanhe marketplaces, agentes e serviços conectados.', asideTitle: 'Conexões protegidas', asideDescription: 'A tela mostra o estado das integrações sem revelar credenciais.', checks: ['Tokens e segredos não são exibidos.', 'Conexões permanecem isoladas por empresa.', 'Última sincronização visível para diagnóstico.'] },
   'Backup e Dados': { title: 'Backup e dados', subtitle: 'Gere cópias operacionais e acompanhe cada exportação da empresa.', asideTitle: 'Cópias rastreáveis', asideDescription: 'Esta área separa exportação, restauração e exclusão para evitar ações ambíguas.', checks: ['Arquivos gerados ficam registrados.', 'Credenciais e sessões não são exportadas.', 'Exclusão permanece restrita ao Owner.'] },
   'Privacidade e LGPD': { title: 'Privacidade e LGPD', subtitle: 'Exporte dados da empresa e registre solicitações de titulares no fluxo correto.', asideTitle: 'Fluxos separados e rastreáveis', asideDescription: 'Exportações operacionais, direitos do titular e exclusão da empresa seguem controles próprios.', checks: ['Exportações respeitam a seleção informada.', 'Direitos são registrados com protocolo.', 'Exclusão da empresa exige confirmação do Owner.'] },
-  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Envie uma mensagem diretamente para a equipe do PrintFlow.', asideTitle: 'Contato protegido', asideDescription: 'Sua mensagem permanece vinculada à sua conta e chega ao painel administrativo da equipe.', checks: ['Identidade confirmada pela conta.', 'Mensagem registrada com protocolo.', 'Nenhum aplicativo externo é aberto.'] }
+  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Envie uma mensagem diretamente para a equipe do Filamind.', asideTitle: 'Contato protegido', asideDescription: 'Sua mensagem permanece vinculada à sua conta e chega ao painel administrativo da equipe.', checks: ['Identidade confirmada pela conta.', 'Mensagem registrada com protocolo.', 'Nenhum aplicativo externo é aberto.'] }
 }
 const currentPresentation = computed(() => sectionPresentation[active.value])
 const pageTitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.title : 'Configurações')
@@ -119,7 +120,10 @@ const selectCompanyDocumentKind = (kind: 'cpf' | 'cnpj') => {
   company.cnpj = ''
 }
 const preferences = reactive({ emailAlerts: true, productionAlerts: true, marketplaceAlerts: true, dailySummary: false, compactLayout: false, logoUrl: '', brandName: '', accentColor: '#1768f2', defaultMargin: 40, monthlyFixedCost: 0, plannedMonthlyUnits: 0 })
-const previewBrandName = computed(() => preferences.brandName.trim() || company.name.trim() || 'PrintFlow 3D')
+const previewBrandName = computed(() => {
+  const name = preferences.brandName.trim() || company.name.trim()
+  return !name || /^PrintFlow(?: 3D)?$/i.test(name) ? 'Filamind' : name
+})
 const roles = [
   { value: 'owner', label: 'Owner', description: 'Controle total da empresa, inclusive outros Owners.', access: ['Todas as configuracoes', 'Membros e Owners', 'Auditoria e dados'] },
   { value: 'admin', label: 'Administrador', description: 'Gerencia membros e a operacao, sem poderes reservados de Owner.', access: ['Catalogo e producao', 'Financeiro e marketplaces', 'Membros, sem Owners'] },
@@ -326,14 +330,35 @@ const submitPasswordChange = async () => {
 
   changingPassword.value = true
   try {
-    await auth.changePassword(passwordForm.currentPassword, passwordForm.newPassword)
+    if (!passwordChangeCodeSent.value) {
+      await auth.requestPasswordChangeCode(passwordForm.currentPassword)
+      passwordChangeCodeSent.value = true
+      notify('Enviamos um código de confirmação para o e-mail da sua conta.')
+      return
+    }
+    await auth.confirmPasswordChange(passwordForm.currentPassword, passwordForm.newPassword, passwordForm.code)
     passwordForm.currentPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmation = ''
+    passwordForm.code = ''
+    passwordChangeCodeSent.value = false
     await loadSessions()
     notify('Senha alterada. As sessoes anteriores foram encerradas por seguranca.')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel alterar a senha.')
+  } finally {
+    changingPassword.value = false
+  }
+}
+
+const resendPasswordChangeCode = async () => {
+  changingPassword.value = true
+  try {
+    await auth.requestPasswordChangeCode(passwordForm.currentPassword)
+    passwordForm.code = ''
+    notify('Enviamos outro código para o e-mail da sua conta.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Não foi possível enviar o código.')
   } finally {
     changingPassword.value = false
   }
@@ -385,7 +410,7 @@ const downloadTenantData = async (groups: string[] = ['all']) => {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `printflow-dados-${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `filamind-dados-${new Date().toISOString().slice(0, 10)}.csv`
     link.click()
     URL.revokeObjectURL(url)
     notify('Arquivo CSV gerado e registrado na auditoria.')
@@ -682,7 +707,7 @@ watch(() => supportDraft.category, (category) => {
             <div v-if="stripeBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(stripeBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="stripeBilling.checkout.url" rel="noopener noreferrer">Abrir link</a>.</div>
             <div v-if="!stripeBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Stripe ainda precisa do segredo de webhook no ambiente antes de gerar um checkout.</div>
             <form v-else-if="!hasProSubscription" class="integration-section" style="margin-top:16px" @submit.prevent="startStripeCheckout">
-              <div class="integration-section__head"><div><h3>Assinatura PrintFlow</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no PrintFlow.</p></div><span class="badge badge--orange">Producao</span></div>
+              <div class="integration-section__head"><div><h3>Assinatura Filamind</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no Filamind.</p></div><span class="badge badge--orange">Producao</span></div>
               <div v-if="selectedBillingPlan" class="billing-plans">
                 <article class="billing-plan-card">
                   <div class="billing-plan-card__title"><h3>PRO mensal</h3><span class="billing-plan-card__caption">Preço de lançamento vigente. Cancele quando quiser.</span></div>
@@ -753,7 +778,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Seguranca'" class="security-page">
           <header class="security-hero">
             <span class="security-hero__icon"><UiIcon name="shield" :size="24" /></span>
-            <div><span class="security-hero__eyebrow">Segurança da conta</span><h2>Proteja seu acesso ao PrintFlow</h2><p>Gerencie sua senha, a verificação em duas etapas e os dispositivos que permanecem conectados.</p></div>
+            <div><span class="security-hero__eyebrow">Segurança da conta</span><h2>Proteja seu acesso ao Filamind</h2><p>Gerencie sua senha, a verificação em duas etapas e os dispositivos que permanecem conectados.</p></div>
             <div :class="['security-hero__status', `security-hero__status--${securityStatus.tone}`]"><i></i><span><strong>{{ securityStatus.label }}</strong><small>{{ securityStatus.detail }}</small></span></div>
           </header>
 
@@ -764,15 +789,19 @@ watch(() => supportDraft.category, (category) => {
           </section>
 
           <form class="security-panel security-password-panel" @submit.prevent="submitPasswordChange">
-            <div class="security-panel__head"><span><UiIcon name="lock" :size="18" /></span><div><small>Credencial de acesso</small><h3>Alterar senha</h3><p>Use uma senha exclusiva. Ao salvar, os outros dispositivos serão desconectados.</p></div></div>
+            <div class="security-panel__head"><span><UiIcon name="lock" :size="18" /></span><div><small>Credencial de acesso</small><h3>Alterar senha</h3><p>Confirme sua senha atual e o código enviado por e-mail. Os outros dispositivos serão desconectados.</p></div></div>
             <div class="security-password-grid">
               <label class="field"><span>Senha atual</span><input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" required placeholder="Confirme sua identidade"></label>
               <label class="field"><span>Nova senha</span><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="10" required placeholder="Crie uma senha forte"></label>
               <label class="field"><span>Confirmar nova senha</span><input v-model="passwordForm.confirmation" type="password" autocomplete="new-password" minlength="10" required placeholder="Repita a nova senha"><small v-if="passwordForm.confirmation" :class="passwordForm.newPassword === passwordForm.confirmation ? 'field-hint--success' : 'field-hint--error'">{{ passwordForm.newPassword === passwordForm.confirmation ? 'As senhas conferem.' : 'As senhas ainda não conferem.' }}</small></label>
             </div>
+            <div v-if="passwordChangeCodeSent" class="security-password-grid">
+              <label class="field"><span>Código enviado por e-mail</span><input v-model="passwordForm.code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]{8}" required placeholder="00000000"></label>
+              <button class="btn" type="button" :disabled="changingPassword || !passwordForm.currentPassword" @click="resendPasswordChangeCode">Reenviar código</button>
+            </div>
             <div class="security-password-footer">
               <ul class="security-password-rules"><li v-for="rule in passwordRules" :key="rule.label" :class="{ 'is-met': rule.met }"><UiIcon :name="rule.met ? 'check' : 'close'" :size="13" />{{ rule.label }}</li></ul>
-              <button class="btn btn--primary" type="submit" :disabled="changingPassword || !passwordReady"><UiIcon name="lock" :size="15" />{{ changingPassword ? 'Alterando...' : 'Atualizar senha' }}</button>
+              <button class="btn btn--primary" type="submit" :disabled="changingPassword || !passwordReady || (passwordChangeCodeSent && !/^\d{8}$/.test(passwordForm.code))"><UiIcon name="lock" :size="15" />{{ changingPassword ? 'Aguarde...' : passwordChangeCodeSent ? 'Confirmar e alterar senha' : 'Enviar código de confirmação' }}</button>
             </div>
           </form>
 
@@ -922,7 +951,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Notificacoes'" class="settings-feature-page">
           <header class="settings-feature-hero settings-feature-hero--notifications">
             <span class="settings-feature-hero__icon"><UiIcon name="bell" :size="23" /></span>
-            <div class="settings-feature-hero__copy"><span>Central de alertas</span><h2>Notificações</h2><p>Escolha quais eventos operacionais devem aparecer para a equipe dentro do PrintFlow.</p></div>
+            <div class="settings-feature-hero__copy"><span>Central de alertas</span><h2>Notificações</h2><p>Escolha quais eventos operacionais devem aparecer para a equipe dentro do Filamind.</p></div>
             <button class="btn btn--primary settings-feature-hero__action" :disabled="savingSettings" @click="saveSettings"><UiIcon name="save" :size="16" />{{ savingSettings ? 'Salvando...' : 'Salvar preferências' }}</button>
           </header>
 
@@ -945,7 +974,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Integracoes'" class="integrations-page">
           <header class="integrations-hero">
             <span class="integrations-hero__icon"><UiIcon name="settings" :size="22" /></span>
-            <div class="integrations-hero__copy"><span>Central de conexões</span><h2>Integrações</h2><p>Acompanhe os serviços que ligam vendas, produção e comunicações ao PrintFlow.</p></div>
+            <div class="integrations-hero__copy"><span>Central de conexões</span><h2>Integrações</h2><p>Acompanhe os serviços que ligam vendas, produção e comunicações ao Filamind.</p></div>
             <div class="integrations-hero__actions">
               <span :class="['integrations-health', `integrations-health--${integrationOverviewStatus.tone}`]"><i></i>{{ integrationOverviewStatus.label }}</span>
               <button class="btn" type="button" :disabled="integrationsLoading" @click="loadIntegrations"><UiIcon name="refresh" :size="15" />{{ integrationsLoading ? 'Atualizando...' : 'Atualizar estados' }}</button>
@@ -1007,7 +1036,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Ajuda e Suporte'" class="support-contact-page">
           <header class="support-contact-hero">
             <span class="support-contact-hero__icon"><UiIcon name="chat" :size="24" /></span>
-            <div><span class="support-contact-hero__eyebrow">Fale com a equipe</span><h2>Como podemos ajudar?</h2><p>Envie sua dúvida ou descreva o problema. A mensagem será registrada diretamente no painel de suporte do PrintFlow.</p></div>
+            <div><span class="support-contact-hero__eyebrow">Fale com a equipe</span><h2>Como podemos ajudar?</h2><p>Envie sua dúvida ou descreva o problema. A mensagem será registrada diretamente no painel de suporte do Filamind.</p></div>
             <span class="support-contact-hero__status"><i></i> Canal interno</span>
           </header>
 

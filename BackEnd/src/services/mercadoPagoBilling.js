@@ -48,7 +48,7 @@ const mercadoPagoRequest = async (path, options = {}) => {
 }
 
 const mercadoPagoPlanPayload = ({ name, billingCycle, amount, trialDays }) => ({
-  reason: `PrintFlow - assinatura ${billingCycle === 'yearly' ? 'anual' : 'mensal'} - ${text(name, 120)}`,
+  reason: `Filamind - assinatura ${billingCycle === 'yearly' ? 'anual' : 'mensal'} - ${text(name, 120)}`,
   auto_recurring: {
     frequency: billingCycle === 'yearly' ? 12 : 1,
     frequency_type: 'months',
@@ -180,7 +180,7 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
     const subscription = await mercadoPagoRequest('/preapproval', {
       method: 'POST',
       body: JSON.stringify({
-        reason: `PrintFlow - assinatura ${cycle === 'yearly' ? 'anual' : 'mensal'}`,
+        reason: `Filamind - assinatura ${cycle === 'yearly' ? 'anual' : 'mensal'}`,
         external_reference: checkoutId,
         payer_email: payerEmail,
         ...(providerPlanId ? { preapproval_plan_id: providerPlanId } : {

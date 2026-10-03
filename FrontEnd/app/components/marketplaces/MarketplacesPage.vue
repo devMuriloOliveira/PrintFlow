@@ -273,7 +273,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
     <PanelCard v-if="activeSection === 'pedidos'" title="Pedidos recebidos dos marketplaces" subtitle="Revise o pedido, confira o SKU e vincule ao produto antes de liberar para impressão." style="margin-top:12px">
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto PrintFlow</th><th>Qtd.</th><th>Valor</th><th>Taxa ML</th><th>Frete</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto Filamind</th><th>Qtd.</th><th>Valor</th><th>Taxa ML</th><th>Frete</th><th>Status</th><th></th></tr></thead>
           <tbody>
             <tr v-for="order in pendingMarketplaceOrders" :key="order.id">
               <td><strong>{{ order.externalOrderId || order.id }}</strong></td>

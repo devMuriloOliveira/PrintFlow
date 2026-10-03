@@ -210,7 +210,7 @@ export const handleSettingsExport = async (req, res, url = new URL(req.url, 'htt
   const data = Object.fromEntries([...selection.resources].map((resource) => [resource, loadedData[resource]]))
   const recordCounts = Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Array.isArray(value) ? value.length : value ? 1 : 0]))
   const recordCount = Object.values(recordCounts).reduce((total, value) => total + value, 0)
-  const fileName = `printflow-dados-${new Date().toISOString().slice(0, 10)}.csv`
+  const fileName = `filamind-dados-${new Date().toISOString().slice(0, 10)}.csv`
   await withTenant(user.tenantId, async (client) => {
     await client.query('insert into export_history (tenant_id, file_name, export_type, file_format, record_count) values ($1, $2, $3, $4, $5)', [user.tenantId, fileName, 'tenant_data', 'csv', recordCount])
     await writeAuditEvent(user.tenantId, { action: 'settings.data_exported', actorType: 'user', actorId: user.id, entityType: 'export', entityId: fileName, details: { format: 'csv', groups: selection.groups, recordCounts } }, client)

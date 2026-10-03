@@ -7,7 +7,8 @@ import {
 
 import {
   handleLogin,
-  handlePasswordChange,
+  handlePasswordChangeCodeRequest,
+  handlePasswordChangeConfirm,
   handleTenantDeletionRequest,
   handleInvitationAccept,
   handleSessionRevoke,
@@ -216,6 +217,8 @@ export const handleRequest =
     req,
     res
   ) => {
+    let requestId = ''
+    let requestRoute = ''
     try {
       const url =
         new URL(
@@ -224,7 +227,10 @@ export const handleRequest =
 
             `http://${req.headers.host}`
         )
-      const requestId = String(req.headers['x-request-id'] || '').trim() || randomUUID()
+      requestRoute = url.pathname
+      const suppliedRequestId = String(req.headers['x-request-id'] || '').trim()
+      requestId = /^[a-zA-Z0-9._:-]{1,120}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID()
+      req.printflowRequestId = requestId
       const requestStartedAt = Date.now()
       const slowRequestThresholdMs = Math.max(200, Number(process.env.API_SLOW_REQUEST_MS) || 500)
       if (typeof res.setHeader === 'function') res.setHeader('X-Request-Id', requestId)
@@ -403,23 +409,13 @@ export const handleRequest =
       if (req.method === 'POST' && url.pathname === '/api/auth/verify-email') return await handleEmailVerification(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/request') return await handlePasswordResetRequest(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/confirm') return await handlePasswordResetConfirm(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/change-password/request-code') return await handlePasswordChangeCodeRequest(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/change-password/confirm') return await handlePasswordChangeConfirm(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/login') return await handleMfaLogin(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/setup') return await handleMfaSetup(req, res)
       if (req.method === 'GET' && url.pathname === '/api/auth/mfa/status') return await handleMfaStatus(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/enable') return await handleMfaEnable(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/disable') return await handleMfaDisable(req, res)
-
-      if (
-        req.method ===
-          'POST' &&
-        url.pathname ===
-          '/api/auth/change-password'
-      ) {
-        return await handlePasswordChange(
-          req,
-          res
-        )
-      }
 
       if (req.method === 'POST' && url.pathname === '/api/auth/tenant-deletion-request') {
         return await handleTenantDeletionRequest(req, res)
@@ -1658,6 +1654,8 @@ export const handleRequest =
           'O documento cadastrado nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.',
           'Informe a senha atual.',
           'Senha atual invalida.',
+          'Codigo invalido ou expirado.',
+          'O envio de codigo por e-mail ainda nao esta configurado.',
           'A nova senha deve ser diferente da senha atual.',
           'A senha precisa ter pelo menos 10 caracteres.',
           'A senha precisa conter letra minuscula.',
@@ -1682,11 +1680,13 @@ export const handleRequest =
         console.error(
           'Erro ao processar requisicao',
           {
+            requestId,
+            tenantId: req.printflowTenantId || null,
             method:
               req.method,
 
-            url:
-              req.url,
+            route:
+              requestRoute,
 
             message:
               error.message

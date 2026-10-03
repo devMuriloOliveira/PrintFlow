@@ -17,7 +17,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'pt-BR' },
-      title: 'PrintFlow 3D',
+      title: 'Filamind',
       meta: [
         { name: 'description', content: 'Gestao financeira e operacional para impressao 3D' },
         { name: 'theme-color', content: '#1768f2' }

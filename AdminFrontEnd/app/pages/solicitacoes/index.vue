@@ -79,7 +79,7 @@ watch([search, categoryFilter], () => {
 
 const categoryLabel = (category: string) => ({ technical: 'Suporte', financial: 'Financeiro', integration: 'Integração', account: 'Conta', data_backup: 'Backup e dados', privacy: 'LGPD', audit: 'Auditoria' }[category] || category)
 const protocolLabel = (request: any) => String(request?.protocolNumber || request?.id || '').replace(/(\d{4})(?=\d)/g, '$1 ')
-const emailSubject = computed(() => selectedRequest.value ? `[PrintFlow #${selectedRequest.value.protocolNumber || selectedRequest.value.id}] ${selectedRequest.value.subject}` : '')
+const emailSubject = computed(() => selectedRequest.value ? `[Filamind #${selectedRequest.value.protocolNumber || selectedRequest.value.id}] ${selectedRequest.value.subject}` : '')
 const loadSelectedContact = async () => {
   if (!selectedRequest.value || !selectedIsSupport.value || !canManageSelected.value) return
   selectedContact.value = await loadSupportContact(selectedRequest.value.id)
@@ -164,7 +164,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AdminShell v-model:search="search" searchable title="Suporte e solicitações" subtitle="Receba, organize e conclua os contatos enviados pelo PrintFlow" :request-count="activeRequests.length">
+  <AdminShell v-model:search="search" searchable title="Suporte e solicitações" subtitle="Receba, organize e conclua os contatos enviados pelo Filamind" :request-count="activeRequests.length">
     <template #actions><select v-model="categoryFilter" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option><option value="technical">Suporte</option><option value="financial">Financeiro</option><option value="integration">Integrações</option><option value="account">Conta</option><option value="data_backup">Backup e dados</option><option value="privacy">LGPD</option><option value="audit">Auditoria</option></select><button class="button button--quiet" :disabled="reportLoading" @click="exportRequestsReport">Exportar CSV</button><button class="button button--quiet" :disabled="refreshing" @click="update">{{ refreshing ? 'Atualizando...' : 'Atualizar' }}</button></template>
     <p v-if="error" class="feedback feedback--error">{{ error }}</p>
 
@@ -193,7 +193,7 @@ onMounted(async () => {
           <main>
             <section class="support-detail__message"><span>Mensagem recebida</span><p>{{ selectedRequest.reason }}</p></section>
             <section class="support-detail__contact"><div><small>Nome</small><strong>{{ selectedContact?.requesterName || selectedRequest.requesterName || 'Não informado' }}</strong></div><div v-if="selectedContact"><small>E-mail liberado para o responsável</small><strong>{{ selectedContact.requesterEmail }}</strong><span class="support-detail__contact-actions"><button type="button" class="button button--quiet" @click="copyText(selectedContact.requesterEmail, 'E-mail')">Copiar e-mail</button><button type="button" class="button button--quiet" @click="copyText(emailSubject, 'Assunto')">Copiar assunto</button></span></div><div v-else><small>E-mail protegido</small><strong>{{ selectedIsSupport ? 'Assuma o atendimento para visualizar' : 'Disponível somente no fluxo autorizado' }}</strong></div><div><small>Empresa</small><strong>{{ tenantFor(selectedRequest.tenantId)?.name || selectedRequest.tenantId }}</strong></div></section>
-            <section v-if="selectedMessages.length" class="support-detail__notes"><h3>Histórico interno</h3><article v-for="message in selectedMessages" :key="message.id"><div><strong>{{ message.sender_type === 'superadmin' ? 'Equipe PrintFlow' : selectedRequest.requesterName }}</strong><time>{{ formatDate(message.created_at) }}</time></div><p>{{ message.body }}</p></article></section>
+            <section v-if="selectedMessages.length" class="support-detail__notes"><h3>Histórico interno</h3><article v-for="message in selectedMessages" :key="message.id"><div><strong>{{ message.sender_type === 'superadmin' ? 'Equipe Filamind' : selectedRequest.requesterName }}</strong><time>{{ formatDate(message.created_at) }}</time></div><p>{{ message.body }}</p></article></section>
             <p v-else-if="detailLoading" class="support-detail__empty">Carregando histórico...</p>
             <p v-else class="support-detail__empty">Nenhuma observação interna registrada.</p>
           </main>

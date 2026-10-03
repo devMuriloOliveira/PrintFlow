@@ -190,7 +190,7 @@ export const mockAppData: AppData = {
     { label: 'Outros', value: 18.2, color: '#7d8799' }
   ],
   goals: mockGoals,
-  settings: { name: 'PrintFlow 3D Mock', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0.92, preferences: { demoVisual: true } }
+  settings: { name: 'Filamind Mock', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0.92, preferences: { demoVisual: true } }
 }
 
 const movementRows: InventoryOverview['movements'] = [

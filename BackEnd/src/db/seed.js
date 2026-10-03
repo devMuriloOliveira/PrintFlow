@@ -73,7 +73,7 @@ const seed = async () => {
   await query(`
     insert into tenants (id, name, email, is_initialized, account_status, billing_status, billing_enforcement_exempt)
     values ($1, $2, $3, true, 'active', 'active', true)
-  `, [TENANT_ID, encryptField(`${DEMO_MARKER} PrintFlow 3D Studio`), encryptField('contato@example.test')])
+  `, [TENANT_ID, encryptField(`${DEMO_MARKER} Filamind Studio`), encryptField('contato@example.test')])
 
   await withTenant(TENANT_ID, async (client) => {
     const demoUser = await client.query(`
@@ -98,7 +98,7 @@ const seed = async () => {
       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Brasil','Real (R$)','(GMT-03:00) Brasilia',0.92,$11::jsonb)
     `, [
       TENANT_ID,
-      encryptField(`${DEMO_MARKER} PrintFlow 3D Studio`),
+      encryptField(`${DEMO_MARKER} Filamind Studio`),
       encryptField('00.000.000/0001-00'),
       encryptField('(11) 4000-0000'),
       encryptField('contato@example.test'),

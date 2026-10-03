@@ -1,6 +1,6 @@
-# PrintFlow BackEnd
+# Filamind BackEnd
 
-API HTTP do PrintFlow 3D. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o PrintFlow Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
+API HTTP do Filamind. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o PrintFlow Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
 
 ## Para Que Serve
 
@@ -77,10 +77,11 @@ Variaveis principais:
 - `MERCADO_LIVRE_CLIENT_ID`: App ID privado da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_CLIENT_SECRET`: Secret Key privada da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_REDIRECT_URI`: callback fixa registrada no Mercado Livre.
-- `APP_PUBLIC_URL`: URL publica do FrontEnd usada ao finalizar OAuth e retornar do checkout.
+- `APP_PUBLIC_URL`: URL publica principal do FrontEnd usada nos links de e-mail, OAuth e retorno do checkout. Para este dominio, use `https://filamind.com.br`.
+- `CORS_ALLOWED_ORIGINS`: inclua `https://filamind.com.br` e `https://www.filamind.com.br`, mantendo outras origens que ainda hospedar.
 - `CORS_ALLOWED_ORIGINS`: origens HTTPS autorizadas (FrontEnd e AdminFrontEnd), separadas por virgula; nao use `*` com cookies.
 - `RESEND_API_KEY`: chave privada do Resend para verificacao de e-mail e recuperacao de senha.
-- `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `PrintFlow <acesso@seudominio.com>`.
+- `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `Filamind <acesso@seudominio.com>`.
 - `AUTH_REQUIRE_EMAIL_VERIFICATION`: use `true` para exigir confirmacao de e-mail em novos cadastros.
 - `AUTH_REQUIRE_MFA_FOR_PRIVILEGED`: use `true` para exigir MFA em Owner e Superadmin; cada perfil configura o aplicativo autenticador em Configuracoes > Seguranca.
 - `PLATFORM_SUPER_ADMIN_EMAILS`: allowlist privada de superadmins. A API sincroniza essas funções ao iniciar; altere somente com controle administrativo.
@@ -96,7 +97,7 @@ Nao publique valores reais dessas variaveis.
 ### Ativacao da autenticacao reforcada
 
 No Render, cadastre primeiro o dominio do remetente no Resend (SPF/DKIM), crie
-uma API key somente com permissao de envio e informe `APP_PUBLIC_URL` com a URL
+uma API key somente com permissao de envio, valide `filamind.com.br` como dominio remetente no Resend e informe `APP_PUBLIC_URL` com a URL
 real do FrontEnd. Depois defina `RESEND_API_KEY`, `EMAIL_FROM` e
 `AUTH_REQUIRE_EMAIL_VERIFICATION=true`. O cadastro passa a retornar uma tela de
 aguardo e o link de verificacao expira em 15 minutos.

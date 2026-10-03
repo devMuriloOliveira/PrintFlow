@@ -12,6 +12,6 @@ defineProps<{ logoUrl?: string; brandName?: string }>()
       <path d="m22 17 13 7.5L22 42 9 34.5l13-7.5V17Z" fill="#1768f2" opacity=".9" />
       <path d="m9 24.5 13 7.5v10L9 34.5v-10Z" fill="#62d2ef" />
     </svg>
-    <span class="brand__name">{{ brandName || 'PrintFlow 3D' }}</span>
+    <span class="brand__name">{{ !brandName || /^PrintFlow(?: 3D)?$/i.test(brandName.trim()) ? 'Filamind' : brandName }}</span>
   </div>
 </template>

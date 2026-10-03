@@ -1,6 +1,6 @@
-﻿# PrintFlow 3D
+﻿# Filamind
 
-PrintFlow 3D é uma plataforma para gestão operacional e financeira de negócios de impressão 3D. O projeto reúne produtos, custos, estoque, pedidos, clientes, impressoras, marketplaces e fila de produção.
+Filamind é uma plataforma para gestão operacional e financeira de negócios de impressão 3D. O projeto reúne produtos, custos, estoque, pedidos, clientes, impressoras, marketplaces e fila de produção.
 
 ## Visao Geral
 
@@ -15,7 +15,7 @@ O FrontEnd e o AdminFrontEnd usam a API; o Agent se comunica com o BackEnd e exp
 
 ## Pilares Consolidados
 
-O PrintFlow 3D se apoia nos pilares abaixo. Esta secao define o que cada um
+O Filamind se apoia nos pilares abaixo. Esta secao define o que cada um
 garante hoje e onde ainda existe dependencia externa para validacao final.
 
 ### 1. Isolamento por Tenant
@@ -176,7 +176,7 @@ Consulte as instruções específicas:
 
 ## FrontEnd
 
-O FrontEnd e a interface web do PrintFlow 3D. Ele e usado para:
+O FrontEnd e a interface web do Filamind. Ele e usado para:
 
 - cadastrar produtos e arquivos de impressao;
 - controlar pedidos manuais e pedidos vindos de marketplaces;

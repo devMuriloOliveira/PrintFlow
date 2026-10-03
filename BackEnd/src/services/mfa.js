@@ -38,4 +38,4 @@ export const verifyTotpCode = (secret, code, timestamp = Date.now()) => {
   return false
 }
 
-export const otpauthUri = (secret, email, issuer = 'PrintFlow') => `otpauth://totp/${encodeURIComponent(`${issuer}:${email}`)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`
+export const otpauthUri = (secret, email, issuer = 'Filamind') => `otpauth://totp/${encodeURIComponent(`${issuer}:${email}`)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`

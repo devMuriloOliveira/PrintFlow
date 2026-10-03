@@ -7,6 +7,17 @@ export type Overview = {
   onlineAgents: number
   printers: number
   connectedPrinters: number
+  health: {
+    checkedAt: string
+    agentsNotOnline: number
+    stalePrintStarts: number
+    longWaitingPrintJobs: number
+    delayedStripeWebhooks: number
+    marketplaceSyncErrors: number
+    latestBackupStatus: string
+    lastSuccessfulBackupAt: string | null
+    backupStale: boolean
+  }
 }
 
 export type Tenant = {

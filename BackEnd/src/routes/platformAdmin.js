@@ -153,7 +153,7 @@ const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""').replace(/
 
 export const formatTenantAuditCsv = (report) => {
   const lines = [
-    ['Relatorio de auditoria PrintFlow', report.companyName, report.cnpj],
+    ['Relatorio de auditoria Filamind', report.companyName, report.cnpj],
     ['Motivo da solicitacao', report.reason],
     ['Acesso confirmado em', new Date(report.verifiedAt).toISOString()],
     ['Acesso expira em', new Date(report.expiresAt).toISOString()],
@@ -179,7 +179,7 @@ export const auditReportFilename = (format, date = new Date()) =>
 
 export const formatTenantAuditWorkbook = async (report) => {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'PrintFlow'
+  workbook.creator = 'Filamind'
   workbook.created = new Date()
   const sheet = workbook.addWorksheet('Auditoria')
   sheet.columns = [
@@ -191,7 +191,7 @@ export const formatTenantAuditWorkbook = async (report) => {
     { header: 'Recurso', key: 'entityType', width: 20 },
     { header: 'Identificador', key: 'entityId', width: 20 }
   ]
-  sheet.addRow(['Relatorio de auditoria PrintFlow'])
+  sheet.addRow(['Relatorio de auditoria Filamind'])
   sheet.addRow(['Empresa', report.companyName])
   sheet.addRow(['CNPJ', report.cnpj])
   sheet.addRow(['Motivo da solicitacao', report.reason])
@@ -278,7 +278,7 @@ export const handlePlatformSupportRequestsReport = async (req, res, url) => {
   return sendText(res, 200, platformReportCsv('Relatorio interno de solicitacoes', [
     ['Protocolo', 'Empresa', 'Tipo', 'Direito LGPD', 'Status', 'Responsavel', 'Prazo', 'Criado em', 'Atualizado em'],
     ...requests.map((request) => [request.protocolNumber || request.id, request.tenantId, request.requestKind === 'privacy' ? 'LGPD' : request.category, request.privacyRight || '', request.status, request.responsibleName || request.chatAssigneeName || '', request.dueAt || '', request.createdAt, request.updatedAt || ''])
-  ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Relatorio_Solicitacoes_PrintFlow.csv"', 'Cache-Control': 'no-store' })
+  ]), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="Relatorio_Solicitacoes_Filamind.csv"', 'Cache-Control': 'no-store' })
 }
 export const handlePlatformSupportMetrics = async (req, res, url) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
@@ -393,7 +393,7 @@ export const handlePlatformSupportAutoAssign = async (req, res) => {
 export const handlePlatformPrivacyPortabilityExport = async (req, res, requestId) => {
   const user = await requirePlatformAdmin(req, res); if (!user) return
   const report = await getPlatformPrivacyPortabilityExport(requestId)
-  const fileName = `PrintFlow_Portabilidade_${report.tenantId}_${new Date().toISOString().slice(0, 10)}.csv`
+  const fileName = `Filamind_Portabilidade_${report.tenantId}_${new Date().toISOString().slice(0, 10)}.csv`
   const recordCount = Object.values(report.data).reduce((total, value) => total + (Array.isArray(value) ? value.length : value ? 1 : 0), 0)
   await withTenant(report.tenantId, (client) => client.query(
     'insert into export_history (tenant_id, file_name, export_type, file_format, record_count) values ($1, $2, $3, $4, $5)',

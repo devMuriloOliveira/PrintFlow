@@ -55,8 +55,8 @@ const profileSections = [
     </section>
 
     <section class="profile-billing-card">
-      <div v-if="upgradeRequested && !hasManagedSubscription" class="profile-upgrade-banner"><UiIcon name="lock" :size="18" /><div><strong>Desbloqueie mais do PrintFlow</strong><span>Ative automação, marketplaces, relatórios avançados e equipe no PRO.</span></div></div>
-      <div class="profile-billing-card__head"><span class="profile-section-card__icon"><UiIcon name="wallet" /></span><div><h2>Planos PrintFlow</h2><p>FREE para operação manual; PRO mensal para conectar e automatizar a produção.</p></div></div>
+      <div v-if="upgradeRequested && !hasManagedSubscription" class="profile-upgrade-banner"><UiIcon name="lock" :size="18" /><div><strong>Desbloqueie mais do Filamind</strong><span>Ative automação, marketplaces, relatórios avançados e equipe no PRO.</span></div></div>
+      <div class="profile-billing-card__head"><span class="profile-section-card__icon"><UiIcon name="wallet" /></span><div><h2>Planos Filamind</h2><p>FREE para operação manual; PRO mensal para conectar e automatizar a produção.</p></div></div>
       <section v-if="isFree && planUsage.length" class="plan-usage" aria-label="Uso dos limites do plano FREE">
         <div class="plan-usage__head"><div><strong>Uso do plano FREE</strong><small>Acompanhe os limites antes de cadastrar. Ao atingi-los, o cadastro correspondente é bloqueado com uma mensagem explicativa.</small></div><NuxtLink v-if="canManageBilling" class="btn" to="/perfil?upgrade=1">Conhecer PRO</NuxtLink></div>
         <div class="plan-usage__grid"><article v-for="item in planUsage" :key="item.resource" :class="{ 'plan-usage__item--warning': item.percent >= 80, 'plan-usage__item--limit': item.used >= item.limit }"><div><strong>{{ item.label }}</strong><span>{{ item.used }} de {{ item.limit }}</span></div><i><b :style="{ width: `${item.percent}%` }" /></i><small v-if="item.used >= item.limit">Limite atingido — faça upgrade para continuar.</small><small v-else-if="item.percent >= 80">Você está próximo do limite.</small></article></div>

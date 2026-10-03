@@ -7,6 +7,6 @@
       <path d="m22 17 13 7.5L22 42 9 34.5l13-7.5V17Z" fill="#1768f2" opacity=".9" />
       <path d="m9 24.5 13 7.5v10L9 34.5v-10Z" fill="#62d2ef" />
     </svg>
-    <span class="brand__name">Print<span>Flow</span><b>3D</b></span>
+    <span class="brand__name">Filamind</span>
   </div>
 </template>

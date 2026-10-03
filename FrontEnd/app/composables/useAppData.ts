@@ -915,7 +915,7 @@ export const useAppData = () => {
   const cancelStripeSubscription = () => getStripeBilling()
   const resumeStripeSubscription = () => getStripeBilling()
 
-  const listSettingsExports = () => mockEnabled ? Promise.resolve([{ id: 'export-mock-1', fileName: 'printflow-mock-export.json', type: 'tenant_data', format: 'json', recordCount: 128, status: 'success', createdAt: new Date().toISOString() }]) : $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
+  const listSettingsExports = () => mockEnabled ? Promise.resolve([{ id: 'export-mock-1', fileName: 'filamind-mock-export.json', type: 'tenant_data', format: 'json', recordCount: 128, status: 'success', createdAt: new Date().toISOString() }]) : $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
     headers: resourceHeaders()
   })
 

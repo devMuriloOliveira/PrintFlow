@@ -1,5 +1,10 @@
 # PrintFlow Agent
 
+Em producao, o servidor local aceita conexoes do site oficial em
+`https://filamind.com.br` e `https://www.filamind.com.br`. A lista padrao fica
+em `src/config/config.js`; mantenha origens personalizadas em
+`PRINTFLOW_APP_ORIGINS` para builds de homologacao.
+
 Programa local para Windows que conecta o PrintFlow às impressoras 3D do usuário. Ele roda no computador do usuário, aparece na bandeja do sistema quando iniciado pelo instalador/tray e executa comandos enviados pelo [BackEnd](../BackEnd/README.md). A versão do pacote neste repositório está em `package.json`; a versão mínima aceita pela API é configurável e tem padrão `0.1.10`.
 
 ## Para Que Serve

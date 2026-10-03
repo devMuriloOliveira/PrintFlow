@@ -3013,7 +3013,7 @@ onMounted(() => { void subscription.load() })
                 <h3>Instale o Agent</h3>
               </div>
             </div>
-            <p>Baixe o aplicativo responsável por conectar o PrintFlow às impressoras deste computador.</p>
+            <p>Baixe o aplicativo responsável por conectar o Filamind às impressoras deste computador.</p>
 
             <button
               v-if="agentNeedsTransitionUpdate"
@@ -3074,7 +3074,7 @@ onMounted(() => { void subscription.load() })
                 <h3>Conecte sua conta</h3>
               </div>
             </div>
-            <p>Abra o Agent instalado e autorize este computador na sua conta PrintFlow.</p>
+            <p>Abra o Agent instalado e autorize este computador na sua conta Filamind.</p>
 
             <button
               type="button"

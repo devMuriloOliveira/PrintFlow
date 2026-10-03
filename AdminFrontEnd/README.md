@@ -1,4 +1,4 @@
-# PrintFlow AdminFrontEnd
+# Filamind AdminFrontEnd
 
 Portal interno em Nuxt 4/Vue 3, separado do [painel do cliente](../FrontEnd/README.md).
 Ele oferece visão operacional, fila de suporte, empresas, auditoria, relatórios
