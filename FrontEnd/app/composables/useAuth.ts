@@ -13,6 +13,7 @@ type AuthResponse = {
   accessToken?: string
   token?: string
   deletionCancelled?: boolean
+  requiresCompanyProfile?: boolean
   verificationRequired?: boolean
   mfaRequired?: boolean
   challengeToken?: string
@@ -155,7 +156,7 @@ export const useAuth = () => {
       method: 'POST', body: { credential, ...payload }, credentials: 'include'
     })
     setSession(session)
-    return session.user
+    return { user: session.user, requiresCompanyProfile: Boolean(session.requiresCompanyProfile) }
   }
 
   const register = async (payload: { name: string; email: string; password: string; company: string; document: string }) => {

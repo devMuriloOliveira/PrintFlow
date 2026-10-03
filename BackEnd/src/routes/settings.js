@@ -113,7 +113,7 @@ export const handleSettingsUpdate = async (req, res) => {
       on conflict (id) do update set
         name = excluded.name,
         document = excluded.document,
-        document_hash = coalesce(tenants.document_hash, excluded.document_hash),
+        document_hash = coalesce(nullif(tenants.document_hash, ''), nullif(excluded.document_hash, '')),
         document_type = coalesce(tenants.document_type, excluded.document_type),
         document_locked_at = coalesce(tenants.document_locked_at, excluded.document_locked_at),
         email = excluded.email,

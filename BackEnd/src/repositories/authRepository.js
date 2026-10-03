@@ -314,6 +314,7 @@ export const loginOrRegisterGoogleUser = async ({ subject, email, name, company,
   const normalizedEmail = normalizeEmail(email)
   const cleanName = String(name || '').trim()
   const companyName = String(company || cleanName || 'Filamind').trim()
+  const companyDocument = validCompanyDocument(document)
 
   if (!subject || !normalizedEmail.includes('@')) throw new Error('Conta Google invalida.')
 
@@ -324,17 +325,10 @@ export const loginOrRegisterGoogleUser = async ({ subject, email, name, company,
       existing.email_verified_at = new Date()
       return publicUser(existing)
     }
-    const companyDocument = validCompanyDocument(document)
-    if (!companyDocument) {
-      const error = new Error('Informe um CPF ou CNPJ para concluir seu cadastro.')
-      error.code = 'GOOGLE_SIGNUP_REQUIRED'
-      error.profile = { name: cleanName, email: normalizedEmail }
-      throw error
-    }
     const user = { id: createOpaqueId('user'), tenant_id: createOpaqueId('tenant'), name: cleanName, email: normalizedEmail, password_hash: '', google_subject: subject, role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '', status: 'active', token_version: 0, email_verified_at: new Date() }
     memoryUsers.set(normalizedEmail, user)
     memoryUsersById.set(String(user.id), user)
-    return publicUser(user)
+    return { user: publicUser(user), requiresCompanyProfile: !companyDocument }
   }
 
   const existing = await query(
@@ -351,19 +345,12 @@ export const loginOrRegisterGoogleUser = async ({ subject, email, name, company,
     return publicUser({ ...row, role: membership.rows[0].role })
   }
 
-  const companyDocument = validCompanyDocument(document)
-  if (!companyDocument) {
-    const error = new Error('Informe um CPF ou CNPJ para concluir seu cadastro.')
-    error.code = 'GOOGLE_SIGNUP_REQUIRED'
-    error.profile = { name: cleanName, email: normalizedEmail }
-    throw error
-  }
   const tenantId = createOpaqueId('tenant')
   const emailHash = blindIndex(normalizedEmail)
   await query(
     `insert into tenants (id, name, document, document_hash, document_type, document_locked_at, email, is_initialized, billing_enforcement_exempt)
-     values ($1, $2, $3, $4, $5, now(), $6, false, false)`,
-    [tenantId, encryptField(companyName), encryptField(companyDocument.digits), companyDocument.hash, companyDocument.type, encryptField(normalizedEmail)]
+     values ($1, $2, $3, $4, $5, case when $4 <> '' then now() else null end, $6, false, false)`,
+    [tenantId, encryptField(companyName), encryptField(companyDocument?.digits || ''), companyDocument?.hash || '', companyDocument?.type || null, encryptField(normalizedEmail)]
   )
   const result = await query(
     `insert into users (tenant_id, name, email, email_hash, password_hash, google_subject, role, status, token_version, email_verified_at)
@@ -374,7 +361,7 @@ export const loginOrRegisterGoogleUser = async ({ subject, email, name, company,
   await tenantQuery(tenantId, `insert into tenant_memberships (tenant_id, user_id, role, status) values ($1, $2, 'owner', 'active') on conflict (tenant_id, user_id) do nothing`, [tenantId, result.rows[0].id])
   await tenantQuery(tenantId, `insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, source) select $1, $2, id, 'active', 'manual', now(), 'manual' from platform_plans where code = 'free' and active = true on conflict (tenant_id) do nothing`, [`subscription_free_${tenantId}`, tenantId])
   await writeAuditEvent(tenantId, { action: 'membership.owner.granted', actorType: 'user', actorId: result.rows[0].id, entityType: 'membership', entityId: result.rows[0].id, details: { role: 'owner', provider: 'google' } })
-  return publicUser({ ...result.rows[0], role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '' })
+  return { user: publicUser({ ...result.rows[0], role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '' }), requiresCompanyProfile: !companyDocument }
 }
 
 export const loginUser = async ({ email, password }) => {

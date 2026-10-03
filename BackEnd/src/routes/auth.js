@@ -89,10 +89,11 @@ export const handleGoogleLogin = async (req, res) => {
   const body = await readJsonBody(req)
   const profile = await verifyGoogleCredential(body.credential)
   try {
-    const user = await loginOrRegisterGoogleUser({ ...profile, company: body.company, document: body.document })
+    const result = await loginOrRegisterGoogleUser({ ...profile, company: body.company, document: body.document })
+    const user = result.user || result
     const deletionCancelled = await cancelTenantDeletionOnLogin(user, req)
     const session = await createSession(user, undefined, sessionMetadata(req))
-    return sendAuth(res, 200, user, session, { deletionCancelled })
+    return sendAuth(res, 200, user, session, { deletionCancelled, requiresCompanyProfile: Boolean(result.requiresCompanyProfile) })
   } catch (error) {
     if (error?.code === 'GOOGLE_SIGNUP_REQUIRED') return sendJson(res, 409, { error: error.message, googleSignupRequired: true, profile: error.profile })
     throw error

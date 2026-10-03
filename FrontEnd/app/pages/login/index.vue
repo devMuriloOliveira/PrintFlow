@@ -31,9 +31,9 @@ const handleGoogleCredential = async (response: { credential?: string }) => {
   loading.value = true
   error.value = ''
   try {
-    await auth.loginWithGoogle(credential, { company: form.company, document: form.document })
+    const result = await auth.loginWithGoogle(credential)
     notify('Login realizado com sucesso.')
-    await navigateTo('/')
+    await navigateTo(result.requiresCompanyProfile ? '/configuracoes/empresa' : '/')
   } catch (err: any) {
     if (err?.data?.googleSignupRequired) {
       googleCredential.value = credential
@@ -117,9 +117,9 @@ const submit = async () => {
       notify(auth.tenantDeletionCancelled.value ? 'A exclusão da empresa foi cancelada pelo seu login.' : 'Login realizado com sucesso.')
     } else {
       if (googleCredential.value) {
-        await auth.loginWithGoogle(googleCredential.value, { company: form.company, document: form.document })
+        const result = await auth.loginWithGoogle(googleCredential.value, { company: form.company, document: form.document })
         notify('Conta criada com sucesso.')
-        await navigateTo('/')
+        await navigateTo(result.requiresCompanyProfile ? '/configuracoes/empresa' : '/')
         return
       }
       const result = await auth.register({ name: form.name, company: form.company, document: form.document, email: form.email, password: form.password })
