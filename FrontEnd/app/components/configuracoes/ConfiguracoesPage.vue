@@ -464,7 +464,8 @@ const loadMercadoPagoBilling = async () => {
   billingLoading.value = true
   try {
     mercadoPagoBilling.value = await getMercadoPagoBilling()
-    const billingReturn = String(route.query.billing || '')
+    // Mercado Pago may append preapproval_id using a second '?' to back_url.
+    const billingReturn = String(route.query.billing || '').split('?')[0]
     if (billingReturn === 'cancelled' && billingReturnRetries.value === 0) notify('Checkout cancelado. Nenhuma cobrança foi criada.')
     if (billingReturn === 'success') {
       if (hasProSubscription.value) notify('Assinatura confirmada com sucesso.')

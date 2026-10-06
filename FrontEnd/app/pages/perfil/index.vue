@@ -3,12 +3,12 @@ definePageMeta({ layout: 'default' })
 
 const auth = useAuth()
 const route = useRoute()
-const { getStripeBilling } = useAppData()
+const { getMercadoPagoBilling } = useAppData()
 const subscriptionAccess = useSubscriptionAccess()
 const subscriptionLoading = computed(() => subscriptionAccess.loading.value)
 const subscriptionError = computed(() => subscriptionAccess.error.value)
 const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'PF')
-const billing = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
+const billing = ref<Awaited<ReturnType<typeof getMercadoPagoBilling>> | null>(null)
 const billingLoading = ref(false)
 const canManageBilling = computed(() => auth.user.value?.role === 'owner')
 const subscription = computed(() => billing.value?.subscription || null)
@@ -34,7 +34,7 @@ onMounted(async () => {
   void subscriptionAccess.load()
   if (!canManageBilling.value) return
   billingLoading.value = true
-  try { billing.value = await getStripeBilling() } catch { billing.value = null } finally { billingLoading.value = false }
+  try { billing.value = await getMercadoPagoBilling() } catch { billing.value = null } finally { billingLoading.value = false }
 })
 
 const profileSections = [
@@ -66,9 +66,9 @@ const profileSections = [
       <template v-if="canManageBilling && !hasManagedSubscription && availablePlan">
         <div class="profile-plans">
           <article class="profile-plan-option profile-plan-option--free"><div><h3>FREE</h3><p>Organize sua operação manual dentro dos limites do plano.</p></div><strong>R$ 0</strong><ul class="profile-plan-benefits"><li v-for="benefit in freeBenefits" :key="benefit">{{ benefit }}</li></ul><button class="btn" type="button" disabled>Plano atual</button></article>
-          <article class="profile-plan-option profile-plan-option--featured"><span>Preço de lançamento vigente</span><div><h3>PRO mensal</h3><p>Cobrança mensal recorrente pelo Stripe, sem fidelidade.</p></div><strong>{{ new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(availablePlan.monthly) }}<small>/mês</small></strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul><NuxtLink class="btn btn--primary" to="/configuracoes/assinatura">Ver assinatura e assinar PRO</NuxtLink></article>
+          <article class="profile-plan-option profile-plan-option--featured"><span>Preço de lançamento vigente</span><div><h3>PRO mensal</h3><p>Cobrança mensal recorrente pelo Mercado Pago.</p></div><strong>{{ new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(availablePlan.monthly) }}<small>/mês</small></strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul><NuxtLink class="btn btn--primary" to="/configuracoes/assinatura">Ver assinatura e assinar PRO</NuxtLink></article>
         </div>
-        <div v-if="!billing?.configured" class="info-note" style="margin-top:14px"><UiIcon name="info" />A assinatura será liberada quando a cobrança Stripe estiver configurada.</div>
+        <div v-if="!billing?.configured" class="info-note" style="margin-top:14px"><UiIcon name="info" />A assinatura será liberada quando a cobrança Mercado Pago estiver configurada.</div>
       </template>
       <div v-else-if="hasManagedSubscription" class="profile-billing-card__actions"><NuxtLink class="btn btn--primary" to="/configuracoes/assinatura">Gerenciar assinatura <UiIcon name="chevron" :size="14" /></NuxtLink></div>
     </section>
