@@ -90,3 +90,27 @@ test('dispatcher propaga cancelamento ao comando em execucao e por tipo', async 
   assert.equal(dispatcher.getState().queued, 0)
   assert.equal(dispatcher.getState().resources, 0)
 })
+
+test('dispatcher nao inicia comando cancelado enquanto aguardava vaga no pool', async () => {
+  let releaseFirst
+  const firstGate = new Promise(resolve => { releaseFirst = resolve })
+  const started = []
+  const dispatcher = createCommandDispatcher({
+    maxConcurrentPrinterCommands: 1,
+    run: async item => {
+      started.push(item.id)
+      if (item.id === 'first') await firstGate
+    }
+  })
+
+  const first = dispatcher.enqueue(command('first', 'A'))
+  const queued = dispatcher.enqueue(command('queued', 'B'))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(dispatcher.cancelCommand('queued'), true)
+  releaseFirst()
+
+  await Promise.allSettled([first, queued])
+  assert.deepEqual(started, ['first'])
+  assert.equal(dispatcher.getState().queued, 0)
+  assert.equal(dispatcher.getState().resources, 0)
+})

@@ -7,7 +7,8 @@ param(
   [switch]$SignDev,
   [switch]$RequirePersistedCertificate,
   [switch]$SkipOuterSignature,
-  [switch]$SkipInstall
+  [switch]$SkipInstall,
+  [switch]$TestPackage
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,6 +28,10 @@ $installerSedPath = Join-Path $outputRoot "$InstallerName.sed"
 $devCertificatePath = Join-Path $outputRoot "PrintFlow-Agent-Dev-Certificate.cer"
 $packageVersion = [string]((Get-Content -LiteralPath (Join-Path $agentRoot "package.json") -Raw | ConvertFrom-Json).version)
 $devCertificateSha256 = ""
+
+if ($TestPackage -and ($PackageName -notmatch '(?i)test' -or $InstallerName -notmatch '(?i)test')) {
+  throw "Pacotes sem validacao OrcaSlicer precisam usar nomes explicitos de teste."
+}
 
 if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
   throw "Versao do Agent invalida no package.json."
@@ -61,6 +66,20 @@ if (-not $SkipInstall) {
 }
 
 node scripts/generate-windows-icon.js
+& (Join-Path $agentRoot "scripts\build-windows-host.ps1")
+& (Join-Path $agentRoot "scripts\build-windows-setup.ps1")
+
+$hostBuildRoot = Join-Path $agentRoot "artifacts\windows-host"
+$hostExecutable = Join-Path $hostBuildRoot "PrintFlowAgentHost.exe"
+$hostManifest = Join-Path $hostBuildRoot "host-version.json"
+if (-not (Test-Path -LiteralPath $hostExecutable) -or -not (Test-Path -LiteralPath $hostManifest)) {
+  throw "O host Windows nativo nao foi gerado."
+}
+
+$hostMetadata = Get-Content -LiteralPath $hostManifest -Raw | ConvertFrom-Json
+if ([string]$hostMetadata.agentVersion -ne $packageVersion -or [string]$hostMetadata.hostVersion -ne $packageVersion) {
+  throw "A versao do host Windows nao corresponde a versao do Agent."
+}
 
 if (Test-Path $stageRoot) {
   Remove-Item -LiteralPath $stageRoot -Recurse -Force
@@ -95,7 +114,8 @@ $nodeRuntimeDirectory = Split-Path $buildNodeExecutable -Parent
 $localLicenseCandidates = @(
   (Join-Path $nodeRuntimeDirectory "LICENSE.node.txt"),
   (Join-Path $nodeRuntimeDirectory "LICENSE"),
-  (Join-Path $nodeRuntimeDirectory "LICENSE.txt")
+  (Join-Path $nodeRuntimeDirectory "LICENSE.txt"),
+  (Join-Path $agentRoot "licenses\NODE-LICENSE.txt")
 )
 $localLicense = $localLicenseCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 
@@ -124,6 +144,8 @@ if (-not $localLicense) {
     }
   }
 }
+
+Copy-Item -LiteralPath $hostBuildRoot -Destination (Join-Path $stageRoot "host") -Recurse -Force
 
 if ($localLicense) {
   Copy-Item -LiteralPath $localLicense -Destination $runtimeLicensePath -Force
@@ -157,13 +179,32 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Dependencias nativas falharam no runtime Node.js empacotado."
   }
-  & (Join-Path $stageRoot "scripts\ensure-orca-slicer.ps1")
-  & $runtimeNodePath "scripts/verify-orca-runtime.mjs"
-  if ($LASTEXITCODE -ne 0) {
-    throw "OrcaSlicer oficial Store nao passou no fatiamento real; release bloqueada."
+  if (-not $TestPackage) {
+    & (Join-Path $agentRoot "scripts\ensure-orca-slicer.ps1")
+    & $runtimeNodePath "scripts/verify-orca-runtime.mjs"
+    if ($LASTEXITCODE -ne 0) {
+      throw "OrcaSlicer oficial Store nao passou no fatiamento real; release bloqueada."
+    }
   }
 } finally {
   Pop-Location
+}
+
+Get-ChildItem -LiteralPath $stageRoot -Recurse -File |
+  Where-Object { $_.Extension -in @('.ps1', '.psm1', '.vbs') } |
+  Remove-Item -Force
+
+if ($SignDev) {
+  $testSigner = Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1"
+  $windowsRuntimeBinaries = @(
+    (Join-Path $stageRoot "host\PrintFlowAgentHost.exe"),
+    (Join-Path $stageRoot "node_modules\@serialport\bindings-cpp\prebuilds\win32-x64\@serialport+bindings-cpp.node")
+  )
+  foreach ($binary in $windowsRuntimeBinaries) {
+    if (-not (Test-Path -LiteralPath $binary)) { throw "Binario nativo do Agent ausente: $binary" }
+    $relativeBinaryPath = $binary.Substring($agentRoot.Path.TrimEnd('\').Length + 1)
+    & $testSigner -FilePath $relativeBinaryPath -RequirePersistedCertificate
+  }
 }
 
 if (Test-Path $zipPath) {
@@ -178,34 +219,24 @@ if (Test-Path $installerSourceRoot) {
 
 New-Item -ItemType Directory -Path $installerSourceRoot | Out-Null
 
-$installerBootstrap = Join-Path $agentRoot "scripts\install-windows-agent-from-package.ps1"
-$installerBootstrapName = "install-windows-agent-from-package.ps1"
-$installerLauncherName = "install-windows-agent.vbs"
+$nativeSetup = Join-Path $agentRoot "artifacts\windows-setup\PrintFlowAgentSetup.exe"
+$nativeSetupName = "PrintFlowAgentSetup.exe"
 $installerZipName = "$PackageName.zip"
 $installerIcon = Join-Path $agentRoot "assets\printflow-agent-icon.ico"
 $installerIconName = "printflow-agent-icon.ico"
 
+if ($SignDev) {
+  & (Join-Path $agentRoot "scripts\sign-windows-agent-dev.ps1") `
+    -FilePath "artifacts\windows-setup\PrintFlowAgentSetup.exe" `
+    -RequirePersistedCertificate
+}
+
 Copy-Item -LiteralPath $zipPath -Destination (Join-Path $installerSourceRoot $installerZipName) -Force
-Copy-Item -LiteralPath $installerBootstrap -Destination (Join-Path $installerSourceRoot $installerBootstrapName) -Force
+Copy-Item -LiteralPath $nativeSetup -Destination (Join-Path $installerSourceRoot $nativeSetupName) -Force
 Copy-Item -LiteralPath $installerIcon -Destination (Join-Path $installerSourceRoot $installerIconName) -Force
 if ($SignDev) {
   Copy-Item -LiteralPath $devCertificatePath -Destination (Join-Path $installerSourceRoot "PrintFlow-Agent-Dev-Certificate.cer") -Force
 }
-
-$escapedApiUrlForVbs = $ApiUrl.Replace("""", """""")
-$launcher = @"
-Set shell = CreateObject("WScript.Shell")
-Set fso = CreateObject("Scripting.FileSystemObject")
-root = fso.GetParentFolderName(WScript.ScriptFullName)
-cmd = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & root & "\$installerBootstrapName" & """ -ApiUrl ""$escapedApiUrlForVbs"" -PackageVersion ""$packageVersion"" -CertificateSha256 ""$devCertificateSha256"""
-code = shell.Run(cmd, 0, True)
-WScript.Quit code
-"@
-
-Set-Content `
-  -LiteralPath (Join-Path $installerSourceRoot $installerLauncherName) `
-  -Value $launcher `
-  -Encoding ASCII
 
 if (Test-Path $installerPath) {
   Remove-Item -LiteralPath $installerPath -Force
@@ -219,9 +250,9 @@ if (Test-Path $installerSedPath) {
 # can make IExpress wait indefinitely while resolving the target/source.
 $escapedInstallerPath = $installerPath
 $escapedSourceRoot = $installerSourceRoot
-$appLaunched = "wscript.exe $installerLauncherName"
-$certificateSedFile = if ($SignDev) { "FILE4=PrintFlow-Agent-Dev-Certificate.cer" } else { "" }
-$certificateSedSource = if ($SignDev) { "%FILE4%=" } else { "" }
+$appLaunched = "$nativeSetupName --install-package $installerZipName --api-url $ApiUrl --quiet"
+$certificateSedFile = if ($SignDev) { "FILE5=PrintFlow-Agent-Dev-Certificate.cer" } else { "" }
+$certificateSedSource = if ($SignDev) { "%FILE5%=" } else { "" }
 
 $sed = @"
 [Version]
@@ -255,9 +286,8 @@ FriendlyName=PrintFlow Agent Setup
 AppLaunched=$appLaunched
 PostInstallCmd=<None>
 FILE0=$installerZipName
-FILE1=$installerBootstrapName
-FILE2=$installerIconName
-FILE3=$installerLauncherName
+FILE1=$installerIconName
+FILE2=$nativeSetupName
 $certificateSedFile
 [SourceFiles]
 SourceFiles0=$escapedSourceRoot
@@ -265,7 +295,6 @@ SourceFiles0=$escapedSourceRoot
 %FILE0%=
 %FILE1%=
 %FILE2%=
-%FILE3%=
 $certificateSedSource
 "@
 
@@ -278,7 +307,7 @@ $iexpressProcess = Start-Process `
   -WindowStyle Hidden `
   -PassThru
 
-$buildDeadline = [DateTime]::UtcNow.AddMinutes(3)
+$buildDeadline = [DateTime]::UtcNow.AddMinutes(15)
 while (
   [DateTime]::UtcNow -lt $buildDeadline -and
   (
@@ -300,6 +329,15 @@ if (-not $iexpressProcess.HasExited) {
   # O arquivo ja atingiu o tamanho esperado; o IExpress pode permanecer vivo
   # depois de escrever o artefato, entao encerramos apenas agora.
   Stop-Process -Id $iexpressProcess.Id -Force -ErrorAction SilentlyContinue
+}
+
+$installerSizeBeforeIcon = (Get-Item -LiteralPath $installerPath).Length
+& (Join-Path $agentRoot 'scripts\set-windows-executable-icon.ps1') `
+  -ExecutablePath $installerPath `
+  -IconPath $installerIcon
+$installerSizeAfterIcon = (Get-Item -LiteralPath $installerPath).Length
+if ($installerSizeAfterIcon -lt [Math]::Max(1048576, [Math]::Floor($installerSizeBeforeIcon * 0.8))) {
+  throw 'A aplicacao do icone truncou o payload do instalador.'
 }
 
 if ($SignDev) {

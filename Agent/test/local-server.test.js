@@ -34,9 +34,10 @@ test(
         port: 0,
         getRuntimeStatus: () => ({
           updateBlocked: true,
-          updateBlockedReason:
+        updateBlockedReason:
             'active_print',
-          activePrintJobs: 2
+          activePrintJobs: 2,
+          cloudConnected: true
         })
       })
 
@@ -65,6 +66,7 @@ test(
       'active_print'
     )
     assert.equal(payload.activePrintJobs, 2)
+    assert.equal(payload.cloudConnected, true)
     const diagnostics = await fetch(`http://127.0.0.1:${address.port}/diagnostics`)
     assert.equal(diagnostics.status, 503)
   }

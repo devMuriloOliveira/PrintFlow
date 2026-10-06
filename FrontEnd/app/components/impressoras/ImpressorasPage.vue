@@ -443,15 +443,32 @@ const startPrintJob = async (job: any) => {
     notify('Somente itens na fila podem ser iniciados.', 'info')
     return
   }
-  const readinessError = printReadinessError(job)
+  let printableJob = job
+  if (jobNeedsGcodePreparation(printableJob)) {
+    if (!printer?.agentId || !printer?.agentPrinterId) {
+      notify('Conecte esta impressora ao Agent para preparar o G-code automaticamente.', 'info')
+      return
+    }
+    queueLoadingId.value = String(printableJob.id)
+    try {
+      notify('Preparando o G-code no Agent...')
+      printableJob = await prepareGcodeForJob(printableJob, printer)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Não foi possível preparar o G-code.', 'info')
+      queueLoadingId.value = ''
+      return
+    }
+  }
+  const readinessError = printReadinessError(printableJob)
   if (readinessError) {
     notify(readinessError, 'info')
+    queueLoadingId.value = ''
     return
   }
   if (!printer?.agentId || !printer?.agentPrinterId) {
-    queueLoadingId.value = String(job.id)
+    queueLoadingId.value = String(printableJob.id)
     try {
-      await startManualPrintJob(String(job.id))
+      await startManualPrintJob(String(printableJob.id))
       notify('Impressão iniciada na fila.')
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Não foi possível iniciar a impressão.', 'info')
@@ -461,14 +478,14 @@ const startPrintJob = async (job: any) => {
     return
   }
   const agent = assertAgentPrinterReady(printer)
-  queueLoadingId.value = String(job.id)
+  queueLoadingId.value = String(printableJob.id)
   try {
     const response = await fetch(`${config.public.apiBase}/api/agents/${agent.id}/printer-start`, {
       method: 'POST',
       headers: tokenHeaders(),
       body: JSON.stringify({
         agentPrinterId: printer.agentPrinterId,
-        printJobId: job.id
+        printJobId: printableJob.id
       })
     })
     const data = await response.json()
@@ -484,26 +501,31 @@ const startPrintJob = async (job: any) => {
     queueLoadingId.value = ''
   }
 }
+const prepareGcodeForJob = async (job: any, printer: any) => {
+  const agent = assertAgentPrinterReady(printer)
+  const response = await fetch(`${config.public.apiBase}/api/agents/${agent.id}/printer-slice`, {
+    method: 'POST', headers: tokenHeaders(),
+    body: JSON.stringify({ agentPrinterId: printer.agentPrinterId, printJobId: job.id })
+  })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data?.error || 'Não foi possível preparar o G-code.')
+  const result = await waitForCommandResult(String(data.command.id))
+  if (result?.success === false) throw new Error(result.error || 'O Agent não conseguiu preparar o G-code.')
+  await refreshAppData()
+  const preparedJob = (printJobs.value as any[]).find((item: any) => String(item.id || '') === String(job.id || ''))
+  if (!preparedJob?.slicingArtifactStorageKey) throw new Error('O Agent terminou sem disponibilizar o G-code para a impressão.')
+  return preparedJob
+}
 const prepareNextGcode = async () => {
   const job = nextJobNeedingGcode.value as any
   const printer = selected.value as any
   if (!job || !printer?.agentId || !printer?.agentPrinterId || queueLoadingId.value) return
-  if (!window.confirm(`Preparar G-code com OrcaSlicer?\n\n${job.title || job.productName || 'Production Job'}\n\nA impressora nao sera iniciada.`)) return
-  const agent = assertAgentPrinterReady(printer)
   queueLoadingId.value = String(job.id)
   try {
-    const response = await fetch(`${config.public.apiBase}/api/agents/${agent.id}/printer-slice`, {
-      method: 'POST', headers: tokenHeaders(),
-      body: JSON.stringify({ agentPrinterId: printer.agentPrinterId, printJobId: job.id })
-    })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data?.error || 'Nao foi possivel preparar o G-code.')
-    const result = await waitForCommandResult(String(data.command.id))
-    if (result?.success === false) throw new Error(result.error || 'O Agent nao conseguiu preparar o G-code.')
-    notify('G-code preparado pelo Agent. A impressora nao foi iniciada.')
-    await refreshAppData()
+    await prepareGcodeForJob(job, printer)
+    notify('G-code preparado pelo Agent. A impressora não foi iniciada.')
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Nao foi possivel preparar o G-code.', 'info')
+    notify(error instanceof Error ? error.message : 'Não foi possível preparar o G-code.', 'info')
   } finally {
     queueLoadingId.value = ''
   }
@@ -716,8 +738,9 @@ onBeforeUnmount(() => {
             <p v-if="connectionGuidance" class="machine-diagnostic" role="status">{{ connectionGuidance }}</p>
 
             <div v-if="nextJobNeedingGcode && selected?.agentId && selected?.agentPrinterId" class="machine-callout">
-              <div><strong>3MF aguardando preparo</strong><small>O OrcaSlicer pode gerar o G-code do próximo item sem iniciar a impressora.</small></div>
-              <button type="button" class="btn" :disabled="queueLoadingId !== ''" @click="prepareNextGcode">Preparar G-code</button>
+              <span class="machine-callout__icon"><UiIcon name="bolt" :size="18" /></span>
+              <div><strong>G-code será preparado ao iniciar</strong><small>Este 3MF será processado pelo Agent antes de enviar a impressão.</small></div>
+              <button type="button" class="machine-action machine-action--slice" :disabled="queueLoadingId !== ''" @click="prepareNextGcode"><UiIcon name="bolt" :size="15" />Preparar agora</button>
             </div>
 
             <section class="production-focus">
@@ -740,11 +763,11 @@ onBeforeUnmount(() => {
               </div>
               <p v-if="selectedLiveStatus?.lastConnectionError" class="machine-error"><strong>Falha na leitura:</strong> {{ selectedLiveStatus.lastConnectionError }} {{ connectionGuidance }}</p>
               <div class="machine-controls">
-                <button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'pause')">Pausar</button>
-                <button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'resume')">Retomar</button>
-                <button type="button" class="btn btn--danger" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'cancel')">Cancelar impressão</button>
-                <button type="button" class="btn" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'disconnect')">Desconectar</button>
-                <button type="button" class="btn btn--danger" :disabled="printerControlLoadingId !== ''" @click="revokeSelectedAgent">Revogar Agent</button>
+                <button type="button" class="machine-action" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'pause')"><UiIcon name="clock" :size="15" />Pausar</button>
+                <button type="button" class="machine-action" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'resume')"><UiIcon name="refresh" :size="15" />Retomar</button>
+                <button type="button" class="machine-action machine-action--danger" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'cancel')"><UiIcon name="close" :size="15" />Cancelar</button>
+                <button type="button" class="machine-action machine-action--neutral" :disabled="printerControlLoadingId !== ''" @click="controlPrinter(selected, 'disconnect')"><UiIcon name="logout" :size="15" />Desconectar</button>
+                <button type="button" class="machine-action machine-action--danger" :disabled="printerControlLoadingId !== ''" @click="revokeSelectedAgent"><UiIcon name="shield" :size="15" />Revogar Agent</button>
               </div>
             </section>
 
@@ -831,11 +854,11 @@ onBeforeUnmount(() => {
 .machine-console { min-width:0; background:#fff; }.machine-console__head { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:18px 20px; border-bottom:1px solid var(--line); }
 .machine-console__identity { display:flex; align-items:center; gap:12px; min-width:0; }.machine-console__identity > span { display:grid; width:50px; height:50px; flex:0 0 auto; place-items:center; border-radius:13px; color:#fff; background:var(--machine-navy); }.machine-console__identity div { min-width:0; }.machine-console__identity small { color:var(--blue); font-size:8px; font-weight:850; letter-spacing:.12em; text-transform:uppercase; }.machine-console__identity h2 { margin:4px 0 2px; overflow:hidden; font-size:17px; text-overflow:ellipsis; white-space:nowrap; }.machine-console__identity p { margin:0; overflow:hidden; color:var(--muted); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
 .machine-console__signal { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px 20px; border-bottom:1px solid #dcefe6; background:#f2fbf6; }.machine-console__signal--offline { border-color:#f4d9d9; background:#fff6f6; }.signal-pulse { width:9px; height:9px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px rgba(13,165,102,.13); }.machine-console__signal--offline .signal-pulse { background:var(--red); box-shadow:0 0 0 4px rgba(215,45,54,.1); }.machine-console__signal strong,.machine-console__signal small { display:block; }.machine-console__signal strong { font-size:10px; }.machine-console__signal small { margin-top:2px; color:var(--muted); font-size:9px; }
-.machine-callout { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:14px 18px 0; border:1px solid #d8e6ff; border-radius:10px; background:#f5f9ff; padding:11px 12px; }.machine-callout strong,.machine-callout small { display:block; }.machine-callout strong { font-size:10px; }.machine-callout small { margin-top:3px; color:var(--muted); font-size:9px; }
+.machine-callout { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:11px; margin:14px 18px 0; border:1px solid #cddfff; border-radius:12px; background:linear-gradient(135deg,#f4f8ff,#eef5ff); padding:12px; }.machine-callout__icon { display:grid; width:34px; height:34px; place-items:center; border-radius:10px; color:#2d6ad4; background:#dbeafe; }.machine-callout strong,.machine-callout small { display:block; }.machine-callout strong { font-size:10px; }.machine-callout small { margin-top:3px; color:var(--muted); font-size:9px; }
 .production-focus,.telemetry-panel,.queue-workbench { padding:18px 20px; border-bottom:1px solid var(--line); }.section-label { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:11px; }.section-label > span { font-size:10px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; }.section-label > small { color:var(--muted); font-size:9px; }
 .current-job { border-radius:13px; color:#fff; background:linear-gradient(135deg,#101a2c,#1e3456); padding:16px; box-shadow:0 12px 26px rgba(16,26,44,.18); }.current-job__top { display:flex; justify-content:space-between; gap:16px; }.current-job__top small { color:#aebbd0; font-size:9px; }.current-job__top h3 { margin:4px 0 0; font-size:15px; }.current-job__top > strong { font-size:24px; font-variant-numeric:tabular-nums; }.current-job__track { height:6px; overflow:hidden; border-radius:99px; background:rgba(255,255,255,.16); margin:14px 0; }.current-job__track i { display:block; height:100%; border-radius:inherit; background:#4c9bff; }.current-job__meta { display:grid; grid-template-columns:.7fr .9fr 1.4fr; gap:10px; }.current-job__meta small,.current-job__meta strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.current-job__meta small { color:#91a1ba; font-size:8px; }.current-job__meta strong { margin-top:3px; font-size:9px; }
 .production-idle { display:flex; align-items:center; gap:12px; border:1px dashed #bfd0e7; border-radius:12px; background:#f8fbff; padding:16px; }.production-idle > span { display:grid; width:38px; height:38px; place-items:center; border-radius:50%; color:var(--green); background:var(--green-soft); }.production-idle strong,.production-idle small { display:block; }.production-idle strong { font-size:11px; }.production-idle small { margin-top:3px; color:var(--muted); font-size:9px; }
-.telemetry-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }.telemetry-grid > div { min-width:0; border:1px solid var(--line); border-radius:10px; background:var(--machine-panel); padding:11px; }.telemetry-grid small { display:block; color:var(--muted); font-size:8px; text-transform:uppercase; }.telemetry-grid strong { display:block; margin-top:7px; font-size:19px; font-variant-numeric:tabular-nums; }.telemetry-grid strong span { margin-left:2px; color:var(--muted); font-size:9px; }.telemetry-grid__state { overflow:hidden; font-size:11px !important; text-overflow:ellipsis; white-space:nowrap; }.text-action { border:0; color:var(--blue); background:transparent; padding:3px; font-size:9px; font-weight:800; cursor:pointer; }.text-action:disabled { opacity:.45; cursor:not-allowed; }.text-action--danger { color:var(--red); }.machine-error { border-radius:8px; color:#a32931; background:#fff0f0; margin:10px 0 0; padding:9px; font-size:9px; }.machine-controls { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+.telemetry-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }.telemetry-grid > div { min-width:0; border:1px solid var(--line); border-radius:10px; background:var(--machine-panel); padding:11px; }.telemetry-grid small { display:block; color:var(--muted); font-size:8px; text-transform:uppercase; }.telemetry-grid strong { display:block; margin-top:7px; font-size:19px; font-variant-numeric:tabular-nums; }.telemetry-grid strong span { margin-left:2px; color:var(--muted); font-size:9px; }.telemetry-grid__state { overflow:hidden; font-size:11px !important; text-overflow:ellipsis; white-space:nowrap; }.text-action { border:0; color:var(--blue); background:transparent; padding:3px; font-size:9px; font-weight:800; cursor:pointer; }.text-action:disabled { opacity:.45; cursor:not-allowed; }.text-action--danger { color:var(--red); }.machine-error { border-radius:8px; color:#a32931; background:#fff0f0; margin:10px 0 0; padding:9px; font-size:9px; }.machine-controls { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }.machine-action { display:inline-flex; min-height:34px; align-items:center; justify-content:center; gap:6px; border:1px solid #cbd8ea; border-radius:9px; color:#17375f; background:#fff; padding:0 11px; font-size:10px; font-weight:800; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease; }.machine-action:hover:not(:disabled) { border-color:#91b3e5; box-shadow:0 4px 12px rgba(29,78,150,.12); transform:translateY(-1px); }.machine-action:focus-visible { outline:3px solid rgba(59,130,246,.3); outline-offset:2px; }.machine-action:disabled { cursor:not-allowed; opacity:.5; }.machine-action--slice { border-color:#8fb4ee; color:#fff; background:#2d6ad4; }.machine-action--danger { border-color:#fecaca; color:#b4232d; background:#fff7f7; }.machine-action--neutral { color:#49566a; background:#f8fafc; }
 .machine-diagnostic { border-bottom:1px solid #f1dada; color:#823d42; background:#fffafa; margin:0; padding:8px 20px; font-size:9px; line-height:1.45; }
 .queue-composer { display:grid; grid-template-columns:minmax(0,1fr) 74px auto; align-items:end; gap:8px; margin-bottom:12px; }.queue-composer label { display:grid; gap:5px; }.queue-composer label span { color:var(--muted); font-size:9px; font-weight:700; }.queue-composer select,.queue-composer input { width:100%; }.queue-empty { display:grid; place-items:center; min-height:90px; border:1px dashed #cbd5e1; border-radius:10px; color:var(--muted); text-align:center; }.queue-empty strong,.queue-empty small { display:block; }.queue-empty strong { color:var(--ink); font-size:11px; }.queue-empty small { margin-top:3px; font-size:9px; }
 .queue-item { display:grid; grid-template-columns:28px minmax(0,1fr); gap:10px; border-top:1px solid #edf0f4; padding:12px 0; }.queue-item__order { display:grid; width:28px; height:28px; place-items:center; border-radius:8px; color:#52627a; background:#eef2f7; font-size:10px; font-weight:850; }.queue-item__body { min-width:0; }.queue-item__head,.queue-item__checks,.queue-item__actions { display:flex; align-items:center; justify-content:space-between; gap:8px; }.queue-item__head strong,.queue-item__head small { display:block; }.queue-item__head strong { font-size:11px; }.queue-item__head small { margin-top:3px; color:var(--muted); font-size:9px; }.queue-item__checks { justify-content:flex-start; margin-top:8px; }.queue-item__checks select { max-width:170px; height:28px; font-size:9px; }.queue-item__error { color:var(--red); margin:8px 0 0; font-size:9px; line-height:1.45; }.queue-item__actions { justify-content:flex-end; margin-top:9px; }

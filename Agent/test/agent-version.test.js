@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -24,6 +25,15 @@ test(
     )
   }
 )
+
+test('mantem package, configuracao e host Windows na mesma versao', async () => {
+  const packageJson = JSON.parse(await readFile(
+    new URL('../package.json', import.meta.url),
+    'utf8'
+  ))
+
+  assert.equal(packageJson.version, AGENT_VERSION)
+})
 
 test('separa DEVELOPMENT e rejeita endpoints inseguros em PRODUCTION', () => {
   const development = resolveRuntimeConfig({})

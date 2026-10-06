@@ -206,6 +206,7 @@ import {
   handleAgentConnectPrinterCreate,
   handleAgentPrinterStatusCreate,
   handleAgentPrinterControlCreate,
+  handleAgentPrinterReconnectList,
   handleAgentPrintersList
 } from './agents.js'
 
@@ -556,6 +557,18 @@ export const handleRequest =
         req.method ===
           'GET' &&
         url.pathname ===
+          '/api/agents/printers/reconnect'
+      ) {
+        return await handleAgentPrinterReconnectList(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
           '/api/agents/commands/pending'
       ) {
         return await handleAgentCommandsPending(
@@ -630,8 +643,12 @@ export const handleRequest =
         (
           req.method ===
             'GET' &&
-          url.pathname ===
-            '/api/agents/events'
+          (
+            url.pathname ===
+              '/api/agents/events' ||
+            url.pathname ===
+              '/api/agents/printers/reconnect'
+          )
         ) ||
         (
           req.method ===

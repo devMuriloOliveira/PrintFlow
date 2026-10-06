@@ -35,6 +35,13 @@ docs/PRINTFLOW_AGENT_FASE_0_AUDITORIA.md
 /Agent/logs/
 /Agent/temp/
 /Agent/updates/
+/Agent/artifacts/
+/Agent/test-dist/
+/Agent/.tmp-updater-probe/
+/Agent/windows-host/bin/
+/Agent/windows-host/obj/
+/Agent/windows-setup/bin/
+/Agent/windows-setup/obj/
 /Agent/*.sqlite
 /Agent/*.sqlite3
 /Agent/*.db

@@ -20,6 +20,7 @@ import {
   sendHeartbeat,
   getPendingCommand,
   completeCommand,
+  getRegisteredPrintersForReconnect,
   reportCommandProgress,
   syncAgentEvents,
   rotateAgentCredential,
@@ -48,6 +49,9 @@ import {
   removeDiagnosticsToken
 } from './storage/diagnosticsToken.js'
 import {
+  loadPrinterCredentials
+} from './storage/printerCredentials.js'
+import {
   recordOperationalMetric
 } from './runtime/operationalMetrics.js'
 import { createAgentHealthSnapshot } from './runtime/healthSnapshot.js'
@@ -73,6 +77,7 @@ import {
   monitorPrintJobCompletion
 } from './printing/productionJobMonitor.js'
 import {
+  connectPrinter,
   disconnectPrinter,
   getPrinterStatus,
   getCachedActivePrintCount,
@@ -119,6 +124,45 @@ const healthSnapshotIntervalMs = Math.max(
   60_000,
   Number(process.env.PRINTFLOW_AGENT_HEALTH_SNAPSHOT_MS) || 60_000
 )
+
+const restoreRegisteredPrinterConnections = async (credentials) => {
+  let printers
+
+  try {
+    printers = await getRegisteredPrintersForReconnect(
+      apiUrl,
+      credentials
+    )
+  } catch (error) {
+    console.log(
+      '[Printers] Nao foi possivel buscar impressoras para restauracao:',
+      error.response?.data?.error || error.message
+    )
+    return
+  }
+
+  if (printers.length === 0) return
+
+  console.log(
+    `[Printers] Restaurando ${printers.length} conexao(oes) registrada(s)...`
+  )
+
+  for (const printer of printers) {
+    if (!printer?.protocol) continue
+
+    try {
+      const options = await loadPrinterCredentials(printer)
+      await connectPrinter(printer, options)
+      console.log(
+        `[Printers] Conexao restaurada: ${printer.name || printer.serial || printer.ip || printer.id}`
+      )
+    } catch (error) {
+      console.log(
+        `[Printers] Nao foi possivel restaurar ${printer.name || printer.serial || printer.ip || printer.id}: ${error.message}`
+      )
+    }
+  }
+}
 
 function getActivePrintJobCount() {
   if (!localOperations) return 0
@@ -295,6 +339,7 @@ const localServer = startLocalServer({
     const activePrintJobs = getActivePrintJobCount()
 
     return {
+      cloudConnected: backendHealth.connected,
       updateBlocked:
         activePrintJobs > 0,
       updateBlockedReason:
@@ -492,6 +537,8 @@ const start = async () => {
     } catch (error) {
       if (error.response?.status !== 409) console.log('[Credentials] Rotacao adiada:', error.response?.data?.error || error.message)
     }
+
+    void restoreRegisteredPrinterConnections(credentials)
 
     // =====================================================
     // HEARTBEAT

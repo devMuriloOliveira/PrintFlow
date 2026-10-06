@@ -86,6 +86,9 @@ export const createCommandDispatcher = ({
       if (controller.signal.aborted) throw controller.signal.reason || new Error('Comando cancelado.')
       const release = await acquire(kind)
       try {
+        // O comando pode ser cancelado enquanto aguarda uma vaga no pool.
+        // Nesse caso, libere a vaga sem iniciar trabalho que já foi cancelado.
+        if (controller.signal.aborted) throw controller.signal.reason || new Error('Comando cancelado.')
         return await run(command, { signal: controller.signal })
       } finally {
         release()

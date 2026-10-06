@@ -1,51 +1,23 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { SerialPort } from 'serialport'
 
 import {
   getPrinterProfile
 } from '../printers/printerProfiles.js'
 
-const execFileAsync = promisify(execFile)
-
 // ======================================================
 // CONSULTAR PORTAS SERIAIS NO WINDOWS
 // ======================================================
 
 const getWindowsSerialPorts = async () => {
-  const script = `
-    $ports = Get-CimInstance Win32_SerialPort |
-      Select-Object DeviceID, Name, Description, Manufacturer, PNPDeviceID
-
-    $ports | ConvertTo-Json -Compress
-  `
-
   try {
-    const { stdout } = await execFileAsync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        script
-      ],
-      {
-        windowsHide: true,
-        timeout: 10_000
-      }
-    )
-
-    const output = stdout.trim()
-
-    if (!output) {
-      return []
-    }
-
-    const parsed = JSON.parse(output)
-
-    return Array.isArray(parsed)
-      ? parsed
-      : [parsed]
+    const ports = await SerialPort.list()
+    return ports.map(port => ({
+      DeviceID: port.path,
+      Name: port.friendlyName || port.manufacturer || port.path,
+      Description: port.friendlyName || '',
+      Manufacturer: port.manufacturer || '',
+      PNPDeviceID: port.pnpId || ''
+    }))
   } catch (error) {
     console.log(
       '[USB] Nao foi possivel consultar as portas seriais:',

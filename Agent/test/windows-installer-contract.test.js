@@ -22,15 +22,15 @@ test('build e instalador exigem fatiamento real antes de empacotar ou parar o Ag
   assert.match(verifier, /sliceWithOrcaSlicer\(/)
 })
 
-test('instalador exibe versao e informa que o runtime esta incluido', async () => {
+test('setup nativo instala o Node empacotado e usa a versao do pacote', async () => {
   const build = await readScript('build-windows-package.ps1')
-  const bootstrap = await readScript('install-windows-agent-from-package.ps1')
+  const setup = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'Program.cs'), 'utf8')
 
-  assert.match(build, /-PackageVersion ""\$packageVersion""/)
-  assert.match(bootstrap, /Versao atual: \$currentVersionText/)
-  assert.match(bootstrap, /Versao a instalar: \$targetVersionText/)
-  assert.match(bootstrap, /nao exige Node\.js instalado separadamente/)
-  assert.match(bootstrap, /Mantem pareamento, credenciais protegidas e historico local durante atualizacoes/)
+  assert.match(build, /AppLaunched=\$appLaunched/)
+  assert.match(setup, /GetVersion\(Path\.Combine\(root, "package\.json"\)\)/)
+  assert.match(setup, /Validador OrcaSlicer ausente no pacote/)
+  assert.match(setup, /PrintFlowAgentSetup\.exe/)
+  assert.ok(setup.indexOf('Run(node, [verifier], required: false)') < setup.indexOf('Run("winget.exe"'))
 })
 
 test('desinstalador preserva dados por padrao e exige escolha explicita para apagar', async () => {
@@ -102,14 +102,82 @@ test('atualizador fixa a identidade do certificado Early Access', async () => {
 
 test('instalador Early Access fixa e confia somente no certificado empacotado', async () => {
   const build = await readScript('build-windows-package.ps1')
-  const bootstrap = await readScript('install-windows-agent-from-package.ps1')
+  const setup = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'Program.cs'), 'utf8')
+  const signer = await readScript('sign-windows-agent-dev.ps1')
 
-  assert.match(build, /-CertificateSha256 ""\$devCertificateSha256""/)
   assert.match(build, /Get-FileHash -LiteralPath \$devCertificatePath -Algorithm SHA256/)
-  assert.match(bootstrap, /Certificado Early Access nao corresponde ao pacote/)
-  assert.match(bootstrap, /1\.3\.6\.1\.5\.5\.7\.3\.3/)
-  assert.match(bootstrap, /@\('Root', 'TrustedPublisher'\)/)
-  assert.match(bootstrap, /X509Store.*CurrentUser/)
+  assert.match(setup, /Certificado Early Access nao corresponde ao pacote/)
+  assert.match(setup, /1\.3\.6\.1\.5\.5\.7\.3\.3/)
+  assert.match(setup, /StoreName\.Root, StoreName\.TrustedPublisher/)
+  assert.match(setup, /StoreLocation\.CurrentUser/)
+  assert.match(signer, /PRINTFLOW_AGENT_DEV_CERT_PASSWORD/)
+  assert.doesNotMatch(signer, /printflow-agent-local-dev-only/)
+})
+
+test('atualizador C# valida o release assinado antes de instalar e confirma o runtime atualizado', async () => {
+  const updater = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'SignedUpdateService.cs'), 'utf8')
+  const certificatePin = 'AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB'
+
+  assert.match(updater, /api\.github\.com\/repos\/devMuriloOliveira\/PrintFlow\/releases\/latest/)
+  assert.match(updater, /uri\.Scheme != Uri\.UriSchemeHttps/)
+  assert.match(updater, new RegExp(certificatePin))
+  assert.match(updater, /CryptographicOperations\.FixedTimeEquals/)
+  assert.match(updater, /X509Certificate\.CreateFromSignedFile/)
+  assert.match(updater, /AuthenticodeTrust\.Verify/)
+
+  const validation = updater.indexOf('ValidatePackage(updatesRoot, latest.ToString())')
+  const launch = updater.indexOf('Process.Start(new ProcessStartInfo(installer)')
+  const health = updater.indexOf('WaitForHealthAsync(latest.ToString(), requirePaired: true')
+  const success = updater.indexOf('WriteHistory(currentVersion, latest.ToString(), "succeeded", "health_verified")')
+  assert.ok(validation >= 0 && validation < launch)
+  assert.ok(launch < health && health < success)
+})
+
+test('host single-file localiza o pacote pelo executavel publicado', async () => {
+  const host = await fs.readFile(path.join(process.cwd(), 'windows-host', 'Program.cs'), 'utf8')
+  const processJob = await fs.readFile(path.join(process.cwd(), 'windows-host', 'AgentProcessJob.cs'), 'utf8')
+
+  assert.match(host, /Environment\.ProcessPath/)
+  assert.match(host, /SelectMany\(GetAncestors\)/)
+  assert.match(host, /File\.Exists\(Path\.Combine\(candidate, "src", "index\.js"\)\)/)
+  assert.match(host, /AgentProcessJob\.Attach\(_agentProcess\)/)
+  assert.match(processJob, /KillProcessesWhenJobCloses = 0x00002000/)
+})
+
+test('instalacao e remocao nativas elevam antes de criar ou excluir a tarefa', async () => {
+  const setup = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'Program.cs'), 'utf8')
+
+  assert.match(setup, /RelaunchElevatedWhenRequired\(args\)/)
+  assert.match(setup, /string\.Equals\(argument, "--install-package"/)
+  assert.match(setup, /string\.Equals\(argument, "--uninstall"/)
+  assert.match(setup, /Verb = "runas"/)
+  assert.match(setup, /process\.WaitForExit\(\)/)
+  assert.match(setup, /process\.StandardError\.ReadToEndAsync\(\)/)
+  assert.match(setup, /private static void StartTask\(string taskName\) => Run\("schtasks\.exe", \["\/Run", "\/TN", taskName\]\);/)
+})
+
+test('tarefa nativa inicia no logon mesmo quando o notebook usa bateria', async () => {
+  const setup = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'Program.cs'), 'utf8')
+
+  assert.match(setup, /LogonTrigger/)
+  assert.match(setup, /DisallowStartIfOnBatteries", "false"/)
+  assert.match(setup, /StopIfGoingOnBatteries", "false"/)
+  assert.match(setup, /StartWhenAvailable", "true"/)
+  assert.match(setup, /Encoding = Encoding\.Unicode/)
+})
+
+test('runtime do release nao chama PowerShell e o ZIP remove scripts de cliente antigos', async () => {
+  const host = await fs.readFile(path.join(process.cwd(), 'windows-host', 'Program.cs'), 'utf8')
+  const credentials = await fs.readFile(path.join(process.cwd(), 'src', 'storage', 'credentials.js'), 'utf8')
+  const scanner = await fs.readFile(path.join(process.cwd(), 'src', 'discovery', 'usbScanner.js'), 'utf8')
+  const orca = await fs.readFile(path.join(process.cwd(), 'src', 'slicing', 'orcaRuntime.js'), 'utf8')
+  const build = await readScript('build-windows-package.ps1')
+
+  for (const source of [host, credentials, scanner, orca]) assert.doesNotMatch(source, /powershell\.exe|powershell/i)
+  assert.match(host, /--check-updates/)
+  assert.match(host, /--dpapi-/)
+  assert.match(build, /@\('\.ps1', '\.psm1', '\.vbs'\)/)
+  assert.doesNotMatch(build, /powershell\.exe.*install-windows-agent-from-package/)
 })
 
 test('interface e instalador nao exibem o endereco interno da API', async () => {

@@ -85,6 +85,7 @@ const getLocalStatus = async (
       Boolean(runtimeStatus?.updateBlocked),
     updateBlockedReason:
       runtimeStatus?.updateBlockedReason || null,
+    cloudConnected: Boolean(runtimeStatus?.cloudConnected),
     activePrintJobs:
       Math.max(
         0,

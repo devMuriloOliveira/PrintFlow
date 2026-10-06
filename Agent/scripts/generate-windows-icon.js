@@ -4,7 +4,7 @@ import { deflateSync } from 'node:zlib'
 
 const outputPng = resolve('assets/printflow-agent-icon.png')
 const outputIco = resolve('assets/printflow-agent-icon.ico')
-const size = 256
+const iconSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
 const polygons = [
   { color: [111, 77, 246, 255], points: [[22, 2], [35, 9.5], [35, 24.5], [22, 32], [9, 24.5], [9, 9.5]] },
@@ -78,44 +78,55 @@ function createPng(width, height, rgba) {
   ])
 }
 
-function createIco(png) {
+function createIco(images) {
   const header = Buffer.alloc(6)
   header.writeUInt16LE(0, 0)
   header.writeUInt16LE(1, 2)
-  header.writeUInt16LE(1, 4)
+  header.writeUInt16LE(images.length, 4)
 
-  const entry = Buffer.alloc(16)
-  entry[0] = 0
-  entry[1] = 0
-  entry[2] = 0
-  entry[3] = 0
-  entry.writeUInt16LE(1, 4)
-  entry.writeUInt16LE(32, 6)
-  entry.writeUInt32LE(png.length, 8)
-  entry.writeUInt32LE(header.length + entry.length, 12)
+  const entries = []
+  let offset = header.length + images.length * 16
+  for (const { size, png } of images) {
+    const entry = Buffer.alloc(16)
+    entry[0] = size === 256 ? 0 : size
+    entry[1] = size === 256 ? 0 : size
+    entry[2] = 0
+    entry[3] = 0
+    entry.writeUInt16LE(1, 4)
+    entry.writeUInt16LE(32, 6)
+    entry.writeUInt32LE(png.length, 8)
+    entry.writeUInt32LE(offset, 12)
+    entries.push(entry)
+    offset += png.length
+  }
 
-  return Buffer.concat([header, entry, png])
+  return Buffer.concat([header, ...entries, ...images.map(image => image.png)])
 }
 
-const rgba = Buffer.alloc(size * size * 4)
-const scale = size / 44
+function renderIcon(size) {
+  const rgba = Buffer.alloc(size * size * 4)
+  const scale = size / 44
 
-for (let y = 0; y < size; y += 1) {
-  for (let x = 0; x < size; x += 1) {
-    const svgX = (x + 0.5) / scale
-    const svgY = (y + 0.5) / scale
-    const pixel = (y * size + x) * 4
-    for (const polygon of polygons) {
-      if (pointInPolygon(svgX, svgY, polygon.points)) {
-        blendPixel(rgba, pixel, polygon.color)
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const svgX = (x + 0.5) / scale
+      const svgY = (y + 0.5) / scale
+      const pixel = (y * size + x) * 4
+      for (const polygon of polygons) {
+        if (pointInPolygon(svgX, svgY, polygon.points)) {
+          blendPixel(rgba, pixel, polygon.color)
+        }
       }
     }
   }
+
+  return createPng(size, size, rgba)
 }
 
-const png = createPng(size, size, rgba)
+const images = iconSizes.map(size => ({ size, png: renderIcon(size) }))
+const png = images.at(-1).png
 mkdirSync(dirname(outputPng), { recursive: true })
 writeFileSync(outputPng, png)
-writeFileSync(outputIco, createIco(png))
+writeFileSync(outputIco, createIco(images))
 
 console.log(`Icones gerados: ${outputPng}, ${outputIco}`)

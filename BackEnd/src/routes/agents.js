@@ -1190,6 +1190,71 @@ export const handleAgentHeartbeat =
     )
   }
 
+// ======================================================
+// LISTAR IMPRESSORAS PARA RESTAURACAO APOS REINICIO
+// ======================================================
+
+export const handleAgentPrinterReconnectList = async (req, res) => {
+  const agent = await authenticateAgentRequest(req)
+
+  if (!agent) {
+    return sendJson(res, 401, { error: 'Agent invalido' })
+  }
+
+  const result = await tenantQuery(
+    agent.tenant_id,
+    `
+      select
+        id,
+        protocol,
+        connection_type,
+        name,
+        manufacturer,
+        model,
+        serial,
+        ip,
+        port,
+        metadata
+      from agent_printers
+      where tenant_id = $1
+        and agent_id = $2
+        and status <> 'disconnected'
+      order by created_at asc
+    `,
+    [agent.tenant_id, agent.id]
+  )
+
+  const printers = result.rows.map(storedPrinter => {
+    const metadata = storedPrinter.metadata && typeof storedPrinter.metadata === 'object'
+      ? storedPrinter.metadata
+      : {}
+
+    const printer = {
+      id: String(storedPrinter.id),
+      protocol: storedPrinter.protocol,
+      connectionType: storedPrinter.connection_type,
+      name: storedPrinter.name,
+      manufacturer: storedPrinter.manufacturer,
+      model: storedPrinter.model,
+      serial: storedPrinter.serial,
+      ip: storedPrinter.ip,
+      port: storedPrinter.port ? Number(storedPrinter.port) : undefined
+    }
+
+    for (const field of ['software', 'baudRate', 'firmware']) {
+      if (metadata[field] !== undefined && metadata[field] !== null) {
+        printer[field] = field === 'baudRate' ? Number(metadata[field]) : metadata[field]
+      }
+    }
+
+    if (metadata.mock === true) printer.mock = true
+
+    return printer
+  })
+
+  return sendJson(res, 200, { printers })
+}
+
 export const handleAgentCredentialRotate = async (req, res) => {
   const agent = await authenticateAgentRequest(req)
   if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })

@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $updatesRoot = Join-Path $env:APPDATA 'PrintFlow Agent\updates'
 $historyPath = Join-Path $updatesRoot 'update-history.jsonl'
 $rollbackRoot = Join-Path $updatesRoot ("rollback-$PreviousVersion-" + [guid]::NewGuid().ToString('N'))
-$binaryItems = @('assets', 'node_modules', 'runtime', 'scripts', 'src', 'package.json', 'package-lock.json', 'README.md')
+$binaryItems = @('assets', 'host', 'node_modules', 'runtime', 'scripts', 'src', 'package.json', 'package-lock.json', 'README.md')
 $rollbackSucceeded = $false
 
 function Add-UpdateHistory {
@@ -32,7 +32,12 @@ function Get-HealthyVersion([string]$ExpectedVersion, [int]$TimeoutSeconds = 90)
   while ([DateTime]::UtcNow -lt $deadline) {
     try {
       $health = Invoke-RestMethod -Uri $LocalHealthUrl -Method Get -TimeoutSec 3
-      if ($health.ok -and [string]$health.version -eq $ExpectedVersion) { return $true }
+      if (
+        $health.ok -and
+        [string]$health.version -eq $ExpectedVersion -and
+        $health.paired -eq $true -and
+        $health.cloudConnected -eq $true
+      ) { return $true }
     } catch {
     }
     Start-Sleep -Seconds 3

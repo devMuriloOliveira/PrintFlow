@@ -79,7 +79,7 @@ if (-not (Test-Path $installRoot)) {
   New-Item -ItemType Directory -Path $installRoot | Out-Null
 }
 
-$items = @("assets", "node_modules", "runtime", "scripts", "src", "package.json", "package-lock.json", "README.md")
+$items = @("assets", "host", "node_modules", "runtime", "scripts", "src", "package.json", "package-lock.json", "README.md")
 foreach ($item in $items) {
   $source = Join-Path $sourceRoot $item
   if (Test-Path $source) {
@@ -89,15 +89,19 @@ foreach ($item in $items) {
 
 $iconPath = Join-Path $installRoot "assets\printflow-agent-icon.ico"
 $openScript = Join-Path $installRoot "scripts\open-windows-agent.ps1"
-$startScript = Join-Path $installRoot "scripts\start-windows-agent-tray.ps1"
 $uninstallScript = Join-Path $installRoot "scripts\uninstall-windows-agent.ps1"
 $openWrapper = Join-Path $installRoot "scripts\open-windows-agent.vbs"
-$startWrapper = Join-Path $installRoot "scripts\start-windows-agent-tray.vbs"
 $uninstallWrapper = Join-Path $installRoot "scripts\uninstall-windows-agent.vbs"
 $packagePath = Join-Path $installRoot "package.json"
+$hostExecutable = Join-Path $installRoot "host\PrintFlowAgentHost.exe"
+$hostManifestPath = Join-Path $installRoot "host\host-version.json"
 
 if (-not (Test-Path (Join-Path $installRoot "node_modules"))) {
   throw "Pacote do Agent incompleto: dependencias de producao ausentes."
+}
+
+if (-not (Test-Path -LiteralPath $hostExecutable) -or -not (Test-Path -LiteralPath $hostManifestPath)) {
+  throw "Pacote do Agent incompleto: host Windows nativo ausente."
 }
 
 $version = "0.1.0"
@@ -112,9 +116,15 @@ if (Test-Path $packagePath) {
   }
 }
 
+$hostMetadata = Get-Content -LiteralPath $hostManifestPath -Raw | ConvertFrom-Json
+if ([string]$hostMetadata.agentVersion -ne [string]$version -or [string]$hostMetadata.hostVersion -ne [string]$version) {
+  throw "Pacote do Agent inconsistente: host Windows e Agent possuem versoes diferentes."
+}
+
 & (Join-Path $installRoot "scripts\install-windows-startup.ps1") `
   -ApiUrl $ApiUrl `
   -TaskName $TaskName `
+  -HostExecutable $hostExecutable `
   -NoStart
 
 function ConvertTo-VbsLiteral {
@@ -160,11 +170,6 @@ WScript.Quit code
 }
 
 New-PowerShellWrapper `
-  -WrapperPath $startWrapper `
-  -ScriptPath $startScript `
-  -Arguments "-ApiUrl `"$ApiUrl`""
-
-New-PowerShellWrapper `
   -WrapperPath $uninstallWrapper `
   -ScriptPath $uninstallScript `
   -Wait $true
@@ -187,29 +192,32 @@ Set-Content -LiteralPath $openWrapper -Value $openWrapperContent -Encoding ASCII
 
 $protocolKey = "HKCU:\Software\Classes\printflow-agent"
 $protocolCommandKey = Join-Path $protocolKey "shell\open\command"
-$protocolCommand = "wscript.exe `"$openWrapper`" `"%1`""
+$protocolIconKey = Join-Path $protocolKey "DefaultIcon"
+$protocolCommand = "`"$hostExecutable`" --protocol `"%1`""
 
 New-Item -Path $protocolCommandKey -Force | Out-Null
+New-Item -Path $protocolIconKey -Force | Out-Null
 Set-Item -Path $protocolKey -Value "URL:PrintFlow Agent Protocol"
 Set-ItemProperty -Path $protocolKey -Name "URL Protocol" -Value ""
+Set-Item -Path $protocolIconKey -Value "`"$iconPath`",0"
 Set-Item -Path $protocolCommandKey -Value $protocolCommand
 
 function New-AgentShortcut {
   param(
     [string]$Path,
-    [string]$TargetScript,
+    [string]$TargetPath,
     [string]$Description,
     [string]$Arguments
   )
 
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($Path)
-  $shortcut.TargetPath = "wscript.exe"
+  $shortcut.TargetPath = $TargetPath
   $shortcut.Arguments = $Arguments
   $shortcut.WorkingDirectory = $installRoot
   $shortcut.Description = $Description
   if (Test-Path $iconPath) {
-    $shortcut.IconLocation = $iconPath
+    $shortcut.IconLocation = "$iconPath,0"
   }
   $shortcut.Save()
 }
@@ -218,9 +226,9 @@ if (-not $NoDesktopShortcut) {
   $desktop = [Environment]::GetFolderPath("DesktopDirectory")
   New-AgentShortcut `
     -Path (Join-Path $desktop "PrintFlow Agent.lnk") `
-    -TargetScript $startScript `
+    -TargetPath $hostExecutable `
     -Description "Iniciar PrintFlow Agent" `
-    -Arguments "`"$startWrapper`""
+    -Arguments "--api-url `"$ApiUrl`""
 }
 
 if (-not $NoStartMenuShortcut) {
@@ -231,12 +239,12 @@ if (-not $NoStartMenuShortcut) {
   }
   New-AgentShortcut `
     -Path (Join-Path $folder "PrintFlow Agent.lnk") `
-    -TargetScript $startScript `
+    -TargetPath $hostExecutable `
     -Description "Iniciar PrintFlow Agent" `
-    -Arguments "`"$startWrapper`""
+    -Arguments "--api-url `"$ApiUrl`""
   New-AgentShortcut `
     -Path (Join-Path $folder "Desinstalar PrintFlow Agent.lnk") `
-    -TargetScript $uninstallScript `
+    -TargetPath "wscript.exe" `
     -Description "Desinstalar PrintFlow Agent" `
     -Arguments "`"$uninstallWrapper`""
 }
