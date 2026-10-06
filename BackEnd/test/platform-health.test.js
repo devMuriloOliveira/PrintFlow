@@ -13,7 +13,7 @@ test('overview interno agrega saúde operacional sem devolver payloads de tenant
       agents_not_online: '2',
       stale_print_starts: '1',
       long_waiting_print_jobs: '3',
-      delayed_stripe_webhooks: '4',
+      delayed_mercado_pago_webhooks: '4',
       marketplace_sync_errors: '5',
       latest_backup_status: 'success',
       last_successful_backup_at: '2026-10-03T12:00:00.000Z'
@@ -32,7 +32,7 @@ test('overview interno agrega saúde operacional sem devolver payloads de tenant
     agentsNotOnline: 2,
     stalePrintStarts: 1,
     longWaitingPrintJobs: 3,
-    delayedStripeWebhooks: 4,
+    delayedMercadoPagoWebhooks: 4,
     marketplaceSyncErrors: 5,
     latestBackupStatus: 'success',
     lastSuccessfulBackupAt: '2026-10-03T12:00:00.000Z',

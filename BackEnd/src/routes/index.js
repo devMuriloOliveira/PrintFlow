@@ -76,14 +76,10 @@ import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } fro
 import {
   handleMercadoPagoBillingSummary,
   handleMercadoPagoCheckoutCreate,
+  handleMercadoPagoSubscriptionStatus,
   handleMercadoPagoWebhook,
   handleMercadoPagoWebhookProbe,
-  handleStripeBillingSummary,
-  handleSubscriptionAccess,
-  handleStripeCheckoutCreate,
-  handleStripeSubscriptionCancellation,
-  handleStripeSubscriptionPlanChange,
-  handleStripeWebhook
+  handleSubscriptionAccess
 } from './billing.js'
 
 import {
@@ -511,7 +507,6 @@ export const handleRequest =
         )
       }
 
-      if (req.method === 'POST' && url.pathname === '/webhooks/stripe') return await handleStripeWebhook(req, res)
 
       // ==================================================
       // ROTAS PÚBLICAS DO AGENT
@@ -715,7 +710,7 @@ export const handleRequest =
         if (!canAccessRequest(user, req.method, url.pathname)) {
           return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
         }
-        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout' || url.pathname === '/api/billing/stripe/subscription/cancel' || url.pathname === '/api/billing/stripe/subscription/resume' || url.pathname === '/api/billing/stripe/subscription/change-plan'
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/mercado-pago/subscription/cancel' || url.pathname === '/api/billing/mercado-pago/subscription/pause' || url.pathname === '/api/billing/mercado-pago/subscription/resume'
         if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
           try {
             await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname, user })
@@ -733,20 +728,12 @@ export const handleRequest =
         return await handleMembersList(req, res)
       }
 
-      if (req.method === 'GET' && url.pathname === '/api/billing/mercado-pago') {
-        return await handleMercadoPagoBillingSummary(req, res)
-      }
-
-      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') {
-        return await handleMercadoPagoCheckoutCreate(req, res)
-      }
-
-      if (req.method === 'GET' && url.pathname === '/api/billing/stripe') return await handleStripeBillingSummary(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/billing/mercado-pago') return await handleMercadoPagoBillingSummary(req, res)
       if (req.method === 'GET' && url.pathname === '/api/subscription/access') return await handleSubscriptionAccess(req, res)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/checkout') return await handleStripeCheckoutCreate(req, res)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/cancel') return await handleStripeSubscriptionCancellation(req, res, true)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/resume') return await handleStripeSubscriptionCancellation(req, res, false)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/change-plan') return await handleStripeSubscriptionPlanChange(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') return await handleMercadoPagoCheckoutCreate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/subscription/cancel') return await handleMercadoPagoSubscriptionStatus(req, res, 'cancelled')
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/subscription/pause') return await handleMercadoPagoSubscriptionStatus(req, res, 'paused')
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/subscription/resume') return await handleMercadoPagoSubscriptionStatus(req, res, 'authorized')
 
       if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
         return await handleInvitationCreate(req, res)
@@ -1690,6 +1677,8 @@ export const handleRequest =
         error.message === 'Registro nao encontrado' ||
         error.message === 'Membro nao encontrado'
           ? 404
+          : (requestRoute === '/webhooks/mercado-pago' || requestRoute.startsWith('/api/billing/mercado-pago')) && Number(error?.status || error?.statusCode) >= 500
+            ? 503
           : 400
 
       if (
@@ -1709,7 +1698,9 @@ export const handleRequest =
               requestRoute,
 
             message:
-              error.message
+              error.message,
+
+            ...(error.providerDetails ? { providerDetails: error.providerDetails } : {})
           }
         )
       }

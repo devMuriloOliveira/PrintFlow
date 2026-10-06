@@ -43,7 +43,7 @@ const operationalHealthItems = computed(() => {
     { label: 'Agents fora de operação', value: health.agentsNotOnline, detail: 'Sem status online agora', alert: health.agentsNotOnline > 0 },
     { label: 'Impressões sem resposta', value: health.stalePrintStarts, detail: 'Em início há mais de 10 min', alert: health.stalePrintStarts > 0 },
     { label: 'Fila aguardando', value: health.longWaitingPrintJobs, detail: 'Itens em fila há mais de 1 h', alert: health.longWaitingPrintJobs > 0 },
-    { label: 'Webhooks Stripe atrasados', value: health.delayedStripeWebhooks, detail: 'Sem processamento após 5 min', alert: health.delayedStripeWebhooks > 0 },
+    { label: 'Webhooks Mercado Pago atrasados', value: health.delayedMercadoPagoWebhooks, detail: 'Sem processamento após 5 min', alert: health.delayedMercadoPagoWebhooks > 0 },
     { label: 'Integrações com erro', value: health.marketplaceSyncErrors, detail: 'Contas com falha de sincronização', alert: health.marketplaceSyncErrors > 0 },
     { label: 'Backup mais recente', value: health.latestBackupStatus === 'success' || health.latestBackupStatus === 'completed' ? 'Concluído' : health.latestBackupStatus, detail: health.lastSuccessfulBackupAt ? `Último sucesso: ${formatDate(health.lastSuccessfulBackupAt)}` : 'Nenhum backup concluído', alert: health.backupStale || health.latestBackupStatus === 'failed' }
   ]

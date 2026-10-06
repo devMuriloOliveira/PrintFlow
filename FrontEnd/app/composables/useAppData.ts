@@ -103,7 +103,7 @@ export type Client = {
   name: string; email: string; phone: string; type?: string; document?: string; zip?: string; address?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; origin?: string; notes?: string; tags?: string; status?: string; orders: number; revenue: number; ticket: number; last: string
 }
 
-export type StripeBillingSummary = {
+export type MercadoPagoBillingSummary = {
   configured: boolean;
   environment: 'sandbox' | 'production';
   plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
@@ -888,13 +888,13 @@ export const useAppData = () => {
     query: { groups: groups.join(',') }, responseType: 'blob', headers: resourceHeaders()
   })
 
-  const getStripeBilling = () => mockEnabled ? Promise.resolve({
+  const getMercadoPagoBilling = () => mockEnabled ? Promise.resolve({
     configured: true,
     environment: 'sandbox' as const,
     plans: [{ id: 'pro', code: 'PRO', name: 'Pro Mock', description: 'Plano ficticio para review', monthly: 79.9, yearly: 799, monthlyEnabled: true, yearlyEnabled: true }],
     subscription: { status: 'active', billingCycle: 'monthly', planCode: 'PRO', planName: 'Pro Mock', currentPeriodEnd: new Date(Date.now() + 20 * 86400000).toISOString() },
     checkout: null
-  }) : $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
+  }) : $fetch<MercadoPagoBillingSummary>(apiUrl('/api/billing/mercado-pago'), {
     headers: resourceHeaders()
   })
 
@@ -907,13 +907,12 @@ export const useAppData = () => {
     timeout: 15_000
   })
 
-  const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
-    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
+  const createMercadoPagoCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
+    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/mercado-pago/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
     })
-  const changeStripeSubscriptionPlan = (billingCycle: 'monthly' | 'yearly') => getStripeBilling()
-  const cancelStripeSubscription = () => getStripeBilling()
-  const resumeStripeSubscription = () => getStripeBilling()
+  const updateMercadoPagoSubscription = (action: 'cancel' | 'pause' | 'resume') => mockEnabled ? getMercadoPagoBilling() :
+    $fetch<MercadoPagoBillingSummary>(apiUrl(`/api/billing/mercado-pago/subscription/${action}`), { method: 'POST', headers: resourceHeaders() })
 
   const listSettingsExports = () => mockEnabled ? Promise.resolve([{ id: 'export-mock-1', fileName: 'filamind-mock-export.json', type: 'tenant_data', format: 'json', recordCount: 128, status: 'success', createdAt: new Date().toISOString() }]) : $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
     headers: resourceHeaders()
@@ -997,11 +996,10 @@ export const useAppData = () => {
     , setOnboardingPrinterMode
     , lookupCompanyByCnpj
     , exportTenantData
-    , getStripeBilling
+    , getMercadoPagoBilling
     , getSubscriptionAccess
-    , createStripeCheckout, changeStripeSubscriptionPlan
-    , cancelStripeSubscription
-    , resumeStripeSubscription
+    , createMercadoPagoCheckout
+    , updateMercadoPagoSubscription
     , listSettingsExports
     , listFinancialHistory
     , exportFinancialReport

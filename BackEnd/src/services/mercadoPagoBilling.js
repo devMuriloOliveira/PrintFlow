@@ -4,6 +4,9 @@ import { hasDatabase, query, withPlatformAdmin, withTenant } from '../db/pool.js
 
 const provider = 'mercado_pago'
 const text = (value, max = 500) => String(value || '').trim().slice(0, max)
+const safeProviderDetail = (value) => text(value, 240)
+  .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+  .replace(/\b(?:APP_USR|TEST)-[A-Za-z0-9-]+\b/g, '[credential]')
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0
 const billingPlanCode = 'starter'
 const supportedEvents = new Set(['subscription_preapproval', 'subscription_authorized_payment', 'payment'])
@@ -28,7 +31,6 @@ const mercadoPagoRequest = async (path, options = {}) => {
     headers: {
       Authorization: `Bearer ${env.mercadoPagoAccessToken}`,
       'Content-Type': 'application/json',
-      ...(env.mercadoPagoEnvironment === 'sandbox' ? { 'X-Scope': 'stage' } : {}),
       ...(options.headers || {})
     }
   })
@@ -40,8 +42,15 @@ const mercadoPagoRequest = async (path, options = {}) => {
   if (!response.ok) {
     const requestId = text(response.headers.get('x-request-id') || response.headers.get('x-correlation-id'), 120)
     const reference = requestId ? ` (referencia Mercado Pago: ${requestId})` : ''
-    const error = new Error(`Mercado Pago retornou HTTP ${response.status}${reference}`)
+    const endpoint = path.split('?')[0]
+    const error = new Error(`Mercado Pago retornou HTTP ${response.status} em ${endpoint}${reference}`)
     error.status = response.status
+    const causes = Array.isArray(data.cause) ? data.cause.slice(0, 5).map((cause) => ({
+      code: text(cause?.code, 80),
+      description: safeProviderDetail(cause?.description)
+    })).filter((cause) => cause.code || cause.description) : []
+    const providerMessage = safeProviderDetail(data.message)
+    if (providerMessage || causes.length) error.providerDetails = { message: providerMessage, causes }
     throw error
   }
   return data
@@ -73,41 +82,20 @@ export const synchronizeMercadoPagoPlans = async ({ name, monthly, yearly, trial
 }
 
 const activePlans = async () => {
-  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days from platform_plans where code = $1 and active = true limit 1`, [billingPlanCode])
+  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days, yearly_enabled from platform_plans where code = $1 and active = true limit 1`, [billingPlanCode])
   return result.rows.map((plan) => ({
     id: String(plan.id), code: plan.code, name: plan.name, description: plan.description || '',
     monthly: number(plan.monthly_reference_price), yearly: number(plan.yearly_reference_price),
     mercadoPagoMonthlyPlanId: text(plan.mercado_pago_monthly_plan_id, 160),
     mercadoPagoYearlyPlanId: text(plan.mercado_pago_yearly_plan_id, 160),
-    trialDays: Math.max(0, Math.min(30, Number(plan.trial_days) || 0))
+    trialDays: Math.max(0, Math.min(30, Number(plan.trial_days) || 0)),
+    yearlyEnabled: Boolean(plan.yearly_enabled)
   }))
-}
-
-const planFromRow = (plan) => ({
-  id: String(plan.id), code: plan.code, name: plan.name, description: plan.description || '',
-  monthly: number(plan.monthly_reference_price), yearly: number(plan.yearly_reference_price),
-  mercadoPagoMonthlyPlanId: text(plan.mercado_pago_monthly_plan_id, 160),
-  mercadoPagoYearlyPlanId: text(plan.mercado_pago_yearly_plan_id, 160),
-  trialDays: Math.max(0, Math.min(30, Number(plan.trial_days) || 0))
-})
-
-const ensureMercadoPagoPlans = async (plan) => {
-  if (plan.mercadoPagoMonthlyPlanId && plan.mercadoPagoYearlyPlanId) return plan
-  const providerPlans = await synchronizeMercadoPagoPlans({ name: plan.name, monthly: plan.monthly, yearly: plan.yearly, trialDays: plan.trialDays })
-  const updated = await withPlatformAdmin((client) => client.query(`
-    update platform_plans
-       set mercado_pago_monthly_plan_id = $2,
-           mercado_pago_yearly_plan_id = $3,
-           updated_at = now()
-     where id = $1
-     returning id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days
-  `, [plan.id, providerPlans.monthlyPlanId, providerPlans.yearlyPlanId]))
-  return planFromRow(updated.rows[0])
 }
 
 const subscriptionStatus = (value) => {
   const status = text(value, 80).toLowerCase()
-  if (status === 'cancelled') return 'cancelled'
+  if (status === 'cancelled' || status === 'canceled') return 'cancelled'
   if (status === 'paused') return 'paused'
   return ''
 }
@@ -122,7 +110,7 @@ export const invoiceStatus = (invoice = {}) => {
 
 export const getMercadoPagoBillingSummary = async (tenantId) => {
   const plans = hasDatabase ? await activePlans() : []
-  if (!hasDatabase) return { configured: Boolean(env.mercadoPagoAccessToken), environment: env.mercadoPagoEnvironment, plans: [], subscription: null, checkout: null }
+  if (!hasDatabase) return { configured: Boolean(env.mercadoPagoAccessToken && env.mercadoPagoWebhookSecret), environment: env.mercadoPagoEnvironment, plans: [], subscription: null, checkout: null }
   return withTenant(tenantId, async (client) => {
     const [subscription, checkout] = await Promise.all([
       client.query(`select subscription.status, subscription.billing_cycle, subscription.current_period_end, plan.code as plan_code, plan.name as plan_name from tenant_subscriptions subscription left join platform_plans plan on plan.id = subscription.plan_id where subscription.tenant_id = $1 limit 1`, [tenantId]),
@@ -131,8 +119,8 @@ export const getMercadoPagoBillingSummary = async (tenantId) => {
     const current = subscription.rows[0]
     const pending = checkout.rows[0]
     return {
-      configured: Boolean(env.mercadoPagoAccessToken), environment: env.mercadoPagoEnvironment,
-      plans: plans.map((plan) => ({ ...plan, monthlyEnabled: plan.monthly > 0, yearlyEnabled: plan.yearly > 0 })),
+      configured: Boolean(env.mercadoPagoAccessToken && env.mercadoPagoWebhookSecret), environment: env.mercadoPagoEnvironment,
+      plans: plans.map((plan) => ({ ...plan, monthlyEnabled: plan.monthly > 0, yearlyEnabled: plan.yearly > 0 && plan.yearlyEnabled })),
       subscription: current ? { status: current.status, billingCycle: current.billing_cycle, planCode: current.plan_code || '', planName: current.plan_name || '', currentPeriodEnd: current.current_period_end } : null,
       checkout: pending ? { status: pending.status, url: pending.checkout_url, expiresAt: pending.expires_at, createdAt: pending.created_at } : null
     }
@@ -141,40 +129,42 @@ export const getMercadoPagoBillingSummary = async (tenantId) => {
 
 export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail, planCode, billingCycle }) => {
   if (!hasDatabase) throw new Error('A cobranca exige banco de dados.')
-  if (!env.appPublicUrl) throw new Error('APP_PUBLIC_URL precisa estar configurada antes de ativar o checkout do Mercado Pago.')
+  if (!env.appPublicUrl || !env.mercadoPagoWebhookSecret) throw new Error('APP_PUBLIC_URL e MERCADO_PAGO_WEBHOOK_SECRET precisam estar configurados antes de ativar o checkout do Mercado Pago.')
   const cycle = ['monthly', 'yearly'].includes(billingCycle) ? billingCycle : ''
-  const selectedPlan = (await activePlans()).find((item) => item.code === text(planCode, 80))
-  const plan = selectedPlan ? await ensureMercadoPagoPlans(selectedPlan) : null
+  const plan = (await activePlans()).find((item) => item.code === text(planCode, 80))
   if (!plan || !cycle) throw new Error('Plano ou ciclo de cobranca invalido.')
   const amount = number(plan[cycle])
   if (amount <= 0) throw new Error('O valor da assinatura ainda nao foi configurado.')
   const payerEmail = env.mercadoPagoEnvironment === 'sandbox'
     ? text(env.mercadoPagoTestPayerEmail, 320)
     : text(actorEmail, 320)
-  if (!payerEmail) throw new Error('O Owner precisa possuir um e-mail valido para iniciar a assinatura.')
-
-  const previousSubscription = await withTenant(tenantId, (client) => client.query(
-    'select trial_used_at from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId]
-  ))
-  const hasUsedTrial = Boolean(previousSubscription.rows[0]?.trial_used_at)
-  const providerPlanId = hasUsedTrial
-    ? ''
-    : cycle === 'yearly' ? plan.mercadoPagoYearlyPlanId : plan.mercadoPagoMonthlyPlanId
-  const trialDays = providerPlanId ? plan.trialDays : 0
-
-  const pending = await withTenant(tenantId, (client) => client.query(`
-    select id, checkout_url, expires_at
-      from tenant_billing_checkouts
-     where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open') and checkout_url <> ''
-     order by created_at desc limit 1
-  `, [tenantId]))
-  if (pending.rowCount) return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
+  if (!payerEmail) throw new Error(env.mercadoPagoEnvironment === 'sandbox'
+    ? 'Configure MERCADO_PAGO_TEST_PAYER_EMAIL com o e-mail do comprador de teste.'
+    : 'O Owner precisa possuir um e-mail valido para iniciar a assinatura.')
 
   const checkoutId = `mercado_pago_checkout_${randomBytes(12).toString('hex')}`
-  await withTenant(tenantId, (client) => client.query(`
-    insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days)
-    values ($1, $2, $3, $4, $5, '${provider}', 'creating', $6, $7, $8)
-  `, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), providerPlanId, trialDays]))
+  const checkoutState = await withTenant(tenantId, async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtext($1))', [String(tenantId)])
+    const current = await client.query(`select status, provider_subscription_id from tenant_subscriptions where tenant_id = $1 limit 1`, [tenantId])
+    if (current.rows[0]?.provider_subscription_id && ['trial', 'active', 'past_due', 'grace', 'paused'].includes(current.rows[0].status)) {
+      throw new Error('Esta empresa ja possui uma assinatura Mercado Pago. Gerencie a assinatura existente.')
+    }
+    const pending = await client.query(`
+      select id, checkout_url, expires_at from tenant_billing_checkouts
+       where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open')
+       order by created_at desc limit 1
+    `, [tenantId])
+    if (pending.rowCount) {
+      if (!pending.rows[0].checkout_url) throw new Error('Ja existe um checkout Mercado Pago em processamento. Aguarde alguns instantes.')
+      return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
+    }
+    await client.query(`
+      insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days)
+      values ($1, $2, $3, $4, $5, '${provider}', 'creating', $6, $7, $8)
+    `, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), '', 0])
+    return null
+  })
+  if (checkoutState) return checkoutState
 
   try {
     const subscription = await mercadoPagoRequest('/preapproval', {
@@ -183,14 +173,12 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
         reason: `Filamind - assinatura ${cycle === 'yearly' ? 'anual' : 'mensal'}`,
         external_reference: checkoutId,
         payer_email: payerEmail,
-        ...(providerPlanId ? { preapproval_plan_id: providerPlanId } : {
-          auto_recurring: {
-            frequency: cycle === 'yearly' ? 12 : 1,
-            frequency_type: 'months',
-            transaction_amount: amount,
-            currency_id: 'BRL'
-          }
-        }),
+        auto_recurring: {
+          frequency: cycle === 'yearly' ? 12 : 1,
+          frequency_type: 'months',
+          transaction_amount: amount,
+          currency_id: 'BRL'
+        },
         back_url: checkoutReturnUrl('success'),
         status: 'pending'
       })
@@ -206,6 +194,36 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
     await withTenant(tenantId, (client) => client.query(`update tenant_billing_checkouts set status = 'failed', updated_at = now() where id = $1`, [checkoutId]))
     throw error
   }
+}
+
+export const setMercadoPagoSubscriptionStatus = async ({ tenantId, actorId, status }) => {
+  if (!hasDatabase || !env.mercadoPagoAccessToken) throw new Error('Mercado Pago ainda nao esta configurado.')
+  const nextStatus = status === 'cancelled' ? 'cancelled' : status === 'paused' ? 'paused' : status === 'authorized' ? 'active' : ''
+  if (!nextStatus) throw new Error('Status de assinatura invalido.')
+  const result = await withTenant(tenantId, (client) => client.query(
+    'select id, status, provider_subscription_id, manual_override from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId]
+  ))
+  const subscription = result.rows[0]
+  if (!subscription?.provider_subscription_id || subscription.manual_override) throw new Error('Nenhuma assinatura Mercado Pago gerenciavel foi encontrada.')
+  if (nextStatus === 'active' && subscription.status !== 'paused') throw new Error('Somente uma assinatura pausada pode ser reativada.')
+  if (nextStatus !== 'active' && !['trial', 'active', 'past_due', 'grace', 'paused'].includes(subscription.status)) throw new Error('Esta assinatura ja foi encerrada.')
+
+  const providerStatus = nextStatus === 'active' ? 'authorized' : nextStatus === 'cancelled' ? 'canceled' : 'paused'
+  const remote = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(subscription.provider_subscription_id)}`, {
+    method: 'PUT', body: JSON.stringify({ status: providerStatus })
+  })
+  const confirmedStatus = subscriptionStatus(remote.status) || (text(remote.status, 80).toLowerCase() === 'authorized' ? 'active' : '')
+  if (confirmedStatus !== nextStatus) throw new Error('O Mercado Pago nao confirmou a alteracao da assinatura.')
+  await withTenant(tenantId, async (client) => {
+    await client.query(`update tenant_subscriptions set status = $2, cancelled_at = case when $2 = 'cancelled' then now() else null end, last_provider_sync_at = now(), updated_at = now() where id = $1`, [subscription.id, nextStatus])
+    await client.query(`update tenants set billing_status = $2 where id = $1`, [tenantId, nextStatus === 'active' ? 'active' : nextStatus === 'paused' ? 'paused' : 'cancelled'])
+    await client.query(`
+      insert into tenant_subscription_events (tenant_id, subscription_id, action, new_state, reason, actor_user_id, source, provider)
+      values ($1,$2,$3,$4::jsonb,$5,$6,'manual','${provider}')
+    `, [tenantId, subscription.id, `subscription.${nextStatus}`, JSON.stringify({ providerSubscriptionId: subscription.provider_subscription_id, status: nextStatus }),
+      nextStatus === 'cancelled' ? 'Assinatura cancelada pelo Owner no Mercado Pago.' : nextStatus === 'paused' ? 'Assinatura pausada pelo Owner no Mercado Pago.' : 'Assinatura reativada pelo Owner no Mercado Pago.', String(actorId || '')])
+  })
+  return getMercadoPagoBillingSummary(tenantId)
 }
 
 const signatureParts = (value) => Object.fromEntries(String(value || '').split(',').map((part) => part.trim().split('=').map((item) => item.trim())).filter(([key, item]) => key && item))

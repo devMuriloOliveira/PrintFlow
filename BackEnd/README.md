@@ -135,17 +135,19 @@ Checklist de producao:
 - Configurar o monitor externo para consultar somente `GET /healthz`. O resumo
   autenticado `GET /api/operational-health` fica restrito a usuarios com acesso
   de producao e deve ser acompanhado pelo painel de Notificacoes.
-- Para o Stripe, cadastrar no Dashboard o endpoint `POST
-  https://SUA-API.onrender.com/webhooks/stripe` e habilitar `checkout.session.completed`,
-  `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`,
-  `invoice.payment_failed`, `invoice.marked_uncollectible` e `invoice.voided`.
-  Copiar o segredo `whsec_...` exibido pelo Stripe para `STRIPE_WEBHOOK_SECRET` no
-  Render. O retorno do Checkout nao confirma a assinatura: somente o webhook com
-  assinatura valida altera o acesso.
-- Antes da primeira cobrança, configure o preço mensal em Superadmin >
-  Empresas e valide o ambiente Stripe. Novos checkouts não oferecem trial;
-  ciclos anuais existentes permanecem históricos e não são oferecidos para
-  novas assinaturas. A chave privada continua somente no Render.
+- Para assinaturas Mercado Pago, configure o webhook da aplicação com URL
+  `https://SUA-API.onrender.com/webhooks/mercado-pago` e habilite `subscription_preapproval`,
+  `subscription_authorized_payment` e `payment`. Salve o segredo de assinatura
+  em `MERCADO_PAGO_WEBHOOK_SECRET` no Render. Configure `MERCADO_PAGO_ACCESS_TOKEN`
+  com o token de produção e `MERCADO_PAGO_ENVIRONMENT=production` no Render.
+  Localmente use somente credenciais sandbox, `MERCADO_PAGO_ENVIRONMENT=sandbox`
+  e o e-mail de um comprador de teste em `MERCADO_PAGO_TEST_PAYER_EMAIL`.
+  O retorno do checkout não confirma a assinatura: somente webhooks verificados
+  pelo segredo atualizam o acesso.
+- Antes da primeira cobrança, configure os preços em Superadmin > Empresas e
+  valide uma assinatura com usuário comprador de teste. Novos checkouts não
+  oferecem trial. Cancelar encerra a assinatura no Mercado Pago; pausar bloqueia
+  operações PRO até que o Owner retome as cobranças.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 
@@ -198,7 +200,7 @@ npm.cmd test
 ```
 
 Os testes automatizados não substituem a validação de RLS no banco de destino,
-webhooks Stripe assinados, OAuth real ou desempenho de homologação.
+webhooks Mercado Pago assinados, OAuth real ou desempenho de homologação.
 
 ## Backup e Restauracao
 
@@ -226,11 +228,14 @@ Autenticacao:
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 
-Assinatura Stripe (restrita ao Owner):
+Assinatura Mercado Pago (restrita ao Owner):
 
-- `GET /api/billing/stripe`
-- `POST /api/billing/stripe/checkout`
-- `POST /webhooks/stripe`
+- `GET /api/billing/mercado-pago`
+- `POST /api/billing/mercado-pago/checkout`
+- `POST /api/billing/mercado-pago/subscription/pause`
+- `POST /api/billing/mercado-pago/subscription/resume`
+- `POST /api/billing/mercado-pago/subscription/cancel`
+- `POST /webhooks/mercado-pago`
 
 Dados do aplicativo:
 

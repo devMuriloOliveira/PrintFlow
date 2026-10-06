@@ -483,9 +483,6 @@ export const migrate =
     `)
     await query(`alter table platform_plans add column if not exists mercado_pago_monthly_plan_id text not null default ''`)
     await query(`alter table platform_plans add column if not exists mercado_pago_yearly_plan_id text not null default ''`)
-    await query(`alter table platform_plans add column if not exists stripe_product_id text not null default ''`)
-    await query(`alter table platform_plans add column if not exists stripe_monthly_price_id text not null default ''`)
-    await query(`alter table platform_plans add column if not exists stripe_yearly_price_id text not null default ''`)
     await query(`alter table platform_plans add column if not exists trial_days integer not null default 7`)
     await query(`alter table platform_plans add column if not exists yearly_enabled boolean not null default false`)
     await query(`alter table platform_plans drop constraint if exists platform_plans_trial_days_check`)
@@ -623,7 +620,7 @@ export const migrate =
       on conflict (code) do nothing
     `)
     await query(`update platform_plans set name = 'FREE', description = 'Organize sua operação com gestão manual dentro dos limites do plano.', monthly_reference_price = 0, yearly_reference_price = 0, limits = '{"clients":20,"products":10,"ordersMonthly":15,"printers":1,"filaments":5,"goals":1}'::jsonb, features = '{"coreOperations":true,"marketplaces":false,"advancedReports":false,"manualPrinters":true,"agent":false,"team":false}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'free'`)
-    await query(`update platform_plans set name = 'PRO', description = 'Conecte e automatize sua produção.', stripe_product_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_product_id end, stripe_monthly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_monthly_price_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"manualPrinters":true,"agent":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'starter'`)
+    await query(`update platform_plans set name = 'PRO', description = 'Conecte e automatize sua produção.', mercado_pago_monthly_plan_id = case when monthly_reference_price <> 19.90 then '' else mercado_pago_monthly_plan_id end, mercado_pago_yearly_plan_id = case when yearly_reference_price <> 199.90 then '' else mercado_pago_yearly_plan_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"manualPrinters":true,"agent":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'starter'`)
     await query(`update platform_plans set active = false, updated_at = now() where code in ('growth', 'scale')`)
 
     await query(`

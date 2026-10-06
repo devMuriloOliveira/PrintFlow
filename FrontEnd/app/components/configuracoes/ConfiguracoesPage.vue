@@ -3,7 +3,7 @@ const props = withDefaults(defineProps<{ initialActive?: string; standalone?: bo
 const { notify } = useUi()
 const auth = useAuth()
 const route = useRoute()
-const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, cancelStripeSubscription, resumeStripeSubscription, createSupportRequest } = useAppData()
+const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getMercadoPagoBilling, createMercadoPagoCheckout, updateMercadoPagoSubscription, createSupportRequest } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 
 const routeActiveSection = computed(() => String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
@@ -42,8 +42,8 @@ const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: 
 const billingLoading = ref(false)
 const creatingBillingLink = ref(false)
 const subscriptionActionLoading = ref(false)
-const stripeBilling = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
-const stripeReturnRetries = ref(0)
+const mercadoPagoBilling = ref<Awaited<ReturnType<typeof getMercadoPagoBilling>> | null>(null)
+const billingReturnRetries = ref(0)
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
 const memberDrafts = reactive<Record<string, { role: string; status: string }>>({})
 const invite = reactive({ email: '', role: 'usuario' as 'admin' | 'financeiro' | 'producao' | 'usuario' })
@@ -206,7 +206,7 @@ const passwordReady = computed(() => Boolean(passwordForm.currentPassword) && pa
 const securityStatus = computed(() => isPrivileged.value && mfaEnabled.value
   ? { label: 'Proteção reforçada', detail: 'MFA ativo', tone: 'success' }
   : { label: 'Proteção básica', detail: isPrivileged.value ? 'MFA recomendado' : 'Senha e sessões ativas', tone: 'warning' })
-const selectedBillingPlan = computed(() => stripeBilling.value?.plans[0] || null)
+const selectedBillingPlan = computed(() => mercadoPagoBilling.value?.plans[0] || null)
 const billingActionLoading = computed(() => creatingBillingLink.value || subscriptionActionLoading.value)
 const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const fixedCostPerUnitPreview = computed(() => {
@@ -215,7 +215,7 @@ const fixedCostPerUnitPreview = computed(() => {
   return plannedUnits > 0 ? monthlyCost / plannedUnits : 0
 })
 const subscriptionStatus = (status: string) => ({ trial: 'Trial histórico', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carência', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
-const hasProSubscription = computed(() => stripeBilling.value?.subscription?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'courtesy'].includes(stripeBilling.value?.subscription?.status || ''))
+const hasProSubscription = computed(() => mercadoPagoBilling.value?.subscription?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'courtesy', 'paused'].includes(mercadoPagoBilling.value?.subscription?.status || ''))
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
 const memberBadge = (status: string) => status === 'active' ? 'badge badge--green' : 'badge badge--orange'
 const memberStatusLabel = (status: string) => status === 'active' ? 'Ativo' : 'Suspenso'
@@ -459,32 +459,32 @@ const loadIntegrations = async () => {
   integrationsLoading.value = true
   try { integrationsOverview.value = await loadIntegrationsOverview() } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel carregar as integracoes.') } finally { integrationsLoading.value = false }
 }
-const loadStripeBilling = async () => {
+const loadMercadoPagoBilling = async () => {
   if (!isOwner.value) return
   billingLoading.value = true
   try {
-    stripeBilling.value = await getStripeBilling()
+    mercadoPagoBilling.value = await getMercadoPagoBilling()
     const billingReturn = String(route.query.billing || '')
-    if (billingReturn === 'cancelled' && stripeReturnRetries.value === 0) notify('Checkout cancelado. Nenhuma cobrança foi criada.')
+    if (billingReturn === 'cancelled' && billingReturnRetries.value === 0) notify('Checkout cancelado. Nenhuma cobrança foi criada.')
     if (billingReturn === 'success') {
       if (hasProSubscription.value) notify('Assinatura confirmada com sucesso.')
-      else if (stripeReturnRetries.value < 3 && import.meta.client) {
-        if (stripeReturnRetries.value === 0) notify('Pagamento recebido. Confirmando sua assinatura...')
-        stripeReturnRetries.value += 1
-        window.setTimeout(() => { void loadStripeBilling() }, 2_000)
+      else if (billingReturnRetries.value < 3 && import.meta.client) {
+        if (billingReturnRetries.value === 0) notify('Pagamento recebido. Confirmando sua assinatura...')
+        billingReturnRetries.value += 1
+        window.setTimeout(() => { void loadMercadoPagoBilling() }, 2_000)
       }
     }
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel consultar a assinatura.')
   } finally { billingLoading.value = false }
 }
-const startStripeCheckout = async () => {
+const startMercadoPagoCheckout = async () => {
   const cycle = 'monthly'
   const amount = selectedBillingPlan.value?.monthly || 0
   if (!selectedBillingPlan.value || amount <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
   creatingBillingLink.value = true
   try {
-    const result = await createStripeCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
+    const result = await createMercadoPagoCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
     window.location.assign(result.url)
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
@@ -532,16 +532,18 @@ const copyMfaSecret = async () => {
   if (!mfaSetup.value?.secret) return
   try { await navigator.clipboard.writeText(mfaSetup.value.secret); notify('Chave de configuração copiada.') } catch { notify('Não foi possível copiar. Selecione a chave manualmente.') }
 }
-const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
-  if (!stripeBilling.value?.subscription || subscriptionActionLoading.value) return
-  const message = cancelAtPeriodEnd
-    ? 'A assinatura continuará ativa até o fim do período atual. Deseja programar o cancelamento?'
-    : 'Deseja continuar a assinatura e remover o cancelamento programado?'
+const changeMercadoPagoSubscription = async (action: 'cancel' | 'pause' | 'resume') => {
+  if (!mercadoPagoBilling.value?.subscription || subscriptionActionLoading.value) return
+  const message = action === 'cancel'
+    ? 'O Mercado Pago cancelará a assinatura agora. Deseja continuar?'
+    : action === 'pause'
+      ? 'As próximas cobranças serão pausadas. Deseja continuar?'
+      : 'Deseja reativar as cobranças desta assinatura?'
   if (!window.confirm(message)) return
   subscriptionActionLoading.value = true
   try {
-    stripeBilling.value = cancelAtPeriodEnd ? await cancelStripeSubscription() : await resumeStripeSubscription()
-    notify(cancelAtPeriodEnd ? 'Cancelamento programado para o fim do período.' : 'Assinatura retomada com sucesso.')
+    mercadoPagoBilling.value = await updateMercadoPagoSubscription(action)
+    notify(action === 'cancel' ? 'Assinatura cancelada no Mercado Pago.' : action === 'pause' ? 'Cobranças pausadas no Mercado Pago.' : 'Assinatura reativada no Mercado Pago.')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar a assinatura.')
   } finally { subscriptionActionLoading.value = false }
@@ -601,7 +603,7 @@ watch(active, (tab) => {
   }
   if (tab === 'Backup e Dados' && canExportCompanyData.value) void loadSectionOnce('backup', loadBackup)
   if (tab === 'Integracoes') void loadSectionOnce('integrations', loadIntegrations)
-  if (tab === 'Assinatura') void loadSectionOnce('billing', loadStripeBilling)
+  if (tab === 'Assinatura') void loadSectionOnce('billing', loadMercadoPagoBilling)
 }, { immediate: true })
 watch(canExportCompanyData, (allowed) => {
   if (allowed && active.value === 'Backup e Dados') void loadSectionOnce('backup', loadBackup)
@@ -695,28 +697,28 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Assinatura'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>PRO mensal por preço de lançamento vigente. Cobrança recorrente pelo Stripe, sem fidelidade.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadStripeBilling">Atualizar</button></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>Assinatura recorrente do Filamind pelo Mercado Pago.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadMercadoPagoBilling">Atualizar</button></div>
           <div v-if="!isOwner" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Somente o Owner pode consultar ou alterar a assinatura da empresa.</div>
           <div v-else-if="billingLoading" class="empty-state"><div><h3>Consultando assinatura</h3></div></div>
-          <template v-else-if="stripeBilling">
-            <div v-if="stripeBilling.subscription" class="billing-subscription-summary">
-              <div class="billing-subscription-summary__status"><UiIcon name="check" /><div><span>Assinatura atual</span><strong>{{ stripeBilling.subscription.planName || stripeBilling.subscription.planCode }} · {{ subscriptionStatus(stripeBilling.subscription.status) }}</strong></div></div>
-              <div v-if="stripeBilling.subscription.status === 'grace' && stripeBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(stripeBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>Você mantém o PRO por 3 dias. Depois, a empresa volta ao FREE sem excluir dados.</small></div><div v-else-if="stripeBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ stripeBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança em' }}</span><strong>{{ new Date(stripeBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="stripeBilling.subscription.status !== 'trial'">{{ currency(stripeBilling.plans[0]?.[stripeBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ stripeBilling.subscription.billingCycle === 'yearly' ? 'anual existente' : 'mensal' }}</small></div>
-              <div class="billing-subscription-summary__actions"><span v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="badge badge--orange">Cancelamento programado</span><button v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="btn" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(false)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Continuar assinatura' }}</button><button v-else-if="['trial', 'active', 'past_due', 'grace'].includes(stripeBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(true)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div>
+          <template v-else-if="mercadoPagoBilling">
+            <div v-if="mercadoPagoBilling.subscription" class="billing-subscription-summary">
+              <div class="billing-subscription-summary__status"><UiIcon name="check" /><div><span>Assinatura atual</span><strong>{{ mercadoPagoBilling.subscription.planName || mercadoPagoBilling.subscription.planCode }} · {{ subscriptionStatus(mercadoPagoBilling.subscription.status) }}</strong></div></div>
+              <div v-if="mercadoPagoBilling.subscription.status === 'grace' && mercadoPagoBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(mercadoPagoBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>Você mantém o PRO por 3 dias. Depois, a empresa volta ao FREE sem excluir dados.</small></div><div v-else-if="mercadoPagoBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ mercadoPagoBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança' }}</span><strong>{{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="mercadoPagoBilling.subscription.status !== 'trial'">{{ currency(mercadoPagoBilling.plans[0]?.[mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'anual' : 'mensal' }}</small></div>
+              <div class="billing-subscription-summary__actions"><button v-if="mercadoPagoBilling.subscription.status === 'paused'" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('resume')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Retomar cobrança' }}</button><button v-else-if="['trial', 'active', 'past_due', 'grace'].includes(mercadoPagoBilling.subscription.status)" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('pause')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Pausar cobrança' }}</button><button v-if="['trial', 'active', 'past_due', 'grace', 'paused'].includes(mercadoPagoBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('cancel')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div>
             </div>
-            <div v-if="stripeBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(stripeBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="stripeBilling.checkout.url" rel="noopener noreferrer">Abrir link</a>.</div>
-            <div v-if="!stripeBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Stripe ainda precisa do segredo de webhook no ambiente antes de gerar um checkout.</div>
-            <form v-else-if="!hasProSubscription" class="integration-section" style="margin-top:16px" @submit.prevent="startStripeCheckout">
-              <div class="integration-section__head"><div><h3>Assinatura Filamind</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no Filamind.</p></div><span class="badge badge--orange">Producao</span></div>
+            <div v-if="mercadoPagoBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(mercadoPagoBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="mercadoPagoBilling.checkout.url" rel="noopener noreferrer">Abrir link no Mercado Pago</a>.</div>
+            <div v-if="!mercadoPagoBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Mercado Pago precisa das credenciais e do segredo de webhook no ambiente para gerar um checkout.</div>
+            <form v-else-if="!hasProSubscription" class="integration-section" style="margin-top:16px" @submit.prevent="startMercadoPagoCheckout">
+              <div class="integration-section__head"><div><h3>Assinatura Filamind</h3><p>O pagamento é concluído em uma página segura do Mercado Pago.</p></div><span class="badge badge--orange">{{ mercadoPagoBilling.environment === 'sandbox' ? 'Teste' : 'Produção' }}</span></div>
               <div v-if="selectedBillingPlan" class="billing-plans">
                 <article class="billing-plan-card">
                   <div class="billing-plan-card__title"><h3>PRO mensal</h3><span class="billing-plan-card__caption">Preço de lançamento vigente. Cancele quando quiser.</span></div>
                   <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.monthly || 0).replace('R$', '').trim() }}<span>/mês</span></div>
                   <ul class="billing-plan-card__features"><li>Automação com PrintFlow Agent e fila de impressão</li><li>Marketplaces e relatórios avançados</li><li>Equipe com até 8 pessoas</li><li>Operação sem os limites do plano FREE</li></ul>
-                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout">{{ billingActionLoading ? 'Atualizando...' : 'Assinar PRO' }}</button>
+                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startMercadoPagoCheckout">{{ billingActionLoading ? 'Atualizando...' : 'Assinar PRO' }}</button>
                 </article>
               </div>
-              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cobrança mensal recorrente pelo Stripe. Você pode programar o cancelamento para o fim do período pago.</div>
+              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cobrança mensal recorrente pelo Mercado Pago. Você pode pausar ou cancelar a assinatura.</div>
             </form>
           </template>
         </div>

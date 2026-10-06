@@ -3,7 +3,7 @@ import { env } from '../config/env.js'
 import { query, withPlatformAdmin, withTenant } from '../db/pool.js'
 import { blindIndexesForLookup, decryptField } from '../security/crypto.js'
 import { describeAuditEvent } from './operationalEvents.js'
-import { synchronizeStripePrices } from './stripeBilling.js'
+import { synchronizeMercadoPagoPlans } from './mercadoPagoBilling.js'
 
 const text = (value, max = 500) => String(value || '').trim().slice(0, max)
 const configuredEmails = () => env.platformSuperAdminEmails
@@ -90,7 +90,7 @@ export const getPlatformOverview = async ({ runQuery = query, now = new Date() }
       (select count(*)::int from agents where status <> 'online') as agents_not_online,
       (select count(*)::int from print_jobs where status = 'starting' and updated_at < now() - interval '10 minutes') as stale_print_starts,
       (select count(*)::int from print_jobs where status = 'queued' and created_at < now() - interval '1 hour' and (scheduled_at is null or scheduled_at <= now())) as long_waiting_print_jobs,
-      (select count(*)::int from payment_provider_events where provider = 'stripe' and processed_at is null and received_at < now() - interval '5 minutes') as delayed_stripe_webhooks,
+      (select count(*)::int from payment_provider_events where provider = 'mercado_pago' and processed_at is null and received_at < now() - interval '5 minutes') as delayed_mercado_pago_webhooks,
       (select count(*)::int from marketplace_integrations where status = 'error' or coalesce(last_error, '') <> '') as marketplace_sync_errors,
       (select status from backup_runs order by started_at desc, id desc limit 1) as latest_backup_status,
       (select completed_at from backup_runs where status in ('success', 'completed') and completed_at is not null order by started_at desc, id desc limit 1) as last_successful_backup_at
@@ -103,7 +103,7 @@ export const getPlatformOverview = async ({ runQuery = query, now = new Date() }
     agentsNotOnline: Number(healthRow.agents_not_online || 0),
     stalePrintStarts: Number(healthRow.stale_print_starts || 0),
     longWaitingPrintJobs: Number(healthRow.long_waiting_print_jobs || 0),
-    delayedStripeWebhooks: Number(healthRow.delayed_stripe_webhooks || 0),
+    delayedMercadoPagoWebhooks: Number(healthRow.delayed_mercado_pago_webhooks || 0),
     marketplaceSyncErrors: Number(healthRow.marketplace_sync_errors || 0),
     latestBackupStatus: String(healthRow.latest_backup_status || 'unknown'),
     lastSuccessfulBackupAt,
@@ -151,11 +151,11 @@ export const listPlatformTenants = async ({ limit = 50, offset = 0 } = {}) => {
 }
 
 export const listPlatformPlans = async () => {
-  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, stripe_product_id, stripe_monthly_price_id, stripe_yearly_price_id, trial_days, limits, features, active, created_at, updated_at from platform_plans order by active desc, name asc`)
+  const result = await query(`select id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days, limits, features, active, created_at, updated_at from platform_plans order by active desc, name asc`)
   return result.rows.map((row) => ({
     id: String(row.id), code: row.code, name: row.name, description: row.description || '',
     monthlyReferencePrice: Number(row.monthly_reference_price || 0), yearlyReferencePrice: Number(row.yearly_reference_price || 0),
-    stripeProductId: row.stripe_product_id || '', stripeMonthlyPriceId: row.stripe_monthly_price_id || '', stripeYearlyPriceId: row.stripe_yearly_price_id || '', trialDays: Number(row.trial_days || 0),
+    mercadoPagoMonthlyPlanId: row.mercado_pago_monthly_plan_id || '', mercadoPagoYearlyPlanId: row.mercado_pago_yearly_plan_id || '', trialDays: Number(row.trial_days || 0),
     limits: row.limits || {}, features: row.features || {}, active: Boolean(row.active), createdAt: row.created_at, updatedAt: row.updated_at
   }))
 }
@@ -167,25 +167,25 @@ export const updatePlatformPlanBillingConfiguration = async (planId, payload = {
   // configurações não podem reativar um trial comercial.
   const trialDays = 0
   if (!Number.isFinite(monthlyReferencePrice) || monthlyReferencePrice <= 0 || !Number.isFinite(yearlyReferencePrice) || yearlyReferencePrice <= 0) throw new Error('Informe valores mensal e anual validos.')
-  const current = await query(`select id, name, monthly_reference_price, yearly_reference_price, trial_days, stripe_product_id, stripe_monthly_price_id, stripe_yearly_price_id from platform_plans where id = $1 limit 1`, [planId])
+  const current = await query(`select id, name, monthly_reference_price, yearly_reference_price, trial_days, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id from platform_plans where id = $1 limit 1`, [planId])
   if (!current.rowCount) throw new Error('Plano nao encontrado.')
   const plan = current.rows[0]
   const pricesChanged = Number(plan.monthly_reference_price) !== monthlyReferencePrice || Number(plan.yearly_reference_price) !== yearlyReferencePrice
-  const hasProviderPlans = Boolean(plan.stripe_monthly_price_id)
+  const hasProviderPlans = Boolean(plan.mercado_pago_monthly_plan_id && plan.mercado_pago_yearly_plan_id)
   const providerPlans = pricesChanged || !hasProviderPlans
-    ? await synchronizeStripePrices({ name: plan.name, monthly: monthlyReferencePrice, yearly: yearlyReferencePrice, existingYearlyPriceId: plan.stripe_yearly_price_id })
-    : { productId: plan.stripe_product_id, monthlyPriceId: plan.stripe_monthly_price_id, yearlyPriceId: plan.stripe_yearly_price_id }
+    ? await synchronizeMercadoPagoPlans({ name: plan.name, monthly: monthlyReferencePrice, yearly: yearlyReferencePrice, trialDays })
+    : { monthlyPlanId: plan.mercado_pago_monthly_plan_id, yearlyPlanId: plan.mercado_pago_yearly_plan_id }
   const result = await query(`
     update platform_plans
-       set monthly_reference_price = $2, yearly_reference_price = $3, stripe_product_id = $4, stripe_monthly_price_id = $5, stripe_yearly_price_id = $6, trial_days = $7, updated_at = now()
+       set monthly_reference_price = $2, yearly_reference_price = $3, mercado_pago_monthly_plan_id = $4, mercado_pago_yearly_plan_id = $5, trial_days = $6, updated_at = now()
      where id = $1
-     returning id, code, name, description, monthly_reference_price, yearly_reference_price, stripe_product_id, stripe_monthly_price_id, stripe_yearly_price_id, trial_days, limits, features, active, created_at, updated_at
-  `, [planId, monthlyReferencePrice, yearlyReferencePrice, providerPlans.productId, providerPlans.monthlyPriceId, providerPlans.yearlyPriceId, trialDays])
+     returning id, code, name, description, monthly_reference_price, yearly_reference_price, mercado_pago_monthly_plan_id, mercado_pago_yearly_plan_id, trial_days, limits, features, active, created_at, updated_at
+  `, [planId, monthlyReferencePrice, yearlyReferencePrice, providerPlans.monthlyPlanId, providerPlans.yearlyPlanId, trialDays])
   const row = result.rows[0]
   return {
     id: String(row.id), code: row.code, name: row.name, description: row.description || '',
     monthlyReferencePrice: Number(row.monthly_reference_price || 0), yearlyReferencePrice: Number(row.yearly_reference_price || 0),
-    stripeProductId: row.stripe_product_id || '', stripeMonthlyPriceId: row.stripe_monthly_price_id || '', stripeYearlyPriceId: row.stripe_yearly_price_id || '', trialDays: Number(row.trial_days || 0),
+    mercadoPagoMonthlyPlanId: row.mercado_pago_monthly_plan_id || '', mercadoPagoYearlyPlanId: row.mercado_pago_yearly_plan_id || '', trialDays: Number(row.trial_days || 0),
     limits: row.limits || {}, features: row.features || {}, active: Boolean(row.active), createdAt: row.created_at, updatedAt: row.updated_at
   }
 }
