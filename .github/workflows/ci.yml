@@ -135,12 +135,12 @@ jobs:
           if (-not (Test-Path $zip)) {
             throw 'O pacote Production do Agent nao foi gerado.'
           }
-          $source = Get-Content 'Agent/dist/PrintFlow-Agent-Setup-source/install-windows-agent.vbs' -Raw
+          $source = Get-Content 'Agent/dist/PrintFlow-Agent-Setup.sed' -Raw
           if ($source -match 'localhost|127\.0\.0\.1|http://') {
-            throw 'O launcher do artefato Production contem endpoint local ou HTTP.'
+            throw 'O SED do instalador Production contem endpoint local ou HTTP.'
           }
           if ($source -notmatch 'https://api\.example\.invalid') {
-            throw 'O launcher do artefato Production nao recebeu o endpoint esperado.'
+            throw 'O SED do instalador Production nao recebeu o endpoint esperado.'
           }
           $extract = Join-Path $env:RUNNER_TEMP 'printflow-agent-package-check'
           if (Test-Path $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
