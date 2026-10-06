@@ -196,11 +196,10 @@ test('token de diagnostico e rotacionado no armazenamento local', async () => {
   assert.match(first.token, /^[A-Za-z0-9_-]{40,64}$/)
   assert.equal(await readDiagnosticsToken(), first.token)
   const stored = await fs.readFile(first.tokenPath, 'utf8')
-  assert.equal(stored.includes(first.token), process.platform !== 'win32')
+  assert.equal(stored.includes(first.token), false)
+  assert.match(stored, /windows-dpapi/)
   if (process.platform !== 'win32') {
     assert.equal((await fs.stat(first.tokenPath)).mode & 0o777, 0o600)
-  } else {
-    assert.match(stored, /windows-dpapi/)
   }
 
   const second = await createDiagnosticsToken()
