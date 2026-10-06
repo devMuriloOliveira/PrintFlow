@@ -92,6 +92,7 @@ $items = @(
   "node_modules",
   "scripts",
   "src",
+  "legal",
   "package.json",
   "package-lock.json",
   "README.md"
@@ -250,7 +251,7 @@ if (Test-Path $installerSedPath) {
 # can make IExpress wait indefinitely while resolving the target/source.
 $escapedInstallerPath = $installerPath
 $escapedSourceRoot = $installerSourceRoot
-$appLaunched = "$nativeSetupName --install-package $installerZipName --api-url $ApiUrl --quiet"
+$appLaunched = "$nativeSetupName --install-package $installerZipName --api-url $ApiUrl"
 $certificateSedFile = if ($SignDev) { "FILE5=PrintFlow-Agent-Dev-Certificate.cer" } else { "" }
 $certificateSedSource = if ($SignDev) { "%FILE5%=" } else { "" }
 

@@ -1,6 +1,8 @@
 using Microsoft.Win32;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Reflection;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -13,6 +15,7 @@ namespace PrintFlowAgentSetup;
 
 internal static class Program
 {
+    private const string TermsVersion = "1.0";
     [STAThread]
     private static int Main(string[] args)
     {
@@ -20,14 +23,27 @@ internal static class Program
         var testMode = args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase);
         try
         {
-            var elevatedExitCode = RelaunchElevatedWhenRequired(args);
-            if (elevatedExitCode.HasValue) return elevatedExitCode.Value;
             var installRoot = ReadArgument(args, "--install-dir") ?? DefaultInstallRoot;
             var taskName = ReadArgument(args, "--task-name") ?? "PrintFlowAgent";
             var localPort = ReadArgument(args, "--local-port") ?? "17873";
             var testDataDirectory = testMode ? ReadArgument(args, "--test-data-dir") ?? Path.Combine(installRoot, "test-data") : null;
+            if (!testMode && args.Contains("--install-package", StringComparer.OrdinalIgnoreCase) && !args.Contains("--consent-accepted", StringComparer.OrdinalIgnoreCase))
+            {
+                var packagePath = ReadArgument(args, "--install-package");
+                var targetVersion = GetPackageVersionFromZip(packagePath);
+                if (!SetupConsentForm.ShowInstall(targetVersion, GetInstalledVersion(installRoot), ReadTerms(), HasAcceptedTerms())) return 0;
+                args = [.. args, "--consent-accepted"];
+            }
+            if (!testMode && args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase) && !args.Contains("--uninstall-confirmed", StringComparer.OrdinalIgnoreCase))
+            {
+                var removeUserData = false;
+                if (!SetupConsentForm.ShowUninstall(GetInstalledVersion(installRoot), out removeUserData)) return 0;
+                args = removeUserData ? [.. args, "--remove-user-data", "--uninstall-confirmed"] : [.. args, "--uninstall-confirmed"];
+            }
+            var elevatedExitCode = RelaunchElevatedWhenRequired(args);
+            if (elevatedExitCode.HasValue) return elevatedExitCode.Value;
             if (args.Contains("--check-updates", StringComparer.OrdinalIgnoreCase))
-                return new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode).CheckAndInstallAsync(installRoot, args.Contains("--interactive", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult() ? 0 : 0;
+                return new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode).CheckAndInstallAsync(installRoot, args.Contains("--interactive", StringComparer.OrdinalIgnoreCase), args.Contains("--confirm-updates", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult() ? 0 : 0;
             if (args.Contains("--finalize-uninstall", StringComparer.OrdinalIgnoreCase))
             {
                 DeleteDirectory(ReadArgument(args, "--install-dir") ?? DefaultInstallRoot);
@@ -39,7 +55,7 @@ internal static class Program
             var zip = ReadArgument(args, "--install-package");
             if (!string.IsNullOrWhiteSpace(zip) && !Path.IsPathRooted(zip)) zip = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, zip));
             if (string.IsNullOrWhiteSpace(zip)) return ShowUsage();
-            return Install(zip, ReadArgument(args, "--api-url") ?? "https://printflow-api-4y5l.onrender.com", installRoot, taskName, localPort, testMode, testDataDirectory, args.Contains("--test-fail-after-copy", StringComparer.OrdinalIgnoreCase));
+            return Install(zip, ReadArgument(args, "--api-url") ?? "https://printflow-api-4y5l.onrender.com", installRoot, taskName, localPort, testMode, testDataDirectory, args.Contains("--test-fail-after-copy", StringComparer.OrdinalIgnoreCase), args.Contains("--consent-accepted", StringComparer.OrdinalIgnoreCase));
         }
         catch (Exception error)
         {
@@ -56,7 +72,7 @@ internal static class Program
         }
     }
 
-    private static int Install(string zipPath, string apiUrl, string root, string taskName, string localPort, bool testMode, string? testDataDirectory, bool failAfterCopy)
+    private static int Install(string zipPath, string apiUrl, string root, string taskName, string localPort, bool testMode, string? testDataDirectory, bool failAfterCopy, bool consentAccepted)
     {
         if (!File.Exists(zipPath)) throw new FileNotFoundException("Pacote do Agent nao encontrado.", zipPath);
         var temp = Path.Combine(Path.GetTempPath(), $"PrintFlowAgentSetup-{Guid.NewGuid():N}");
@@ -101,6 +117,7 @@ internal static class Program
             var installedVersion = GetVersion(Path.Combine(root, "package.json"));
             if (!WaitForHealth(installedVersion, localPort, requirePaired: movedExistingInstall, TimeSpan.FromSeconds(45)))
                 throw new InvalidOperationException("O Agent nao confirmou /healthz e conexao local no prazo.");
+            if (!testMode && consentAccepted) SaveTermsAcceptance(installedVersion);
             if (!testMode && !Environment.GetCommandLineArgs().Contains("--quiet", StringComparer.OrdinalIgnoreCase)) MessageBox.Show("PrintFlow Agent instalado. Ele iniciara automaticamente com o Windows.", "PrintFlow Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 0;
         }
@@ -131,13 +148,38 @@ internal static class Program
     private static int Uninstall(string installRoot, string taskName, bool removeUserData, bool testMode)
     {
         if (testMode) return FinalizeUninstall(installRoot, taskName, removeUserData, true);
-        var answer = MessageBox.Show(removeUserData
-            ? "Remover o Agent e todos os dados locais, incluindo pareamento e credenciais?"
-            : "Remover o PrintFlow Agent? Pareamento e credenciais locais serao preservados.",
-            "Desinstalar PrintFlow Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-        if (answer != DialogResult.Yes) return 0;
-
         return FinalizeUninstall(installRoot, taskName, removeUserData, testMode);
+    }
+
+    private static string ReadTerms() => Assembly.GetExecutingAssembly().GetManifestResourceStream("PrintFlowAgentSetup.TermsOfUse.txt") is { } stream
+        ? new StreamReader(stream, Encoding.UTF8).ReadToEnd()
+        : throw new InvalidDataException("Os termos de uso nao foram incluidos neste instalador.");
+
+    private static string? GetPackageVersionFromZip(string? zipPath)
+    {
+        if (string.IsNullOrWhiteSpace(zipPath)) return null;
+        if (!Path.IsPathRooted(zipPath)) zipPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, zipPath));
+        if (!File.Exists(zipPath)) throw new FileNotFoundException("Pacote do Agent nao encontrado.", zipPath);
+        using var archive = ZipFile.OpenRead(zipPath);
+        var entry = archive.GetEntry("package.json") ?? throw new InvalidDataException("Pacote do Agent incompleto.");
+        using var reader = new StreamReader(entry.Open());
+        using var json = JsonDocument.Parse(reader.ReadToEnd());
+        return json.RootElement.GetProperty("version").GetString();
+    }
+
+    private static string GetInstalledVersion(string root) => File.Exists(Path.Combine(root, "package.json")) ? GetVersion(Path.Combine(root, "package.json")) : "";
+    private static string TermsAcceptancePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent", "terms-acceptance.json");
+
+    private static bool HasAcceptedTerms()
+    {
+        try { using var json = JsonDocument.Parse(File.ReadAllText(TermsAcceptancePath)); return json.RootElement.GetProperty("termsVersion").GetString() == TermsVersion; }
+        catch { return false; }
+    }
+
+    private static void SaveTermsAcceptance(string packageVersion)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(TermsAcceptancePath)!);
+        File.WriteAllText(TermsAcceptancePath, JsonSerializer.Serialize(new { termsVersion = TermsVersion, acceptedAtUtc = DateTime.UtcNow.ToString("O"), packageVersion }, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     private static int FinalizeUninstall(string installRoot, string taskName, bool removeUserData, bool testMode = false)
@@ -253,7 +295,10 @@ internal static class Program
             WorkingDirectory = Environment.CurrentDirectory
         };
         foreach (var argument in args) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Nao foi possivel reabrir o instalador com permissao administrativa.");
+        Process? elevatedProcess;
+        try { elevatedProcess = Process.Start(start); }
+        catch (Win32Exception error) when (error.NativeErrorCode == 1223) { return 0; }
+        using var process = elevatedProcess ?? throw new InvalidOperationException("Nao foi possivel reabrir o instalador com permissao administrativa.");
         process.WaitForExit();
         return process.ExitCode;
     }

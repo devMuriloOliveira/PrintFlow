@@ -34,13 +34,13 @@ const server = createServer()
 let apiPort
 
 assert.equal(path.basename(setup).toLowerCase(), 'printflowagentsetup.exe')
-assert.equal(releaseVersion, '0.1.24', `test release must be the next local version, received ${releaseVersion}`)
+assert.equal(releaseVersion, '0.1.25', `test release must be the next local version, received ${releaseVersion}`)
 assert.equal(installRoot, path.resolve(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'PrintFlowAgent'))
 assert.ok(await exists(setup), `native Setup missing: ${setup}`)
 for (const [name, file] of files) assert.ok(await exists(file), `release asset missing: ${name}`)
 
 const before = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) }).then(response => response.json())
-assert.equal(before.version, '0.1.23', `expected the installed pre-update version 0.1.23, received ${before.version}`)
+assert.equal(before.version, '0.1.24', `expected the installed pre-update version 0.1.24, received ${before.version}`)
 assert.equal(before.paired, true)
 assert.equal(before.cloudConnected, true)
 assert.equal(before.activePrintJobs, 0)
@@ -126,7 +126,7 @@ try {
     `post-update health did not reach the signed release: ${JSON.stringify(after)}`)
 
   const history = (await readFile(updateHistory, 'utf8')).trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
-  assert.ok(history.some(entry => entry.previousVersion === '0.1.23' && entry.newVersion === releaseVersion && entry.result === 'succeeded' && entry.detail === 'health_verified'),
+  assert.ok(history.some(entry => entry.previousVersion === '0.1.24' && entry.newVersion === releaseVersion && entry.result === 'succeeded' && entry.detail === 'health_verified'),
     'C# updater did not record succeeded after post-update health verification')
   assert.equal(await hashFile(credentialsFile), credentialHashBefore, 'updating changed the persisted Agent credential file')
 

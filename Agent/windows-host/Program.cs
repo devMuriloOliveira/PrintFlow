@@ -85,7 +85,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
         var menu = new ContextMenuStrip();
         _statusMenuItem = new ToolStripMenuItem("Abrir status", null, (_, _) => ShowStatus());
         menu.Items.Add(_statusMenuItem);
-        menu.Items.Add(new ToolStripMenuItem("Verificar atualizações", null, async (_, _) => await CheckForUpdatesAsync()));
+        menu.Items.Add(new ToolStripMenuItem("Verificar atualizações", null, async (_, _) => await CheckForUpdatesAsync(manual: true)));
         menu.Items.Add(new ToolStripMenuItem("Abrir logs", null, (_, _) => OpenLogs()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Fechar Agent", null, (_, _) => ExitThread()));
@@ -243,7 +243,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
     {
         if (_statusForm is null || _statusForm.IsDisposed)
         {
-            _statusForm = new StatusForm(_icon, _version, OpenLogs, async () => await CheckForUpdatesAsync());
+            _statusForm = new StatusForm(_icon, _version, OpenLogs, async () => await CheckForUpdatesAsync(manual: true));
             _statusForm.FormClosing += (_, eventArgs) =>
             {
                 if (!_closing)
@@ -259,7 +259,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
         _ = RefreshStatusAsync();
     }
 
-    private async Task CheckForUpdatesAsync()
+    private async Task CheckForUpdatesAsync(bool manual = false)
     {
         if (_closing || _checkingUpdate) return;
         _checkingUpdate = true;
@@ -269,6 +269,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
             if (!File.Exists(setup)) return;
             var startInfo = new ProcessStartInfo(setup) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = _agentRoot };
             startInfo.ArgumentList.Add("--check-updates");
+            startInfo.ArgumentList.Add(manual ? "--interactive" : "--confirm-updates");
             startInfo.ArgumentList.Add("--install-dir");
             startInfo.ArgumentList.Add(_agentRoot);
             if (_dataDirectory is not null) startInfo.ArgumentList.Add("--test-mode");

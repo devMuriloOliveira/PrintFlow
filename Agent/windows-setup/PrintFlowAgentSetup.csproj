@@ -10,4 +10,7 @@
     <SelfContained>true</SelfContained>
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\legal\TERMOS-DE-USO-PRINTFLOW-AGENT.txt" LogicalName="PrintFlowAgentSetup.TermsOfUse.txt" />
+  </ItemGroup>
 </Project>

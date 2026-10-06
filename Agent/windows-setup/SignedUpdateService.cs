@@ -32,7 +32,7 @@ internal sealed class SignedUpdateService
         _testAuthority = testUri.GetLeftPart(UriPartial.Authority);
     }
 
-    public async Task<bool> CheckAndInstallAsync(string installRoot, bool interactive, CancellationToken cancellationToken = default)
+    public async Task<bool> CheckAndInstallAsync(string installRoot, bool interactive, bool confirmUpdates, CancellationToken cancellationToken = default)
     {
         var health = await GetHealthAsync(cancellationToken);
         if (health is null || health.UpdateBlocked || !health.CloudConnected)
@@ -52,9 +52,13 @@ internal sealed class SignedUpdateService
 
         var currentVersion = VersionAt(installRoot);
         if (!Version.TryParse(currentVersion, out var current)) throw new InvalidDataException("Versao instalada invalida.");
-        if (latest <= current) return false;
+        if (latest <= current)
+        {
+            if (interactive) MessageBox.Show($"Você já está usando a versão mais recente do PrintFlow Agent ({current}).", "PrintFlow Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return false;
+        }
 
-        if (interactive && MessageBox.Show($"Nova versao do PrintFlow Agent disponivel: {latest}\nVersao atual: {current}\n\nDeseja atualizar agora?", "PrintFlow Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
+        if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do PrintFlow Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará as alterações e os termos antes de continuar.", "PrintFlow Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             WriteHistory(currentVersion, latest.ToString(), "declined", "user_declined");
             return false;
@@ -78,6 +82,11 @@ internal sealed class SignedUpdateService
             ?? throw new InvalidOperationException("Nao foi possivel iniciar o instalador assinado.");
         await process.WaitForExitAsync(cancellationToken);
         if (process.ExitCode != 0) throw new InvalidOperationException($"Instalador retornou {process.ExitCode}.");
+        if (!string.Equals(VersionAt(installRoot), latest.ToString(), StringComparison.Ordinal))
+        {
+            WriteHistory(currentVersion, latest.ToString(), "declined", "installer_cancelled_or_closed");
+            return false;
+        }
 
         var healthy = await WaitForHealthAsync(latest.ToString(), requirePaired: true, TimeSpan.FromSeconds(90), cancellationToken);
         if (!healthy) throw new InvalidOperationException("Nova versao nao confirmou health, pareamento e Cloud depois de iniciar.");

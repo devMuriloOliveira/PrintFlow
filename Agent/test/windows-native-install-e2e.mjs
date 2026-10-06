@@ -255,8 +255,8 @@ try {
   assert.equal(firstInstall.code, 0, `initial install failed (${firstInstall.code}): ${firstInstall.installerLog || firstInstall.stderr}\n${firstInstall.diagnostics || ''}\n${firstInstall.observations || ''}`)
   installed = true
   task('/Query')
-  assert.equal(await readFile(path.join(installRoot, 'package.json'), 'utf8').then(value => JSON.parse(value).version), '0.1.24')
-  await waitForHealth(health => health.ok && health.version === '0.1.24' && health.activePrintJobs === 0)
+  assert.equal(await readFile(path.join(installRoot, 'package.json'), 'utf8').then(value => JSON.parse(value).version), '0.1.25')
+  await waitForHealth(health => health.ok && health.version === '0.1.25' && health.activePrintJobs === 0)
 
   const queuedPairing = await fetch(`http://127.0.0.1:${agentPort}/pair`, {
     method: 'POST',
@@ -265,8 +265,8 @@ try {
   })
   assert.equal(queuedPairing.status, 202)
   const pairedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.activePrintJobs === 0)
-  assert.equal(pairedHealth.version, '0.1.24')
-  assert.ok(pairCalls.some(call => call.code === pairCode && call.version === '0.1.24'))
+  assert.equal(pairedHealth.version, '0.1.25')
+  assert.ok(pairCalls.some(call => call.code === pairCode && call.version === '0.1.25'))
   await waitForHealth(() => heartbeatCount > 0)
 
   verifyDelayMs = 15_000
@@ -276,7 +276,7 @@ try {
   const delayedCloudUpdate = await install()
   assert.equal(delayedCloudUpdate.code, 0, `update waited for Cloud reconnect (${delayedCloudUpdate.code}): ${delayedCloudUpdate.installerLog || delayedCloudUpdate.stderr}\n${delayedCloudUpdate.observations || ''}`)
   task('/Query')
-  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.24', 90_000)
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.25', 90_000)
   verifyDelayMs = 0
 
   const sentinel = path.join(installRoot, 'rollback-sentinel.txt')
@@ -287,14 +287,14 @@ try {
   assert.equal(failedUpgrade.code, 1, `injected upgrade unexpectedly succeeded: ${failedUpgrade.installerLog || failedUpgrade.stderr}`)
   assert.equal(await readFile(sentinel, 'utf8'), 'prior isolated installation must survive a failed upgrade\n')
   task('/Query')
-  const rolledBackHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.24')
+  const rolledBackHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.25')
   assert.equal(rolledBackHealth.activePrintJobs, 0)
 
   task('/End')
   await waitUntilUnavailable()
   task('/Run')
   const heartbeatsBeforeRestart = heartbeatCount
-  const restartedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.24')
+  const restartedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.25')
   assert.equal(restartedHealth.activePrintJobs, 0)
   await waitForHealth(() => heartbeatCount > heartbeatsBeforeRestart)
 
@@ -315,7 +315,7 @@ try {
 
   process.stdout.write(JSON.stringify({
     status: 'passed',
-    version: '0.1.24',
+    version: '0.1.25',
     installRoot,
     taskName,
     agentPort,

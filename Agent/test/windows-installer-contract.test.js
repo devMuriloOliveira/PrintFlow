@@ -156,6 +156,34 @@ test('instalacao e remocao nativas elevam antes de criar ou excluir a tarefa', a
   assert.match(setup, /private static void StartTask\(string taskName\) => Run\("schtasks\.exe", \["\/Run", "\/TN", taskName\]\);/)
 })
 
+test('setup público exibe resumo e termos antes do UAC e exige aceite', async () => {
+  const setup = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'Program.cs'), 'utf8')
+  const dialogs = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'SetupConsentForm.cs'), 'utf8')
+  const project = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'PrintFlowAgentSetup.csproj'), 'utf8')
+  const build = await readScript('build-windows-package.ps1')
+
+  assert.ok(setup.indexOf('SetupConsentForm.ShowInstall') < setup.indexOf('RelaunchElevatedWhenRequired(args)'))
+  assert.ok(setup.indexOf('SetupConsentForm.ShowUninstall') < setup.indexOf('RelaunchElevatedWhenRequired(args)'))
+  assert.match(dialogs, /Aceitar e continuar/)
+  assert.match(dialogs, /_continue\.Enabled = _accept\.Checked/)
+  assert.match(dialogs, /Também apagar pareamento, credenciais, cache e logs locais/)
+  assert.match(project, /TermsOfUse\.txt/)
+  assert.match(build, /"legal"/)
+  assert.match(build, /\$appLaunched = "\$nativeSetupName --install-package \$installerZipName --api-url \$ApiUrl"/)
+  assert.doesNotMatch(build, /\$appLaunched = .*--quiet/)
+  assert.match(setup, /SaveTermsAcceptance\(installedVersion\)/)
+})
+
+test('atualizações automáticas pedem confirmação e cancelamento não é registrado como falha', async () => {
+  const updater = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'SignedUpdateService.cs'), 'utf8')
+  const host = await fs.readFile(path.join(process.cwd(), 'windows-host', 'Program.cs'), 'utf8')
+
+  assert.match(host, /manual \? "--interactive" : "--confirm-updates"/)
+  assert.match(updater, /interactive \|\| confirmUpdates/)
+  assert.match(updater, /installer_cancelled_or_closed/)
+  assert.match(updater, /O instalador mostrará as alterações e os termos/)
+})
+
 test('tarefa nativa inicia no logon mesmo quando o notebook usa bateria', async () => {
   const setup = await fs.readFile(path.join(process.cwd(), 'windows-setup', 'Program.cs'), 'utf8')
 
