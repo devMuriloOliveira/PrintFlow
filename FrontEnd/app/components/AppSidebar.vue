@@ -115,7 +115,7 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
             <UiIcon :name="item.icon" :size="20" />
             <span>{{ item.label }}</span>
             <UiIcon v-if="isLocked(item.to)" class="nav-item__lock" name="lock" :size="14" />
-            <span v-if="item.children" class="nav-item__chevron" :class="{ 'nav-item__chevron--open': expandedItems[item.label] }" aria-hidden="true">⌄</span>
+            <UiIcon v-if="item.children" class="nav-item__chevron" :class="{ 'nav-item__chevron--open': expandedItems[item.label] }" name="down" :size="16" />
           </a>
           </NuxtLink>
           <div v-if="item.children && expandedItems[item.label]" class="nav-submenu">

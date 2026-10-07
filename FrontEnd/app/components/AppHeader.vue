@@ -51,8 +51,8 @@ const initials = computed(() =>
 
 <template>
   <header class="topbar">
-    <button class="icon-btn mobile-menu" aria-label="Abrir menu" @click="$emit('menu')">
-      <UiIcon name="menu" />
+    <button class="icon-btn mobile-menu" type="button" aria-label="Abrir menu" @click="$emit('menu')">
+      <UiIcon name="sidebar" :size="21" />
     </button>
 
     <div class="workspace-context">
