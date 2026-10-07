@@ -209,7 +209,9 @@ export const emptyDashboardSummary = (): DashboardSummary => ({
 export const emptyReportSummary = (params: Record<string, any> = {}): ReportSummary => ({
   filters: { from: String(params.from || ''), to: String(params.to || ''), grouping: ['day', 'week'].includes(params.grouping) ? params.grouping : 'month', section: params.section === 'produtos' ? 'produtos' : 'financeiro', marketplace: String(params.marketplace || ''), product: String(params.product || ''), category: String(params.category || ''), channel: String(params.channel || ''), limit: Number(params.limit || 50), offset: Number(params.offset || 0) },
   totals: { revenue: 0, netRevenue: 0, fees: 0, shipping: 0, registeredProfit: 0, expenses: 0, profit: 0, estimatedCurrentCost: 0, orderCount: 0, itemCount: 0, ticket: 0, productsCount: 0 },
-  series: [], marketplaces: [], expenseCategories: [], products: [],
+  series: [], marketplaces: [], channels: [], clients: [],
+  productionCostComparison: { jobCount: 0, estimatedCurrentRateCost: 0, actualRecordedCost: 0, variance: 0 },
+  expenseCategories: [], products: [],
   sales: { items: [], total: 0, limit: Number(params.limit || 50), offset: Number(params.offset || 0) },
   options: { marketplaces: [], products: [], categories: [] }
 })

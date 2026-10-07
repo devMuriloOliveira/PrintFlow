@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const route = useRoute()
 const auth = useAuth()
+const pageKey = computed(() => route.path === '/relatorios' ? route.path : route.fullPath)
 </script>
 
 <template>
@@ -13,6 +14,6 @@ const auth = useAuth()
     </div>
   </div>
   <NuxtLayout v-else>
-    <NuxtPage :key="route.fullPath" :page-key="route.fullPath" :transition="{ name: 'page', mode: 'out-in' }" />
+    <NuxtPage :page-key="pageKey" :transition="{ name: 'page', mode: 'out-in' }" />
   </NuxtLayout>
 </template>

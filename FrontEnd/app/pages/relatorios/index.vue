@@ -51,13 +51,12 @@ const productOptions = computed(() => ['Todos', ...report.value.options.products
 const categoryOptions = computed(() => ['Todos', ...report.value.options.categories])
 const invalidPeriod = computed(() => !filters.periodStart || !filters.periodEnd || filters.periodStart > filters.periodEnd)
 
-const loadReport = async () => {
+const loadReport = async (requestId = ++reportRequest) => {
   if (invalidPeriod.value || !['financeiro', 'produtos'].includes(reportSection.value)) {
     report.value = emptyReportSummary()
     reportLoading.value = false
     return
   }
-  const requestId = ++reportRequest
   reportLoading.value = true
   reportError.value = ''
   try {
@@ -77,8 +76,9 @@ const loadReport = async () => {
   }
 }
 const scheduleReport = () => {
+  const requestId = ++reportRequest
   if (reportTimer) clearTimeout(reportTimer)
-  reportTimer = setTimeout(() => void loadReport(), 180)
+  reportTimer = setTimeout(() => void loadReport(requestId), 180)
 }
 watch(() => [reportSection.value, filters.periodStart, filters.periodEnd, filters.grouping, filters.marketplace, filters.product, filters.category, filters.channel], () => {
   reportPage.value = 0
@@ -86,7 +86,7 @@ watch(() => [reportSection.value, filters.periodStart, filters.periodEnd, filter
 })
 watch([reportPage, reportPageSize], scheduleReport)
 onMounted(() => void loadReport())
-onBeforeUnmount(() => { if (reportTimer) clearTimeout(reportTimer) })
+onBeforeUnmount(() => { if (reportTimer) clearTimeout(reportTimer); reportRequest += 1 })
 
 const clearContextFilters = () => {
   filters.marketplace = 'Todos'
