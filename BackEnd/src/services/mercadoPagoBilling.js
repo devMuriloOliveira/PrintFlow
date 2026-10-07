@@ -1,13 +1,17 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { env } from '../config/env.js'
 import { hasDatabase, query, withPlatformAdmin, withTenant } from '../db/pool.js'
+import { effectiveSubscriptionForEntitlement, subscriptionCancellationDeadline } from './subscriptionEntitlements.js'
 
 const provider = 'mercado_pago'
+const checkoutTtlMs = 8 * 60 * 60 * 1000
 const text = (value, max = 500) => String(value || '').trim().slice(0, max)
 const safeProviderDetail = (value) => text(value, 240)
   .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
   .replace(/\b(?:APP_USR|TEST)-[A-Za-z0-9-]+\b/g, '[credential]')
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0
+export const mercadoPagoCheckoutExpiresAt = (createdAt = new Date()) =>
+  new Date(new Date(createdAt).getTime() + checkoutTtlMs)
 const billingPlanCode = 'starter'
 const supportedEvents = new Set(['subscription_preapproval', 'subscription_authorized_payment', 'payment'])
 
@@ -54,6 +58,83 @@ const mercadoPagoRequest = async (path, options = {}) => {
     throw error
   }
   return data
+}
+
+export const updateMercadoPagoPreapprovalStatus = async (providerSubscriptionId, status) => {
+  const update = (providerStatus) => mercadoPagoRequest(`/preapproval/${encodeURIComponent(providerSubscriptionId)}`, {
+    method: 'PUT', body: JSON.stringify({ status: providerStatus })
+  })
+  try {
+    return await update(status)
+  } catch (error) {
+    const statusParamRejected = error.status === 400 && /^Invalid preapproval status param:\s*canceled$/i.test(error.providerDetails?.message || '')
+    if (status !== 'canceled' || !statusParamRejected) throw error
+    const current = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(providerSubscriptionId)}`)
+    if (['canceled', 'cancelled'].includes(text(current.status, 80).toLowerCase())) return current
+    return update('cancelled')
+  }
+}
+
+export const expireMercadoPagoPreapproval = async (providerSubscriptionId) => {
+  const current = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(providerSubscriptionId)}`)
+  const currentStatus = text(current.status, 80).toLowerCase()
+  if (['canceled', 'cancelled'].includes(currentStatus)) return current
+  if (currentStatus !== 'pending') throw new Error('O Mercado Pago informou que o checkout vencido nao esta pendente; ele nao foi substituido.')
+  const cancelled = await updateMercadoPagoPreapprovalStatus(providerSubscriptionId, 'canceled')
+  if (!['canceled', 'cancelled'].includes(text(cancelled.status, 80).toLowerCase())) {
+    throw new Error('O Mercado Pago nao confirmou o cancelamento do checkout vencido.')
+  }
+  return cancelled
+}
+
+export const expireMercadoPagoPendingCheckouts = async ({ tenantId = null, now = new Date(), limit = 50 } = {}) => {
+  if (!hasDatabase) return { expired: 0, failed: 0 }
+  const candidates = await withPlatformAdmin((client) => client.query(`
+    select checkout.id, checkout.tenant_id, checkout.provider_checkout_id
+      from tenant_billing_checkouts checkout
+     where checkout.provider = '${provider}'
+       and checkout.status in ('creating', 'open')
+       and coalesce(checkout.expires_at, checkout.created_at + ($2::bigint * interval '1 millisecond')) <= $1::timestamptz
+       and ($3::text is null or checkout.tenant_id = $3)
+       and not exists (
+         select 1 from tenant_subscriptions subscription
+          where subscription.tenant_id = checkout.tenant_id
+            and subscription.provider = '${provider}'
+            and subscription.provider_subscription_id = checkout.provider_checkout_id
+            and subscription.status in ('trial', 'active', 'past_due', 'grace', 'paused')
+       )
+     order by coalesce(checkout.expires_at, checkout.created_at + ($2::bigint * interval '1 millisecond')) asc
+     limit $4
+  `, [now, checkoutTtlMs, tenantId, Math.max(1, Math.min(200, Number(limit) || 50))]))
+  let expired = 0
+  let failed = 0
+  for (const checkout of candidates.rows) {
+    try {
+      if (checkout.provider_checkout_id) await expireMercadoPagoPreapproval(checkout.provider_checkout_id)
+      const result = await withPlatformAdmin((client) => client.query(`
+        update tenant_billing_checkouts
+           set status = 'expired', updated_at = now()
+         where id = $1 and tenant_id = $2 and provider = '${provider}'
+           and status in ('creating', 'open')
+           and coalesce(expires_at, created_at + ($3::bigint * interval '1 millisecond')) <= $4::timestamptz
+           and not exists (
+             select 1 from tenant_subscriptions subscription
+              where subscription.tenant_id = tenant_billing_checkouts.tenant_id
+                and subscription.provider = '${provider}'
+                and subscription.provider_subscription_id = tenant_billing_checkouts.provider_checkout_id
+                and subscription.status in ('trial', 'active', 'past_due', 'grace', 'paused')
+           )
+        returning id
+      `, [checkout.id, checkout.tenant_id, checkoutTtlMs, now]))
+      if (result.rowCount) expired += 1
+    } catch (error) {
+      failed += 1
+      console.error('[MercadoPagoCheckoutExpiry] Falha ao expirar checkout pendente.', {
+        checkoutId: checkout.id, tenantId: checkout.tenant_id, message: text(error.message, 250)
+      })
+    }
+  }
+  return { expired, failed }
 }
 
 const mercadoPagoPlanPayload = ({ name, billingCycle, amount, trialDays }) => ({
@@ -113,15 +194,38 @@ export const getMercadoPagoBillingSummary = async (tenantId) => {
   if (!hasDatabase) return { configured: Boolean(env.mercadoPagoAccessToken && env.mercadoPagoWebhookSecret), environment: env.mercadoPagoEnvironment, plans: [], subscription: null, checkout: null }
   return withTenant(tenantId, async (client) => {
     const [subscription, checkout] = await Promise.all([
-      client.query(`select subscription.status, subscription.billing_cycle, subscription.current_period_end, plan.code as plan_code, plan.name as plan_name from tenant_subscriptions subscription left join platform_plans plan on plan.id = subscription.plan_id where subscription.tenant_id = $1 limit 1`, [tenantId]),
-      client.query(`select status, checkout_url, expires_at, created_at from tenant_billing_checkouts where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open') order by created_at desc limit 1`, [tenantId])
+      client.query(`
+        select subscription.status, subscription.billing_cycle, subscription.current_period_end,
+               subscription.trial_ends_at, subscription.grace_ends_at, subscription.cancel_at_period_end,
+               plan.code as plan_code, plan.name as plan_name,
+               free_plan.code as free_plan_code, free_plan.name as free_plan_name,
+               free_plan.limits as free_plan_limits, free_plan.features as free_plan_features
+          from tenant_subscriptions subscription
+          left join platform_plans plan on plan.id = subscription.plan_id
+          left join platform_plans free_plan on free_plan.code = 'free' and free_plan.active = true
+         where subscription.tenant_id = $1 limit 1
+      `, [tenantId]),
+      client.query(`
+        select status, checkout_url,
+               coalesce(expires_at, created_at + ($2::bigint * interval '1 millisecond')) as expires_at,
+               created_at
+          from tenant_billing_checkouts
+         where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open')
+           and coalesce(expires_at, created_at + ($2::bigint * interval '1 millisecond')) > now()
+         order by created_at desc limit 1
+      `, [tenantId, checkoutTtlMs])
     ])
-    const current = subscription.rows[0]
+    const current = effectiveSubscriptionForEntitlement(subscription.rows[0] || null)
     const pending = checkout.rows[0]
     return {
       configured: Boolean(env.mercadoPagoAccessToken && env.mercadoPagoWebhookSecret), environment: env.mercadoPagoEnvironment,
       plans: plans.map((plan) => ({ ...plan, monthlyEnabled: plan.monthly > 0, yearlyEnabled: plan.yearly > 0 && plan.yearlyEnabled })),
-      subscription: current ? { status: current.status, billingCycle: current.billing_cycle, planCode: current.plan_code || '', planName: current.plan_name || '', currentPeriodEnd: current.current_period_end } : null,
+      subscription: current ? {
+        status: current.status, billingCycle: current.billing_cycle,
+        planCode: current.plan_code || '', planName: current.plan_name || '',
+        currentPeriodEnd: current.status === 'cancelled' ? null : subscriptionCancellationDeadline(current),
+        cancelAtPeriodEnd: Boolean(current.cancel_at_period_end && current.status !== 'cancelled')
+      } : null,
       checkout: pending ? { status: pending.status, url: pending.checkout_url, expiresAt: pending.expires_at, createdAt: pending.created_at } : null
     }
   })
@@ -142,6 +246,9 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
     ? 'Configure MERCADO_PAGO_TEST_PAYER_EMAIL com o e-mail do comprador de teste.'
     : 'O Owner precisa possuir um e-mail valido para iniciar a assinatura.')
 
+  const expiredCheckouts = await expireMercadoPagoPendingCheckouts({ tenantId })
+  if (expiredCheckouts.failed) throw new Error('Existe um checkout vencido que o Mercado Pago ainda nao confirmou como cancelado. Tente novamente em alguns minutos.')
+
   const checkoutId = `mercado_pago_checkout_${randomBytes(12).toString('hex')}`
   const checkoutState = await withTenant(tenantId, async (client) => {
     await client.query('select pg_advisory_xact_lock(hashtext($1))', [String(tenantId)])
@@ -150,18 +257,22 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
       throw new Error('Esta empresa ja possui uma assinatura Mercado Pago. Gerencie a assinatura existente.')
     }
     const pending = await client.query(`
-      select id, checkout_url, expires_at from tenant_billing_checkouts
+      select id, checkout_url,
+             coalesce(expires_at, created_at + ($2::bigint * interval '1 millisecond')) as expires_at
+        from tenant_billing_checkouts
        where tenant_id = $1 and provider = '${provider}' and status in ('creating', 'open')
+         and coalesce(expires_at, created_at + ($2::bigint * interval '1 millisecond')) > now()
        order by created_at desc limit 1
-    `, [tenantId])
+    `, [tenantId, checkoutTtlMs])
     if (pending.rowCount) {
       if (!pending.rows[0].checkout_url) throw new Error('Ja existe um checkout Mercado Pago em processamento. Aguarde alguns instantes.')
       return { id: pending.rows[0].id, url: pending.rows[0].checkout_url, expiresAt: pending.rows[0].expires_at }
     }
+    const expiresAt = mercadoPagoCheckoutExpiresAt()
     await client.query(`
-      insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days)
-      values ($1, $2, $3, $4, $5, '${provider}', 'creating', $6, $7, $8)
-    `, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), '', 0])
+      insert into tenant_billing_checkouts (id, tenant_id, plan_id, billing_cycle, amount, provider, status, created_by, provider_plan_id, trial_days, expires_at)
+      values ($1, $2, $3, $4, $5, '${provider}', 'creating', $6, $7, $8, $9)
+    `, [checkoutId, tenantId, plan.id, cycle, amount, String(actorId || ''), '', 0, expiresAt])
     return null
   })
   if (checkoutState) return checkoutState
@@ -186,10 +297,10 @@ export const createMercadoPagoCheckout = async ({ tenantId, actorId, actorEmail,
     const providerCheckoutId = text(subscription.id, 160)
     const checkoutUrl = text(subscription.init_point, 1000)
     if (!providerCheckoutId || !checkoutUrl) throw new Error('O Mercado Pago nao retornou um checkout valido.')
-    await withTenant(tenantId, (client) => client.query(`
-      update tenant_billing_checkouts set provider_checkout_id = $2, checkout_url = $3, status = 'open', updated_at = now() where id = $1
+    const updated = await withTenant(tenantId, (client) => client.query(`
+      update tenant_billing_checkouts set provider_checkout_id = $2, checkout_url = $3, status = 'open', updated_at = now() where id = $1 returning expires_at
     `, [checkoutId, providerCheckoutId, checkoutUrl]))
-    return { id: checkoutId, url: checkoutUrl, expiresAt: null }
+    return { id: checkoutId, url: checkoutUrl, expiresAt: updated.rows[0]?.expires_at || null }
   } catch (error) {
     await withTenant(tenantId, (client) => client.query(`update tenant_billing_checkouts set status = 'failed', updated_at = now() where id = $1`, [checkoutId]))
     throw error
@@ -201,27 +312,66 @@ export const setMercadoPagoSubscriptionStatus = async ({ tenantId, actorId, stat
   const nextStatus = status === 'cancelled' ? 'cancelled' : status === 'paused' ? 'paused' : status === 'authorized' ? 'active' : ''
   if (!nextStatus) throw new Error('Status de assinatura invalido.')
   const result = await withTenant(tenantId, (client) => client.query(
-    'select id, status, provider_subscription_id, manual_override from tenant_subscriptions where tenant_id = $1 limit 1', [tenantId]
+    `select id, status, billing_cycle, provider_subscription_id, manual_override, cancel_at_period_end,
+            current_period_start, current_period_end, trial_ends_at, grace_ends_at, started_at
+       from tenant_subscriptions where tenant_id = $1 limit 1`, [tenantId]
   ))
   const subscription = result.rows[0]
   if (!subscription?.provider_subscription_id || subscription.manual_override) throw new Error('Nenhuma assinatura Mercado Pago gerenciavel foi encontrada.')
+  if (nextStatus === 'cancelled' && subscription.cancel_at_period_end) return getMercadoPagoBillingSummary(tenantId)
+  if (subscription.cancel_at_period_end) throw new Error('Esta assinatura já está com o cancelamento agendado no Mercado Pago.')
   if (nextStatus === 'active' && subscription.status !== 'paused') throw new Error('Somente uma assinatura pausada pode ser reativada.')
   if (nextStatus !== 'active' && !['trial', 'active', 'past_due', 'grace', 'paused'].includes(subscription.status)) throw new Error('Esta assinatura ja foi encerrada.')
 
   const providerStatus = nextStatus === 'active' ? 'authorized' : nextStatus === 'cancelled' ? 'canceled' : 'paused'
-  const remote = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(subscription.provider_subscription_id)}`, {
-    method: 'PUT', body: JSON.stringify({ status: providerStatus })
-  })
+  let accessUntil = subscriptionCancellationDeadline(subscription)
+  const shouldPreserveCurrentAccess = nextStatus === 'cancelled' && ['active', 'trial', 'grace'].includes(subscription.status)
+  const isFuture = (value) => Number.isFinite(Date.parse(value || '')) && Date.parse(value) > Date.now()
+  if (shouldPreserveCurrentAccess && !isFuture(accessUntil)) {
+    const currentProviderSubscription = await mercadoPagoRequest(`/preapproval/${encodeURIComponent(subscription.provider_subscription_id)}`)
+    const providerDeadline = subscription.status === 'trial'
+      ? subscription.trial_ends_at || currentProviderSubscription.auto_recurring?.end_date || currentProviderSubscription.next_payment_date
+      : subscription.status === 'grace'
+        ? subscription.grace_ends_at
+        : currentProviderSubscription.next_payment_date || currentProviderSubscription.auto_recurring?.end_date
+    if (isFuture(providerDeadline)) accessUntil = providerDeadline
+    if (!isFuture(accessUntil) && (subscription.current_period_start || subscription.started_at)) {
+      accessUntil = addCycle(subscription.current_period_start || subscription.started_at, subscription.billing_cycle)
+    }
+    if (!isFuture(accessUntil)) throw new Error('Não foi possível confirmar até quando o período atual está pago; a assinatura não foi cancelada. Atualize os dados de cobrança e tente novamente.')
+  }
+
+  const remote = nextStatus === 'cancelled'
+    ? await updateMercadoPagoPreapprovalStatus(subscription.provider_subscription_id, providerStatus)
+    : await mercadoPagoRequest(`/preapproval/${encodeURIComponent(subscription.provider_subscription_id)}`, {
+        method: 'PUT', body: JSON.stringify({ status: providerStatus })
+      })
   const confirmedStatus = subscriptionStatus(remote.status) || (text(remote.status, 80).toLowerCase() === 'authorized' ? 'active' : '')
   if (confirmedStatus !== nextStatus) throw new Error('O Mercado Pago nao confirmou a alteracao da assinatura.')
+
+  const cancelAtPeriodEnd = nextStatus === 'cancelled' && shouldPreserveCurrentAccess && isFuture(accessUntil)
+  const localStatus = cancelAtPeriodEnd ? subscription.status : nextStatus
+  const tenantBillingStatus = localStatus === 'trial' ? 'trial'
+    : localStatus === 'active' || localStatus === 'courtesy' ? 'active'
+      : localStatus === 'past_due' || localStatus === 'grace' ? 'overdue'
+        : localStatus === 'paused' ? 'paused' : 'cancelled'
   await withTenant(tenantId, async (client) => {
-    await client.query(`update tenant_subscriptions set status = $2, cancelled_at = case when $2 = 'cancelled' then now() else null end, last_provider_sync_at = now(), updated_at = now() where id = $1`, [subscription.id, nextStatus])
-    await client.query(`update tenants set billing_status = $2 where id = $1`, [tenantId, nextStatus === 'active' ? 'active' : nextStatus === 'paused' ? 'paused' : 'cancelled'])
+    await client.query(`
+      update tenant_subscriptions
+         set status = $2, cancel_at_period_end = $3,
+             current_period_end = case when $3 and $2 <> 'trial' then $4::timestamptz else current_period_end end,
+             trial_ends_at = case when $3 and $2 = 'trial' then coalesce(trial_ends_at, $4::timestamptz) else trial_ends_at end,
+             cancelled_at = case when $2 = 'cancelled' then coalesce(cancelled_at, now()) else null end,
+             last_provider_sync_at = now(), updated_at = now()
+       where id = $1
+    `, [subscription.id, localStatus, cancelAtPeriodEnd, cancelAtPeriodEnd ? accessUntil : null])
+    await client.query(`update tenants set billing_status = $2 where id = $1`, [tenantId, tenantBillingStatus])
     await client.query(`
       insert into tenant_subscription_events (tenant_id, subscription_id, action, new_state, reason, actor_user_id, source, provider)
       values ($1,$2,$3,$4::jsonb,$5,$6,'manual','${provider}')
-    `, [tenantId, subscription.id, `subscription.${nextStatus}`, JSON.stringify({ providerSubscriptionId: subscription.provider_subscription_id, status: nextStatus }),
-      nextStatus === 'cancelled' ? 'Assinatura cancelada pelo Owner no Mercado Pago.' : nextStatus === 'paused' ? 'Assinatura pausada pelo Owner no Mercado Pago.' : 'Assinatura reativada pelo Owner no Mercado Pago.', String(actorId || '')])
+    `, [tenantId, subscription.id, cancelAtPeriodEnd ? 'subscription.cancel_at_period_end' : `subscription.${nextStatus}`,
+      JSON.stringify({ providerSubscriptionId: subscription.provider_subscription_id, providerStatus: remote.status, status: localStatus, cancelAtPeriodEnd, accessUntil: cancelAtPeriodEnd ? accessUntil : null }),
+      cancelAtPeriodEnd ? 'Renovação cancelada no Mercado Pago; acesso mantido até o fim do período atual.' : nextStatus === 'cancelled' ? 'Assinatura cancelada pelo Owner no Mercado Pago.' : nextStatus === 'paused' ? 'Assinatura pausada pelo Owner no Mercado Pago.' : 'Assinatura reativada no Mercado Pago.', String(actorId || '')])
   })
   return getMercadoPagoBillingSummary(tenantId)
 }
@@ -269,6 +419,17 @@ const syncPreapproval = async (client, { resource, eventId, action }) => {
     : subscriptionStatus(providerStatus)
   if (!providerState) return { tenantId, ignored: true }
   const providerCustomerId = text(resource.payer_id, 160) || null
+  const providerEndDate = nextPaymentAt || resource.auto_recurring?.end_date || null
+  const existingEndDate = subscription ? subscriptionCancellationDeadline(subscription) : null
+  const candidateEndDate = subscription?.status === 'grace'
+    ? existingEndDate
+    : existingEndDate && Date.parse(existingEndDate) > Date.now() ? existingEndDate : providerEndDate
+  const keepAccessUntilPeriodEnd = providerState === 'cancelled'
+    && ['active', 'trial', 'grace'].includes(subscription?.status)
+    && Number.isFinite(Date.parse(candidateEndDate || ''))
+    && Date.parse(candidateEndDate) > Date.now()
+  const localStatus = keepAccessUntilPeriodEnd ? subscription.status : providerState
+  const cancelAtPeriodEnd = keepAccessUntilPeriodEnd || Boolean(subscription?.cancel_at_period_end && providerState !== 'cancelled')
 
   if (!subscription) {
     const created = await client.query(`
@@ -284,22 +445,28 @@ const syncPreapproval = async (client, { resource, eventId, action }) => {
              trial_started_at = case when $4 = 'trial' then coalesce(trial_started_at, now()) else trial_started_at end,
              trial_ends_at = case when $4 = 'trial' then $7::timestamptz else trial_ends_at end,
              trial_used_at = case when $4 = 'trial' then coalesce(trial_used_at, now()) else trial_used_at end,
-             current_period_end = case when $4 = 'active' then coalesce($8::timestamptz, current_period_end) else current_period_end end,
-             source = 'provider', last_provider_sync_at = now(), cancelled_at = case when $4 = 'cancelled' then now() else cancelled_at end,
+             current_period_end = case
+               when $4 = 'active' then coalesce($8::timestamptz, current_period_end)
+               when $9 and $4 not in ('trial', 'grace') then $10::timestamptz
+               else current_period_end
+             end,
+             cancel_at_period_end = $9,
+             source = 'provider', last_provider_sync_at = now(),
+             cancelled_at = case when $9 then null when $4 = 'cancelled' then coalesce(cancelled_at, now()) else cancelled_at end,
              updated_at = now()
        where id = $1
-    `, [subscription.id, checkout.plan_id, checkout.billing_cycle, providerState, providerCustomerId, providerSubscriptionId, trialEndsAt, nextPaymentAt])
+    `, [subscription.id, checkout.plan_id, checkout.billing_cycle, localStatus, providerCustomerId, providerSubscriptionId, trialEndsAt, nextPaymentAt, cancelAtPeriodEnd, candidateEndDate])
   }
 
-  if (providerState === 'trial') await client.query(`update tenants set billing_status = 'trial', billing_due_at = $2::timestamptz where id = $1`, [tenantId, trialEndsAt])
-  if (providerState === 'active') await client.query(`update tenants set billing_status = 'active', billing_due_at = $2::timestamptz where id = $1`, [tenantId, nextPaymentAt])
-  if (providerState === 'cancelled') await client.query(`update tenants set billing_status = 'cancelled' where id = $1`, [tenantId])
-  if (providerState === 'paused') await client.query(`update tenants set billing_status = 'paused' where id = $1`, [tenantId])
+  if (localStatus === 'trial') await client.query(`update tenants set billing_status = 'trial', billing_due_at = coalesce($2::timestamptz, billing_due_at) where id = $1`, [tenantId, trialEndsAt || providerEndDate])
+  if (localStatus === 'active') await client.query(`update tenants set billing_status = 'active', billing_due_at = coalesce($2::timestamptz, billing_due_at) where id = $1`, [tenantId, providerEndDate])
+  if (localStatus === 'cancelled') await client.query(`update tenants set billing_status = 'cancelled' where id = $1`, [tenantId])
+  if (localStatus === 'paused') await client.query(`update tenants set billing_status = 'paused' where id = $1`, [tenantId])
   if (providerState === 'cancelled') await client.query(`update tenant_billing_checkouts set status = 'cancelled', updated_at = now() where id = $1`, [checkout.id])
   await recordSubscriptionEvent(client, {
     tenantId, subscriptionId: subscription.id, eventId, action: `mercado_pago.${text(action, 120) || 'subscription_preapproval'}`,
     reason: 'Atualizacao de assinatura recebida do Mercado Pago.',
-    state: { providerSubscriptionId, status: providerStatus, trialEndsAt: trialEndsAt || null, trialDays }
+    state: { providerSubscriptionId, providerStatus, status: localStatus, cancelAtPeriodEnd, accessUntil: keepAccessUntilPeriodEnd ? candidateEndDate : null, trialEndsAt: trialEndsAt || null, trialDays }
   })
   return { tenantId, subscriptionId: subscription.id }
 }

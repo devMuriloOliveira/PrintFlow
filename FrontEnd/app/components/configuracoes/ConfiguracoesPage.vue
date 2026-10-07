@@ -40,6 +40,7 @@ const supportDraft = reactive({
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const billingLoading = ref(false)
+const billingError = ref('')
 const creatingBillingLink = ref(false)
 const subscriptionActionLoading = ref(false)
 const mercadoPagoBilling = ref<Awaited<ReturnType<typeof getMercadoPagoBilling>> | null>(null)
@@ -462,6 +463,7 @@ const loadIntegrations = async () => {
 const loadMercadoPagoBilling = async () => {
   if (!isOwner.value) return
   billingLoading.value = true
+  billingError.value = ''
   try {
     mercadoPagoBilling.value = await getMercadoPagoBilling()
     // Mercado Pago may append preapproval_id using a second '?' to back_url.
@@ -476,7 +478,8 @@ const loadMercadoPagoBilling = async () => {
       }
     }
   } catch (error: any) {
-    notify(error?.data?.error || error?.message || 'Nao foi possivel consultar a assinatura.')
+    billingError.value = error?.data?.error || error?.message || 'Não foi possível consultar a assinatura.'
+    notify(billingError.value)
   } finally { billingLoading.value = false }
 }
 const startMercadoPagoCheckout = async () => {
@@ -535,16 +538,26 @@ const copyMfaSecret = async () => {
 }
 const changeMercadoPagoSubscription = async (action: 'cancel' | 'pause' | 'resume') => {
   if (!mercadoPagoBilling.value?.subscription || subscriptionActionLoading.value) return
+  const accessUntil = mercadoPagoBilling.value.subscription.currentPeriodEnd
+    ? new Date(mercadoPagoBilling.value.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')
+    : 'o fim do período atual confirmado pelo Mercado Pago'
   const message = action === 'cancel'
-    ? 'O Mercado Pago cancelará a assinatura agora. Deseja continuar?'
+    ? `O Mercado Pago cancelará a renovação agora, sem fazer novas cobranças. Seu acesso PRO continuará até ${accessUntil}; depois, a empresa volta ao FREE sem apagar os dados. Deseja continuar?`
     : action === 'pause'
-      ? 'As próximas cobranças serão pausadas. Deseja continuar?'
-      : 'Deseja reativar as cobranças desta assinatura?'
+      ? 'O Mercado Pago pausará as cobranças. O acesso PRO ficará suspenso enquanto a assinatura estiver pausada; você poderá retomá-la depois. Deseja continuar?'
+      : 'O Mercado Pago retomará as cobranças e o acesso PRO desta assinatura. Deseja continuar?'
   if (!window.confirm(message)) return
   subscriptionActionLoading.value = true
   try {
     mercadoPagoBilling.value = await updateMercadoPagoSubscription(action)
-    notify(action === 'cancel' ? 'Assinatura cancelada no Mercado Pago.' : action === 'pause' ? 'Cobranças pausadas no Mercado Pago.' : 'Assinatura reativada no Mercado Pago.')
+    const cancellationEnd = mercadoPagoBilling.value.subscription?.currentPeriodEnd
+      ? new Date(mercadoPagoBilling.value.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')
+      : ''
+    notify(action === 'cancel'
+      ? mercadoPagoBilling.value.subscription?.cancelAtPeriodEnd
+        ? `Renovação cancelada no Mercado Pago. Acesso PRO até ${cancellationEnd}.`
+        : 'Assinatura cancelada no Mercado Pago.'
+      : action === 'pause' ? 'Cobranças pausadas no Mercado Pago.' : 'Assinatura reativada no Mercado Pago.')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar a assinatura.')
   } finally { subscriptionActionLoading.value = false }
@@ -604,8 +617,11 @@ watch(active, (tab) => {
   }
   if (tab === 'Backup e Dados' && canExportCompanyData.value) void loadSectionOnce('backup', loadBackup)
   if (tab === 'Integracoes') void loadSectionOnce('integrations', loadIntegrations)
-  if (tab === 'Assinatura') void loadSectionOnce('billing', loadMercadoPagoBilling)
+  if (tab === 'Assinatura' && isOwner.value) void loadSectionOnce('billing', loadMercadoPagoBilling)
 }, { immediate: true })
+watch(isOwner, (allowed) => {
+  if (allowed && active.value === 'Assinatura') void loadSectionOnce('billing', loadMercadoPagoBilling, true)
+})
 watch(canExportCompanyData, (allowed) => {
   if (allowed && active.value === 'Backup e Dados') void loadSectionOnce('backup', loadBackup)
 })
@@ -698,14 +714,18 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Assinatura'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>Assinatura recorrente do Filamind pelo Mercado Pago.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadMercadoPagoBilling">Atualizar</button></div>
+          <div class="billing-page-heading"><div><span class="billing-page-heading__eyebrow">PLANO DA EMPRESA</span><h2>Assinatura da plataforma</h2><p>Consulte seu plano e gerencie as cobranças recorrentes.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadMercadoPagoBilling">{{ billingLoading ? 'Atualizando...' : 'Atualizar' }}</button></div>
           <div v-if="!isOwner" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Somente o Owner pode consultar ou alterar a assinatura da empresa.</div>
           <div v-else-if="billingLoading" class="empty-state"><div><h3>Consultando assinatura</h3></div></div>
+          <div v-else-if="billingError" class="info-note" style="margin-top:16px"><UiIcon name="alert" /><span>{{ billingError }}</span><button class="btn" style="margin-left:auto" @click="loadMercadoPagoBilling">Tentar novamente</button></div>
           <template v-else-if="mercadoPagoBilling">
             <div v-if="mercadoPagoBilling.subscription" class="billing-subscription-summary">
-              <div class="billing-subscription-summary__status"><UiIcon name="check" /><div><span>Assinatura atual</span><strong>{{ mercadoPagoBilling.subscription.planName || mercadoPagoBilling.subscription.planCode }} · {{ subscriptionStatus(mercadoPagoBilling.subscription.status) }}</strong></div></div>
-              <div v-if="mercadoPagoBilling.subscription.status === 'grace' && mercadoPagoBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(mercadoPagoBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>Você mantém o PRO por 3 dias. Depois, a empresa volta ao FREE sem excluir dados.</small></div><div v-else-if="mercadoPagoBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ mercadoPagoBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança' }}</span><strong>{{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="mercadoPagoBilling.subscription.status !== 'trial'">{{ currency(mercadoPagoBilling.plans[0]?.[mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'anual' : 'mensal' }}</small></div>
-              <div class="billing-subscription-summary__actions"><button v-if="mercadoPagoBilling.subscription.status === 'paused'" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('resume')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Retomar cobrança' }}</button><button v-else-if="['trial', 'active', 'past_due', 'grace'].includes(mercadoPagoBilling.subscription.status)" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('pause')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Pausar cobrança' }}</button><button v-if="['trial', 'active', 'past_due', 'grace', 'paused'].includes(mercadoPagoBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('cancel')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div>
+              <div class="billing-subscription-summary__overview">
+                <div class="billing-subscription-summary__status" :class="`billing-subscription-summary__status--${mercadoPagoBilling.subscription.status}`"><span class="billing-subscription-summary__status-icon"><UiIcon :name="mercadoPagoBilling.subscription.status === 'active' ? 'check' : 'info'" /></span><div><span>Plano contratado</span><strong>{{ mercadoPagoBilling.subscription.planName || mercadoPagoBilling.subscription.planCode }}</strong><small class="billing-subscription-summary__badge">{{ mercadoPagoBilling.subscription.cancelAtPeriodEnd ? 'Cancelamento agendado' : subscriptionStatus(mercadoPagoBilling.subscription.status) }}</small></div></div>
+                <div v-if="mercadoPagoBilling.subscription.cancelAtPeriodEnd && mercadoPagoBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>Acesso PRO até</span><strong>{{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small>A renovação foi cancelada no Mercado Pago; não haverá nova cobrança.</small></div><div v-else-if="mercadoPagoBilling.subscription.status === 'grace' && mercadoPagoBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(mercadoPagoBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>O acesso PRO continua durante o período de carência.</small></div><div v-else-if="mercadoPagoBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ mercadoPagoBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança' }}</span><strong>{{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="mercadoPagoBilling.subscription.status !== 'trial'">{{ currency(mercadoPagoBilling.plans[0]?.[mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'anual' : 'mensal' }}</small></div>
+              </div>
+              <div class="billing-subscription-summary__management"><div class="billing-subscription-summary__management-copy"><strong>{{ mercadoPagoBilling.subscription.cancelAtPeriodEnd ? 'Renovação cancelada' : 'Gerencie sua assinatura' }}</strong><span>{{ mercadoPagoBilling.subscription.cancelAtPeriodEnd ? 'O acesso PRO continua até o fim do período pago.' : 'As alterações são enviadas ao Mercado Pago e confirmadas aqui após a resposta.' }}</span></div><div class="billing-subscription-summary__actions"><button v-if="!mercadoPagoBilling.subscription.cancelAtPeriodEnd && mercadoPagoBilling.subscription.status === 'paused'" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('resume')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Retomar cobrança' }}</button><button v-else-if="!mercadoPagoBilling.subscription.cancelAtPeriodEnd && ['trial', 'active', 'past_due', 'grace'].includes(mercadoPagoBilling.subscription.status)" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('pause')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Pausar cobranças' }}</button><button v-if="!mercadoPagoBilling.subscription.cancelAtPeriodEnd && ['trial', 'active', 'past_due', 'grace', 'paused'].includes(mercadoPagoBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('cancel')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div></div>
+              <div v-if="['active', 'trial', 'past_due', 'grace', 'paused'].includes(mercadoPagoBilling.subscription.status)" class="billing-subscription-summary__access-note"><UiIcon name="info" /><span v-if="mercadoPagoBilling.subscription.cancelAtPeriodEnd">A renovação foi cancelada no Mercado Pago. O acesso PRO permanece até {{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}; depois, a empresa volta ao FREE sem perder dados.</span><span v-else>Pausar suspende o acesso PRO enquanto a assinatura estiver pausada. Cancelar encerra as próximas cobranças e mantém o acesso até o fim do período pago.</span></div>
             </div>
             <div v-if="mercadoPagoBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(mercadoPagoBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="mercadoPagoBilling.checkout.url" rel="noopener noreferrer">Abrir link no Mercado Pago</a>.</div>
             <div v-if="!mercadoPagoBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Mercado Pago precisa das credenciais e do segredo de webhook no ambiente para gerar um checkout.</div>
@@ -722,6 +742,7 @@ watch(() => supportDraft.category, (category) => {
               <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cobrança mensal recorrente pelo Mercado Pago. Você pode pausar ou cancelar a assinatura.</div>
             </form>
           </template>
+          <div v-else class="empty-state"><div><h3>Carregando dados do plano</h3><p>A consulta da assinatura ainda não começou.</p><button class="btn" @click="loadMercadoPagoBilling">Consultar assinatura</button></div></div>
         </div>
 
         <div v-else-if="active === 'Usuarios e Permissoes'" class="members-page">

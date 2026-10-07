@@ -31,6 +31,26 @@ const numberLimit = (value) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
 }
 
+export const subscriptionCancellationDeadline = (subscription = {}) => {
+  if (subscription.status === 'trial') return subscription.trial_ends_at || subscription.current_period_end || null
+  if (subscription.status === 'grace') return subscription.grace_ends_at || subscription.current_period_end || null
+  return subscription.current_period_end || subscription.trial_ends_at || subscription.grace_ends_at || null
+}
+
+export const effectiveSubscriptionForEntitlement = (subscription = null, now = new Date()) => {
+  if (!subscription?.cancel_at_period_end) return subscription
+  const deadline = subscriptionCancellationDeadline(subscription)
+  if (!deadline || new Date(deadline) > now) return subscription
+  return {
+    ...subscription,
+    status: 'cancelled',
+    plan_code: subscription.free_plan_code || 'free',
+    plan_name: subscription.free_plan_name || 'Grátis',
+    limits: subscription.free_plan_limits || {},
+    features: subscription.free_plan_features || {}
+  }
+}
+
 export const entitlementFromSubscription = (subscription = null, billingEnforcementExempt = true) => {
   if (!subscription?.status) {
     return {
@@ -90,15 +110,21 @@ export const resolveTenantEntitlement = async (tenantId, client = null, user = n
 
   const read = async (queryClient) => {
     const result = await queryClient.query(`
-      select subscription.status, plan.code as plan_code, plan.limits, plan.features, tenant.billing_enforcement_exempt
+      select subscription.status, subscription.cancel_at_period_end, subscription.current_period_end,
+             subscription.trial_ends_at, subscription.grace_ends_at,
+             plan.code as plan_code, plan.limits, plan.features,
+             free_plan.code as free_plan_code, free_plan.name as free_plan_name,
+             free_plan.limits as free_plan_limits, free_plan.features as free_plan_features,
+             tenant.billing_enforcement_exempt
         from tenants tenant
         left join tenant_subscriptions subscription on subscription.tenant_id = tenant.id
         left join platform_plans plan on plan.id = subscription.plan_id
+        left join platform_plans free_plan on free_plan.code = 'free' and free_plan.active = true
        where tenant.id = $1
        limit 1
     `, [tenantId])
     const row = result.rows[0] || null
-    return entitlementFromSubscription(row, Boolean(row?.billing_enforcement_exempt))
+    return entitlementFromSubscription(effectiveSubscriptionForEntitlement(row), Boolean(row?.billing_enforcement_exempt))
   }
 
   return client ? read(client) : withTenant(tenantId, read)

@@ -6,7 +6,6 @@ const subscriptionAccess = useSubscriptionAccess()
 const route = useRoute()
 const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Estoque: route.path === '/estoque', Configurações: route.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
-const brandName = computed(() => String(preferences.value.brandName || settings.value?.name || 'Filamind'))
 const normalizePath = (path: string) => path.length > 1 ? path.replace(/\/+$/, '') : path
 const hasSectionQuery = (to: string) => new URLSearchParams(to.split('?')[1] || '').has('secao')
 const childIsActive = (to: string) => {
@@ -80,7 +79,7 @@ watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Rel
 
   <aside class="sidebar" :class="{ 'sidebar--open': open }">
     <div class="sidebar__top">
-      <AppLogo :logo-url="String(preferences.logoUrl || '')" :brand-name="brandName" />
+      <AppLogo :logo-url="String(preferences.logoUrl || '')" brand-name="Filamind" />
 
       <button class="icon-btn sidebar__close" aria-label="Fechar menu" @click="emit('close')">
         <UiIcon name="close" />

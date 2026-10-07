@@ -4,8 +4,15 @@ import { EventEmitter } from 'node:events'
 import test from 'node:test'
 
 process.env.MERCADO_PAGO_WEBHOOK_SECRET = 'mercado-pago-test-webhook-secret'
+process.env.MERCADO_PAGO_ACCESS_TOKEN = 'test-access-token'
 
-const { invoiceStatus, mercadoPagoWebhookSignatureMatches } = await import('../src/services/mercadoPagoBilling.js')
+const {
+  expireMercadoPagoPreapproval,
+  invoiceStatus,
+  mercadoPagoCheckoutExpiresAt,
+  mercadoPagoWebhookSignatureMatches,
+  updateMercadoPagoPreapprovalStatus
+} = await import('../src/services/mercadoPagoBilling.js')
 const { handleMercadoPagoWebhook, handleMercadoPagoWebhookProbe } = await import('../src/routes/billing.js')
 
 const webhookRequest = (headers, body) => {
@@ -39,6 +46,89 @@ test('classifica faturas recorrentes do Mercado Pago sem guardar o payload compl
   assert.equal(invoiceStatus({ payment: { status: 'rejected' } }), 'void')
   assert.equal(invoiceStatus({ status: 'recycling' }), 'overdue')
   assert.equal(invoiceStatus({ status: 'scheduled' }), 'pending')
+})
+
+test('checkout Mercado Pago expira apos oito horas da criacao', () => {
+  const expiresAt = mercadoPagoCheckoutExpiresAt('2026-10-07T00:00:00.000Z')
+  assert.equal(expiresAt.toISOString(), '2026-10-07T08:00:00.000Z')
+})
+
+test('expira checkout remoto pendente e exige confirmacao de cancelamento', async () => {
+  const originalFetch = globalThis.fetch
+  const operations = []
+  globalThis.fetch = async (_url, options = {}) => {
+    const method = options.method || 'GET'
+    operations.push(method)
+    return method === 'GET'
+      ? new Response(JSON.stringify({ id: 'preapproval-test', status: 'pending' }), { status: 200 })
+      : new Response(JSON.stringify({ id: 'preapproval-test', status: 'cancelled' }), { status: 200 })
+  }
+
+  try {
+    const result = await expireMercadoPagoPreapproval('preapproval-test')
+    assert.deepEqual(operations, ['GET', 'PUT'])
+    assert.equal(result.status, 'cancelled')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('nao cancela checkout remoto que ja foi autorizado', async () => {
+  const originalFetch = globalThis.fetch
+  const operations = []
+  globalThis.fetch = async (_url, options = {}) => {
+    operations.push(options.method || 'GET')
+    return new Response(JSON.stringify({ id: 'preapproval-test', status: 'authorized' }), { status: 200 })
+  }
+
+  try {
+    await assert.rejects(expireMercadoPagoPreapproval('preapproval-test'), /nao esta pendente/)
+    assert.deepEqual(operations, ['GET'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('usa a grafia de cancelamento aceita pela API quando o primeiro valor e rejeitado', async () => {
+  const originalFetch = globalThis.fetch
+  const requestedOperations = []
+  globalThis.fetch = async (_url, options) => {
+    const operation = options.body ? JSON.parse(options.body).status : 'GET'
+    requestedOperations.push(operation)
+    if (requestedOperations.length === 1) {
+      return new Response(JSON.stringify({ message: 'Invalid preapproval status param: canceled' }), { status: 400 })
+    }
+    if (operation === 'GET') return new Response(JSON.stringify({ id: 'preapproval-test', status: 'authorized' }), { status: 200 })
+    return new Response(JSON.stringify({ id: 'preapproval-test', status: 'cancelled' }), { status: 200 })
+  }
+
+  try {
+    const result = await updateMercadoPagoPreapprovalStatus('preapproval-test', 'canceled')
+    assert.deepEqual(requestedOperations, ['canceled', 'GET', 'cancelled'])
+    assert.equal(result.status, 'cancelled')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('nao repete a acao quando o Mercado Pago ja confirmou cancelamento', async () => {
+  const originalFetch = globalThis.fetch
+  const requestedOperations = []
+  globalThis.fetch = async (_url, options) => {
+    const operation = options.body ? JSON.parse(options.body).status : 'GET'
+    requestedOperations.push(operation)
+    return requestedOperations.length === 1
+      ? new Response(JSON.stringify({ message: 'Invalid preapproval status param: canceled' }), { status: 400 })
+      : new Response(JSON.stringify({ id: 'preapproval-test', status: 'cancelled' }), { status: 200 })
+  }
+
+  try {
+    const result = await updateMercadoPagoPreapprovalStatus('preapproval-test', 'canceled')
+    assert.deepEqual(requestedOperations, ['canceled', 'GET'])
+    assert.equal(result.status, 'cancelled')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('aceita somente assinatura HMAC valida do webhook Mercado Pago', () => {
