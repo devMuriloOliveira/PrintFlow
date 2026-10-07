@@ -33,12 +33,22 @@ const timedQuery = async (executor, text, params = []) => {
     if (durationMs >= slowQueryThresholdMs) console.warn('Consulta PostgreSQL lenta', { statement: queryLabel(text), durationMs })
   }
 }
-const instrumentClient = (client) => new Proxy(client, {
-  get(target, property, receiver) {
-    if (property === 'query') return (text, params = []) => timedQuery((sql, values) => target.query(sql, values), text, params)
-    return Reflect.get(target, property, receiver)
+export const instrumentClient = (client) => {
+  let pendingQuery = Promise.resolve()
+  const query = (text, params = []) => {
+    const result = pendingQuery.then(() => timedQuery((sql, values) => client.query(sql, values), text, params))
+    pendingQuery = result.catch(() => {})
+    return result
   }
-})
+
+  return new Proxy(client, {
+    get(target, property, receiver) {
+      if (property === 'query') return query
+      if (property === 'flushQueries') return () => pendingQuery
+      return Reflect.get(target, property, receiver)
+    }
+  })
+}
 
 export const query = async (text, params = []) => {
   if (!pool) {
@@ -54,14 +64,17 @@ export const withTenant = async (tenantId, callback) => {
   }
 
   const client = await pool.connect()
+  const scopedClient = instrumentClient(client)
 
   try {
     await client.query('begin')
     await client.query("select set_config('app.tenant_id', $1, true)", [tenantId])
-    const result = await callback(instrumentClient(client))
+    const result = await callback(scopedClient)
+    await scopedClient.flushQueries()
     await client.query('commit')
     return result
   } catch (error) {
+    await scopedClient.flushQueries().catch(() => {})
     await client.query('rollback')
     throw error
   } finally {
@@ -75,13 +88,16 @@ export const withPlatformAdmin = async (callback) => {
   }
 
   const client = await pool.connect()
+  const scopedClient = instrumentClient(client)
   try {
     await client.query('begin')
     await client.query("select set_config('app.platform_admin', 'true', true)")
-    const result = await callback(instrumentClient(client))
+    const result = await callback(scopedClient)
+    await scopedClient.flushQueries()
     await client.query('commit')
     return result
   } catch (error) {
+    await scopedClient.flushQueries().catch(() => {})
     await client.query('rollback')
     throw error
   } finally {

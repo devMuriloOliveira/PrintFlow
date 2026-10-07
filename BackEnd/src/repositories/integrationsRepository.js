@@ -188,8 +188,7 @@ export const markMarketplaceIntegrationSync = async (tenantId, integrationId, re
            set connection_status = case
              when exists (select 1 from marketplace_integrations where tenant_id = $1 and marketplace_id = $2 and status = 'connected') then 'connected'
              when exists (select 1 from marketplace_integrations where tenant_id = $1 and marketplace_id = $2 and status = 'error') then 'error'
-             else 'disconnected' end,
-               updated_at = now()
+             else 'disconnected' end
          where tenant_id = $1 and id = $2
       `, [tenantId, marketplaceId])
     }
@@ -219,8 +218,7 @@ export const disconnectMarketplaceIntegration = async (tenantId, integrationId) 
            set connection_status = case when exists (
              select 1 from marketplace_integrations
               where tenant_id = $1 and marketplace_id = $2 and status = 'connected'
-           ) then 'connected' else 'disconnected' end,
-               updated_at = now()
+           ) then 'connected' else 'disconnected' end
          where tenant_id = $1 and id = $2
       `, [tenantId, marketplaceId])
     }
