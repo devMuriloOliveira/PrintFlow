@@ -29,6 +29,8 @@ const requiredReleaseTool = [
   'SHA256SUMS.txt',
   'RELEASE-METADATA.json',
   'certificateSha256',
+  'ExportVerifiedSignerCertificateAsync',
+  'VerifyPackagedHostMatchesSignedBuildAsync',
   'validate-agent-release-artifacts.mjs',
   'PrintFlow-Agent-Transition-Setup.exe',
   '"release", "create"',
@@ -44,6 +46,11 @@ if (!releaseVerifier.includes('DEV_SELF_SIGNED') || !releaseVerifier.includes('P
 }
 if (/shell:\s*(?:pwsh|powershell)|\.ps1|\.psm1|\.vbs|iexpress/i.test(workflow)) {
   missing.push('workflow ainda depende de PowerShell/IExpress')
+}
+const signedHostAt = releaseTool.indexOf('await SignAsync(agentRoot, options.CertificatePfx, certificatePath!, [hostExecutable])')
+const zipCreationAt = releaseTool.indexOf('ZipFile.CreateFromDirectory(stageRoot, zipPath')
+if (signedHostAt < 0 || zipCreationAt < 0 || signedHostAt > zipCreationAt) {
+  missing.push('host precisa ser assinado antes de entrar no ZIP distribuido')
 }
 const windowsRunSteps = workflow.match(/^\s{8}run:/gm)?.length ?? 0
 const explicitCmdSteps = workflow.match(/^\s{8}shell:\s*cmd\s*$/gm)?.length ?? 0

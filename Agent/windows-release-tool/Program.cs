@@ -82,6 +82,9 @@ internal static class Program
         if (!File.Exists(hostExecutable)) throw new FileNotFoundException("Executavel do host nativo nao foi gerado.", hostExecutable);
         var hostManifest = JsonSerializer.Serialize(new { agentVersion = version, hostVersion = version, executable = "FilaAgent.exe" }, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(hostOutput, "host-version.json"), hostManifest, new System.Text.UTF8Encoding(false));
+        var certificatePath = options.SignDev ? Path.Combine(outputRoot, "Fila-Agent-Dev-Certificate.cer") : null;
+        if (options.SignDev)
+            await SignAsync(agentRoot, options.CertificatePfx, certificatePath!, [hostExecutable]);
 
         ResetDirectory(stageRoot, outputRoot);
         Directory.CreateDirectory(stageRoot);
@@ -106,11 +109,9 @@ internal static class Program
 
         if (File.Exists(zipPath)) File.Delete(zipPath);
         ZipFile.CreateFromDirectory(stageRoot, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+        if (options.SignDev) await VerifyPackagedHostMatchesSignedBuildAsync(zipPath, hostExecutable);
 
         ResetDirectory(setupOutput, agentRoot);
-        var certificatePath = options.SignDev ? Path.Combine(outputRoot, "Fila-Agent-Dev-Certificate.cer") : null;
-        if (options.SignDev)
-            await SignAsync(agentRoot, options.CertificatePfx, certificatePath!, [hostExecutable]);
 
         var setupPublishArguments = new List<string>
         {
@@ -123,12 +124,39 @@ internal static class Program
         var setupExecutable = Path.Combine(setupOutput, "FilaAgentSetup.exe");
         if (!File.Exists(setupExecutable)) throw new FileNotFoundException("Executavel nativo do instalador nao foi gerado.", setupExecutable);
         await RunRequiredAsync(setupExecutable, ["--validate-embedded-package"], agentRoot, TimeSpan.FromMinutes(1));
-        if (options.SignDev) await SignAsync(agentRoot, options.CertificatePfx, certificatePath!, [setupExecutable]);
+        if (options.SignDev)
+        {
+            await SignAsync(agentRoot, options.CertificatePfx, certificatePath!, [setupExecutable]);
+            await ExportVerifiedSignerCertificateAsync(setupExecutable, certificatePath!);
+        }
         File.Copy(setupExecutable, installerPath, overwrite: true);
 
         if (options.SignDev && !File.Exists(certificatePath)) throw new InvalidDataException("Certificado publico do instalador nao foi exportado.");
         Console.WriteLine($"Pacote Windows: {zipPath}");
         Console.WriteLine($"Instalador autocontido: {installerPath}");
+    }
+
+    private static async Task ExportVerifiedSignerCertificateAsync(string signedFilePath, string certificatePath)
+    {
+        if (!File.Exists(signedFilePath)) throw new FileNotFoundException("Binario assinado para exportar o certificado nao foi encontrado.", signedFilePath);
+        using var rawSigner = X509Certificate.CreateFromSignedFile(signedFilePath);
+        using var signer = new X509Certificate2(rawSigner);
+        var certificateSha256 = Convert.ToHexString(SHA256.HashData(signer.RawData));
+        if (!string.Equals(certificateSha256, ExpectedCertificateSha256, StringComparison.OrdinalIgnoreCase))
+            throw new CryptographicException("Certificado extraido do instalador diverge da identidade fixada pelo atualizador.");
+        Directory.CreateDirectory(Path.GetDirectoryName(certificatePath)!);
+        await File.WriteAllBytesAsync(certificatePath, signer.Export(X509ContentType.Cert));
+    }
+
+    private static async Task VerifyPackagedHostMatchesSignedBuildAsync(string zipPath, string signedHostPath)
+    {
+        using var archive = ZipFile.OpenRead(zipPath);
+        var entry = archive.GetEntry("host/FilaAgent.exe") ?? throw new InvalidDataException("ZIP de release nao contem o host Fila Agent.");
+        await using var packagedHost = entry.Open();
+        var packagedHash = await SHA256.HashDataAsync(packagedHost);
+        var signedHostHash = SHA256.HashData(await File.ReadAllBytesAsync(signedHostPath));
+        if (!CryptographicOperations.FixedTimeEquals(packagedHash, signedHostHash))
+            throw new CryptographicException("Host dentro do ZIP diverge do executavel validado por Authenticode.");
     }
 
     private static BuildOptions ParseOptions(string[] args)
@@ -219,8 +247,13 @@ internal static class Program
         var zipPath = Path.Combine(dist, "Fila-Agent-Windows.zip");
         var legacyZipPath = Path.Combine(dist, "PrintFlow-Agent-Windows.zip");
         Console.WriteLine($"Diretorio de artefatos: {Path.GetFullPath(dist)}");
-        foreach (var path in new[] { certificatePath, setupPath, zipPath })
+        foreach (var path in new[] { setupPath, zipPath })
             if (!File.Exists(path)) throw new FileNotFoundException($"Artefato obrigatorio ausente para preparar release: {Path.GetFullPath(path)}", path);
+        if (!File.Exists(certificatePath))
+        {
+            Console.WriteLine("Certificado publico ausente; extraindo e validando a identidade Authenticode do setup.");
+            await ExportVerifiedSignerCertificateAsync(setupPath, certificatePath);
+        }
 
         File.Copy(setupPath, legacySetupPath, overwrite: true);
         File.Copy(setupPath, transitionPath, overwrite: true);

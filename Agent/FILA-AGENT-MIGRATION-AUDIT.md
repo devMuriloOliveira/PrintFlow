@@ -402,3 +402,13 @@ O run 37827242596 concluiu testes e empacotamento Early Access, mas falhou em Cr
 Para tornar o caminho verificável e comum entre as etapas, o workflow passa a executar build, preparação e publicação com working-directory: Agent; o comando de build informa --output-dir dist, e a etapa de metadados lista essa pasta antes de prosseguir. O ReleaseTool agora informa o caminho absoluto da pasta e do primeiro artefato obrigatório ausente. O contrato de release verifica que as três etapas usam a mesma pasta de trabalho.
 
 Verificações locais da correção: node scripts/check-agent-release-contract.mjs passou; node scripts/validate-agent-package.mjs aprovou 0.1.26; dotnet build --no-restore --configuration Release windows-release-tool\FilaAgent.ReleaseTool.csproj passou sem avisos/erros; git diff --check passou. A release continua pendente até o novo workflow assinar, preparar, publicar e validar os ativos no GitHub.
+
+### Certificado e assinatura no pacote Windows — 2026-10-08
+
+A segunda execução do workflow 37828891462 confirmou que Agent/dist continha Fila-Agent-Setup.exe e Fila-Agent-Windows.zip, mas não Fila-Agent-Dev-Certificate.cer. O caminho comum entre as etapas foi confirmado; portanto a correção anterior de diretório não resolveu a ausência do certificado. A causa interna do primeiro arquivo ausente não apareceu no log acessível.
+
+O ReleaseTool foi reforçado para assinar o executável do host antes de copiá-lo e compactá-lo, comparar por SHA-256 o host do ZIP com o binário assinado e exportar novamente o certificado público a partir da assinatura Authenticode do setup, validando a identidade fixada. A preparação da release também pode reconstruir o .cer ausente a partir do setup, mas só aceita a identidade esperada e depois verifica as assinaturas. O workflow permanece limitado à mesma pasta Agent.
+
+Verificações locais: o contrato do workflow/ReleaseTool passou em 28 checks; o validador do pacote aprovou 0.1.26; o build Release do ReleaseTool passou sem avisos/erros; git diff --check passou. A prova local isolada de argumentos confirmou que --sign-dev e --require-persisted-certificate chegam ao ReleaseTool e tentou abrir o PFX; a senha foi deliberadamente removida do processo de teste e o comando parou antes de assinar. O primeiro teste isolado foi interrompido por NU1900 ao restaurar dependências sem acesso ao NuGet; após restaurar os assets com NuGetAudit=false, o probe atingiu a validação esperada da senha. A pasta temporária de prova foi removida.
+
+A nova correção ainda precisa passar pelo workflow Windows e pela validação das assinaturas/ativos publicados. Até essa execução, não há release 0.1.26 disponível.
