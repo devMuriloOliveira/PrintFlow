@@ -14,6 +14,8 @@ const requiredWorkflow = [
   'windows-release-tool\\FilaAgent.ReleaseTool.csproj',
   '--sign-dev',
   '--require-persisted-certificate',
+  '--output-dir dist',
+  'working-directory: Agent',
   'prepare-release',
   'publish-release',
   'FILA_AGENT_DEV_CERT_PFX_BASE64',
@@ -47,6 +49,14 @@ const windowsRunSteps = workflow.match(/^\s{8}run:/gm)?.length ?? 0
 const explicitCmdSteps = workflow.match(/^\s{8}shell:\s*cmd\s*$/gm)?.length ?? 0
 if (windowsRunSteps === 0 || windowsRunSteps !== explicitCmdSteps) {
   missing.push('cada passo run do workflow Windows precisa declarar shell: cmd')
+}
+for (const name of ['Build Early Access package', 'Create release metadata and hashes', 'Publish Early Access release']) {
+  const stepStart = workflow.indexOf(`      - name: ${name}`)
+  const nextStep = stepStart < 0 ? -1 : workflow.indexOf('\n      - name:', stepStart + 1)
+  const step = stepStart < 0 ? '' : workflow.slice(stepStart, nextStep < 0 ? undefined : nextStep)
+  if (!/^        working-directory:\s*Agent\s*$/m.test(step)) {
+    missing.push(`passo ${name} precisa executar na mesma pasta Agent`)
+  }
 }
 if (missing.length) {
   console.error(`Agent release contract invalido; ausentes: ${missing.join(', ')}`)

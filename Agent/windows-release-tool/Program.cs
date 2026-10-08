@@ -218,8 +218,9 @@ internal static class Program
         var legacyTransitionPath = Path.Combine(dist, "PrintFlow-Agent-Transition-Setup.exe");
         var zipPath = Path.Combine(dist, "Fila-Agent-Windows.zip");
         var legacyZipPath = Path.Combine(dist, "PrintFlow-Agent-Windows.zip");
+        Console.WriteLine($"Diretorio de artefatos: {Path.GetFullPath(dist)}");
         foreach (var path in new[] { certificatePath, setupPath, zipPath })
-            if (!File.Exists(path)) throw new FileNotFoundException("Artefato obrigatorio ausente para preparar release.", path);
+            if (!File.Exists(path)) throw new FileNotFoundException($"Artefato obrigatorio ausente para preparar release: {Path.GetFullPath(path)}", path);
 
         File.Copy(setupPath, legacySetupPath, overwrite: true);
         File.Copy(setupPath, transitionPath, overwrite: true);
