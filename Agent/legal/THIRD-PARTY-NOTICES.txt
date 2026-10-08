@@ -1,0 +1,51 @@
+FILA AGENT — THIRD-PARTY SOFTWARE NOTICES
+
+The Windows package includes the following components. Their notices and
+license texts are included in this folder's third-party directory. The
+package is built for Windows x64 as a self-contained .NET 8 application;
+the .NET runtime license and its third-party notices are included below.
+
+MANAGED AND NATIVE DEPENDENCIES
+
+- BouncyCastle.Cryptography 2.7.0 — MIT-based Bouncy Castle license.
+  Also includes a modified BZip2 library under Apache License 2.0.
+  License: third-party/LICENSE-BouncyCastle.txt and
+  third-party/LICENSE-APACHE-2.0.txt.
+  Source: https://github.com/bcgit/bc-csharp
+- FluentFTP 55.0.0 — MIT.
+  License: third-party/LICENSE-FluentFTP.txt.
+  Source: https://github.com/robinrodricks/FluentFTP
+- Microsoft.Data.Sqlite 10.0.12 and Microsoft.Data.Sqlite.Core 10.0.12 — MIT.
+  License: third-party/LICENSE-DotNet-MIT.txt.
+  Source: https://github.com/dotnet/efcore
+- MQTTnet 5.2.0.1603 — MIT.
+  License: third-party/LICENSE-MQTTnet.txt.
+  Source: https://github.com/dotnet/MQTTnet
+- SQLitePCLRaw.bundle_e_sqlite3 2.1.12, SQLitePCLRaw.core 2.1.12,
+  SQLitePCLRaw.lib.e_sqlite3 2.1.12, and
+  SQLitePCLRaw.provider.e_sqlite3 2.1.12 — Apache License 2.0.
+  Notices: third-party/NOTICE-SQLitePCLRaw.txt.
+  License: third-party/LICENSE-APACHE-2.0.txt.
+  Source: https://github.com/ericsink/SQLitePCL.raw
+- The SQLite database engine bundled by SQLitePCLRaw — public domain.
+  Source: https://www.sqlite.org/copyright.html
+- System.IO.Ports 10.0.12, System.Security.Cryptography.ProtectedData
+  10.0.12, and System.Memory 4.5.3 — MIT.
+  License: third-party/LICENSE-DotNet-MIT.txt.
+  Source: https://github.com/dotnet/runtime
+
+MICROSOFT .NET RUNTIME
+
+The installer and Agent use self-contained .NET 8 runtime files. The .NET
+license is in third-party/LICENSE-DotNet-Runtime.txt and .NET runtime
+component notices are in third-party/DOTNET-THIRD-PARTY-NOTICES.txt.
+These files were taken from the .NET 8 SDK/runtime available when this
+package was prepared. Recheck them whenever the SDK/runtime baseline changes.
+
+SEPARATE SOFTWARE INSTALLED FROM THE OFFICIAL STORE
+
+OrcaSlicer is not included in this package. If the installer cannot find
+a compatible installation, it can request installation from the official
+Microsoft Store through Windows Package Manager. OrcaSlicer is licensed
+separately under GNU AGPL version 3; see
+https://github.com/OrcaSlicer/OrcaSlicer/blob/main/LICENSE.txt.

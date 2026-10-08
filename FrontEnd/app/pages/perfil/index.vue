@@ -31,7 +31,7 @@ const periodDate = computed(() => {
       : subscription.value?.currentPeriodEnd
   return value ? new Date(value).toLocaleDateString('pt-BR') : 'Não informado'
 })
-const proBenefits = ['Automação com PrintFlow Agent e fila de impressão', 'Marketplaces e relatórios avançados', 'Equipe com até 8 pessoas', 'Operação sem os limites do plano FREE']
+const proBenefits = ['Automação com Fila Agent e fila de impressão', 'Marketplaces e relatórios avançados', 'Equipe com até 8 pessoas', 'Operação sem os limites do plano FREE']
 const freeBenefits = ['Clientes, produtos e pedidos manuais', '1 impressora manual e gestão de filamentos', 'Metas e operação básica dentro dos limites', 'Sem Agent, marketplaces e relatórios avançados']
 
 const upgradeRequested = computed(() => String(route.query.upgrade || '') === '1')

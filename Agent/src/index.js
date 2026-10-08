@@ -101,6 +101,9 @@ process.on('exit', removeDiagnosticsToken)
 
 const apiUrl = config.apiUrl
 
+const agentEnvironmentValue = (filaName, legacyName) =>
+  process.env[filaName] || process.env[legacyName]
+
 const pairingCode =
   process.env.PRINTFLOW_PAIRING_CODE ||
   ''
@@ -122,7 +125,7 @@ const backendHealth = { connected: false, lastSuccessAt: null, lastLatencyMs: nu
 let lastHealthSnapshotAt = 0
 const healthSnapshotIntervalMs = Math.max(
   60_000,
-  Number(process.env.PRINTFLOW_AGENT_HEALTH_SNAPSHOT_MS) || 60_000
+  Number(agentEnvironmentValue('FILA_AGENT_HEALTH_SNAPSHOT_MS', 'PRINTFLOW_AGENT_HEALTH_SNAPSHOT_MS')) || 60_000
 )
 
 const restoreRegisteredPrinterConnections = async (credentials) => {
@@ -473,7 +476,7 @@ const start = async () => {
       if (!credentials) {
         console.log('')
         console.log(
-          'Agent aguardando conexao pelo site PrintFlow.'
+          'Fila Agent aguardando conexao pelo Filamind.'
         )
         console.log(
           'Use a opcao Conectar Agent instalado na tela de impressoras.'
@@ -508,7 +511,7 @@ const start = async () => {
       return false
     }
 
-    console.log('Agent autenticado pelo PrintFlow')
+    console.log('Agent autenticado pelo Filamind')
     console.log('Status:', authResult.status)
 
     // A nova credencial é salva primeiro e confirmada usando o hash pendente.
@@ -888,9 +891,9 @@ const checkCommands = async () => {
       dispatched += 1
     }
     if (realtimeMode === 'websocket') {
-      commandPollDelay = Math.max(60_000, Number(process.env.PRINTFLOW_AGENT_WS_POLL_MS) || 90_000)
+      commandPollDelay = Math.max(60_000, Number(agentEnvironmentValue('FILA_AGENT_WS_POLL_MS', 'PRINTFLOW_AGENT_WS_POLL_MS')) || 90_000)
     } else if (realtimeMode === 'sse') {
-      commandPollDelay = Math.max(30_000, Number(process.env.PRINTFLOW_AGENT_SSE_POLL_MS) || 45_000)
+      commandPollDelay = Math.max(30_000, Number(agentEnvironmentValue('FILA_AGENT_SSE_POLL_MS', 'PRINTFLOW_AGENT_SSE_POLL_MS')) || 45_000)
     } else if (dispatched === 0) {
       commandPollDelay = Math.min(commandPollDelay * 2, 30_000)
     } else {
@@ -952,8 +955,8 @@ commandScheduler.schedule(0)
     }),
       onModeChange: mode => {
         realtimeMode = mode
-        if (mode === 'websocket') commandPollDelay = Math.max(60_000, Number(process.env.PRINTFLOW_AGENT_WS_POLL_MS) || 90_000)
-        else if (mode === 'sse') commandPollDelay = Math.max(30_000, Number(process.env.PRINTFLOW_AGENT_SSE_POLL_MS) || 45_000)
+        if (mode === 'websocket') commandPollDelay = Math.max(60_000, Number(agentEnvironmentValue('FILA_AGENT_WS_POLL_MS', 'PRINTFLOW_AGENT_WS_POLL_MS')) || 90_000)
+        else if (mode === 'sse') commandPollDelay = Math.max(30_000, Number(agentEnvironmentValue('FILA_AGENT_SSE_POLL_MS', 'PRINTFLOW_AGENT_SSE_POLL_MS')) || 45_000)
         else commandPollDelay = 5_000
         commandScheduler.schedule(commandPollDelay)
       },
@@ -991,7 +994,7 @@ commandScheduler.schedule(0)
     )
 
     console.log('')
-    console.log('PrintFlow Agent pronto.')
+    console.log('Fila Agent pronto.')
     return true
   } catch (error) {
     console.log('')

@@ -1,0 +1,26 @@
+Copyright on SQLitePCLRaw
+
+SQLitePCLRaw version 2.1.12 is distributed under Apache License 2.0.
+The project repository states that the change from the Zumero name to
+SourceGear has no legal distinction because Zumero is a DBA name for
+SourceGear.
+
+License for SQLite
+
+The author disclaims copyright to the SQLite source code. In place of
+a legal notice, the SQLite project provides this blessing:
+
+May you do good and not evil.
+May you find forgiveness for yourself and forgive others.
+May you share freely, never taking more than you give.
+
+License for Microsoft Open Technologies
+
+Copyright (c) Microsoft Open Technologies, Inc. All Rights Reserved.
+Licensed under the Apache License, Version 2.0. The software is provided
+on an "AS IS" basis, without warranties or conditions of any kind, either
+express or implied, including without limitation warranties or conditions
+of title, fitness for a particular purpose, merchantability, or
+non-infringement. See LICENSE-APACHE-2.0.txt for the terms and limitations.
+
+Source: https://github.com/ericsink/SQLitePCL.raw

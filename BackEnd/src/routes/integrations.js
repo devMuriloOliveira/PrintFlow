@@ -1,4 +1,4 @@
-import { readJsonBody } from '../http/body.js'
+import { readJsonBody, readRawBody } from '../http/body.js'
 import { sendJson } from '../http/response.js'
 import { verifyWebhookSecret } from '../security/webhook.js'
 import { getTenantId } from '../config/tenant.js'
@@ -7,12 +7,14 @@ import { getAuthUser } from './auth.js'
 import { tenantQuery } from '../db/pool.js'
 import {
   createMarketplaceIntegration,
+  claimMarketplaceWebhookEvent,
   consumeMarketplaceOAuthAttempt,
   disconnectMarketplaceIntegration,
   findIntegrationById,
   findIntegrationByExternalAccount,
   listMarketplaceIntegrations,
   markMarketplaceIntegrationSync,
+  markMarketplaceWebhookEventStatus,
   recordTrackedSales,
   recordWebhookEvent
 } from '../repositories/integrationsRepository.js'
@@ -24,7 +26,8 @@ import {
   exchangeMarketplaceOAuthCode,
   fetchMarketplaceOrderDetails,
   marketplaceAuthorizationUrl,
-  readMarketplaceOAuthState
+  readMarketplaceOAuthState,
+  verifyShopeePushSignature
 } from '../services/marketplaceOfficial.js'
 
 const safeNormalizeOrFetch = async (integration, platform, externalOrderId, payload) => {
@@ -54,7 +57,7 @@ const recordAndQueueMarketplaceSale = async (integration, sale, externalOrderId)
 }
 
 const ignored = (res) => sendJson(res, 200, { message: 'Conta ignorada ou nao integrada.' })
-const syncErrorMessage = (error) => String(error?.message || '').includes('Token do Mercado Livre')
+const syncErrorMessage = (error) => ['Token do Mercado Livre', 'Token do Shopee', 'Token da Amazon'].some((prefix) => String(error?.message || '').includes(prefix))
   ? error.message
   : 'Falha ao consultar a API do marketplace. Reconecte a conta se o erro persistir.'
 
@@ -113,7 +116,7 @@ export const handleMarketplaceIntegrationDisconnect = async (req, res, integrati
 }
 
 export const handleMarketplaceOAuthCallback = async (req, res, url) => {
-  const code = String(url.searchParams.get('code') || '')
+  const code = String(url.searchParams.get('code') || url.searchParams.get('spapi_oauth_code') || '')
   const state = readMarketplaceOAuthState(url.searchParams.get('state') || '')
   if (!code) return sendJson(res, 400, { error: 'Codigo OAuth nao informado.' })
 
@@ -122,21 +125,26 @@ export const handleMarketplaceOAuthCallback = async (req, res, url) => {
   const token = await exchangeMarketplaceOAuthCode({
     platform: state.platform,
     code,
-    codeVerifier: attempt.codeVerifier
+    codeVerifier: attempt.codeVerifier,
+    shopId: url.searchParams.get('shop_id') || '',
+    mainAccountId: url.searchParams.get('main_account_id') || '',
+    sellerId: url.searchParams.get('selling_partner_id') || ''
   })
 
   const marketplaceName = state.platform === 'mercado_livre' ? 'Mercado Livre' : state.platform === 'shopee' ? 'Shopee' : state.platform === 'amazon' ? 'Amazon' : state.platform
-
-  await createMarketplaceIntegration(state.tenantId, {
-    platform: state.platform,
-    marketplaceName,
-    connectionName: marketplaceName,
-    accountExternalId: token.accountExternalId || `${state.platform}-${state.tenantId}`,
-    accessToken: token.accessToken,
-    refreshToken: token.refreshToken,
-    tokenExpiresAt: token.tokenExpiresAt,
-    scopes: token.scopes
-  })
+  const accountIds = token.shopIds?.length ? token.shopIds : [token.accountExternalId || `${state.platform}-${state.tenantId}`]
+  for (const accountExternalId of accountIds) {
+    await createMarketplaceIntegration(state.tenantId, {
+      platform: state.platform,
+      marketplaceName,
+      connectionName: marketplaceName,
+      accountExternalId,
+      accessToken: token.accessToken,
+      refreshToken: token.refreshToken,
+      tokenExpiresAt: token.tokenExpiresAt,
+      scopes: token.scopes
+    })
+  }
 
   if (env.appPublicUrl) {
     const redirect = new URL('/marketplaces', env.appPublicUrl)
@@ -214,35 +222,73 @@ export const handleMercadoLivreWebhook = async (req, res) => {
 }
 
 export const handleShopeeWebhook = async (req, res) => {
-  if (!verifyWebhookSecret(req)) return sendJson(res, 401, { error: 'Webhook nao autorizado.' })
+  const rawBody = await readRawBody(req)
+  if (!verifyShopeePushSignature(req, rawBody)) {
+    res.writeHead(401)
+    return res.end()
+  }
 
-  const payload = await readJsonBody(req)
+  let payload
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'))
+  } catch {
+    res.writeHead(400)
+    return res.end()
+  }
   const externalAccountId = String(payload.shop_id || '')
-  if (!externalAccountId) return sendJson(res, 400, { error: 'Shop ID nao informado.' })
+  if (!externalAccountId) {
+    res.writeHead(204)
+    return res.end()
+  }
 
   const integration = await findIntegrationByExternalAccount('shopee', externalAccountId)
-  if (!integration) return ignored(res)
+  if (!integration) {
+    res.writeHead(204)
+    return res.end()
+  }
 
   const data = payload.data || {}
-  const externalOrderId = String(data.ordersn || data.order_sn || payload.ordersn || '')
-  const webhookReceipt = await recordWebhookEvent(integration, {
+  const eventType = String(payload.code || 'webhook')
+  const externalOrderId = String(data.ordersn || data.order_sn || payload.ordersn || payload.order_sn || '')
+  const webhookReceipt = await claimMarketplaceWebhookEvent(integration, {
     platform: 'shopee',
-    eventType: String(payload.code || 'webhook'),
+    eventType,
     externalOrderId,
     payload
   })
-  if (!webhookReceipt.inserted) return sendJson(res, 200, { message: 'duplicate' })
-
-  if (externalOrderId) {
-    const sale = await safeNormalizeOrFetch(integration, 'shopee', externalOrderId, payload)
-    await recordAndQueueMarketplaceSale(integration, {
-      platform: 'shopee',
-      externalOrderId,
-      ...sale
-    })
+  if (!webhookReceipt.claimed) {
+    if (webhookReceipt.status === 'processing') {
+      res.writeHead(503)
+      return res.end()
+    }
+    res.writeHead(204)
+    return res.end()
   }
 
-  return sendJson(res, 200, { message: 'success' })
+  try {
+    if (eventType === '2') {
+      await disconnectMarketplaceIntegration(integration.tenant_id, integration.id)
+    } else if (eventType === '3' && externalOrderId) {
+      const sale = await fetchMarketplaceOrderDetails(integration, externalOrderId)
+      await recordAndQueueMarketplaceSale(integration, {
+        platform: 'shopee',
+        externalOrderId,
+        ...sale
+      })
+      await markMarketplaceIntegrationSync(integration.tenant_id, integration.id)
+    }
+    await markMarketplaceWebhookEventStatus(integration, webhookReceipt.id, 'processed')
+    res.writeHead(204)
+    return res.end()
+  } catch (error) {
+    await markMarketplaceWebhookEventStatus(integration, webhookReceipt.id, 'error')
+    await markMarketplaceIntegrationSync(integration.tenant_id, integration.id, {
+      status: 'error',
+      lastError: syncErrorMessage(error)
+    })
+    res.writeHead(503)
+    return res.end()
+  }
 }
 
 export const handleAmazonWebhook = async (req, res) => {

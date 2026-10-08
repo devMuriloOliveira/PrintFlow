@@ -735,7 +735,7 @@ watch(() => supportDraft.category, (category) => {
                 <article class="billing-plan-card">
                   <div class="billing-plan-card__title"><h3>PRO mensal</h3><span class="billing-plan-card__caption">Preço de lançamento vigente. Cancele quando quiser.</span></div>
                   <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.monthly || 0).replace('R$', '').trim() }}<span>/mês</span></div>
-                  <ul class="billing-plan-card__features"><li>Automação com PrintFlow Agent e fila de impressão</li><li>Marketplaces e relatórios avançados</li><li>Equipe com até 8 pessoas</li><li>Operação sem os limites do plano FREE</li></ul>
+                  <ul class="billing-plan-card__features"><li>Automação com Fila Agent e fila de impressão</li><li>Marketplaces e relatórios avançados</li><li>Equipe com até 8 pessoas</li><li>Operação sem os limites do plano FREE</li></ul>
                   <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startMercadoPagoCheckout">{{ billingActionLoading ? 'Atualizando...' : 'Assinar PRO' }}</button>
                 </article>
               </div>
@@ -982,7 +982,7 @@ watch(() => supportDraft.category, (category) => {
           <div class="notification-preference-list">
             <article class="notification-preference" :class="{ 'notification-preference--active': preferences.productionAlerts }">
               <span class="notification-preference__icon"><UiIcon name="printer" :size="20" /></span>
-              <div class="notification-preference__copy"><strong>Produção e impressoras</strong><p>Falhas, conclusão de impressões, fila de produção e estado do PrintFlow Agent.</p></div>
+              <div class="notification-preference__copy"><strong>Produção e impressoras</strong><p>Falhas, conclusão de impressões, fila de produção e estado do Fila Agent.</p></div>
               <div class="notification-preference__control"><small>{{ preferences.productionAlerts ? 'Ativado' : 'Desativado' }}</small><button type="button" class="switch" :class="{ active: preferences.productionAlerts }" role="switch" :aria-checked="preferences.productionAlerts" aria-label="Alternar alertas de produção" @click="preferences.productionAlerts = !preferences.productionAlerts"></button></div>
             </article>
 
@@ -1039,7 +1039,7 @@ watch(() => supportDraft.category, (category) => {
             </section>
 
             <section class="integration-panel">
-              <div class="integration-panel__head"><span><UiIcon name="printer" :size="18" /></span><div><h3>PrintFlow Agent</h3><p>Computadores autorizados a operar impressoras nesta empresa.</p></div><NuxtLink class="btn" to="/impressoras">Ver impressoras</NuxtLink></div>
+              <div class="integration-panel__head"><span><UiIcon name="printer" :size="18" /></span><div><h3>Fila Agent</h3><p>Computadores autorizados a operar impressoras nesta empresa.</p></div><NuxtLink class="btn" to="/impressoras">Ver impressoras</NuxtLink></div>
               <div v-if="integrationsOverview.agents.length" class="integration-connection-list">
                 <article v-for="agent in integrationsOverview.agents" :key="agent.id" class="integration-connection-row">
                   <span class="integration-connection-row__device"><UiIcon name="printer" :size="18" /></span>

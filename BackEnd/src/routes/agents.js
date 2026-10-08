@@ -682,7 +682,7 @@ export const handleAgentPair =
 
     const entitlement = await resolveTenantEntitlement(pairing.tenant_id)
     if (!supportsSubscriptionFeature(entitlement, 'agent')) {
-      return sendJson(res, 403, { error: 'O PrintFlow Agent esta disponivel apenas no plano PRO.' })
+      return sendJson(res, 403, { error: 'O Fila Agent esta disponivel apenas no plano PRO.' })
     }
 
     // ==================================================
@@ -1513,15 +1513,20 @@ export const handleAgentPrintJobMetrics = async (req, res, printJobId) => {
   return sendJson(res, 200, result)
 }
 
+export const readAgentSlicingHeader = (headers, field) => {
+  const current = String(headers[`x-agent-${field}`] ?? '').trim()
+  return current || String(headers[`x-printflow-${field}`] ?? '').trim()
+}
+
 export const handleAgentPrintJobSlicingArtifact = async (req, res, printJobId) => {
   const agent = await authenticateAgentRequest(req)
   if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })
 
-  const fileName = String(req.headers['x-printflow-file-name'] || '').trim()
-  const format = String(req.headers['x-printflow-file-format'] || '').trim().toLowerCase()
-  const profileId = String(req.headers['x-printflow-slicer-profile-id'] || '').trim()
-  const profileVersion = String(req.headers['x-printflow-slicer-profile-version'] || '').trim()
-  const idempotencyKey = String(req.headers['x-printflow-idempotency-key'] || '').trim()
+  const fileName = readAgentSlicingHeader(req.headers, 'file-name')
+  const format = readAgentSlicingHeader(req.headers, 'file-format').toLowerCase()
+  const profileId = readAgentSlicingHeader(req.headers, 'slicer-profile-id')
+  const profileVersion = readAgentSlicingHeader(req.headers, 'slicer-profile-version')
+  const idempotencyKey = readAgentSlicingHeader(req.headers, 'idempotency-key')
   if (!fileName || format !== 'gcode' || !profileId || !profileVersion || !idempotencyKey) {
     return sendJson(res, 400, { error: 'Metadados do artefato de slicing invalidos.' })
   }
@@ -1559,9 +1564,9 @@ export const handleAgentPrintJobSlicingArtifact = async (req, res, printJobId) =
         idempotencyKey,
         profileId,
         profileVersion,
-        estimatedPrintSeconds: req.headers['x-printflow-estimated-print-seconds'],
-        estimatedFilamentGrams: req.headers['x-printflow-estimated-filament-grams'],
-        estimatedFilamentMillimeters: req.headers['x-printflow-estimated-filament-millimeters'],
+        estimatedPrintSeconds: readAgentSlicingHeader(req.headers, 'estimated-print-seconds'),
+        estimatedFilamentGrams: readAgentSlicingHeader(req.headers, 'estimated-filament-grams'),
+        estimatedFilamentMillimeters: readAgentSlicingHeader(req.headers, 'estimated-filament-millimeters'),
         artifact: {
           ...stored,
           name: stored.fileName

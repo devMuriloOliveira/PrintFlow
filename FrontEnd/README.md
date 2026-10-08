@@ -77,7 +77,7 @@ estiverem em domínios diferentes.
 - Shopee e Amazon podem ser usados como canais manuais. A integração
   automática ainda é apresentada como «Em breve».
 - Impressoras cadastradas manualmente não exigem o Agent. Descoberta e
-  comandos locais dependem do [PrintFlow Agent](../Agent/README.md) instalado
+  comandos locais dependem do [Fila Agent](../Agent/README.md) instalado
   e pareado; a simulação não equivale a um teste com hardware real.
 
 O deploy deste Nuxt usa `ssr: false` e preset `static`. Publicar o FrontEnd é

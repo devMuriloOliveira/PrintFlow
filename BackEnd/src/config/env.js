@@ -157,8 +157,11 @@ export const env = {
   shopeePartnerId: process.env.SHOPEE_PARTNER_ID || '',
   shopeePartnerKey: process.env.SHOPEE_PARTNER_KEY || '',
   shopeeRedirectUri: process.env.SHOPEE_REDIRECT_URI || '',
+  shopeeApiBaseUrl: String(process.env.SHOPEE_API_BASE_URL || 'https://openplatform.shopee.com.br').replace(/\/$/, ''),
+  shopeeWebhookUrl: process.env.SHOPEE_WEBHOOK_URL || '',
   amazonLwaClientId: process.env.AMAZON_LWA_CLIENT_ID || '',
   amazonLwaClientSecret: process.env.AMAZON_LWA_CLIENT_SECRET || '',
+  amazonSpApiApplicationId: process.env.AMAZON_SP_API_APPLICATION_ID || '',
   amazonRedirectUri: process.env.AMAZON_REDIRECT_URI || '',
   amazonMarketplaceId: process.env.AMAZON_MARKETPLACE_ID || 'A2Q3Y263D00KWC',
   amazonRegionEndpoint: process.env.AMAZON_SP_API_ENDPOINT || 'https://sellingpartnerapi-na.amazon.com'

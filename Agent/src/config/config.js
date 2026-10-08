@@ -11,6 +11,9 @@ export const RUNTIME_ENVIRONMENTS = Object.freeze([
   'PRODUCTION'
 ])
 
+const configuredValue = (environment, filaName, legacyName) =>
+  environment[filaName] || environment[legacyName]
+
 const DEVELOPMENT_API_URL =
   'http://localhost:3333'
 
@@ -62,7 +65,7 @@ export const resolveRuntimeConfig = (
   environment = process.env
 ) => {
   const runtimeEnvironment = String(
-    environment.PRINTFLOW_ENVIRONMENT ||
+    configuredValue(environment, 'FILA_AGENT_ENVIRONMENT', 'PRINTFLOW_ENVIRONMENT') ||
       'DEVELOPMENT'
   ).trim().toUpperCase()
 
@@ -72,24 +75,24 @@ export const resolveRuntimeConfig = (
     )
   ) {
     throw new Error(
-      'PRINTFLOW_ENVIRONMENT deve ser DEVELOPMENT ou PRODUCTION.'
+      'FILA_AGENT_ENVIRONMENT (PRINTFLOW_ENVIRONMENT) deve ser DEVELOPMENT ou PRODUCTION.'
     )
   }
 
   const apiUrl =
-    environment.PRINTFLOW_API_URL ||
+    configuredValue(environment, 'FILA_AGENT_API_URL', 'PRINTFLOW_API_URL') ||
     (runtimeEnvironment === 'PRODUCTION'
       ? PRODUCTION_API_URL
       : DEVELOPMENT_API_URL)
 
   const wsUrl =
-    environment.PRINTFLOW_WS_URL ||
+    configuredValue(environment, 'FILA_AGENT_WS_URL', 'PRINTFLOW_WS_URL') ||
     (runtimeEnvironment === 'PRODUCTION'
       ? apiUrl.replace(/^https:/i, 'wss:')
       : 'ws://localhost:3333')
 
   const configuredAppOrigins = String(
-    environment.PRINTFLOW_APP_ORIGINS || ''
+    configuredValue(environment, 'FILA_AGENT_APP_ORIGINS', 'PRINTFLOW_APP_ORIGINS') || ''
   )
     .split(',')
     .map(value => value.trim())
@@ -108,12 +111,12 @@ export const resolveRuntimeConfig = (
     runtimeEnvironment === 'PRODUCTION'
   ) {
     assertProductionEndpoint(
-      'PRINTFLOW_API_URL',
+      'FILA_AGENT_API_URL',
       apiUrl,
       ['https:']
     )
     assertProductionEndpoint(
-      'PRINTFLOW_WS_URL',
+      'FILA_AGENT_WS_URL',
       wsUrl,
       ['wss:']
     )
@@ -127,12 +130,12 @@ export const resolveRuntimeConfig = (
 
     if (
       String(
-        environment.PRINTFLOW_DEV_MOCK_BAMBU ||
+        configuredValue(environment, 'FILA_AGENT_DEV_MOCK_BAMBU', 'PRINTFLOW_DEV_MOCK_BAMBU') ||
           ''
       ).toLowerCase() === 'true'
     ) {
       throw new Error(
-        'PRINTFLOW_DEV_MOCK_BAMBU nao pode ser usado em PRODUCTION.'
+        'FILA_AGENT_DEV_MOCK_BAMBU nao pode ser usado em PRODUCTION.'
       )
     }
   }

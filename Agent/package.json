@@ -1,27 +1,25 @@
 {
-  "name": "printflow-agent",
-  "version": "0.1.25",
+  "name": "fila-agent",
+  "version": "0.1.26",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "start:tray": "powershell -STA -ExecutionPolicy Bypass -File scripts/start-windows-agent-tray.ps1",
-    "dev": "nodemon src/index.js",
+    "start": "dotnet run --project windows-host/FilaAgent.csproj --configuration Release",
+    "start:tray": "dotnet run --project windows-host/FilaAgent.csproj --configuration Release",
+    "dev": "dotnet watch --project windows-host/FilaAgent.csproj run",
+    "start:node-reference": "node src/index.js",
+    "dev:node-reference": "nodemon src/index.js",
     "test": "node --check src/index.js && node --test test/*.test.js",
-    "diagnostics": "node scripts/printflow-agent-diagnostics.mjs",
-    "support-bundle": "node scripts/printflow-agent-support-bundle.mjs",
+    "diagnostics": "node scripts/fila-agent-diagnostics.mjs",
+    "support-bundle": "node scripts/fila-agent-support-bundle.mjs",
     "generate:icon": "node scripts/generate-windows-icon.js",
-    "build:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1",
-    "build:windows:dev-signed": "powershell -ExecutionPolicy Bypass -File scripts/build-windows-package.ps1 -SignDev",
-    "sign:windows:dev": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows-agent-dev.ps1",
-    "trust:windows:dev-cert": "powershell -ExecutionPolicy Bypass -File scripts/trust-windows-agent-dev-certificate.ps1",
-    "install:agent": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-agent.ps1",
-    "uninstall:agent": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-agent.ps1",
-    "install:startup": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-startup.ps1",
-    "uninstall:startup": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-startup.ps1"
+    "build:windows": "dotnet run --project windows-release-tool/FilaAgent.ReleaseTool.csproj --configuration Release -- package",
+    "build:windows:dev-signed": "dotnet run --project windows-release-tool/FilaAgent.ReleaseTool.csproj --configuration Release -- package --sign-dev --require-persisted-certificate",
+    "install:agent": "npm run build:windows && dist\\Fila-Agent-Setup.exe",
+    "uninstall:agent": "\"%LOCALAPPDATA%\\PrintFlowAgent\\FilaAgentSetup.exe\" --uninstall"
   },
   "dependencies": {
     "axios": "^1.0.0",

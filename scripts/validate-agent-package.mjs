@@ -56,13 +56,39 @@ if (packageJson && lockJson) {
   for (const script of [
     'build:windows',
     'build:windows:dev-signed',
-    'start:tray'
+    'start',
+    'start:tray',
+    'dev',
+    'install:agent',
+    'uninstall:agent'
   ]) {
     if (!packageJson.scripts?.[script]) {
       errors.push(
         `script obrigatorio ausente: ${script}`
       )
     }
+  }
+
+  for (const script of ['start', 'start:tray', 'dev', 'build:windows', 'build:windows:dev-signed', 'install:agent', 'uninstall:agent']) {
+    if (/powershell|\.ps1/i.test(packageJson.scripts?.[script] || '')) {
+      errors.push(`script ${script} ainda depende de PowerShell.`)
+    }
+  }
+
+  for (const script of ['start', 'start:tray', 'dev', 'build:windows', 'build:windows:dev-signed']) {
+    if (!packageJson.scripts?.[script]?.includes('dotnet')) {
+      errors.push(`script ${script} nao inicia o runtime/ferramentas C#.`)
+    }
+  }
+
+  if (!packageJson.scripts?.['install:agent']?.includes('npm run build:windows') ||
+      !packageJson.scripts?.['install:agent']?.includes('Fila-Agent-Setup.exe')) {
+    errors.push('install:agent deve reconstruir o instalador C# antes de executa-lo.')
+  }
+  if (!packageJson.scripts?.['uninstall:agent']?.includes('%LOCALAPPDATA%') ||
+      !packageJson.scripts?.['uninstall:agent']?.includes('PrintFlowAgent\\FilaAgentSetup.exe') ||
+      !packageJson.scripts?.['uninstall:agent']?.includes('--uninstall')) {
+    errors.push('uninstall:agent deve usar o setup C# da instalacao atual, nao um binario antigo em dist.')
   }
 
   const agentVersionSource = await fs.readFile(
@@ -80,9 +106,13 @@ if (packageJson && lockJson) {
 }
 
 for (const relativePath of [
-  'scripts/build-windows-package.ps1',
-  'scripts/start-windows-agent-tray.ps1',
-  'scripts/install-windows-agent.ps1',
+  'windows-release-tool/FilaAgent.ReleaseTool.csproj',
+  'windows-release-tool/Program.cs',
+  'windows-release-tool/AuthenticodeVerificationPolicy.cs',
+  'windows-setup/Program.cs',
+  'windows-setup/FilaAgentSetup.csproj',
+  'windows-host/FilaAgent.csproj',
+  'windows-host/Program.cs',
   'src/index.js',
   'src/config/agentVersion.js',
   'src/cloud/productionJobMetrics.js',
@@ -104,148 +134,136 @@ for (const relativePath of [
 }
 
 try {
-  const installer =
-    await fs.readFile(
-      path.join(
-        agentRoot,
-        'scripts/install-windows-agent.ps1'
-      ),
-      'utf8'
-    )
-
-  if (!installer.includes('Stop-ExistingAgentInstall')) {
-    errors.push(
-      'installer não interrompe explicitamente a instalação anterior.'
-    )
+  const installer = await fs.readFile(path.join(agentRoot, 'windows-setup/Program.cs'), 'utf8')
+  if (!installer.includes('EnsureNoActivePrintJobs(root, localPort)') || !installer.includes('Directory.Move(root, backup)')) {
+    errors.push('setup C# nao verifica impressoes e cria backup antes de atualizar a instalacao.')
+  }
+  if (!installer.includes('removeUserData') ||
+      !installer.includes('args.Contains("--remove-user-data"') ||
+      !installer.includes('DeleteDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)')) {
+    errors.push('desinstalador C# nao limita a remocao de dados a escolha explicita do usuario.')
   }
 
-  if (
-    /Remove-Item[\s\S]{0,160}\$installRoot/i.test(
-      installer
-    )
-  ) {
-    errors.push(
-      'installer contém remoção ampla do diretório de instalação.'
-    )
+  const setupProject = await fs.readFile(path.join(agentRoot, 'windows-setup/FilaAgentSetup.csproj'), 'utf8')
+  const hostProject = await fs.readFile(path.join(agentRoot, 'windows-host/FilaAgent.csproj'), 'utf8')
+  if (!hostProject.includes('<AssemblyName>FilaAgent</AssemblyName>') ||
+      !setupProject.includes('<AssemblyName>FilaAgentSetup</AssemblyName>')) {
+    errors.push('projetos C# ainda geram executaveis com os nomes antigos.')
+  }
+  const consent = await fs.readFile(path.join(agentRoot, 'windows-setup/SetupConsentForm.cs'), 'utf8')
+  const terms = await fs.readFile(path.join(agentRoot, 'legal/TERMOS-DE-USO-FILA-AGENT.txt'), 'utf8')
+  const notices = await fs.readFile(path.join(agentRoot, 'legal/THIRD-PARTY-NOTICES.txt'), 'utf8')
+  if (!setupProject.includes('FilaAgentSetup.ThirdParty.00-Overview.txt') ||
+      !setupProject.includes('legal\\third-party\\*.txt') ||
+      !consent.includes('Licenças de terceiros') ||
+      !consent.includes('ThirdPartyLicensesForm') ||
+      !installer.includes('TermsVersion = "1.3"') ||
+      !terms.includes('Versão 1.3')) {
+    errors.push('setup nao mostra licencas de terceiros antes da instalacao ou nao versiona os termos atualizados.')
+  }
+  for (const file of [
+    'LICENSE-APACHE-2.0.txt',
+    'LICENSE-BouncyCastle.txt',
+    'LICENSE-DotNet-MIT.txt',
+    'LICENSE-DotNet-Runtime.txt',
+    'DOTNET-THIRD-PARTY-NOTICES.txt',
+    'LICENSE-FluentFTP.txt',
+    'LICENSE-MQTTnet.txt',
+    'NOTICE-SQLitePCLRaw.txt'
+  ]) {
+    try {
+      await fs.access(path.join(agentRoot, 'legal/third-party', file))
+    } catch {
+      errors.push(`aviso/licenca de dependencias ausente: Agent/legal/third-party/${file}`)
+    }
+  }
+  for (const component of ['BouncyCastle.Cryptography 2.7.0', 'FluentFTP 55.0.0', 'MQTTnet 5.2.0.1603', 'SQLitePCLRaw.lib.e_sqlite3 2.1.12', 'OrcaSlicer is not included']) {
+    if (!notices.includes(component)) errors.push(`THIRD-PARTY-NOTICES.txt sem ${component}.`)
   }
 
-  const trayLauncher = await fs.readFile(
-    path.join(agentRoot, 'scripts/start-windows-agent-tray.ps1'),
-    'utf8'
-  )
-  if (!trayLauncher.includes('PRINTFLOW_ENVIRONMENT')) {
-    errors.push('launcher de Production nao define PRINTFLOW_ENVIRONMENT.')
-  }
-  if (!trayLauncher.includes('Resolve-NodeExecutable') || !trayLauncher.includes('runtime\\node.exe')) {
-    errors.push('launcher do Agent nao resolve um Node.js suportado fora do PATH interativo.')
-  }
-  if (!installer.includes('Assert-BundledNodeRuntime') || !installer.includes('runtime Node.js portatil ausente')) {
-    errors.push('instalador nao valida o runtime Node.js portatil empacotado.')
-  }
-
-  const packageBuilder = await fs.readFile(
-    path.join(agentRoot, 'scripts/build-windows-package.ps1'),
-    'utf8'
-  )
-  if (!packageBuilder.includes('apiUri.Scheme -ne "https"') || !packageBuilder.includes('localhost')) {
+  const packageBuilder = await fs.readFile(path.join(agentRoot, 'windows-release-tool/Program.cs'), 'utf8')
+  const signaturePolicy = await fs.readFile(path.join(agentRoot, 'windows-release-tool/AuthenticodeVerificationPolicy.cs'), 'utf8')
+  if (!packageBuilder.includes('uri.Scheme != Uri.UriSchemeHttps') || !packageBuilder.includes('uri.IsLoopback')) {
     errors.push('builder do pacote nao bloqueia endpoint local/inseguro em Production.')
   }
   if (
-    !packageBuilder.includes('NodeRuntimeVersion') ||
-    !packageBuilder.includes('runtime.json') ||
-    !packageBuilder.includes("import('node:sqlite')") ||
-    !packageBuilder.includes("import('serialport')")
+    !packageBuilder.includes('windows-runtime-live-smoke') ||
+    !packageBuilder.includes('runtime = ".NET 8 self-contained"') ||
+    !packageBuilder.includes('selfContained = true') ||
+    !packageBuilder.includes('ValidateReleaseFiles') ||
+    !packageBuilder.includes('--property:FilaAgentPackagePath=') ||
+    !packageBuilder.includes('--validate-embedded-package')
   ) {
-    errors.push('builder nao inclui e exercita o runtime Node.js portatil.')
+    errors.push('builder nao cria payload C# autocontido ou ainda empacota o runtime legado.')
   }
-  if (
-    !packageBuilder.includes('RequirePersistedCertificate') ||
-    !packageBuilder.includes('Instalador permaneceu sem assinatura Authenticode')
-  ) {
-    errors.push('builder Early Access nao exige PFX persistente e assinatura Authenticode.')
+  if (!packageBuilder.includes('ExpectedCertificateSha256') || !packageBuilder.includes('TimestampUrl') ||
+      !packageBuilder.includes('"/sha1"') || !packageBuilder.includes('"/fd", "SHA256"') ||
+      !packageBuilder.includes('"/tr"') || !packageBuilder.includes('"/td", "SHA256"')) {
+    errors.push('builder Early Access nao fixa certificado e timestamp da assinatura Authenticode.')
   }
-
-  const devSigner = await fs.readFile(
-    path.join(agentRoot, 'scripts/sign-windows-agent-dev.ps1'),
-    'utf8'
-  )
-  if (/TrustedPublisher|X509Store\s*\(\s*["']Root/i.test(devSigner)) {
-    errors.push('assinatura DEV instala certificado silenciosamente como confiavel.')
+  if (!packageBuilder.includes('AuthenticodeVerificationPolicy.IsAcceptable') ||
+      !signaturePolicy.includes('exitCode != 1') ||
+      !signaturePolicy.includes('ExpectedUntrustedRootMessage') ||
+      !signaturePolicy.includes('hash mismatch')) {
+    errors.push('builder nao limita falha tolerada de assinatura ao certificado Early Access sem raiz confiavel.')
   }
-  if (
-    !devSigner.includes('https://timestamp.digicert.com') &&
-    !devSigner.includes('http://timestamp.digicert.com')
-  ) {
-    errors.push('assinatura DEV deve usar timestamp DigiCert RFC 3161.')
+  if (/powershell|iexpress/i.test(packageBuilder)) {
+    errors.push('builder C# ainda depende de PowerShell ou IExpress.')
   }
-
-  const copyItems =
-    installer.match(
-      /\$items\s*=\s*@\(([^)]*)\)/i
-    )?.[1] || ''
-
-  if (
-    /\b(?:data|agent\.json|agent-operations\.sqlite|cache|logs)\b/i.test(
-      copyItems
-    )
-  ) {
-    errors.push(
-      'installer tenta copiar/sobrescrever dados locais do Agent.'
-    )
+  for (const fragment of ['validate-release', 'prepare-release', 'publish-release', 'ValidateTagAndMinimum', 'SHA256SUMS.txt']) {
+    if (!packageBuilder.includes(fragment)) errors.push(`ReleaseTool C# sem etapa ${fragment}.`)
   }
 
   const updater = await fs.readFile(
-    path.join(agentRoot, 'scripts/update-windows-agent.ps1'),
+    path.join(agentRoot, 'windows-setup/SignedUpdateService.cs'),
     'utf8'
   )
-  if (
-    !updater.includes('Save-AgentBinaryBackup') ||
-    !updater.includes('Restore-AgentBinaryBackup') ||
-    !updater.includes('Rollback dos binarios concluido')
-  ) {
-    errors.push('atualizador nao possui rollback explicito dos binarios.')
+  const host = await fs.readFile(path.join(agentRoot, 'windows-host/Program.cs'), 'utf8')
+  if (!host.includes('"FilaAgentSetup.exe"') || !host.includes('"PrintFlowAgentSetup.exe"')) {
+    errors.push('host deve preferir o setup Fila e manter fallback apenas para completar a transicao do instalador anterior.')
   }
   if (
-    !updater.includes('if (-not $signature.SignerCertificate)') ||
-    !updater.includes('$signature.Status -ne "Valid"')
+    !updater.includes('ValidatePackage(updatesRoot, latest.ToString(), setupName, certificateName)') ||
+    !updater.includes('AuthenticodeTrust.Verify') ||
+    !updater.includes('.NET 8 self-contained') ||
+    !updater.includes('WaitForHealthAsync(latest.ToString(), requirePaired: true')
   ) {
-    errors.push('atualizador aceita instalador sem assinatura confiavel.')
-  }
-  if (!updater.includes('"runtime"') || !updater.includes('runtime\\node.exe')) {
-    errors.push('atualizador nao preserva nem usa o runtime Node.js portatil.')
-  }
-
-  const updateApplier = await fs.readFile(
-    path.join(agentRoot, 'scripts/apply-windows-agent-update.ps1'),
-    'utf8'
-  )
-  if (!updateApplier.includes("'runtime'")) {
-    errors.push('aplicador de atualizacao nao inclui o runtime Node.js no rollback.')
+    errors.push('atualizador C# nao valida release assinada e health apos atualizar.')
   }
 
   const releaseWorkflow = await fs.readFile(
     path.join(root, '.github/workflows/agent-release.yml'),
     'utf8'
   )
+  const releaseRunSteps = releaseWorkflow.match(/^\s{8}run:/gm)?.length ?? 0
+  const releaseCmdSteps = releaseWorkflow.match(/^\s{8}shell:\s*cmd\s*$/gm)?.length ?? 0
   if (
+    !releaseWorkflow.includes('FILA_AGENT_DEV_CERT_PFX_BASE64') ||
     !releaseWorkflow.includes('PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64') ||
-    !releaseWorkflow.includes("PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'") ||
-    !releaseWorkflow.includes('-SignDev') ||
-    !releaseWorkflow.includes('-RequirePersistedCertificate')
+    !releaseWorkflow.includes("FILA_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'") ||
+    !releaseWorkflow.includes('--sign-dev') ||
+    !releaseWorkflow.includes('--require-persisted-certificate') ||
+    !releaseWorkflow.includes('prepare-release') ||
+    !releaseWorkflow.includes('publish-release') ||
+    !releaseWorkflow.includes('FilaAgent.ReleaseTool.csproj') ||
+    releaseRunSteps === 0 ||
+    releaseRunSteps !== releaseCmdSteps ||
+    /shell:\s*(?:pwsh|powershell)/i.test(releaseWorkflow) ||
+    /\.ps1|\.psm1|\.vbs|iexpress/i.test(releaseWorkflow)
   ) {
-    errors.push('workflow de release nao exige assinatura Early Access persistente.')
+    errors.push('workflow de release nao usa o ReleaseTool C# com assinatura e publicacao sem PowerShell.')
   }
 
   const ciWorkflow = await fs.readFile(
     path.join(root, '.github/workflows/ci.yml'),
     'utf8'
   )
-  if (
-    !ciWorkflow.includes("PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'") ||
-    !ciWorkflow.includes('node-version: ${{ env.PRINTFLOW_AGENT_NODE_VERSION }}') ||
-    !ciWorkflow.includes('-NodeRuntimeVersion $env:PRINTFLOW_AGENT_NODE_VERSION')
-  ) {
-    errors.push('CI do pacote Windows nao fixa o mesmo runtime Node.js da release.')
+  if (!ciWorkflow.includes('FilaAgent.ReleaseTool.csproj') ||
+      !ciWorkflow.includes('FilaAgent.Runtime.ContractTests.csproj') ||
+      !ciWorkflow.includes('Fila-Agent-Setup.exe --validate-embedded-package') ||
+      /shell:\s*(?:pwsh|powershell)/i.test(ciWorkflow) ||
+      /\.ps1|\.psm1|\.vbs|iexpress/i.test(ciWorkflow)) {
+    errors.push('CI do Agent nao compila o ReleaseTool, exercita contratos C# no Windows e empacota sem PowerShell.')
   }
 } catch (error) {
   errors.push(
@@ -261,7 +279,10 @@ const ignoredDirectories =
     'dist',
     '.git',
     'data',
-    'certs'
+    'certs',
+    'temp',
+    'bin',
+    'obj'
   ])
 
 const walk = async directory => {
@@ -292,6 +313,11 @@ const walk = async directory => {
         agentRoot,
         absolutePath
       ).replace(/\\/g, '/')
+
+    if (entry.isFile() && /\.(?:ps1|psm1|vbs)$/i.test(entry.name)) {
+      errors.push(`script PowerShell/WSH legado no Agent: Agent/${relativePath}`)
+      continue
+    }
 
     if (
       entry.name === '.env' ||
@@ -335,7 +361,7 @@ const collectSourceFiles = async directory => {
       path.join(directory, entry.name)
     if (entry.isDirectory()) {
       await collectSourceFiles(absolutePath)
-    } else if (/\.(?:js|mjs|cjs|json|ps1|md)$/i.test(entry.name)) {
+    } else if (/\.(?:js|mjs|cjs|json|md)$/i.test(entry.name)) {
       sourceFiles.push(absolutePath)
     }
   }

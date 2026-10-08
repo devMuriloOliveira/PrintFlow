@@ -25,7 +25,7 @@ export const pairAgent = async (
 
   try {
     console.log('')
-    console.log('Este computador ainda nao esta conectado ao PrintFlow.')
+    console.log('Este computador ainda nao esta conectado ao Filamind.')
     console.log('')
 
     const code =
@@ -35,7 +35,7 @@ export const pairAgent = async (
       )
 
     console.log('')
-    console.log('Conectando ao PrintFlow...')
+    console.log('Conectando ao Filamind...')
 
     const response = await cloudHttp.post(
       `${apiUrl}/api/agents/pair`,

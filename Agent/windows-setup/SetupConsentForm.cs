@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace PrintFlowAgentSetup;
+namespace FilaAgent.Setup;
 
 internal sealed class SetupConsentForm : Form
 {
@@ -37,7 +37,7 @@ internal sealed class SetupConsentForm : Form
         };
         var termsLabel = new Label
         {
-            Text = "Termos de Uso do PrintFlow Agent — Early Access",
+            Text = "Termos de Uso do Fila Agent — Early Access",
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             ForeColor = Color.FromArgb(30, 41, 59),
             Location = new Point(31, 158),
@@ -56,7 +56,19 @@ internal sealed class SetupConsentForm : Form
             Size = new Size(658, 325),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
         };
-        _accept.Text = "Li e aceito os Termos de Uso do PrintFlow Agent.";
+        var licenses = new Button
+        {
+            Text = "Licenças de terceiros",
+            Location = new Point(31, 582),
+            Size = new Size(170, 36),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+        };
+        licenses.Click += (_, _) =>
+        {
+            using var dialog = new ThirdPartyLicensesForm();
+            dialog.ShowDialog(this);
+        };
+        _accept.Text = "Li e aceito os Termos de Uso do Fila Agent.";
         _accept.Location = new Point(31, 525);
         _accept.Size = new Size(650, 26);
         _accept.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
@@ -77,7 +89,7 @@ internal sealed class SetupConsentForm : Form
         _continue.Size = new Size(123, 36);
         _continue.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
 
-        Controls.AddRange([titleLabel, summaryLabel, termsLabel, termsBox, _accept, cancel, _continue]);
+        Controls.AddRange([titleLabel, summaryLabel, termsLabel, termsBox, licenses, _accept, cancel, _continue]);
         AcceptButton = _continue;
         CancelButton = cancel;
     }
@@ -85,12 +97,12 @@ internal sealed class SetupConsentForm : Form
     public static bool ShowInstall(string? targetVersion, string installedVersion, string terms, bool termsPreviouslyAccepted)
     {
         var isUpdate = !string.IsNullOrWhiteSpace(installedVersion);
-        var change = isUpdate ? $"Atualizar PrintFlow Agent {installedVersion} para {targetVersion ?? "a nova versão"}" : $"Instalar PrintFlow Agent {targetVersion ?? ""}";
+        var change = isUpdate ? $"Atualizar Fila Agent {installedVersion} para {targetVersion ?? "a nova versão"}" : $"Instalar Fila Agent {targetVersion ?? ""}";
         var summary = change + Environment.NewLine +
             "O Agent inicia quando você entra no Windows, cria atalhos e aparece em Aplicativos Instalados para desinstalação. " +
             "O Agent verifica atualizações e pede confirmação antes de aplicá-las. Pareamento e dados locais existentes são preservados." + Environment.NewLine +
             "O Windows solicitará permissão para concluir a instalação. No Early Access, também será apresentada a confirmação separada do certificado de teste.";
-        using var dialog = new SetupConsentForm(isUpdate ? "Atualizar PrintFlow Agent" : "Instalar PrintFlow Agent", change, summary, terms);
+        using var dialog = new SetupConsentForm(isUpdate ? "Atualizar Fila Agent" : "Instalar Fila Agent", change, summary, terms);
         dialog._accept.Checked = termsPreviouslyAccepted;
         return dialog.ShowDialog() == DialogResult.OK;
     }
@@ -105,6 +117,84 @@ internal sealed class SetupConsentForm : Form
     }
 }
 
+internal sealed class ThirdPartyLicensesForm : Form
+{
+    public ThirdPartyLicensesForm()
+    {
+        Text = "Licenças de terceiros — Fila Agent";
+        StartPosition = FormStartPosition.CenterParent;
+        ClientSize = new Size(720, 620);
+        MinimumSize = new Size(720, 620);
+        Font = new Font("Segoe UI", 9F);
+        BackColor = Color.FromArgb(248, 250, 252);
+
+        var heading = new Label
+        {
+            Text = "Avisos e licenças de componentes incluídos",
+            Font = new Font("Segoe UI", 16F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(15, 23, 42),
+            Location = new Point(24, 18),
+            Size = new Size(660, 34)
+        };
+        var selector = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(27, 65),
+            Size = new Size(666, 30),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        var content = new TextBox
+        {
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical,
+            WordWrap = true,
+            BackColor = Color.White,
+            Font = new Font("Consolas", 9F),
+            Location = new Point(27, 107),
+            Size = new Size(666, 455),
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+        };
+        var close = new Button
+        {
+            Text = "Fechar",
+            DialogResult = DialogResult.OK,
+            Location = new Point(581, 572),
+            Size = new Size(112, 34),
+            Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+        };
+        selector.DisplayMember = nameof(LicenseDocument.Name);
+        selector.DataSource = LoadDocuments();
+        selector.SelectedIndexChanged += (_, _) =>
+        {
+            if (selector.SelectedItem is LicenseDocument document) content.Text = document.Content;
+        };
+        Controls.AddRange([heading, selector, content, close]);
+        if (selector.SelectedItem is LicenseDocument initialDocument) content.Text = initialDocument.Content;
+        AcceptButton = close;
+        CancelButton = close;
+    }
+
+    private static List<LicenseDocument> LoadDocuments()
+    {
+        const string prefix = "FilaAgentSetup.ThirdParty.";
+        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+        return assembly.GetManifestResourceNames()
+            .Where(name => name.StartsWith(prefix, StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .Select(name =>
+            {
+                using var stream = assembly.GetManifestResourceStream(name)
+                    ?? throw new InvalidDataException($"Recurso de licença ausente: {name}");
+                using var reader = new StreamReader(stream);
+                return new LicenseDocument(name[prefix.Length..], reader.ReadToEnd());
+            })
+            .ToList();
+    }
+
+    private sealed record LicenseDocument(string Name, string Content);
+}
+
 internal sealed class UninstallConsentForm : Form
 {
     private readonly CheckBox _removeData = new();
@@ -112,7 +202,7 @@ internal sealed class UninstallConsentForm : Form
 
     public UninstallConsentForm(string installedVersion)
     {
-        Text = "Desinstalar PrintFlow Agent";
+        Text = "Desinstalar Fila Agent";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -123,7 +213,7 @@ internal sealed class UninstallConsentForm : Form
 
         var heading = new Label
         {
-            Text = "Desinstalar PrintFlow Agent",
+            Text = "Desinstalar Fila Agent",
             Font = new Font("Segoe UI", 17F, FontStyle.Bold),
             ForeColor = Color.FromArgb(15, 23, 42),
             Location = new Point(25, 20),

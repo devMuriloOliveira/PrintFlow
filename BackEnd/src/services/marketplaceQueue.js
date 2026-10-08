@@ -35,6 +35,8 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
   const data = payload.data || payload.order || payload
   const itemCollection = Array.isArray(data.items)
     ? data.items
+    : Array.isArray(data.item_list)
+      ? data.item_list
     : Array.isArray(data.order_items)
       ? data.order_items
       : Array.isArray(data.products)
@@ -44,6 +46,8 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
   const reviewReason = ''
   const item = Array.isArray(data.items)
     ? data.items[0]
+    : Array.isArray(data.item_list)
+      ? data.item_list[0]
     : Array.isArray(data.order_items)
       ? data.order_items[0]
       : Array.isArray(data.products)
@@ -130,35 +134,62 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
   }
 
   if (platform === 'shopee') {
+    const orderStatus = firstText(data.order_status, data.status, 'received').toUpperCase()
+    const normalizedStatus = ({
+      UNPAID: 'unpaid',
+      PENDING: 'pending',
+      READY_TO_SHIP: 'paid',
+      PROCESSED: 'processing',
+      SHIPPED: 'shipped',
+      TO_CONFIRM_RECEIVE: 'shipped',
+      COMPLETED: 'delivered',
+      IN_CANCEL: 'cancel_pending',
+      CANCELLED: 'cancelled',
+      TO_RETURN: 'return_requested'
+    })[orderStatus] || orderStatus.toLowerCase()
     return {
       externalOrderId:
-        firstText(data.ordersn, data.order_sn, payload.ordersn),
+        firstText(data.ordersn, data.order_sn, payload.ordersn, payload.order_sn),
       sku:
-        firstText(item.item_sku, item.model_sku, item.sku, data.item_sku, payload.sku),
+        firstText(item.model_sku, item.item_sku, item.sku, data.model_sku, data.item_sku, payload.sku),
       productName:
-        firstText(item.item_name, item.name, data.product_name, payload.product_name),
+        firstText(item.item_name, item.model_name, item.name, data.product_name, payload.product_name),
       quantity:
         quantity(item.model_quantity_purchased || item.quantity || data.quantity),
       gross:
         number(data.total_amount),
       marketplaceFee:
-        number(data.escrow_amount_after_adjustment ? data.total_amount - data.escrow_amount_after_adjustment : data.marketplace_fee),
+        number(data.marketplace_fee ?? (data.escrow_amount_after_adjustment ? data.total_amount - data.escrow_amount_after_adjustment : 0)),
       shipping:
-        number(data.shipping_fee),
+        number(data.seller_shipping_cost ?? data.shipping_fee),
       items: itemCollection.map((rawItem, index) => ({
-        lineKey: firstText(rawItem.item_id, rawItem.item_sku, `line-${index}`),
-        sku: firstText(rawItem.item_sku, rawItem.model_sku, rawItem.sku),
-        productName: firstText(rawItem.item_name, rawItem.name),
+        lineKey: firstText(
+          rawItem.line_item_id,
+          rawItem.item_id && rawItem.model_id ? `${rawItem.item_id}-${rawItem.model_id}` : '',
+          rawItem.model_sku,
+          rawItem.item_sku,
+          `line-${index}`
+        ),
+        sku: firstText(rawItem.model_sku, rawItem.item_sku, rawItem.sku),
+        productName: firstText(rawItem.item_name, rawItem.model_name, rawItem.name),
         quantity: quantity(rawItem.model_quantity_purchased || rawItem.quantity),
-        gross: number(rawItem.item_price || rawItem.model_price || rawItem.price),
-        marketplaceFee: number(rawItem.marketplace_fee)
+        gross: rawItem.gross !== undefined
+          ? number(rawItem.gross)
+          : rawItem.discounted_price !== undefined
+            ? number(rawItem.discounted_price)
+            : rawItem.model_discounted_price !== undefined
+              ? number(rawItem.model_discounted_price) * quantity(rawItem.model_quantity_purchased || rawItem.quantity)
+              : number(rawItem.item_price ?? rawItem.model_price ?? rawItem.price),
+        marketplaceFee: number(rawItem.marketplace_fee),
+        requiresReview: Boolean(rawItem.requiresReview),
+        reviewReason: text(rawItem.reviewReason)
       })),
       net:
         data.escrow_amount_after_adjustment === undefined
           ? undefined
           : number(data.escrow_amount_after_adjustment),
       status:
-        firstText(data.status, 'received'),
+        normalizedStatus,
       soldAt: data.create_time ? new Date(Number(data.create_time) * 1000).toISOString() : null,
       requiresReview,
       reviewReason,
@@ -168,6 +199,46 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
             remainingQuantity: Math.max(0, quantity(item.model_quantity_purchased || item.quantity || data.quantity) - number(data.refunded_quantity ?? payload.refunded_quantity))
           }
         : {})
+    }
+  }
+
+  if (platform === 'amazon') {
+    const orderItems = Array.isArray(data.orderItems) ? data.orderItems : []
+    const items = orderItems.map((rawItem, index) => {
+      const orderedQuantity = quantity(rawItem.quantityOrdered || rawItem.quantity)
+      const price = number(rawItem.product?.price?.unitPrice?.amount ?? rawItem.itemPrice?.amount ?? rawItem.itemPrice)
+      return {
+        lineKey: firstText(rawItem.orderItemId, rawItem.order_item_id, `line-${index}`),
+        sku: firstText(rawItem.product?.sellerSku, rawItem.sellerSku),
+        productName: firstText(rawItem.product?.title, rawItem.title),
+        quantity: orderedQuantity,
+        gross: price * orderedQuantity,
+        marketplaceFee: 0
+      }
+    })
+    const status = firstText(data.fulfillment?.fulfillmentStatus, data.fulfillmentStatus, 'PENDING').toUpperCase()
+    const normalizedStatus = ({
+      UNSHIPPED: 'paid',
+      PARTIALLY_SHIPPED: 'partially_shipped',
+      SHIPPED: 'shipped',
+      CANCELLED: 'cancelled',
+      PENDING: 'pending',
+      UNFULFILLABLE: 'unfulfillable',
+      PENDING_AVAILABILITY: 'pending_availability',
+      INVOICE_UNCONFIRMED: 'invoice_unconfirmed'
+    })[status] || status.toLowerCase()
+    return {
+      externalOrderId: firstText(data.orderId, data.amazonOrderId),
+      sku: items[0]?.sku || '',
+      productName: items[0]?.productName || '',
+      quantity: items.reduce((total, orderItem) => total + orderItem.quantity, 0),
+      gross: items.reduce((total, orderItem) => total + orderItem.gross, 0),
+      marketplaceFee: 0,
+      shipping: 0,
+      items,
+      status: normalizedStatus,
+      soldAt: firstText(data.createdTime) || null,
+      fulfilledBy: firstText(data.fulfillment?.fulfilledBy)
     }
   }
 
@@ -213,6 +284,11 @@ export const normalizeMarketplaceOrder = (platform, payload = {}) => {
   }
 }
 
+export const canQueueAmazonMarketplaceSale = (sale) =>
+  sale?.fulfilledBy === 'MERCHANT' &&
+  !['pending', 'pending_availability', 'invoice_unconfirmed', 'unfulfillable', 'partially_shipped']
+    .includes(String(sale?.status || '').toLowerCase())
+
 export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
   if (!hasDatabase || !integration?.tenant_id || !sale?.id) {
     return null
@@ -221,14 +297,22 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
   const tenantId = integration.tenant_id
   const sku = text(sale.sku)
   const productName = text(sale.productName)
+  const orderStatus = String(sale.status || '').toLowerCase()
 
   if (sale.requiresReview || !sku && !productName) {
     return null
   }
 
+  if (integration.platform === 'shopee' && ['unpaid', 'pending', 'cancel_pending', 'return_requested'].includes(orderStatus)) {
+    return null
+  }
+  if (integration.platform === 'amazon' && !canQueueAmazonMarketplaceSale(sale)) {
+    return null
+  }
+
   return withTenant(tenantId, async (client) => {
-    if (['cancelled', 'canceled', 'refunded'].includes(String(sale.status || '').toLowerCase())) {
-      if (String(sale.status || '').toLowerCase() === 'refunded' && sale.refundedQuantity !== undefined) {
+    if (['cancelled', 'canceled', 'refunded'].includes(orderStatus)) {
+      if (orderStatus === 'refunded' && sale.refundedQuantity !== undefined) {
         await reduceSalesFulfillmentPlan({
           client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id,
           requestedQuantity: Math.max(0, Number(sale.remainingQuantity ?? sale.quantity ?? 0))
@@ -238,7 +322,7 @@ export const enqueueMarketplaceSaleForPrinting = async (integration, sale) => {
       await releaseSalesFulfillmentPlan({ client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id })
       return null
     }
-    if (['shipped', 'delivered'].includes(String(sale.status || '').toLowerCase())) {
+    if (['shipped', 'delivered'].includes(orderStatus)) {
       await fulfillSalesFulfillmentPlan({ client, tenantId, sourceType: 'tracked_sale', sourceId: sale.id })
       return null
     }

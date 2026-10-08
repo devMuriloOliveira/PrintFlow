@@ -188,7 +188,8 @@ const getLocalDiagnostics = async ({
 }
 
 export const startLocalServer = ({
-  port = process.env.PRINTFLOW_AGENT_LOCAL_PORT ||
+  port = process.env.FILA_AGENT_LOCAL_PORT ||
+    process.env.PRINTFLOW_AGENT_LOCAL_PORT ||
     DEFAULT_LOCAL_PORT,
   allowedOrigins = [],
   canAcceptPairing,
@@ -265,7 +266,11 @@ export const startLocalServer = ({
           return
         }
 
-        if (!hasValidDiagnosticsToken(request.headers['x-printflow-diagnostics-token'], diagnosticsToken)) {
+        if (!hasValidDiagnosticsToken(
+          request.headers['x-fila-agent-diagnostics-token'] ||
+            request.headers['x-printflow-diagnostics-token'],
+          diagnosticsToken
+        )) {
           json(response, 401, {
             ok: false,
             error: 'Token local de diagnostico invalido.'

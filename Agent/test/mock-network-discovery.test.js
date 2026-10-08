@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-process.env.PRINTFLOW_DEV_MOCK_BAMBU =
+process.env.FILA_AGENT_DEV_MOCK_BAMBU =
   'true'
+delete process.env.PRINTFLOW_DEV_MOCK_BAMBU
 
 const {
   scanNetwork,

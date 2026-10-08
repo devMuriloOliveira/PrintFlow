@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyTitle>Fila Agent Setup</AssemblyTitle>
+    <AssemblyName>FilaAgentSetup</AssemblyName>
+    <Product>Fila Agent</Product>
+    <Company>Filamind</Company>
+    <ApplicationIcon>..\assets\fila-agent-icon.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\legal\TERMOS-DE-USO-FILA-AGENT.txt" LogicalName="FilaAgentSetup.TermsOfUse.txt" />
+    <EmbeddedResource Include="..\legal\THIRD-PARTY-NOTICES.txt" LogicalName="FilaAgentSetup.ThirdParty.00-Overview.txt" />
+    <EmbeddedResource Include="..\legal\third-party\*.txt" LogicalName="FilaAgentSetup.ThirdParty.%(Filename)%(Extension)" />
+    <ProjectReference Include="..\windows-runtime\FilaAgent.Runtime.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(FilaAgentPackagePath)' != '' and Exists('$(FilaAgentPackagePath)')">
+    <EmbeddedResource Include="$(FilaAgentPackagePath)" LogicalName="FilaAgentSetup.AgentPackage.zip" />
+  </ItemGroup>
+</Project>

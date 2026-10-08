@@ -1,6 +1,6 @@
 # Filamind BackEnd
 
-API HTTP do Filamind. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o PrintFlow Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
+API HTTP do Filamind. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o Fila Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
 
 ## Para Que Serve
 

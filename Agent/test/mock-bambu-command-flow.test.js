@@ -8,8 +8,9 @@ import test from 'node:test'
 
 import axios from 'axios'
 
-process.env.PRINTFLOW_DEV_MOCK_BAMBU =
+process.env.FILA_AGENT_DEV_MOCK_BAMBU =
   'true'
+delete process.env.PRINTFLOW_DEV_MOCK_BAMBU
 
 process.env.PRINTFLOW_AGENT_DATA_DIR =
   await fs.mkdtemp(

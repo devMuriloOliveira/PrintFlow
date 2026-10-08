@@ -42,6 +42,8 @@ docs/PRINTFLOW_AGENT_FASE_0_AUDITORIA.md
 /Agent/windows-host/obj/
 /Agent/windows-setup/bin/
 /Agent/windows-setup/obj/
+/Agent/**/bin/
+/Agent/**/obj/
 /Agent/*.sqlite
 /Agent/*.sqlite3
 /Agent/*.db

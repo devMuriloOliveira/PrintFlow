@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 
-namespace PrintFlowAgentSetup;
+namespace FilaAgent.Setup;
 
 internal sealed class SignedUpdateService
 {
@@ -42,7 +42,7 @@ internal sealed class SignedUpdateService
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, _releaseApi);
-        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PrintFlow-Agent-Updater", VersionAt(installRoot)));
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Fila-Agent-Updater", VersionAt(installRoot)));
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var release = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
@@ -54,11 +54,11 @@ internal sealed class SignedUpdateService
         if (!Version.TryParse(currentVersion, out var current)) throw new InvalidDataException("Versao instalada invalida.");
         if (latest <= current)
         {
-            if (interactive) MessageBox.Show($"Você já está usando a versão mais recente do PrintFlow Agent ({current}).", "PrintFlow Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (interactive) MessageBox.Show($"Você já está usando a versão mais recente do Fila Agent ({current}).", "Fila Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return false;
         }
 
-        if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do PrintFlow Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará as alterações e os termos antes de continuar.", "PrintFlow Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do Fila Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará as alterações e os termos antes de continuar.", "Fila Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             WriteHistory(currentVersion, latest.ToString(), "declined", "user_declined");
             return false;
@@ -67,17 +67,30 @@ internal sealed class SignedUpdateService
         var assets = root.GetProperty("assets").EnumerateArray().ToDictionary(
             asset => asset.GetProperty("name").GetString() ?? "",
             asset => asset.GetProperty("browser_download_url").GetString() ?? "",
-            StringComparer.Ordinal);
-        var required = new[] { "PrintFlow-Agent-Setup.exe", "PrintFlow-Agent-Dev-Certificate.cer", "RELEASE-METADATA.json", "SHA256SUMS.txt" };
+            StringComparer.OrdinalIgnoreCase);
+        string setupName;
+        string certificateName;
+        if (assets.ContainsKey("Fila-Agent-Setup.exe") && assets.ContainsKey("Fila-Agent-Dev-Certificate.cer"))
+        {
+            setupName = "Fila-Agent-Setup.exe";
+            certificateName = "Fila-Agent-Dev-Certificate.cer";
+        }
+        else if (assets.ContainsKey("PrintFlow-Agent-Setup.exe") && assets.ContainsKey("PrintFlow-Agent-Dev-Certificate.cer"))
+        {
+            setupName = "PrintFlow-Agent-Setup.exe";
+            certificateName = "PrintFlow-Agent-Dev-Certificate.cer";
+        }
+        else throw new InvalidDataException("Release incompleta: falta um par de instalador e certificado do Fila Agent.");
+        var required = new[] { setupName, certificateName, "RELEASE-METADATA.json", "SHA256SUMS.txt" };
         if (required.Any(name => !assets.ContainsKey(name))) throw new InvalidDataException("Release incompleta: falta um artefato obrigatorio.");
 
         var updatesRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent", "updates", latest.ToString());
         Directory.CreateDirectory(updatesRoot);
         foreach (var name in required) await DownloadAsync(assets[name], Path.Combine(updatesRoot, name), cancellationToken);
-        ValidatePackage(updatesRoot, latest.ToString());
+        ValidatePackage(updatesRoot, latest.ToString(), setupName, certificateName);
 
         WriteHistory(currentVersion, latest.ToString(), "started", "verified_signed_release");
-        var installer = Path.Combine(updatesRoot, "PrintFlow-Agent-Setup.exe");
+        var installer = Path.Combine(updatesRoot, setupName);
         using var process = Process.Start(new ProcessStartInfo(installer) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = updatesRoot })
             ?? throw new InvalidOperationException("Nao foi possivel iniciar o instalador assinado.");
         await process.WaitForExitAsync(cancellationToken);
@@ -107,16 +120,16 @@ internal sealed class SignedUpdateService
         await source.CopyToAsync(target, cancellationToken);
     }
 
-    private static void ValidatePackage(string directory, string expectedVersion)
+    private static void ValidatePackage(string directory, string expectedVersion, string installerName, string certificateName)
     {
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "RELEASE-METADATA.json")));
         var metadata = manifest.RootElement;
         if (metadata.GetProperty("version").GetString() != expectedVersion) throw new InvalidDataException("Versao do manifesto diverge da tag.");
         if (metadata.GetProperty("signingMode").GetString() is not ("DEV_SELF_SIGNED" or "PRODUCTION_TRUSTED")) throw new InvalidDataException("Modo de assinatura invalido.");
         if (!Version.TryParse(metadata.GetProperty("minimumSupportedVersion").GetString(), out _)) throw new InvalidDataException("Versao minima invalida.");
-        if (!metadata.GetProperty("portableRuntime").GetBoolean()) throw new InvalidDataException("Release sem runtime Node portatil.");
-        if (metadata.GetProperty("nodeRuntimeArchitecture").GetString() != "x64") throw new InvalidDataException("Arquitetura do runtime Node invalida.");
-        if (!Version.TryParse(metadata.GetProperty("nodeRuntimeVersion").GetString(), out var nodeVersion) || nodeVersion.Major != 24) throw new InvalidDataException("Versao do runtime Node invalida.");
+        if (metadata.GetProperty("runtime").GetString() != ".NET 8 self-contained" ||
+            !metadata.GetProperty("selfContained").GetBoolean())
+            throw new InvalidDataException("Release sem runtime C# .NET 8 autocontido.");
 
         var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in File.ReadLines(Path.Combine(directory, "SHA256SUMS.txt")))
@@ -126,7 +139,7 @@ internal sealed class SignedUpdateService
             hashes[Path.GetFileName(split[1])] = split[0].ToUpperInvariant();
         }
 
-        foreach (var name in new[] { "PrintFlow-Agent-Setup.exe", "PrintFlow-Agent-Dev-Certificate.cer", "RELEASE-METADATA.json" })
+        foreach (var name in new[] { installerName, certificateName, "RELEASE-METADATA.json" })
         {
             var path = Path.Combine(directory, name);
             if (!hashes.TryGetValue(name, out var expected)) throw new InvalidDataException($"Hash ausente: {name}");
@@ -134,15 +147,16 @@ internal sealed class SignedUpdateService
             if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expected))) throw new InvalidDataException($"Hash divergente: {name}");
         }
 
-        var certificatePath = Path.Combine(directory, "PrintFlow-Agent-Dev-Certificate.cer");
+        var certificatePath = Path.Combine(directory, certificateName);
         var certificateFileHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(certificatePath)));
         var pinnedCertificate = X509Certificate2.CreateFromCertFile(certificatePath);
-        var signer = X509Certificate.CreateFromSignedFile(Path.Combine(directory, "PrintFlow-Agent-Setup.exe"));
+        var installerPath = Path.Combine(directory, installerName);
+        var signer = X509Certificate.CreateFromSignedFile(installerPath);
         var signerHash = Convert.ToHexString(SHA256.HashData(signer.GetRawCertData()));
         if (!string.Equals(certificateFileHash, TrustedCertificateSha256, StringComparison.OrdinalIgnoreCase)) throw new CryptographicException("Certificado nao corresponde ao pin confiavel do Agent.");
         if (!string.Equals(signerHash, certificateFileHash, StringComparison.OrdinalIgnoreCase)) throw new CryptographicException("Assinante nao corresponde ao certificado publicado.");
         if (!string.Equals(metadata.GetProperty("certificateSha256").GetString(), certificateFileHash, StringComparison.OrdinalIgnoreCase)) throw new CryptographicException("Manifesto e certificado divergem.");
-        if (!AuthenticodeTrust.Verify(Path.Combine(directory, "PrintFlow-Agent-Setup.exe"))) throw new CryptographicException("Windows nao confia na assinatura Authenticode deste instalador.");
+        if (!AuthenticodeTrust.Verify(installerPath)) throw new CryptographicException("Windows nao confia na assinatura Authenticode deste instalador.");
         _ = pinnedCertificate;
     }
 

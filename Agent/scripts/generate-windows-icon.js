@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { deflateSync } from 'node:zlib'
 
-const outputPng = resolve('assets/printflow-agent-icon.png')
-const outputIco = resolve('assets/printflow-agent-icon.ico')
+const outputPng = resolve('assets/fila-agent-icon.png')
+const outputIco = resolve('assets/fila-agent-icon.ico')
 const iconSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
 const polygons = [

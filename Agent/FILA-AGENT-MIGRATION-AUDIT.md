@@ -1,0 +1,396 @@
+# Auditoria e plano de migração do Fila Agent
+
+- **Última revisão:** 2026-10-08
+- **Base de código:** `main` em `30092e1`
+- **Versão do Agent:** `0.1.26` (preparação)
+- **Estado do checkout:** alterações locais aguardando publicação
+- **Publicação:** autorizada para `feature/Alex`; push e release `agent-v0.1.26` ainda pendentes de execução e confirmação.
+
+Este arquivo reúne o estado técnico da migração e os registros de validação feitos ao longo do trabalho. As seções iniciais descrevem o estado mais recente; os registros datados ao final preservam o que foi verificado em cada etapa. Para uma decisão atual, use o resumo consolidado e confira a data do registro correspondente.
+
+## Resumo executivo
+
+A troca do runtime instalado para C# foi concluída em ambiente isolado: o host inicia o runtime .NET diretamente, e o pacote validado não inclui Node nem scripts operacionais PowerShell. O Node continua no repositório como referência de paridade e ferramenta de desenvolvimento. A migração ainda não está liberada para publicação: faltam provas de atualização assinada sobre instalação pareada anterior, instalação do Orca em máquina limpa, chamadas autenticadas ao backend hospedado e operação em impressora física.
+
+As validações mais recentes incluem contratos C#, testes Node, contratos de release e um E2E isolado de instalação, pareamento simulado, reinício, rollback e desinstalação. O teste DPAPI real passou em uma execução interativa do Windows; execuções no sandbox podem pular esse caso quando o perfil Windows não está carregado. Consulte as seções de validação para os comandos, contagens e limites de cada execução.
+
+## Estado atual — 2026-10-08
+
+O host C# inicia `AgentRuntimeComposition` diretamente no processo .NET; não inicia `node.exe`. Runtime, bandeja, setup, desinstalação, atualizador e ReleaseTool são C#/.NET 8. Os 20 scripts `.ps1` de operação/build foram removidos; os passos Windows de CI/release usam `cmd`, sem invocar PowerShell. O ReleaseTool ainda executa validadores Node do repositório como gates de release; isso é dependência de desenvolvimento/publicação, não do Agent instalado. O pacote cliente autocontido não leva Node nem `node_modules`. Os scripts operacionais antigos não estão no código rastreado nem no pacote atual; `Agent/temp` e `Agent/dist`, ignorados pelo Git, ainda guardam extrações históricas de releases 0.1.22 com esses scripts, preservadas como evidência. O setup 0.1.22 que ainda estava rastreado em `Agent/dist/PrintFlow-Agent-Setup.exe` foi removido; builds novos passam a usar `Fila-Agent-*`, enquanto a preparação da release cria aliases `PrintFlow-*` para os atualizadores antigos. Node permanece em `Agent/src` como referência de paridade e em testes/ferramentas auxiliares.
+
+O runtime C# integrado cobre pareamento e credenciais DPAPI, heartbeat, renovação de credencial, comandos, progresso, eventos, métricas, WebSocket/SSE, downloads de artefatos, servidor local em `127.0.0.1:17873`, SQLite/outboxes, descoberta, adapters Bambu/Marlin/OctoPrint/Moonraker/PrusaLink, cache, recuperação após reinício e slicing via OrcaSlicer. A rota `/diagnostics` exige token local protegido por DPAPI, recusa chamadas com `Origin`, aceita os cabeçalhos Fila e PrintFlow e mascara segredos, seriais e endereços. Na execução pelo sandbox, 202 contratos C# passaram e o caso de DPAPI real foi pulado porque o perfil Windows não estava carregado; em CMD interativo, o teste DPAPI real passou e a suíte concluiu 203 contratos. O E2E isolado também confirmou persistência e recuperação da credencial protegida após reinício. Ainda faltam evidências de impressora física, provisionamento do Orca numa máquina limpa, atualização assinada sobre instalação anterior e chamadas autenticadas ao backend hospedado.
+
+O site agora inicia o pareamento por `fila-agent://`; o setup registra esse protocolo e remove a chave antiga, e o parser C# aceita somente `fila-agent://`. O `/healthz` do runtime C# informa `app: "fila-agent"`; o site ainda aceita o valor antigo como compatibilidade de resposta. `Agent/package.json` e o lockfile identificam o pacote como `fila-agent`.
+
+## Compatibilidade e dependências remanescentes — 2026-10-08
+
+`Agent/scripts` continua necessária no código-fonte, mas não no Agent instalado: `package.json` chama as ferramentas Node de diagnóstico, pacote de suporte e geração de ícone; o verificador manual de pacote de atualização permanece como ferramenta do runtime Node de referência. O verificador Node do Orca foi removido após validação do smoke C# com o Orca instalado. O runtime C# não inicia esses scripts, e o pacote cliente não os inclui. Node permanece no repositório como referência de paridade e suporte às ferramentas de desenvolvimento.
+
+`Agent/temp` é uma pasta local ignorada pelo Git, não uma dependência de compilação ou execução. Ela conserva logs diagnósticos, builds de QA e releases antigas que servem para testes de transição. Os itens locais e o instalador/ZIP de QA foram preservados para inspeção. Foi removido apenas o cache intermediário `.build` da última pasta QA, liberando aproximadamente 393 MiB. O instalador e o ZIP permaneceram íntegros; a validação do pacote passou e o ZIP ainda lista 19 entradas.
+
+O C# envia metadados de slicing pelos novos cabeçalhos neutros `X-Agent-*` e mantém `X-PrintFlow-*` como alias de transição. O backend passa a preferir os cabeçalhos novos, aceita os antigos como fallback e anuncia ambos no CORS. O health check público da API hospedada respondeu `200 {"status":"ok"}`; a mesma resposta ainda anuncia os cabeçalhos antigos. O código de backend desta revisão não foi implantado no Render e o Agent ainda envia ambos, então a API hospedada atual continua compatível. Não foram feitas chamadas autenticadas nem mutações de dados.
+
+O contrato de pareamento agora registra somente `fila-agent://`; o setup remove a chave antiga durante a instalação e o parser C# recusa o esquema `printflow-agent://`. O FrontEnd atual gera o esquema novo. A decisão segue a documentação Microsoft para apps WinForms/desktop não empacotados: registrar apenas os URIs que o app realmente processa. O teste de parser cobre o esquema aceito e a rejeição do antigo; o contrato do setup verifica o registro e a limpeza da chave anterior.
+
+A identidade pública do certificado beta continua igual à fixada pelo atualizador. Os hashes do `.cer` público retido no instalador local foram recalculados nesta revisão: SHA-1 `43A798A610B5F9A814C104BEC417A0E9B248EC3E` (o valor exibido na tela) e SHA-256 `AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB`. Ambos coincidem com os valores no FrontEnd e no atualizador/ReleaseTool. O certificado identifica `PrintFlow 3D Local Dev`, tem EKU de assinatura de código e vence em 24/08/2029. O PFX privado está presente, mas a senha não está configurada; a abertura com senha vazia falhou, e a chave correspondente não foi localizada nos stores `CurrentUser/My` ou `LocalMachine/My`. O workflow de release usa secrets do GitHub para o PFX e sua senha, que não podem ser verificados localmente. O código e o pin continuam compatíveis se a mesma chave assinar o próximo release; a assinatura local e uma atualização assinada instalada ainda não foram comprovadas. A identidade do certificado não pode ser renomeada sem emitir outro certificado e executar uma transição de confiança. A Microsoft classifica certificados autoassinados como teste/desenvolvimento e diz que não são confiáveis por padrão: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options.
+
+A revisão ainda encontra identificadores antigos em caminhos de dados, nomes de assets e identidade do certificado beta, variáveis de ambiente, cabeçalhos de transição, URL real da API e caminho do repositório GitHub. Os nomes do executável/projeto, tarefa padrão e chave de desinstalação já foram migrados para Fila Agent; o setup ainda reconhece executáveis, tarefa e chaves antigos durante upgrade/rollback. Caminhos de dados e assets exigem transição compatível antes de remoção; URL da API e repositório apontam para serviços existentes e só mudam junto com a infraestrutura/publicação. Os cabeçalhos `X-PrintFlow-*` são temporários até a API hospedada aceitar o contrato novo e versões antigas deixarem de depender deles. PowerShell operacional não foi encontrado no runtime ou pacote; as ocorrências restantes são verificações contra reintrodução.
+
+Verificações desta continuação: Agent Node `152/152`; contratos C# `202` aprovados (o cenário de DPAPI isolado foi pulado porque o perfil não estava carregado); Backend `206/207` aprovados, com o único teste pulado exigindo PostgreSQL descartável; contrato de release `22` verificações e validador do pacote passaram. O E2E do instalador C# passou em diretórios exclusivos: `/healthz`, pareamento com API local simulada, cinco heartbeats, atualização, rollback injetado, reinício e desinstalação; tarefa e diretórios temporários removidos. O E2E também comprova que o host instalado conseguiu persistir/reabrir as credenciais DPAPI neste perfil. Builds Release de Host e Setup passaram com zero avisos/erros; `git diff --check` passou. `validate-agent-release-artifacts.mjs` não passou porque `Agent/dist/RELEASE-METADATA.json` ainda não existe, pois nenhum release foi preparado. Branch ativa continua `main`; nada foi publicado. A automação de janela nativa não ficou disponível (`Trusted RPC service is not configured: sky`), então não houve inspeção visual do instalador nem aceite dos termos.
+
+## Linha de base executada
+
+- `dotnet run --no-restore --project Agent\\windows-runtime-tests\\FilaAgent.Runtime.ContractTests.csproj`: 200/200 verificações passaram, incluindo autenticação/sanitização de `/diagnostics`; o teste de DPAPI real imprimiu `SKIP` porque o perfil Windows não está carregado no executor. A falha foi isolada e não interrompe mais a suíte.
+- `npm.cmd test` em `Agent`: 152/152 testes passaram; o contrato de instalação agora exige build C# antes de abrir o instalador e usa o setup C# instalado na desinstalação.
+- ReleaseTool recompilou runtime, host e setup e validou o payload `0.1.25` em `Agent/temp/fila-agent-csharp-license-qa-20261008-post-diagnostics`. ZIP de QA contém 19 arquivos, sem Node nem scripts `.ps1`, `.psm1` ou `.vbs`; instalador sem assinatura tem 230.735.656 bytes. Não foi instalado.
+- `node scripts/validate-agent-package.mjs`, `node scripts/check-agent-release-contract.mjs` (22 verificações) e `git diff --check`: passaram.
+- `NU1900` aconteceu porque o restore tentou consultar `api.nuget.org` para auditoria de vulnerabilidades e a conexão HTTPS foi recusada; `TreatWarningsAsErrors=true` transforma o aviso de auditoria em erro. Uma restauração diagnóstica com `NuGetAudit=false` atualizou o cache local e permitiu builds Release, sem mudar a política do projeto. O build do pacote repetido com `--no-restore` passou; a auditoria NuGet online continua sem comprovação por falta de rede.
+- O setup embute os termos v1.3 e avisos/licenças das dependências .NET; a tela de consentimento oferece acesso à lista de licenças. A inspeção visual não foi concluída porque o ambiente de validação não disponibilizou acesso a janelas nativas. Não houve aceite dos termos nem instalação nesta etapa.
+- SDK disponível: .NET `8.0.425`; Node local: `24.19.0`.
+- Os testes incluem simuladores e mocks para protocolos e impressoras. Não comprovam operação em impressora física, atualização instalada, assinatura confiável por certificado de produção ou comportamento no backend hospedado.
+- Não houve chamada à API hospedada, alteração no Render, instalação/desinstalação, pareamento ou publicação nesta etapa. A branch ativa segue `main`, não `feature/Alex`.
+
+## Mapa de nomes e compatibilidade
+
+| Superfície | Ação segura | Compatibilidade necessária |
+| --- | --- | --- |
+| Bandeja, janela de status, mensagens do instalador, atalhos e textos do site | Exibir `Fila Agent` | Alteração visual; atualizar rótulos e testes de contrato juntos |
+| Nome do app no payload de health e User-Agent | `/healthz` C# já informa `fila-agent`; revisar User-Agent e consumidores remanescentes | O site ainda aceita o identificador legado enquanto houver instalações antigas |
+| API `/api/agents/*`, IDs e segredos | Manter | Contrato com backend e instalações já pareadas |
+| `printflow-agent://` | Site e setup usam `fila-agent://`; o setup remove o registro anterior e o parser novo rejeita o esquema antigo | Clientes antigos precisam atualizar para registrar o protocolo novo |
+| `%APPDATA%\\PrintFlow Agent`, `%LOCALAPPDATA%\\PrintFlowAgent`, DPAPI e SQLite | Ler e continuar usando esses locais na transição; só migrar após cópia/verificação idempotente e rollback | Evita perder pareamento, credenciais, fila pendente, logs e recuperação de impressão |
+| Task Scheduler, chaves de uninstall/registry, executáveis instalados | Nome padrão `FilaAgent`; setup remove a tarefa/chave antiga e consegue restaurar a tarefa antiga em rollback | Resolução de executáveis/chaves antigas continua no upgrade e rollback |
+| Variáveis `PRINTFLOW_*`, schema do bundle de suporte | Manter aliases antigos; introduzir aliases novos com precedência documentada se necessário | Scripts dos clientes, CI e ferramentas de suporte ainda podem depender deles |
+| ZIP/EXE/certificado e nomes de assets | Builds novos usam `Fila-Agent-*`; a preparação mantém aliases `PrintFlow-*` e o atualizador prefere o par Fila com fallback legado | O pin do certificado e os nomes antigos permanecem até clientes anteriores migrarem |
+| Tag `agent-v*` | Manter durante a transição | Release workflow, atualizador e versões existentes consultam esse padrão |
+| Identidade do certificado | Não alterar nesta migração | Troca de certificado exige transição de confiança e pode bloquear atualizações |
+| Nomes de projeto e executáveis | `FilaAgent`/`FilaAgentSetup`; mantidos aliases somente para localizar instalações antigas | Os dados e artefatos públicos ainda seguem o contrato de transição |
+
+No snapshot registrado nesta etapa antiga, scripts PowerShell ainda implementavam tarefas fora do pacote. A auditoria de 2026-10-08 confirmou os substitutos C# e removeu os scripts após transferir seus contratos para o setup, ReleaseTool e CI.
+
+## Plano original e critérios ainda pendentes
+
+### Etapa 1 — Marca visível e compatibilidade de instalação
+
+Atualizar os rótulos visíveis para `Fila Agent`, mantendo aliases de protocolo, diretórios, variáveis de ambiente, chaves de desinstalação e artefatos. Atualizar os termos para refletir o nome novo sem mudar o responsável legal ou inventar compromissos de privacidade. Validar instalador, atalhos, atualização sobre uma instalação antiga, pareamento preservado, `/healthz` e remoção/rollback em diretórios de teste isolados.
+
+### Etapa 2 — Contratos executáveis
+
+Extrair dos testes atuais fixtures de requisição/resposta, SQLite e máquina de estados. Documentar cada rota usada pelo Agent e o fluxo de autenticação sem alterar o backend. Definir testes de paridade que possam executar contra os dois runtimes com os mesmos fixtures.
+
+### Etapa 3 — Núcleo C# em paralelo
+
+Criar implementação .NET do runtime por fatias: configuração/logging/shutdown; credenciais/pairing/API; SQLite/outbox; health e servidor local; polling/realtime e dispatch; cache e arquivos; adaptadores OctoPrint/Moonraker/PrusaLink; Marlin; Bambu MQTT/FTPS; descoberta; slicing/Orca e monitoramento. Para cada fatia, exigir paridade de contrato e testes equivalentes antes de permitir uso pelo host. Não manter dois runtimes ativos simultaneamente numa mesma instalação.
+
+### Etapa 4 — Host, atualização e empacotamento somente C# (implementada)
+
+O host inicia o serviço C# sem criar `node.exe`; instalador, atualização assinada, rollback, ReleaseTool e CI/release também usam C#/.NET e `cmd`. O Node permanece no repositório por decisão do usuário, como runtime de referência e ferramenta de testes, e não entra no pacote nem é iniciado pelo Agent instalado. Os scripts NPM de instalação agora recompilam o setup antes de abri-lo; os de desinstalação usam o setup C# instalado em `%LOCALAPPDATA%\\PrintFlowAgent`, evitando executar o binário antigo que estava em `dist`.
+
+### Etapa 5 — Prova instalada e retirada das fontes legadas
+
+Concluída a instalação em diretórios isolados com API simulada, `/healthz`, pareamento, reinício, upgrade e rollback injetado, restauração de estado e desinstalação. Permanecem pendentes a atualização assinada sobre instalação pareada anterior, instalação limpa sem Orca, API hospedada e impressora física. Node e seus testes de referência permanecem por decisão do usuário; PowerShell operacional foi removido. O aceite de hardware continua separado.
+
+## Fora do escopo desta auditoria
+
+Não alterar rotas, schema, autorização, autenticação, comportamento de cobrança, dados hospedados, certificado, API de produção ou impressoras físicas. Nenhuma instalação existente será removida ou sobrescrita durante desenvolvimento; testes de instalação devem usar diretórios, porta e credenciais isolados.
+
+## Riscos e bloqueios conhecidos
+
+- O branch remoto existente está como `feature/Alex`; a conexão com GitHub falhou nesta sessão. Não há evidência de que o envio possa ser feito agora, e nenhum push foi feito.
+- A branch local `feature/Alex` tem um commit ainda não enviado (`e026cf0 fix-auth-trusted-proxy-ip`). Ele deve ser preservado e inspecionado antes de qualquer publicação.
+- A assinatura atual é de desenvolvimento. Builds locais ou testes aprovados não provam confiança do Windows em outro computador.
+- Protocolos de impressora e atualizações devem ser testados no runtime instalado antes de declarar a migração completa; mocks não provam todos os firmwares nem equipamentos reais.
+- O workspace atual contém mudanças locais não relacionadas em marketplace. Elas não fazem parte desta tarefa e não devem entrar em commits do Agent.
+
+## Estado da marca no snapshot anterior — 2026-10-08
+
+Os textos visíveis do host, setup/desinstalador, atalhos, documentação, termos e telas do site usam `Fila Agent`. O site emite `fila-agent://`; o setup registra o protocolo novo e remove o registro antigo, e o parser C# aceita somente `fila-agent://`. O C# responde `app: "fila-agent"`, enquanto a tela web ainda aceita `printflow-agent` na resposta de instalações anteriores. O nome do pacote NPM passou a `fila-agent`. Diretórios, chaves DPAPI, variáveis, cabeçalhos, nomes de artefatos e identificadores antigos continuam em uso onde são necessários para upgrade e rollback; a remoção depende de uma migração compatível.
+
+## Auditoria ampliada: slicer, descoberta, conexões e PowerShell
+
+### OrcaSlicer e preparação do G-code
+
+O OrcaSlicer não é uma biblioteca do Agent: o setup tenta instalar o executável oficial da Microsoft Store por WinGet e o runtime C# usa os perfis instalados. A implementação C# escolhe combinações explícitas de máquina/processo/filamento para os modelos Bambu suportados, executa o CLI sem shell, calcula métricas e valida/hash do G-code. Para Production Job, baixa e mantém o 3MF no cache enquanto fatia, chama `POST /api/agents/print-jobs/:id/slicing-artifact` com os cabeçalhos de credencial, perfil, métricas e idempotência, depois libera o arquivo temporário.
+
+A implementação C# analisa STL binário/ASCII e 3MF ZIP, extrai limites e triângulos, lê métricas do G-code e oferece `SliceModelAsync`. O registro de desinstalação em `WOW6432Node` identifica OrcaSlicer 2.4.2, Publisher SoftFever, em `C:\Program Files\OrcaSlicer`; os perfis Bambu usados no Agent estão presentes. O arquivo baixado `OrcaSlicer Installer.exe` tem assinatura Authenticode válida da Microsoft. O launcher instalado `orca-slicer.exe` não expõe assinatura Authenticode, então a descoberta C# limita a instalação desktop ao nome, publisher e versão exatos do registro, além do caminho e dos arquivos de perfil existentes. O resolvedor tenta essa instalação antes de `WindowsApps`: neste PC há um caminho WindowsApps residual que existe, mas o Windows nega sua execução. A fallback WindowsApps 2.4.3.0 permanece para instalação em que o executável possa ser iniciado; ambas usam motor 2.4.2.
+
+O Orca instalado foi executado de verdade pelo smoke test C# em um cubo 3MF sintético local de 20 mm, perfil Bambu P1S/PLA Basic; o teste também confirmou a descoberta automática pela entrada de registro. A última execução gerou G-code de 416.866 bytes com SHA-256 `bd2ae932254701bf3d9709e451aaf898308d91b4a8413533706cbf0e5942088f`, tempo total estimado de 992 segundos e filamento de 1326,58 mm. O cabeçalho do motor 2.4.2 usa `total estimated time` e não informa massa quando a densidade está zerada; o parser C# agora lê o tempo e o comprimento e deixa gramas ausentes, sem estimar valor. O modelo e o G-code ficaram em `%TEMP%`; o smoke test não chamou a API nem conectou impressora.
+
+O serviço C# de Production Job baixa o 3MF pela rota autenticada `/api/agents/print-file`, retoma transferências por `Range`, valida hash/tamanho, mantém cache com expiração e pin/unpin sem gravar credenciais da impressora, fatia pelo Orca e envia o G-code ao endpoint existente com a mesma chave idempotente `slice-{jobId}-{sha256}`. Também recupera pins expirados somente após verificar que o job não está ativo e que a impressora está ociosa. A composição C# integrada conecta esse serviço ao dispatcher. Os contratos simulados verificam download retomado, cabeçalhos de credencial, retenção durante o slicing, recuperação/expiração de pins, limpeza temporária e upload de G-code. Não houve chamada ao backend hospedado nesta etapa. O motor de fatiamento continua sendo o OrcaSlicer oficial externo; C# o orquestra pela CLI e valida o resultado, não substitui o motor.
+
+### Descoberta de impressoras
+
+- USB/Marlin usa `serialport` para enumerar portas; consulta cada porta em 115200 e depois 250000 baud, envia `M115\n`, aguarda até 3 segundos e só identifica uma resposta contendo `FIRMWARE_NAME` ou `Marlin`. O resultado atual inclui porta e, quando o driver fornece, nome, fabricante e PNP ID.
+- Bambu usa busca SSDP multicast em `239.255.255.250:1990`; cabeçalhos ou XML podem revelar serial e modelo. A descoberta não obtém o LAN Access Code. O cadastro exige `serial` e `accessCode`, o frontend pede esse código e o adapter usa `bblp:<accessCode>` no MQTT TLS; ele permanece segredo e não deve ser tentado por força bruta.
+- Se SSDP não responder, a descoberta enumera interfaces IPv4 locais e testa 80, 7125, 5000 e 8883, em grupos limitados, identificando Moonraker, OctoPrint, PrusaLink ou uma possível Bambu. A rede pode bloquear multicast/scan; o cadastro manual por IP continua sendo fallback necessário.
+
+A fatia C# agora tem enumeração COM e sonda Marlin com os mesmos baud rates/comando/timeout, além do parser e cliente SSDP Bambu com o contrato de credenciais. Os testes atuais são isolados com portas/probes falsas e fixture SSDP; não acessaram hardware, rede multicast real ou o Access Code do usuário. Falta portar a enumeração de metadados PNP com paridade, descoberta de interfaces/sub-redes, scan limitado de portas e detecção HTTP de cada firmware, além de comprovar em hardware.
+
+### Lacunas restantes de paridade e hardware
+
+O host agora inicia o runtime C# integrado, mas as fontes Node permanecem no repositório para comparação e testes. A suíte C# exercita os adapters e contratos com transportes simulados; isso não prova conexão com uma impressora física nem comportamento de cada firmware em equipamento real.
+
+O adapter Bambu C# implementa MQTT 3.1.1, tópicos report/request, normalização de status, pausa/retomada/cancelamento, upload FTPS e payload `project_file`; o Access Code fica em memória e o callback para certificado autoassinado permanece restrito ao adapter. As fixtures de transporte real ainda falharam neste ambiente com Schannel `0x8009030E` antes da troca de comandos, então MQTT/FTPS Bambu em impressora real continua sem aprovação. Marlin, OctoPrint, Moonraker e PrusaLink têm contratos simulados, mas não foram validados em hardware/firmware físico. Nenhum pareamento ou credencial de cliente deve ser recriado por causa do nome novo.
+
+### PowerShell no build e na publicação — estado anterior à migração final
+
+Na auditoria anterior, o PowerShell ainda cuidava de empacotamento, instalação, atualização, assinatura e publicação. O ReleaseTool C# agora gera e valida ZIP/setup, assina Authenticode, monta metadados e hashes e publica com GitHub CLI por meio da API de processo .NET. `agent-release.yml` e o CI chamam o ReleaseTool e usam `shell: cmd` nos passos Windows. Os scripts legados foram removidos; as verificações abaixo cobrem a ausência de dependência operacional de PowerShell.
+
+## Diretórios locais e licença
+
+### `Agent/temp` e diretório temporário instalado
+
+`Agent/temp` dentro do checkout é cache de trabalho local, está explicitamente ignorado em `.gitignore` e hoje contém artefatos antigos de validação do Orca/instalador, ZIPs de releases anteriores, cópias extraídas/backup e logs de diagnóstico. Não é código-fonte nem parte pretendida do pacote. Não foi limpo porque alguns itens têm natureza de diagnóstico/backup e não foram revisados individualmente.
+
+Isso é diferente do diretório `temp` sob os dados locais do Agent. O layout Node/C# o reserva e cria junto do banco/cache/logs; downloads parciais do cache usam arquivos `.part`, e o slicing de Production Job cria um diretório temporário no `TEMP` do Windows, remove-o no `finally` e libera o arquivo de origem. A cópia C# precisa preservar essa limpeza e nunca apagar cache fixado, G-code de impressão ou estado de rollback por engano.
+
+### `Agent/scripts`
+
+A pasta contém ferramentas JavaScript de diagnóstico/suporte e testes de referência Node. Os 20 arquivos `.ps1` encontrados no levantamento foram retirados individualmente após a migração dos fluxos correspondentes e a atualização dos testes; os validadores agora falham se um `.ps1`, `.psm1` ou `.vbs` reaparecer dentro de `Agent`.
+
+### O que “licença beta” significa no repositório
+
+Não foi encontrado um arquivo/token de licença chamado Beta para o Agent. Há três coisas diferentes:
+
+1. O texto local de aceite é `TERMOS-DE-USO-FILA-AGENT.txt`, marcado `EARLY ACCESS`, versão 1.3. O setup grava a versão/horário do aceite localmente e exige novo aceite para a versão atual. Os termos descrevem o runtime autocontido do Agent, a instalação/reutilização separada do OrcaSlicer e sua licença AGPL-3.0; o pacote atual também inclui as licenças/notas das dependências .NET. Não há token/licença técnica de Beta no runtime; o termo Early Access continua sendo o documento de aceite.
+2. O acesso comercial ao Agent não está embutido no Node nem no instalador. O backend consulta o entitlement `agent` ao parear e antes de entregar comandos; estados/recursos do plano (inclusive trial/PRO conforme configurados para cada tenant) são do backend. Mantendo rotas, credenciais e payloads iguais, migrar o processo para C# não muda a regra da licença. O direito atual de uma conta específica não foi consultado nem alterado.
+3. `Agent/licenses/NODE-LICENSE.txt` é o aviso do runtime Node legado e não é a licença Early Access nem a licença comercial do cliente. O pacote C# validado não distribui Node; esse arquivo ainda precisa ser classificado/removido quando as ferramentas Node forem retiradas. O pacote deve continuar levando os avisos das bibliotecas .NET efetivamente distribuídas, além de respeitar a licença do OrcaSlicer instalado pela Store.
+
+## Diretriz de marca e transição
+
+O nome visível e os novos artefatos do Agent serão `Fila Agent`; o nome `PrintFlow` não deve aparecer para o cliente. A busca atual ainda encontra referências técnicas e históricas. Não será feito replace cego porque existem contratos de compatibilidade: diretório e DPAPI existentes, tarefa/uninstall antigo, variáveis de ambiente legadas, protocolo `printflow-agent://`, cabeçalhos HTTP `x-printflow-*`, identificador local `printflow-agent`, nomes de assets e releases antigos. A migração deve fazer o caminho novo usar `Fila` e continuar reconhecendo os identificadores antigos sem mostrá-los; remover cada alias só quando o backend/frontend/atualizador e a população de instalações suportarem a transição.
+
+Os nomes internos restantes (namespace/projeto, nomes de executáveis/projetos e identificadores do armazenamento) serão revisados por categoria; alguns permanecem por compatibilidade de atualização. Nomes de instalação/armazenamento e protocolo só mudam com migração de caminho/registro e teste de upgrade/downgrade para preservar pareamento, impressoras, fila, cache e uninstall. O destino solicitado é `feature/alex`, enquanto a referência local rastreada é `feature/Alex`; nenhuma mudança de referência ou push foi feito nesta revisão.
+
+O corte deve manter um único runtime em execução. Antes de retirar o Node, é necessário parar o processo sem impressão ativa, migrar e conferir dados/credenciais, instalar o C# em diretório isolado e comprovar reconexão e rollback. Arquivos de pareamento e histórico só podem ser removidos após cópia verificável, teste de leitura e período de rollback. Aliases de protocolo/API dependem da migração do frontend e das versões antigas.
+
+### Critérios para concluir a migração
+
+1. O Orca real da Store gera G-code para cada perfil suportado; métricas e upload autenticado chegam ao backend com a mesma chave idempotente e sem iniciar impressão.
+2. Testes de paridade cobrem interfaces COM, resposta real de `M115`, SSDP, fallback de portas/HTTP, cada adapter, comandos, reconexão, status e credenciais; quando não houver equipamento/firmware, isso fica marcado como limite e não como validação aprovada.
+3. Runtime hospedado em C# passa pareamento, reinício com credenciais preservadas, `/healthz`, heartbeat, fila de comandos, eventos, job/arquivo, atualização assinada, rollback e desinstalação em diretório/porta isolados.
+4. Build, pacote e release funcionam sem PowerShell; o ZIP/instaladores não contêm Node nem scripts PowerShell. `feature/alex` permanece a única branch de publicação solicitada.
+
+### Verificação desta fatia de migração
+
+- `dotnet restore windows-runtime-tests/FilaAgent.Runtime.ContractTests.csproj --ignore-failed-sources`: concluiu usando pacotes NuGet já presentes localmente; nenhum download foi necessário.
+- O teste de contrato simula portas COM/respostas Marlin e SSDP, subnet/identificação de rede, fluxos HTTP completos de impressão em OctoPrint/Moonraker/PrusaLink, endpoints de nuvem, rotação de credencial e Bambu MQTT/FTPS via seams de transporte. Também exercita análise STL/3MF, métricas Orca, download retomado e verificado, pins e recuperação segura de cache e orquestração de Production Job até o upload simulado; total atual: 135 verificações C#.
+- `dotnet run --no-restore -c Release --project Agent\\windows-runtime-tests\\FilaAgent.Runtime.ContractTests.csproj` passou com 135/135 verificações. O smoke test `dotnet run --no-restore -c Release --project Agent\\windows-runtime-tests\\FilaAgent.Runtime.ContractTests.csproj -- --orca-live-smoke` descobriu o Orca instalado e executou o motor real 2.4.2. O download/upload C# foi testado com servidor HTTP simulado, não com a API real. `git diff --check` passou, com avisos de conversão de LF/CRLF em arquivos preexistentes do worktree. As integrações MQTT/FTPS locais continuam opt-in e já reproduziram falha Schannel `0x8009030E` antes do handshake. Suíte Node do Agent: última validação registrada 158/158.
+- Depois de renomear o SVG e o texto de termos e atualizar as referências, o gerador criou o novo ícone `fila-agent-icon.ico`; os projetos C# do host e setup compilaram com 0 avisos e 0 erros. Os arquivos `.ico`/`.png` antigos foram removidos só após essa compilação.
+- Não foram acessados API real, credenciais do usuário, impressora física ou rede multicast real. O OrcaSlicer já instalado foi usado apenas para fatiar o modelo sintético em `%TEMP%`; os testes de cache e upload usaram dados e HTTP locais simulados. Instalação e dados atuais do Fila Agent não foram alterados.
+
+## Histórico de implementação e validação
+
+Os registros abaixo são notas de cada etapa. Contagens e limites valem para a execução indicada; não substituem o estado atual no início do documento.
+
+### Atualização da auditoria — 2026-10-07
+
+Este adendo substitui os numeros e o estado anterior do fatiamento C# registrados acima. O usuario confirmou que OrcaSlicer ja aparece instalado na Microsoft Store; nao foi reinstalado. O smoke test local executou o motor 2.4.2 num modelo 3MF sintetico e gerou G-code de 416866 bytes, com 992 segundos estimados e 1326.58 mm de filamento. Nenhuma impressora ou API foi acessada.
+
+Foi criado `ProductionJobSlicingCommandHandler` para interpretar a resposta `command` do endpoint pendente no formato atual (`id`, `type`, `payload.job`, `payload.printer`). Para `slice_print_job`, ele usa o SQLite existente para deduplicar, registra resultado e outbox antes de enviar a conclusao autenticada, e oferece um ciclo separado para retry da outbox. Outros tipos de comando permanecem intocados. O Access Code e campos que nao sao necessarios para o slicing nao sao copiados para os metadados persistidos nem para o resultado. O handler ainda nao esta conectado ao loop de polling geral, e o host segue iniciando Node.
+
+A validacao C# passou com 141/141 verificacoes. Os testes simulam download e upload HTTP, falha temporaria na conclusao e retry sem repetir slicing/upload. A API real nao foi chamada. `git diff --check` passou; o Git apenas reportou avisos de conversao LF/CRLF em arquivos locais ja alterados.
+### Compatibilidade de credenciais e reconexão — 2026-10-07
+
+O runtime C# agora tem `AgentPrinterCredentialStore` para ler e gravar `printer-credentials.json` no envelope DPAPI e no formato interno AES-256-GCM/Scrypt que o Node ja usava. Foi adicionada a dependencia NuGet `BouncyCastle.Cryptography` 2.7.0 para Scrypt; o projeto compila em .NET 8. A fixture usada no teste foi cifrada pelo Node com dados sinteticos, e o C# conseguiu recuperar o valor esperado. Nenhum arquivo de credencial real foi aberto ou alterado. O identificador legado usado como material de derivacao continua preservado para que a migracao nao invalide credenciais existentes.
+
+`AgentPrinterConnectionManager` agora consulta `/api/agents/printers/reconnect`, carrega as credenciais locais por serial, IP/porta ou porta COM e restaura sessoes Bambu, Marlin e HTTP. O contrato simulado confirmou a reconexao Bambu usando o Access Code local, reutilizacao de uma sessao ativa e fechamento MQTT. Sem segredo salvo, a conexao falha antes de iniciar MQTT; SSDP e outros scans nao descobrem nem tentam adivinhar o LAN Access Code. A conexao e a reconexao foram exercitadas com API e MQTT simulados, nao com impressora real.
+
+A suite C# passou com 150/150 verificacoes e o build Release do runtime passou sem avisos. O teste DPAPI `CurrentUser` com credencial sintetica falhou dentro do sandbox, onde o perfil do usuario nao estava carregado, e passou ao executar a mesma suite fora do sandbox; nenhum dado real foi acessado. A dependencia esta declarada apenas no projeto do runtime; nenhum backend, instalador, host ativo ou dado do usuario foi alterado nesta etapa. O host ainda inicia Node, e o gerenciador C# ainda precisa ser ligado ao ciclo geral de polling/dispatch antes de substituir o runtime.
+
+### Ciclo de inicialização C# — 2026-10-07
+
+Foi adicionado `AgentRuntimeStartupService` para consumir pareamento local pendente quando ainda nao ha credenciais, persistir a resposta protegida, validar credenciais salvas, recuperar/rotacionar segredo e chamar a reconexao das impressoras cadastradas. Uma credencial recusada e removida e o resultado volta para `AwaitingPairing`; falhas de reconexao sao registradas sem impedir a inicializacao, conforme o fluxo Node.
+
+Tres contratos novos exercitam pareamento e armazenamento, sequencia de validacao/rotacao/reconexao com Bambu MQTT simulado e limpeza de credencial recusada. A suite completa passou com 153/153 verificacoes; o build Release do runtime passou com 0 avisos e 0 erros. O teste usou API/MQTT simulados e dados temporarios. O host WinForms ainda inicia Node; este servico C# ainda nao foi ligado ao polling, dispatcher, heartbeat ou servidor local do host.
+
+### Comandos de operação de impressora C# — 2026-10-07
+
+`AgentPrinterConnectionManager` agora expoe status, pausa, retomada e cancelamento sobre as sessoes ja gerenciadas. `AgentPrinterCommandHandler` interpreta `connect_printer`, `disconnect_printer`, `printer_status`, `printer_pause`, `printer_resume` e `printer_cancel`, registra resultado na tabela SQLite idempotente e envia conclusao autenticada pela API; falhas na conclusao permanecem na outbox para retry. A API Key do OctoPrint foi fornecida ao adapter local, cifrada no arquivo existente e nao apareceu no resultado nem na conclusao da API.
+
+Cinco verificacoes novas cobrem conexao, status, controles, desconexao, deduplicacao e retry de conclusao. A suite passou com 158/158 verificacoes e o build Release dos testes/runtime passou sem avisos. O servidor OctoPrint e a API foram simulados. `discover_printers` e `start_print` ainda nao estao neste dispatcher, `slice_print_job` permanece em handler separado, e nenhum deles esta conectado ao host C#; o host continua iniciando Node.
+
+### Início de impressão C# — 2026-10-07
+
+`AgentPrinterCommandHandler` agora tambem interpreta `start_print`, valida o job e o formato para o protocolo, baixa o arquivo com credenciais do Agent, confere hash/tamanho pelo cache existente, fixa o arquivo durante a operacao e evita repetir um envio quando recebe o mesmo comando concluido. `AgentPrinterConnectionManager` encaminha a impressao aos adapters Bambu, Marlin e HTTP existentes.
+
+Quatro verificacoes novas cobrem o dispatch OctoPrint com API/impressora simuladas: validacao, download autenticado e hash, upload multipart com API Key salva, liberacao do pin apos resposta sincronizada, deduplicacao e rejeicao de job nao validado antes do envio. A suite Release passou com 162/162 verificacoes, incluindo o teste DPAPI real executado no contexto Windows autorizado; o build passou sem avisos. Nenhuma impressora fisica, API real, instalacao de cliente ou dado de producao foi usada.
+
+Limites ainda abertos: o dispatcher nao esta integrado ao host WinForms, que continua iniciando Node; `discover_printers` ainda nao foi portado ao dispatcher C#. O fluxo de start foi exercitado de ponta a ponta somente com OctoPrint simulado; os adapters Bambu, Marlin, Moonraker e PrusaLink tem testes de adapter separados, sem validacao de comando com hardware. Foi confirmado no backend que um Production Job com artifact usa o nome/formato do artefato fatiado, enquanto o adapter Bambu C# aceita apenas `.3mf`/`.gcode.3mf`; o fluxo Bambu com artifact Orca `.gcode` continua sem contrato validado e precisa de correcao antes de substituir Node.
+
+### Artefato Bambu do Orca C# — 2026-10-07
+
+O fluxo C# agora pede ao Orca CLI um pacote de placa `.gcode.3mf` para Bambu (`--export-3mf` e `--min-save`), preservando `format: gcode` no contrato atual do backend e no comando do Production Job. As metricas passam a ser lidas de `Metadata/plate_1.gcode` dentro do pacote. Isso resolve no fluxo C# a divergencia entre o G-code simples enviado pelo slicing e o formato consumido pelo adapter Bambu, sem alteracao de schema ou rota. O comando de inicio e testado com o nome `.gcode.3mf` e o adapter existente aceita esse sufixo.
+
+O teste C# foi ampliado para criar um pacote zip fixture, validar os argumentos Orca, conferir o arquivo interno, metricas e headers de upload. Build Release: 0 avisos/0 erros. Suíte completa: 164/164. Esse fatiamento foi exercitado com runner Orca simulado, nao com o executavel instalado.
+
+O usuario mostrou a pagina da Microsoft Store com o botao `Abrir`, portanto nao foi iniciada outra instalacao. Nesta execucao, a consulta de metadados MSIX nao retornou pacote, os caminhos conhecidos do Store/desktop e chaves de desinstalacao nao existem no contexto do executor, e o controlador de janelas nativas nao apresentou apps. A captura confirma que a Store oferece o Orca instalado, mas a ferramenta daqui nao consegue ler a versao nem executar esse pacote. O smoke local anteriormente registrado validou o motor desktop Orca 2.4.2, nao prova esta instalacao Store especifica nem a nova exportacao `.gcode.3mf` com o binario real.
+
+O host WinForms ainda inicia Node. Nenhuma destas mudancas C# foi integrada ao ciclo de runtime do instalador.
+
+### Descoberta de impressoras no dispatcher C# — 2026-10-07
+
+`AgentPrinterCommandHandler` agora aceita `discover_printers` sem exigir um objeto de impressora. O comando usa a varredura de rede/SSDP e USB serial existentes em C#, devolve `printers` e `diagnostics.warnings` no contrato atual, respeita o timeout configurável de 1 a 600 segundos e publica progresso autenticado deduplicado, com limite de 50 itens. A lista de `requiredCredentials` contém apenas nomes de campos; o Access Code Bambu continua sendo informado pelo cliente e não é inferido pela descoberta.
+
+Build Release do runtime e da suíte: 0 avisos/0 erros. Suíte completa: 165/165, incluindo descoberta simulada de uma Bambu por SSDP e uma Marlin em COM7, publicação de progresso e conclusão do comando. O teste roda com probes e API simulados; não acessa impressoras, conta real nem produção.
+
+O host WinForms ainda inicia Node e a integração do runtime C# com o polling continua pendente. A Store mostrou `Abrir`, mas não há janela nativa disponível ao controlador nesta sessão; não foi possível abrir essa instalação nem validar o CLI Orca Store nesta máquina. O teste de slicing continua usando runner Orca simulado.
+
+### Smoke local com Orca real — 2026-10-07
+
+Foi adicionado `Agent/windows-runtime-live-smoke` como verificação reutilizável sem API. Nesta execução, o resolver do Agent encontrou `C:\Program Files\OrcaSlicer\orca-slicer.exe` (engine 2.4.2), e o CLI real gerou um `.gcode.3mf` para um tetraedro sintético usando o perfil Bambu P1S. O pacote mediu 51.789 bytes, passou pela leitura do G-code interno e retornou estimativa de 808 segundos; o helper calculou SHA-256 e removeu os arquivos temporários ao terminar.
+
+Esse resultado valida a integração de CLI e pacote com o Orca desktop registrado neste PC. A consulta MSIX anterior não encontrou o pacote Store e a interface da Store não está acessível ao controlador de janelas, portanto não afirmo que o executável usado veio daquela página específica. O helper mostra o caminho escolhido em cada execução. Não houve chamada à API, upload, conexão com impressora ou alteração da instalação do Agent.
+
+`AgentCommandPollingService` agora busca um comando na rota pendente existente, tenta primeiro o handler de slicing, depois o dispatcher de impressora, sincroniza conclusões pendentes antes de buscar outro e pausa novas execuções quando a outbox atinge o limite configurado. O contrato foi exercitado com API simulada: o poll consumiu `discover_printers`, reportou conclusão, e o poll seguinte retornou vazio. O build Release e a suíte ficaram em 0 avisos/erros e 165/165 verificações.
+
+Esse serviço ainda é chamado apenas pelos testes. O ciclo contínuo, heartbeat, WebSocket/SSE, sincronização de eventos/métricas e monitor de Production Job precisam ser ligados ao host C# antes da troca do Node. A instalação do cliente e o release atual continuam no runtime Node.
+
+### Validação do Orca no setup C# e instalação em outro PC — 2026-10-07
+
+O instalador C# deixou de executar `node.exe` e `verify-orca-runtime.mjs` para validar o Orca. Ele usa `OrcaSlicerService.ResolveConfiguredExecutable`, reconhece a instalação desktop oficial 2.4.2 registrada em Program Files e a versão Store com motor 2.4.2, confere os cinco perfis Bambu suportados e fatia um cubo STL local. O G-code precisa conter movimentos, aquecimento e o cabeçalho de versão esperado; os arquivos de verificação são removidos em `finally`. Se não houver Orca compatível, o setup tenta instalar pela Microsoft Store com Windows Package Manager (`winget`).
+
+O pacote ainda não inclui os binários do OrcaSlicer. Em outro PC com Store/App Installer, Internet e acesso ao pacote, o setup tenta baixar e instalar essa dependência; se `winget` não existir ou a Store estiver indisponível, a instalação para com uma mensagem e exige a instalação oficial manual. Portanto, a instalação ainda não é autossuficiente em todos os Windows. O host e o setup são configurados como single-file/self-contained no build Windows; nesta revisão o pacote do Agent ainda inclui Node porque o host ainda o inicia.
+
+Os Termos Early Access foram versionados como 1.1 para descrever a aceitação de instalação desktop e o fallback Store; instalações que aceitaram 1.0 terão de aceitar a versão atualizada. O SHA-256 do certificado Early Access permanece `AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB`; mudar texto, marca ou runtime não exige trocar o certificado, desde que o release continue assinado com a mesma identidade. Os termos continuam identificados no próprio documento como rascunho sem revisão jurídica.
+
+Verificações desta revisão: setup C# Release compilado com 0 avisos/erros; testes Node do Agent 158/158; contratos C# 165/165 com DPAPI real do Windows; smoke C# com Orca desktop real em `C:\Program Files\OrcaSlicer\orca-slicer.exe`, gerando `.gcode.3mf` de 51.820 bytes, SHA-256 `3d818de2d7a5f4994dbe2b9964eb05ed00ce22f77c560ffdc564d909a9be6d0b` e estimativa de 808 segundos. O smoke foi local com modelo sintético; API, impressora, instalação existente e dados de produção não foram alterados.
+
+### Ciclo C# mantém pareamento pronto — 2026-10-07
+
+AgentRuntimeLoop agora mantém o servidor local ativo e, enquanto não existem credenciais, verifica o código de pareamento pendente a cada 2 segundos. Antes, o backoff exponencial podia aumentar essa espera até 30 segundos depois de iniciar sem código; o backoff continua reservado para falhas de rede ou de pareamento. Ao conectar, o loop executa heartbeat a cada 30 segundos e polling de comandos com intervalo adaptativo.
+
+A fila C# de métricas de Production Job foi completada sem alterar o schema local v8 nem a rota da API. Ela preserva idempotência, retry exponencial, dead letter para 4xx permanentes e sanitização de tokens; o polling a descarrega sem repetir slicing nem bloquear novos comandos.
+
+A suíte C# espera 500 ms antes de enviar um código local e exige que a requisição de pareamento chegue à API simulada em até 250 ms. Também simula 503 seguido de sucesso, 400 permanente, remoção de token de diagnóstico e sincronização da fila pelo ciclo contínuo. Contratos: 176/176 com DPAPI real do Windows e API HTTP simulada. Builds Release do runtime e testes: 0 avisos e 0 erros. Nenhuma chamada à API real ou impressora física ocorreu.
+
+Este loop ainda não foi ligado ao host: windows-host continua iniciando node.exe src/index.js. A migração não está pronta para substituir o runtime do cliente.
+
+### Decisão de provisionamento Orca - 2026-10-07
+
+A escolha de menor fricção é manter o Orca fora do ZIP do Agent: o setup reaproveita uma instalação compatível existente e, se não encontrar, tenta instalar pela fonte oficial da Microsoft Store via WinGet em modo silencioso. Isso elimina etapas manuais nos Windows com App Installer, Store e Internet. Se o WinGet/Store estiver indisponível, o setup ainda exige instalação manual e nova execução; esse é o limite atual do fallback.
+
+Não empacotar o build portátil como padrão. Além de distribuir binários e ampliar o pacote, a versão portátil oficial já foi bloqueada pelo Windows Code Integrity neste PC. A redistribuição também exige cumprir os avisos e a oferta de código-fonte correspondente da licença AGPL. O canal Store mantém a assinatura e a confiança do Windows e evita esse bloqueio conhecido.
+
+### Atualização do fallback Orca, monitor e eventos C# — 2026-10-08
+
+O setup agora procura WinGet no `PATH` e no alias de execução de aplicativos do usuário, executa a instalação Store em modo silencioso com timeout de 20 minutos e mostra progresso. Se WinGet/App Installer estiver indisponível ou a tentativa falhar, abre a página oficial do Orca na Microsoft Store e oferece `Repetir` para validar a instalação sem reiniciar o setup. A Store instalada continua fora do ZIP do Agent; o fallback exige que o cliente conclua a instalação pela interface da Store. Os termos Early Access foram atualizados para a versão 1.2, informam a licença AGPL-3.0 e esse fluxo, e pedem novo aceite.
+
+O monitor de Production Job C# agora persiste o dispositivo e o horário de início no SQLite, é retomado após reinício quando o loop C# recebe credenciais, lê o estado terminal, reporta métricas idempotentes e libera o pin local após enviar ou enfileirar a métrica. `start_print` mantém o arquivo fixado quando adapters retornam `started` ou `background`, alinhado aos resultados reais dos adapters C#.
+
+A outbox C# de eventos agora é alimentada na mesma transação que persiste conclusão de comandos (`command.completed`) e é descarregada antes e depois do polling. Os envios usam `/api/agents/sync-events`, preservam o envelope `{id,type,payload,createdAt}`, fazem retry com jitter, movem erros 4xx permanentes (exceto 408/429) para dead-letter e redigem tokens do diagnóstico. Schema local permanece v8; não foi alterado backend.
+
+Verificações: setup Release compilado com 0 avisos/erros; contratos do instalador Node 17/17; runtime C# 182/182 com DPAPI real, API simulada, retry/dead-letter das outboxes e cenário OctoPrint simulado de retomada/conclusão. O Orca já está disponível neste PC, portanto o novo fallback da Store não foi executado ao vivo. Nenhum pacote Orca foi baixado/redistribuído nesta etapa, nenhuma impressora física ou API real foi chamada e a instalação existente do Agent não foi alterada. O host WinForms continua iniciando Node; a migração ainda não pode ser publicada como runtime C#.
+### Notificação de comandos em tempo real no runtime C# — 2026-10-08
+
+Foi adicionada a camada C# de notificação em tempo real sem nova dependência: WebSocket primeiro, endpoint `/api/agents/ws`, headers `x-agent-id`/`x-agent-secret`, keepalive, reconexão com backoff e evento `command_available`; se o WebSocket cair, o runtime abre SSE autenticado em `/api/agents/events`, interpreta blocos e dados multiline e retorna ao WebSocket quando ele reconecta. O polling continua como caminho de recuperação, com agendamento de 90s em WebSocket, 45s em SSE e backoff offline; um evento recebido acorda o dispatcher imediatamente. `/healthz` agora inclui `realtimeMode`, campo já exposto pelo runtime Node.
+
+Os testes usam um handshake WebSocket real em TCP loopback, um stream SSE HTTP simulado com evento multiline e credenciais verificadas, e o loop C# com sinalização de comando que exige novo poll imediato. Suíte C# passou com 185 verificações e DPAPI real do Windows. Nenhum request chegou ao backend real; não houve conexão a impressora, instalação nem publicação. O host WinForms ainda inicia Node, portanto este serviço C# permanece fora do runtime instalado até a integração do host e a validação isolada.
+
+### Host C# integrado e instalação isolada — 2026-10-08
+
+O host agora inicia `AgentRuntimeComposition` diretamente, sem criar um processo `node.exe`. A composição conecta pareamento e credenciais existentes, reconexão de impressoras, heartbeat, comandos, monitoramento de Production Job, slicing Orca, servidor local, WebSocket/SSE, SQLite e outboxes. A instalação continua lendo os diretórios e os dados DPAPI existentes do PrintFlow para preservar upgrades; o pacote de cliente inclui o runtime .NET autocontido, ícones, termos e manifesto, sem `node.exe`, `node_modules`, `src`, scripts de build/execução ou arquivos `.ps1`, `.psm1` e `.vbs`.
+
+O pacote isolado `Fila-Agent-Test-Windows.zip` foi criado com 10 entradas e manifesto UTF-8 sem BOM; `Fila-Agent-Test-Setup.exe` foi empacotado, mas ambos são artefatos de teste sem assinatura e não são distribuíveis. O E2E instalou o pacote em diretórios exclusivos, iniciou a tarefa, validou `/healthz`, pareou com uma API HTTP simulada, recebeu quatro heartbeats, atualizou após reconexão atrasada, restaurou um arquivo sentinela após falha de upgrade injetada, reiniciou a tarefa e desinstalou. A tarefa e os diretórios do teste foram removidos. O teste não usou o backend real nem uma impressora.
+
+Verificações atuais: `npm test` 158/158; contratos C# 186/186 com DPAPI real e dados sintéticos; contratos do instalador 17/17; `validate-agent-package.mjs` passou; `check-agent-release-contract.mjs` passou com 13 verificações; `git diff --check` passou. O Orca já está instalado neste PC, então a instalação automática por WinGet/Store em uma máquina sem Orca não foi executada ao vivo. O setup tenta a instalação oficial Store em modo silencioso e mostra a página da Store com opção de repetir se WinGet/App Installer ou a tentativa falharem; o teste E2E usou `--test-mode` e não acionou essa dependência.
+
+O E2E separado do atualizador assinado exige uma instalação pareada 0.1.24 no diretório padrão; este PC não tem instalação padrão ativa, portanto esse roteiro não foi executado nem recriamos uma instalação sobre a conta atual. O pacote local é deliberadamente não assinado, não tem metadados de release e não foi publicado. Permanecem sem prova nesta etapa: atualização assinada de uma instalação anterior, provisionamento real do Orca em uma máquina sem ele, API hospedada e impressora física. Node ainda existe no código-fonte e nas ferramentas de testes/build; não é iniciado nem distribuído no Agent instalado. PowerShell permanece nas ferramentas de build/publicação do repositório, mas fica fora do pacote cliente.
+
+### Migração do identificador local e metadado do pacote — 2026-10-08
+
+O `/healthz` do runtime C# passou a retornar `app: "fila-agent"`; a tela de impressoras aceita também `printflow-agent` durante a transição de versões antigas. O site emite `fila-agent://`, enquanto o setup novo registra os dois esquemas. `Agent/package.json` e os dois campos de nome do lockfile agora usam `fila-agent`.
+
+Verificações desta atualização: contratos C# 186/186 com DPAPI real e servidor HTTP simulado; testes Node/paridade 158/158; contratos do instalador 17/17; build Nuxt concluído; `git diff --check` sem erros. A primeira execução C# no sandbox falhou porque a identidade isolada não tinha o perfil DPAPI carregado; a mesma suíte passou ao executar sob o perfil Windows do usuário. Builds diretos do host/setup tentados nesta sessão pararam na consulta de vulnerabilidade NuGet (`NU1900`) porque `api.nuget.org` não estava acessível; o código do runtime foi compilado pelo projeto de contratos.
+
+Naquele snapshot, não houve instalação ou remoção do Orca, impressão, chamada à API hospedada ou mudança na instalação normal. A pendência de automação sem PowerShell foi resolvida na etapa abaixo; atualização assinada sobre uma instalação anterior, provisão em uma máquina sem Orca, API hospedada e impressora física continuam sem prova.
+
+### ReleaseTool C# e remoção do PowerShell — 2026-10-08
+
+O ReleaseTool C# agora responde pelos builds de host/setup, empacotamento ZIP, validação de payload, assinatura Authenticode com identidade fixada, preparação de metadados e SHA-256, validação da tag e publicação idempotente pelo GitHub CLI. A verificação aceita código de saída zero ou somente a falha conhecida de raiz não confiável do certificado Early Access; aviso, hash inválido, digest inválido, assinatura ausente e qualquer outro erro são rejeitados. Os workflows CI e de release usam os comandos C#; todos os passos `run` do workflow Windows de release declaram `shell: cmd`. Foram removidos os 20 scripts `.ps1` legados de build, instalação, atualização, tray, assinatura, Orca e publicação, e seus testes foram migrados para os contratos C#.
+
+O workflow de CI foi atualizado para compilar o ReleaseTool no job de paridade e executar os contratos C# no Windows, incluindo DPAPI e os cenários locais do setup/runtime; ainda não foi executado no GitHub nesta etapa. Node permanece intencionalmente em `Agent/src` e nos testes/paridade; ele não é distribuído nem iniciado pelo Agent instalado. A validação do pacote falha se arquivos `.ps1`, `.psm1` ou `.vbs` forem reintroduzidos em `Agent`.
+
+Verificações locais desta etapa: `npm test` passou com 151/151; o contrato de release passou com 22 verificações; o validador do pacote passou; os contratos C# passaram com 192 verificações usando DPAPI real e API simulada; builds Release do host, setup, ReleaseTool e smoke do Orca terminaram com zero avisos/erros. Os seis casos da política de verificação de assinatura também passaram. O setup de teste de 230 MB validou seu payload embutido (`v0.1.25`). Isso não prova a atualização assinada sobre uma instalação pareada, a instalação Orca em máquina sem ele, API hospedada ou impressora física.
+
+A investigação de `NU1900` identificou uma falha de conexão com `api.nuget.org`; como `TreatWarningsAsErrors=true`, o aviso da auditoria NuGet interrompeu o build. Os arquivos `project.assets.json` também mantinham o resultado da restauração anterior. Uma restauração diagnóstica local com `NuGetAudit=false` atualizou esses assets e permitiu concluir os builds Release do host/setup, sem alterar a política de auditoria do projeto. Isso comprova a compilação local, mas não substitui a auditoria NuGet em um ambiente com acesso ao feed.
+
+Os artefatos de teste criados localmente não foram instalados no perfil normal nem publicados. Permanecem sem validação nesta etapa: atualização assinada sobre uma instalação pareada anterior, WinGet/Store em máquina sem Orca, API hospedada e impressora física. Nenhuma chamada de produção ou alteração de dados foi feita.
+
+### Renomeação dos executáveis e auditoria de `scripts`/`temp` — 2026-10-08
+
+Os nomes internos dos projetos e binários Windows foram migrados para `FilaAgent.csproj`/`FilaAgent.exe` e `FilaAgentSetup.csproj`/`FilaAgentSetup.exe`. O atualizador ainda reconhece os nomes antigos ao localizar uma instalação anterior e ao executar rollback. A tarefa agendada padrão agora é `FilaAgent`: no upgrade, `PrintFlowAgent` é removida após a nova tarefa ser criada, e o rollback restaura a tarefa antiga. Nomes públicos de artefatos, diretórios de dados, variáveis `PRINTFLOW_*` e caminhos DPAPI permanecem compatíveis até haver uma migração explícita de instalação e dados. Não foi feita substituição global de `PrintFlow`.
+
+O E2E local instalou um pacote C# com os nomes internos antigos, atualizou para o pacote renomeado, simulou falha de atualização e verificou rollback com o estado restaurado, pareamento, conexão à API loopback simulada e seis heartbeats; em seguida desinstalou e removeu a tarefa e o diretório isolado. A etapa seguinte repetiu o upgrade isolado para validar a migração da tarefa `PrintFlowAgent` para `FilaAgent`, incluindo rollback após falha e remoção da tarefa antiga após sucesso; o caso terminou com pareamento, conexão simulada e sete heartbeats. O pacote antigo era um artefato local de QA da mesma versão `0.1.25`, não uma release histórica publicada. O smoke C# repetido nesta continuação usou `C:\Program Files\OrcaSlicer\orca-slicer.exe`, perfil P1S, produziu `.gcode.3mf` local de 51.795 bytes (estimativa: 808 segundos) e não enviou modelo nem iniciou impressão. Builds Release do host, setup e ReleaseTool passaram; contratos C# 202/202, `npm test` 152/152, validador do pacote e contrato de release 22/22 passaram. O pacote validado é unsigned e não foi publicado.
+
+`Agent/scripts` continua necessário para desenvolvimento e suporte: diagnóstico, geração segura de pacote de suporte e ícone têm comandos NPM documentados; o verificador manual de pacotes de atualização permanece como ferramenta do runtime Node de referência. Nenhum desses utilitários é iniciado pelo Agent instalado ou incluído no pacote cliente. Os comandos de diagnóstico/suporte foram renomeados para Fila Agent, e `verify-orca-runtime.mjs` foi removido após o smoke C# gerar G-code local com o OrcaSlicer instalado. O setup e o ReleaseTool validam o Orca no fluxo C#.
+
+`Agent/temp` é ignorada pelo Git e não é entrada do build/release. Ela contém pacotes de QA retidos, snapshots antigos, prévia do instalador e dois logs de diagnóstico; esses itens foram preservados. Foram removidos somente quatro diretórios `.build` intermediários, já reproduzidos nos instaladores/ZIPs retidos, liberando aproximadamente 1,53 GiB. Nenhuma instalação normal, dado de cliente ou ambiente de produção foi alterado.
+
+### E2E do setup silencioso — 2026-10-08
+
+O setup não inicializa Windows Forms nos modos silencioso, de teste ou de validação do pacote; a inicialização visual fica dentro do tratamento de erros. Isso evita que operações de teste sem interface terminem com a exceção CLR genérica antes de registrar o motivo. O E2E reconstruído foi aprovado: o modo de teste rejeitou uma pasta fora do namespace isolado, instalou em `FilaAgent-E2E-*`, pareou com API HTTP simulada em loopback, confirmou `/healthz`, conectividade e cinco heartbeats, validou restauração do rollback e removeu a tarefa, a instalação e a pasta de dados temporária. Os diretórios exclusivos desse teste foram conferidos como ausentes após a execução.
+
+Após a mudança: `npm test` 152/152; contratos C# 202; contrato de release 22; validador do pacote 0.1.25; build Release do pacote e `git diff --check` passaram. Um contrato real de DPAPI foi ignorado porque o perfil Windows não estava carregado; os demais contratos usaram o protetor controlado. O teste usou somente a API simulada local; não houve chamada à API hospedada, mudança na instalação normal, publicação ou alteração de produção. Permanecem sem prova a atualização assinada sobre instalação anterior, a instalação limpa do Orca em outro PC, a API hospedada e uma impressora física.
+
+### DPAPI confirmado em CMD interativo — 2026-10-08
+
+O teste de contratos foi executado pelo usuário em um CMD aberto na sessão Windows interativa. A primeira tentativa de `cd` falhou porque `dotnet` foi colado na mesma linha; a execução seguinte, com os comandos separados, passou o teste `DPAPI real do Windows persiste e recupera credencial sintetica de impressora entre instancias C#` e concluiu `203` contratos sem `SKIP`. O E2E isolado também foi reforçado: após o pareamento, confirma `agent.json` com envelope `windows-dpapi` e sem o segredo sintético em texto claro; depois de parar e reiniciar a tarefa, exige estado pareado/conectado e novo heartbeat. Resultado: `dpapiCredentialProtectedAtRest=true`, `dpapiCredentialReloadedAfterRestart=true`, rollback restaurado e instalação/tarefa removidas. Isso confirma DPAPI CurrentUser no fluxo instalado deste PC; não usa credenciais reais nem API hospedada.
+
+### Revalidação do E2E isolado e causa do diálogo CLR — 2026-10-08
+
+Uma execução do E2E pelo sandbox terminou com o código `0xE0434352`. A reprodução direta mostrou `UnauthorizedAccessException` ao criar `%LOCALAPPDATA%\FilaAgent-E2E-data-*`; o sandbox não permite essa escrita. Como o setup de teste também tenta gravar `installer.log` nessa pasta, a falha de permissão escapou do tratamento normal e apareceu como diálogo CLR. Portanto, a conclusão anterior de que o executável de `dist` estaria desatualizado não foi demonstrada e fica retirada.
+
+O ReleaseTool C# recompilou host e setup em `Agent/temp/fila-agent-e2e-20261008-rebuild`, validou o payload embutido `0.1.25`, e o mesmo E2E executado fora do sandbox passou integralmente: rejeição do caminho não isolado, instalação e pareamento com API loopback, health/heartbeat, envelope DPAPI sem segredo legível, reinício e reconexão, upgrade/rollback e desinstalação com remoção da tarefa/pasta. Resultado reportado: `status=passed`, `heartbeatCount=5`, `dpapiCredentialProtectedAtRest=true`, `dpapiCredentialReloadedAfterRestart=true`, `rollbackMarkerRestored=true`, `taskRemoved=true`, `installRemoved=true`. O teste usa segredo sintético e API simulada; não chama produção nem impressora.
+
+Na mesma revisão, `npm.cmd --prefix Agent test` passou 152/152; o contrato de release passou 22/22 e `validate-agent-package.mjs` validou `0.1.25`. O teste C# executado pelo sandbox pulou somente o caso DPAPI real por perfil não carregado; a execução interativa do usuário em CMD já havia passado 203/203 sem `SKIP`. A branch ativa continua `main`, com worktree sujo. `feature/Alex` não está pronta para receber publicação: comparada a `main`, está 29 commits atrás e tem 3 commits próprios; localmente está 1 commit à frente de `origin/feature/Alex`. Nada foi comitado, enviado ou implantado.
+
+O tratamento de falhas do setup foi ajustado para que uma falha ao gravar `installer.log` não substitua a exceção original nem provoque outra exceção CLR; a gravação agora é best-effort e tenta informar o erro por `stderr`. O E2E cria deliberadamente um arquivo no lugar do diretório de log, força a falha, e confirma código de saída `1` sem criar o diretório de instalação rejeitado. Após recompilar o setup/payload em `Agent/temp/fila-agent-e2e-20261008-rebuild`, o E2E completo passou novamente, inclusive esse caso, DPAPI no runtime instalado, pareamento, heartbeat, reinício, rollback e desinstalação. A pasta de build foi removida após a prova para não deixar outro pacote de QA grande em `temp`. `npm test` passou 152/152, `check-agent-release-contract.mjs` 22/22, `validate-agent-package.mjs` passou para `0.1.25`, `node --check` e `git diff --check` sem erros. Builds e E2E são locais; API loopback, segredo sintético, nenhuma impressora, produção ou publicação.
+
+### Nomes canônicos Fila Agent nos artefatos — 2026-10-08
+
+Os builds locais agora geram `Fila-Agent-Windows.zip`, `Fila-Agent-Setup.exe` e `Fila-Agent-Dev-Certificate.cer`; `install:agent` e a documentação usam esses nomes. Ao preparar uma release, o ReleaseTool copia o ZIP, o setup assinado e o certificado para aliases `PrintFlow-Agent-*`, incluindo `PrintFlow-Agent-Transition-Setup.exe`, e gera hashes para os dois conjuntos. O atualizador C# seleciona primeiro o par Fila e mantém fallback apenas quando o par antigo de setup/certificado está completo. A identidade e o pin SHA-256 do certificado não foram alterados.
+
+O validador de release aceita conjuntos históricos apenas PrintFlow e exige que uma release nova inclua os nomes Fila e todos os aliases legados com hashes idênticos. Testes com fixtures sintéticas aceitaram release nova e release histórica, e rejeitaram alias divergente. O modo de publicação em teste confirmou que o ReleaseTool lista os artefatos Fila e PrintFlow. O empacotador também gerou `Fila-Agent-Test-Windows.zip` e `Fila-Agent-Test-Setup.exe`, validou o payload `0.1.25` embutido e o conteúdo do ZIP foi conferido; a pasta exclusiva de QA foi removida após a prova.
+
+Verificações: `npm.cmd test` passou 155/155; `node scripts/check-agent-release-contract.mjs` passou 22 verificações; `node scripts/validate-agent-package.mjs` passou para `0.1.25`; os builds Release do ReleaseTool e do setup passaram sem avisos ou erros. Uma primeira chamada direcionada dos testes foi feita no diretório raiz por engano e falhou por não localizar os projetos/arquivos; a repetição no diretório `Agent` passou. Não foi preparado um release assinado porque esta etapa não tinha acesso validado à senha do PFX. A instalação normal, o GitHub, a API hospedada e produção não foram alterados; nenhuma publicação ou implantação ocorreu. A alteração segue local no branch `main`, sem commit.
+
+### Exceção CLR no setup de teste antigo — 2026-10-08
+
+O usuário apresentou o diálogo `Fila-Agent-Test-Setup.exe - Erro de Aplicativo`, código `0xE0434352`. A validação apenas do payload embutido passou, mas o E2E do executável que já estava em `Agent/dist` reproduziu a falha: a rejeição do diretório de log bloqueado terminou com o código decimal `3762504530` (equivalente a `0xE0434352`), em vez do código controlado `1`. Isso demonstrou que o executável local em `dist` não continha o tratamento best-effort já presente no fonte.
+
+O ReleaseTool recompilou host, pacote e setup em `Agent/temp/fila-agent-crash-repro-20261008`, sem executar o smoke Orca por ser um pacote explícito de teste. O E2E completo com esse novo setup passou: rejeição do escopo inseguro, `/healthz`, pareamento e heartbeats contra API loopback, proteção e recuperação DPAPI após reinício, rollback e desinstalação; tarefa e instalação isoladas foram removidas. O setup e o ZIP testados foram copiados para `Agent/dist/Fila-Agent-Test-Setup.exe` e `Agent/dist/Fila-Agent-Test-Windows.zip`; os hashes de origem/destino coincidiram e a validação do payload copiado passou para `0.1.25`. A pasta temporária foi removida após a cópia.
+
+Verificações desta etapa: contratos C# `203/203` executados pelo usuário em CMD interativo, incluindo DPAPI real; `npm.cmd test` do Agent `155/155`; Backend `206/207` aprovados com um teste pulado por depender de PostgreSQL descartável; contrato de release `22/22`; validador do pacote `0.1.25`; builds Release do ReleaseTool e Setup sem avisos/erros; build de produção FrontEnd concluído; `git diff --check` sem erros. Os executáveis de `dist` foram validados apenas com `--validate-embedded-package` depois da cópia, e o comportamento de instalação foi exercitado no pacote recompilado idêntico por hash. A API foi simulada em loopback; não houve chamada hospedada, uso de credenciais reais, impressão, mudança na instalação normal, publicação ou implantação.
+
+### Variáveis canônicas Fila e fluxo de CI — 2026-10-08
+
+O ReleaseTool agora prefere `FILA_AGENT_API_URL`, `FILA_AGENT_MINIMUM_SUPPORTED_VERSION`, `FILA_AGENT_DEV_CERT_PFX_BASE64` e `FILA_AGENT_DEV_CERT_PASSWORD`, mantendo leitura dos nomes `PRINTFLOW_*` existentes como fallback. O workflow de release usa nomes de ambiente Fila; para PFX e senha, seleciona os secrets Fila primeiro e recorre aos secrets antigos somente quando os novos não estão definidos. O certificado, seu pin, a URL de repositório GitHub e o endpoint Render não foram alterados. O arquivo `Agent/.env.example` e a seção de secrets no README agora apresentam os nomes Fila.
+
+O CI ainda validava `PrintFlow-Agent-Setup.exe`, embora o empacotador gere `Fila-Agent-Setup.exe`; o caminho foi corrigido e o validador passou a exigir o artefato canônico. O contrato de release agora verifica os nomes Fila e os aliases de secrets antigos. A suíte de artefatos testa tanto o fallback legado quanto a precedência de `FILA_AGENT_MINIMUM_SUPPORTED_VERSION` sobre seu alias. A sintaxe de expressões/secrets usada pelo workflow segue a documentação oficial do [operador `||` e expressões](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions) e do [uso de secrets em variáveis de ambiente](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets); secrets ausentes são avaliados como string vazia e acionam o fallback.
+
+Verificações: `npm.cmd test` do Agent passou `156/156`; `node scripts/check-agent-release-contract.mjs` passou `24` verificações; `node scripts/validate-agent-package.mjs` passou para `0.1.25`; build Release do ReleaseTool passou com zero avisos/erros. Testes de processo confirmaram a precedência da variável nova e o fallback legado. A primeira execução da suíte tinha `155/156` porque um novo teste procurava o caminho do setup no workflow errado; a asserção foi corrigida para conferir `ci.yml` e a repetição passou `156/156`. `git diff --check` passou sem erros (apenas avisos existentes de conversão LF/CRLF).
+
+Auditoria local adicional: `Agent/scripts` contém dois utilitários Node de diagnóstico/suporte, o gerador do ícone e o verificador manual de release; o último compartilha o verificador Node ainda exercitado por testes, portanto não foi removido. Esses scripts são ferramentas de desenvolvimento/suporte e não entram no Agent instalado. A busca por PowerShell encontrou somente deny-lists e asserções de teste/documentação; os passos operacionais/build de CI/release não chamam PowerShell. `Agent/temp` é ignorada pelo Git e guarda resultados de QA e referências históricas, fora da entrada do empacotador. Sete snapshots QA `0.1.25` somam `3.463 GiB`; foram mantidos nesta etapa porque incluem resultados de licença, protocolo, renome e migração de tarefa já registrados, e uma limpeza seletiva ainda precisa preservar os baselines antigos úteis para update/rollback. Os logs de diagnóstico também foram mantidos.
+
+Na sessão Windows atual não há tarefa `FilaAgent`/`PrintFlowAgent` nem processo do host, e `127.0.0.1:17873/healthz` não respondeu; portanto não existe instalação ativa neste perfil para validar persistência. A chamada GET à API Render falhou em `curl.exe` com código `7` (não foi possível conectar) e o navegador de pesquisa não abriu o host; isso indica limitação de conectividade desta execução, não prova que a API hospedada esteja indisponível. Nenhum endpoint autenticado foi chamado. Branch ativa permanece `main`; `feature/Alex` está 29 commits atrás e 3 à frente de `main`, e 1 commit à frente de `origin/feature/Alex`; nada foi comitado ou publicado.
+
+### Revalidação do crash e paridade de configuração — 2026-10-08
+
+O evento .NET Runtime 1026 de 14:50:14 para Fila-Agent-Test-Setup.exe registrou System.IO.IOException em Program.Main: a E2E havia criado deliberadamente um arquivo no caminho FilaAgent-E2E-data-blocked-log-*, e o setup antigo tentou criar uma pasta com o mesmo nome. Isso identifica a origem do diálogo 0xE0434352 visto durante esse teste. O caminho representa uma falha de log injetada pela E2E; este evento não demonstra falha da instalação normal.
+
+O ReleaseTool recompilou o host e o setup atual em Agent/temp/fila-agent-screenshot-fix-20261008. A E2E executada contra esse pacote aprovou a rejeição do caminho inseguro sem exceção CLR, instalação isolada, /healthz, pareamento e cinco heartbeats via API HTTP simulada, credencial sintética protegida por DPAPI e recuperada após reinício, rollback e desinstalação. O teste confirmou taskRemoved=true e installRemoved=true. Os artefatos testados foram copiados para Agent/dist/Fila-Agent-Test-Setup.exe e Agent/dist/Fila-Agent-Test-Windows.zip; os hashes SHA-256 de origem e destino coincidem (737B63D062EAEF5465A1F03D9E7D23D998DF56DB9F2C9CCE5ECC752B23A096AC para o setup e 9676DDA12829FF1A00CF4001878504DC46F9CA45E17AE7145AA8CF3785C07223 para o ZIP). --validate-embedded-package aprovou 0.1.25. A pasta de build temporária foi removida depois da cópia. O pacote permanece sem assinatura e serve somente para teste.
+
+O runtime C# agora respeita os intervalos configuráveis de health snapshot, polling WebSocket e polling SSE usados pelo Node, com padrão de 60 s, 90 s e 45 s e limites mínimos de 60 s, 60 s e 30 s. FILA_AGENT_* tem precedência e PRINTFLOW_* continua como alias. O Node de referência passou a ler os nomes Fila para ambiente/API/WebSocket/origens/mock e para os três intervalos, mantendo os aliases antigos; .env.example e README foram alinhados. Os contratos C# verificam fallback legado, precedência Fila e limites mínimos.
+
+Verificações: dotnet build --no-restore --configuration Release Agent\windows-runtime-tests\FilaAgent.Runtime.ContractTests.csproj sem avisos/erros; dotnet run --no-restore --configuration Release --project Agent\windows-runtime-tests\FilaAgent.Runtime.ContractTests.csproj passou 206/206, incluindo DPAPI real no perfil Windows carregado; npm.cmd --prefix Agent test passou 156/156; build Release do ReleaseTool passou sem avisos/erros; node scripts/check-agent-release-contract.mjs passou 24 checks; node scripts/validate-agent-package.mjs aprovou 0.1.25; E2E isolada passou no pacote recompilado; git diff --check passou, com avisos existentes de conversão LF/CRLF.
+
+O E2E usou API simulada em loopback e credencial sintética; não houve request à API hospedada, impressão, alteração na instalação normal, commit, publicação ou implantação. A inspeção visual da tela normal do setup, a validação de confiança do pacote em PCs com Smart App Control, atualização assinada sobre uma instalação anterior, Orca em uma máquina limpa e impressora física continuam pendentes.
+
+### Empacotamento Early Access 0.1.26 — 2026-10-08
+
+Objetivo: preparar a versão `0.1.26` do Fila Agent, validar o instalador em isolamento e publicar a branch/release conforme autorizado. A assinatura prevista é a do certificado de desenvolvimento Early Access já configurado nos secrets do workflow; ela permite continuidade com versões beta que fixam essa identidade, mas não é uma assinatura Code Signing confiável para distribuição ampla e pode continuar sujeita ao Smart App Control.
+
+Verificações concluídas: `node scripts/validate-agent-package.mjs` passou para `0.1.26`; `node scripts/check-agent-release-contract.mjs` passou em 24 checks; `git diff --check` não encontrou erros (somente avisos de conversão LF/CRLF); o E2E `Agent/test/windows-native-install-e2e.mjs` passou para `0.1.26`, com pareamento e API simulados, cinco heartbeats, credencial protegida por DPAPI e recuperada após reinício, rollback restaurado e remoção da tarefa e instalação. A suíte de contratos C# passou 205 casos no runner isolado; nesse runner, o teste DPAPI direto foi pulado porque o perfil Windows não estava carregado, mas o E2E instalado executou DPAPI real. O CMD confirmou a atribuição da variável `NUXT_PUBLIC_API_BASE` usada pelo launcher local.
+
+O empacotamento local de QA é unsigned e não foi usado como prova de assinatura; a assinatura e os ativos oficiais dependem do workflow do GitHub acionado pelo tag `agent-v0.1.26`. Até a conclusão do workflow, a release está pendente. Nenhuma implantação Render, chamada autenticada à API hospedada, impressão física, validação em máquina limpa do OrcaSlicer ou atualização assinada sobre uma instalação anterior foi executada nesta etapa. O E2E não alterou a instalação normal do usuário.

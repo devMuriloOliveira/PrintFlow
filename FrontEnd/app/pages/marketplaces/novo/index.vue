@@ -17,7 +17,7 @@ const persistedConnectionStatus = ref('manual')
 
 const platforms = [
   { id: 'mercado_livre', name: 'Mercado Livre', short: 'ML', color: '#ffe600', commission: 16, fixed: 5, financial: 0, ads: 3, integration: 'available', description: 'OAuth oficial e pedidos automáticos' },
-  { id: 'shopee', name: 'Shopee', short: 'SP', color: '#ee4d2d', commission: 14, fixed: 4, financial: 0, ads: 3, integration: 'pending', description: 'Canal manual; integração em desenvolvimento' },
+  { id: 'shopee', name: 'Shopee', short: 'SP', color: '#ee4d2d', commission: 14, fixed: 4, financial: 0, ads: 3, integration: 'pending', description: 'Integração aguardando avaliação da Shopee' },
   { id: 'amazon', name: 'Amazon', short: 'AM', color: '#232f3e', commission: 15, fixed: 0, financial: 0, ads: 2, integration: 'pending', description: 'Canal manual; integração ainda não disponível' },
   { id: 'custom', name: 'Outro canal', short: 'OT', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, integration: 'manual', description: 'Controle manual de taxas e resultados' }
 ]
@@ -29,6 +29,7 @@ const form = reactive({
 })
 
 const selectedPlatform = computed(() => platforms.find(platform => platform.id === form.platform) || platforms[0])
+const selectedPlatformName = computed(() => selectedPlatform.value.name)
 const supportsOfficialIntegration = computed(() => selectedPlatform.value.integration === 'available')
 const pendingOfficialIntegration = computed(() => selectedPlatform.value.integration === 'pending')
 const requiresManualCredentials = computed(() => supportsOfficialIntegration.value && connectionMode.value === 'manual' && !isEditing.value)
@@ -57,7 +58,7 @@ watch(() => form.platform, (platformId) => {
   form.fixed = platform.fixed
   form.financial = platform.financial
   form.ads = platform.ads
-  connectionMode.value = platformId === 'mercado_livre' ? 'oauth' : 'manual'
+  connectionMode.value = ['mercado_livre', 'shopee'].includes(platformId) ? 'oauth' : 'manual'
 })
 
 watchEffect(() => {
@@ -69,7 +70,7 @@ watchEffect(() => {
     commission: item.commission, fixed: item.fixed, financial: item.financial, ads: item.ads, others: item.others
   })
   persistedConnectionStatus.value = item.connectionStatus || 'manual'
-  connectionMode.value = item.platform === 'mercado_livre' ? 'oauth' : 'manual'
+  connectionMode.value = ['mercado_livre', 'shopee'].includes(item.platform) ? 'oauth' : 'manual'
   hydrated.value = true
 })
 
@@ -89,7 +90,7 @@ const validate = () => {
 
 const connectOfficialOAuth = async () => {
   if (!supportsOfficialIntegration.value || oauthLoading.value) return
-  if (!window.confirm('O Mercado Livre vai autorizar a conta que estiver aberta no navegador. Para adicionar outra conta, entre nela ou troque de usuário no Mercado Livre antes de continuar.')) return
+  if (!window.confirm(`A ${selectedPlatformName.value} vai autorizar a conta que estiver aberta no navegador. Para adicionar outra conta, entre nela ou troque de usuário antes de continuar.`)) return
   oauthLoading.value = true
   try {
     window.location.href = await startMarketplaceOAuth(form.platform)
@@ -171,9 +172,9 @@ const cancel = () => {
           <div class="marketplace-section__heading"><span>02</span><div><small>INTEGRAÇÃO</small><h2>Como os pedidos entram?</h2><p>A disponibilidade abaixo se refere à importação automática, não ao cadastro manual do canal.</p></div></div>
 
           <template v-if="supportsOfficialIntegration">
-            <div class="integration-message integration-message--available"><span><UiIcon name="check" :size="17" /></span><div><strong>Integração oficial disponível</strong><p>O Mercado Livre pode enviar pedidos automaticamente após a autorização OAuth.</p></div></div>
-            <div class="oauth-guidance"><UiIcon name="info" :size="18" /><span><strong>Vai adicionar outra conta?</strong> Entre nessa conta ou troque de usuário no Mercado Livre antes de continuar. O OAuth autoriza a conta aberta no navegador.</span></div>
-            <div class="integration-actions"><button type="button" class="btn btn--primary" :disabled="oauthLoading" @click="connectOfficialOAuth"><UiIcon name="bolt" :size="16" />{{ oauthLoading ? 'Abrindo Mercado Livre...' : 'Conectar com OAuth oficial' }}</button><button type="button" class="btn" :class="{ 'btn--primary': connectionMode === 'manual' }" @click="connectionMode = connectionMode === 'manual' ? 'oauth' : 'manual'">{{ connectionMode === 'manual' ? 'Voltar para OAuth' : 'Tenho credenciais manuais' }}</button></div>
+            <div class="integration-message integration-message--available"><span><UiIcon name="check" :size="17" /></span><div><strong>Integração oficial disponível</strong><p>{{ selectedPlatformName }} pode importar pedidos e atualizar o status após a autorização OAuth.</p></div></div>
+            <div class="oauth-guidance"><UiIcon name="info" :size="18" /><span><strong>Vai adicionar outra conta?</strong> Entre nessa conta ou troque de usuário na {{ selectedPlatformName }} antes de continuar. O OAuth autoriza a conta aberta no navegador.</span></div>
+            <div class="integration-actions"><button type="button" class="btn btn--primary" :disabled="oauthLoading" @click="connectOfficialOAuth"><UiIcon name="bolt" :size="16" />{{ oauthLoading ? `Abrindo ${selectedPlatformName}...` : 'Conectar com OAuth oficial' }}</button><button type="button" class="btn" :class="{ 'btn--primary': connectionMode === 'manual' }" @click="connectionMode = connectionMode === 'manual' ? 'oauth' : 'manual'">{{ connectionMode === 'manual' ? 'Voltar para OAuth' : 'Tenho credenciais manuais' }}</button></div>
             <div v-if="requiresManualCredentials" class="manual-credentials">
               <div class="info-note"><UiIcon name="shield" :size="17" />Use esta opção somente se você recebeu credenciais válidas do serviço.</div>
               <div class="form-grid">
@@ -224,7 +225,7 @@ const cancel = () => {
           <h3><UiIcon name="bolt" :size="17" />Como funcionará</h3>
           <div><span class="active"><UiIcon name="check" :size="12" /></span><p><strong>Taxas e simulações</strong><small>Disponíveis assim que o canal for salvo.</small></p></div>
           <div><span :class="{ active: supportsOfficialIntegration }"><UiIcon :name="supportsOfficialIntegration ? 'check' : 'clock'" :size="12" /></span><p><strong>Importação de pedidos</strong><small>{{ supportsOfficialIntegration ? 'Disponível após conectar uma conta.' : pendingOfficialIntegration ? 'Ainda não disponível para este canal.' : 'Registro manual pela tela de vendas.' }}</small></p></div>
-          <div><span :class="{ active: supportsOfficialIntegration }"><UiIcon :name="supportsOfficialIntegration ? 'check' : 'info'" :size="12" /></span><p><strong>Sincronização automática</strong><small>{{ supportsOfficialIntegration ? 'OAuth oficial do Mercado Livre.' : 'Nenhuma credencial será solicitada.' }}</small></p></div>
+          <div><span :class="{ active: supportsOfficialIntegration }"><UiIcon :name="supportsOfficialIntegration ? 'check' : 'info'" :size="12" /></span><p><strong>Sincronização automática</strong><small>{{ supportsOfficialIntegration ? `OAuth oficial da ${selectedPlatformName}.` : 'Nenhuma credencial será solicitada.' }}</small></p></div>
         </section>
       </aside>
     </div>

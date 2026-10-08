@@ -9,22 +9,36 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using FilaAgent.Runtime;
 
-namespace PrintFlowAgentSetup;
+namespace FilaAgent.Setup;
 
 internal static class Program
 {
-    private const string TermsVersion = "1.0";
+    private const string TermsVersion = "1.3";
+    private const string DefaultTaskName = "FilaAgent";
+    private const string LegacyTaskName = "PrintFlowAgent";
+    private const string OrcaStoreProductId = "9MV6GL23XM59";
     [STAThread]
     private static int Main(string[] args)
     {
-        ApplicationConfiguration.Initialize();
+        string? embeddedPackagePath = null;
         var testMode = args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase);
         try
         {
+            if (!testMode && !args.Contains("--quiet", StringComparer.OrdinalIgnoreCase) &&
+                !args.Contains("--validate-embedded-package", StringComparer.OrdinalIgnoreCase))
+                ApplicationConfiguration.Initialize();
+            if (args.Contains("--validate-embedded-package", StringComparer.OrdinalIgnoreCase))
+                return ValidateEmbeddedPackage();
+            args = AddEmbeddedPackageArgument(args, out embeddedPackagePath);
             var installRoot = ReadArgument(args, "--install-dir") ?? DefaultInstallRoot;
-            var taskName = ReadArgument(args, "--task-name") ?? "PrintFlowAgent";
+            var taskName = ReadArgument(args, "--task-name") ?? DefaultTaskName;
+            var legacyTaskName = ReadArgument(args, "--legacy-task-name");
+            if (string.IsNullOrWhiteSpace(legacyTaskName) && !testMode && taskName.Equals(DefaultTaskName, StringComparison.OrdinalIgnoreCase))
+                legacyTaskName = LegacyTaskName;
             var localPort = ReadArgument(args, "--local-port") ?? "17873";
             var testDataDirectory = testMode ? ReadArgument(args, "--test-data-dir") ?? Path.Combine(installRoot, "test-data") : null;
             if (!testMode && args.Contains("--install-package", StringComparer.OrdinalIgnoreCase) && !args.Contains("--consent-accepted", StringComparer.OrdinalIgnoreCase))
@@ -40,7 +54,8 @@ internal static class Program
                 if (!SetupConsentForm.ShowUninstall(GetInstalledVersion(installRoot), out removeUserData)) return 0;
                 args = removeUserData ? [.. args, "--remove-user-data", "--uninstall-confirmed"] : [.. args, "--uninstall-confirmed"];
             }
-            var elevatedExitCode = RelaunchElevatedWhenRequired(args);
+            ValidateTestModeOperation(testMode, args, installRoot, taskName, legacyTaskName, testDataDirectory);
+            var elevatedExitCode = RelaunchElevatedWhenRequired(args, testMode);
             if (elevatedExitCode.HasValue) return elevatedExitCode.Value;
             if (args.Contains("--check-updates", StringComparer.OrdinalIgnoreCase))
                 return new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode).CheckAndInstallAsync(installRoot, args.Contains("--interactive", StringComparer.OrdinalIgnoreCase), args.Contains("--confirm-updates", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult() ? 0 : 0;
@@ -55,37 +70,117 @@ internal static class Program
             var zip = ReadArgument(args, "--install-package");
             if (!string.IsNullOrWhiteSpace(zip) && !Path.IsPathRooted(zip)) zip = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, zip));
             if (string.IsNullOrWhiteSpace(zip)) return ShowUsage();
-            return Install(zip, ReadArgument(args, "--api-url") ?? "https://printflow-api-4y5l.onrender.com", installRoot, taskName, localPort, testMode, testDataDirectory, args.Contains("--test-fail-after-copy", StringComparer.OrdinalIgnoreCase), args.Contains("--consent-accepted", StringComparer.OrdinalIgnoreCase));
+            return Install(zip, ReadArgument(args, "--api-url") ?? "https://printflow-api-4y5l.onrender.com", installRoot, taskName, legacyTaskName, localPort, testMode, testDataDirectory, args.Contains("--test-fail-after-copy", StringComparer.OrdinalIgnoreCase), args.Contains("--consent-accepted", StringComparer.OrdinalIgnoreCase));
         }
         catch (Exception error)
         {
+            if (args.Contains("--validate-embedded-package", StringComparer.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine(error);
+                return 1;
+            }
             if (testMode || args.Contains("--quiet", StringComparer.OrdinalIgnoreCase))
             {
                 var logDirectory = testMode
                     ? ReadArgument(args, "--test-data-dir") ?? Path.Combine(ReadArgument(args, "--install-dir") ?? DefaultInstallRoot, "test-data")
                     : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent", "logs");
-                Directory.CreateDirectory(logDirectory);
-                File.AppendAllText(Path.Combine(logDirectory, "installer.log"), $"{DateTime.UtcNow:O} {error}{Environment.NewLine}");
+                try
+                {
+                    Directory.CreateDirectory(logDirectory);
+                    File.AppendAllText(Path.Combine(logDirectory, "installer.log"), $"{DateTime.UtcNow:O} {error}{Environment.NewLine}");
+                }
+                catch (Exception loggingError)
+                {
+                    try
+                    {
+                        Console.Error.WriteLine($"Falha do instalador: {error}");
+                        Console.Error.WriteLine($"Nao foi possivel gravar installer.log: {loggingError.Message}");
+                    }
+                    catch { }
+                }
             }
-            else MessageBox.Show($"Nao foi possivel concluir: {error.Message}", "PrintFlow Agent", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            else MessageBox.Show($"Nao foi possivel concluir: {error.Message}", "Fila Agent", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(embeddedPackagePath))
+            {
+                try { File.Delete(embeddedPackagePath); } catch { }
+            }
         }
     }
 
-    private static int Install(string zipPath, string apiUrl, string root, string taskName, string localPort, bool testMode, string? testDataDirectory, bool failAfterCopy, bool consentAccepted)
+    private static int ValidateEmbeddedPackage()
+    {
+        ValidateThirdPartyLicenseResources();
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("FilaAgentSetup.AgentPackage.zip")
+            ?? throw new InvalidDataException("Payload ZIP nao foi embutido no instalador.");
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var entries = archive.Entries.Select(entry => entry.FullName.Replace('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!entries.Contains("package.json") || !entries.Contains("host/FilaAgent.exe"))
+            throw new InvalidDataException("Payload embutido nao contem package.json e host C#.");
+        if (entries.Any(name => Path.GetFileName(name).Equals("node.exe", StringComparison.OrdinalIgnoreCase) ||
+                                new[] { ".node", ".ps1", ".psm1", ".vbs" }.Contains(Path.GetExtension(name), StringComparer.OrdinalIgnoreCase)))
+            throw new InvalidDataException("Payload embutido contem Node nativo ou script de execucao legado.");
+        using var manifestStream = archive.GetEntry("package.json")!.Open();
+        using var manifest = JsonDocument.Parse(manifestStream);
+        if (manifest.RootElement.GetProperty("runtime").GetString() != ".NET 8 self-contained" ||
+            manifest.RootElement.GetProperty("selfContained").GetBoolean() is false)
+            throw new InvalidDataException("Manifesto do payload nao declara runtime C# autocontido.");
+        Console.WriteLine($"Payload embutido validado (v{manifest.RootElement.GetProperty("version").GetString()}).");
+        return 0;
+    }
+
+    private static void ValidateThirdPartyLicenseResources()
+    {
+        var resources = Assembly.GetExecutingAssembly().GetManifestResourceNames().ToHashSet(StringComparer.Ordinal);
+        var required = new[]
+        {
+            "FilaAgentSetup.ThirdParty.00-Overview.txt",
+            "FilaAgentSetup.ThirdParty.DOTNET-THIRD-PARTY-NOTICES.txt",
+            "FilaAgentSetup.ThirdParty.LICENSE-APACHE-2.0.txt",
+            "FilaAgentSetup.ThirdParty.LICENSE-BouncyCastle.txt",
+            "FilaAgentSetup.ThirdParty.LICENSE-DotNet-MIT.txt",
+            "FilaAgentSetup.ThirdParty.LICENSE-DotNet-Runtime.txt",
+            "FilaAgentSetup.ThirdParty.LICENSE-FluentFTP.txt",
+            "FilaAgentSetup.ThirdParty.LICENSE-MQTTnet.txt",
+            "FilaAgentSetup.ThirdParty.NOTICE-SQLitePCLRaw.txt"
+        };
+        var missing = required.Where(name => !resources.Contains(name)).ToArray();
+        if (missing.Length > 0) throw new InvalidDataException("Avisos de licenca ausentes no instalador: " + string.Join(", ", missing));
+    }
+
+    private static string[] AddEmbeddedPackageArgument(string[] args, out string? extractedPackagePath)
+    {
+        extractedPackagePath = null;
+        if (args.Any(argument => string.Equals(argument, "--install-package", StringComparison.OrdinalIgnoreCase)) ||
+            args.Any(argument => new[] { "--check-updates", "--uninstall", "--finalize-uninstall", "--help" }
+                .Contains(argument, StringComparer.OrdinalIgnoreCase))) return args;
+
+        using var embeddedPackage = Assembly.GetExecutingAssembly().GetManifestResourceStream("FilaAgentSetup.AgentPackage.zip");
+        if (embeddedPackage is null) return args;
+
+        extractedPackagePath = Path.Combine(Path.GetTempPath(), $"FilaAgentPackage-{Guid.NewGuid():N}.zip");
+        using (var output = File.Create(extractedPackagePath)) embeddedPackage.CopyTo(output);
+        return [.. args, "--install-package", extractedPackagePath];
+    }
+
+    private static int Install(string zipPath, string apiUrl, string root, string taskName, string? legacyTaskName, string localPort, bool testMode, string? testDataDirectory, bool failAfterCopy, bool consentAccepted)
     {
         if (!File.Exists(zipPath)) throw new FileNotFoundException("Pacote do Agent nao encontrado.", zipPath);
-        var temp = Path.Combine(Path.GetTempPath(), $"PrintFlowAgentSetup-{Guid.NewGuid():N}");
-        var backup = Path.Combine(Path.GetTempPath(), $"PrintFlowAgentRollback-{Guid.NewGuid():N}");
+        var temp = Path.Combine(Path.GetTempPath(), $"FilaAgentSetup-{Guid.NewGuid():N}");
+        var backup = Path.Combine(Path.GetTempPath(), $"FilaAgentRollback-{Guid.NewGuid():N}");
         var movedExistingInstall = false;
         var copiedNewInstall = false;
         var taskStopped = false;
+        var legacyTaskStopped = false;
         var hadExistingInstall = Directory.Exists(root);
         try
         {
             Directory.CreateDirectory(temp);
             ZipFile.ExtractToDirectory(zipPath, temp);
-            var host = Path.Combine(temp, "host", "PrintFlowAgentHost.exe");
+            var host = Path.Combine(temp, "host", "FilaAgent.exe");
             var package = Path.Combine(temp, "package.json");
             if (!File.Exists(host) || !File.Exists(package)) throw new InvalidDataException("Pacote do Agent incompleto.");
             if (!testMode) TrustDeveloperCertificateIfPresent();
@@ -94,6 +189,11 @@ internal static class Program
             if (hadExistingInstall) EnsureNoActivePrintJobs(root, localPort);
             StopTask(taskName);
             taskStopped = true;
+            if (!string.IsNullOrWhiteSpace(legacyTaskName) && !taskName.Equals(legacyTaskName, StringComparison.OrdinalIgnoreCase))
+            {
+                StopTask(legacyTaskName);
+                legacyTaskStopped = true;
+            }
             if (hadExistingInstall)
             {
                 StopAgentProcesses(root, localPort);
@@ -102,10 +202,10 @@ internal static class Program
             }
             copiedNewInstall = true;
             CopyDirectory(temp, root);
-            File.Copy(Environment.ProcessPath!, Path.Combine(root, "PrintFlowAgentSetup.exe"), true);
+            File.Copy(Environment.ProcessPath!, Path.Combine(root, "FilaAgentSetup.exe"), true);
             if (testMode && failAfterCopy) throw new InvalidOperationException("Falha de rollback simulada em modo de teste.");
 
-            var installedHost = Path.Combine(root, "host", "PrintFlowAgentHost.exe");
+            var installedHost = Path.Combine(root, "host", "FilaAgent.exe");
             CreateTask(installedHost, apiUrl, taskName, localPort, root, testMode, testDataDirectory);
             if (!testMode)
             {
@@ -118,7 +218,7 @@ internal static class Program
             if (!WaitForHealth(installedVersion, localPort, requirePaired: movedExistingInstall, TimeSpan.FromSeconds(45)))
                 throw new InvalidOperationException("O Agent nao confirmou /healthz e conexao local no prazo.");
             if (!testMode && consentAccepted) SaveTermsAcceptance(installedVersion);
-            if (!testMode && !Environment.GetCommandLineArgs().Contains("--quiet", StringComparer.OrdinalIgnoreCase)) MessageBox.Show("PrintFlow Agent instalado. Ele iniciara automaticamente com o Windows.", "PrintFlow Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (!testMode && !Environment.GetCommandLineArgs().Contains("--quiet", StringComparer.OrdinalIgnoreCase)) MessageBox.Show("Fila Agent instalado. Ele iniciara automaticamente com o Windows.", "Fila Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 0;
         }
         catch
@@ -131,8 +231,9 @@ internal static class Program
                 try
                 {
                     if (!testMode) RegisterUninstaller(root, GetVersion(Path.Combine(root, "package.json")));
-                    CreateTask(Path.Combine(root, "host", "PrintFlowAgentHost.exe"), apiUrl, taskName, localPort, root, testMode, testDataDirectory);
-                    StartTask(taskName);
+                    var rollbackTaskName = legacyTaskStopped && !string.IsNullOrWhiteSpace(legacyTaskName) ? legacyTaskName : taskName;
+                    CreateTask(ResolveInstalledHost(root), apiUrl, rollbackTaskName, localPort, root, testMode, testDataDirectory);
+                    StartTask(rollbackTaskName);
                 }
                 catch { }
             }
@@ -151,7 +252,7 @@ internal static class Program
         return FinalizeUninstall(installRoot, taskName, removeUserData, testMode);
     }
 
-    private static string ReadTerms() => Assembly.GetExecutingAssembly().GetManifestResourceStream("PrintFlowAgentSetup.TermsOfUse.txt") is { } stream
+    private static string ReadTerms() => Assembly.GetExecutingAssembly().GetManifestResourceStream("FilaAgentSetup.TermsOfUse.txt") is { } stream
         ? new StreamReader(stream, Encoding.UTF8).ReadToEnd()
         : throw new InvalidDataException("Os termos de uso nao foram incluidos neste instalador.");
 
@@ -185,14 +286,18 @@ internal static class Program
     private static int FinalizeUninstall(string installRoot, string taskName, bool removeUserData, bool testMode = false)
     {
         StopTask(taskName);
-        if (!testMode) DeleteShortcuts();
-        if (!testMode && taskName == "PrintFlowAgent")
+        if (!testMode)
         {
+            foreach (var knownTaskName in new[] { DefaultTaskName, LegacyTaskName })
+                if (!taskName.Equals(knownTaskName, StringComparison.OrdinalIgnoreCase)) StopTask(knownTaskName);
+            DeleteShortcuts();
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\printflow-agent", false);
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\fila-agent", false);
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FilaAgent", false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent", false);
         }
         if (!testMode && removeUserData) DeleteDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent"));
-        var helper = Path.Combine(Path.GetTempPath(), $"PrintFlowAgentUninstall-{Guid.NewGuid():N}.exe");
+        var helper = Path.Combine(Path.GetTempPath(), $"FilaAgentUninstall-{Guid.NewGuid():N}.exe");
         File.Copy(Environment.ProcessPath!, helper, true);
         Process.Start(new ProcessStartInfo(helper, $"--finalize-uninstall --install-dir \"{installRoot}\" --task-name \"{taskName}\" {(removeUserData ? "--remove-user-data" : "")} {(testMode ? "--test-mode" : "")}") { UseShellExecute = false, CreateNoWindow = true });
         return 0;
@@ -217,7 +322,7 @@ internal static class Program
             store.Open(OpenFlags.ReadOnly);
             return store.Certificates.Cast<X509Certificate2>().Any(existing => existing.Thumbprint == certificate.Thumbprint);
         });
-        if (!trusted && MessageBox.Show("Este pacote usa o certificado Early Access do PrintFlow Agent. Deseja confiar neste certificado para validar as atualizacoes assinadas futuras?", "PrintFlow Agent - certificado de teste", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        if (!trusted && MessageBox.Show("Este pacote usa o certificado Early Access do Fila Agent. Deseja confiar neste certificado para validar as atualizacoes assinadas futuras?", "Fila Agent - certificado de teste", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             throw new OperationCanceledException("Instalacao cancelada: certificado Early Access recusado.");
         foreach (var storeName in new[] { StoreName.Root, StoreName.TrustedPublisher })
         {
@@ -226,7 +331,7 @@ internal static class Program
             if (!store.Certificates.Cast<X509Certificate2>().Any(existing => existing.Thumbprint == certificate.Thumbprint)) store.Add(certificate);
         }
     }
-    private static int ShowUsage() { MessageBox.Show("Instalador nativo do PrintFlow Agent.", "PrintFlow Agent"); return 2; }
+    private static int ShowUsage() { MessageBox.Show("Instalador nativo do Fila Agent.", "Fila Agent"); return 2; }
     private static void CreateTask(string host, string apiUrl, string taskName, string localPort, string installRoot, bool testMode, string? testDataDirectory)
     {
         XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
@@ -239,7 +344,7 @@ internal static class Program
                 new XAttribute("version", "1.2"),
                 new XElement(ns + "RegistrationInfo",
                     new XElement(ns + "Author", user),
-                    new XElement(ns + "Description", "Inicia o PrintFlow Agent quando este usuario entra no Windows.")),
+                    new XElement(ns + "Description", "Inicia o Fila Agent quando este usuario entra no Windows.")),
                 new XElement(ns + "Triggers",
                     new XElement(ns + "LogonTrigger",
                         new XElement(ns + "Enabled", "true"),
@@ -263,7 +368,7 @@ internal static class Program
                         new XElement(ns + "Command", host),
                         new XElement(ns + "Arguments", arguments),
                         new XElement(ns + "WorkingDirectory", installRoot)))));
-        var definitionPath = Path.Combine(Path.GetTempPath(), $"PrintFlowAgentTask-{Guid.NewGuid():N}.xml");
+        var definitionPath = Path.Combine(Path.GetTempPath(), $"FilaAgentTask-{Guid.NewGuid():N}.xml");
         try
         {
             using (var writer = System.Xml.XmlWriter.Create(definitionPath, new System.Xml.XmlWriterSettings
@@ -280,12 +385,47 @@ internal static class Program
         }
     }
     private static string QuoteTaskArgument(string value) => $"\"{value.Replace("\"", "\\\"")}\"";
-    private static int? RelaunchElevatedWhenRequired(string[] args)
+    private static void ValidateTestModeOperation(bool testMode, string[] args, string installRoot, string taskName, string? legacyTaskName, string? testDataDirectory)
+    {
+        if (!testMode) return;
+        var installing = args.Contains("--install-package", StringComparer.OrdinalIgnoreCase);
+        var uninstalling = args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase);
+        if (!installing && !uninstalling) return;
+
+        var localAppData = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        bool IsDirectTestDirectory(string path, string prefix)
+        {
+            var fullPath = Path.GetFullPath(path);
+            return string.Equals(Path.GetDirectoryName(fullPath), localAppData, StringComparison.OrdinalIgnoreCase) &&
+                   Path.GetFileName(fullPath).StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!IsDirectTestDirectory(installRoot, "FilaAgent-E2E-"))
+            throw new InvalidOperationException("Test mode only permits an isolated FilaAgent-E2E-* install directory under LocalAppData.");
+        if (!taskName.StartsWith("FilaAgent_E2E_", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Test mode only permits an isolated FilaAgent_E2E_* scheduled task.");
+        if (!string.IsNullOrWhiteSpace(legacyTaskName) && !legacyTaskName.StartsWith("FilaAgent_E2E_Legacy_", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Test mode legacy task name is outside the isolated E2E namespace.");
+        if (args.Contains("--remove-user-data", StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Test mode cannot remove user data.");
+
+        if (installing)
+        {
+            if (!args.Contains("--test-data-dir", StringComparer.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(testDataDirectory) ||
+                !IsDirectTestDirectory(testDataDirectory, "FilaAgent-E2E-data-"))
+                throw new InvalidOperationException("Test mode requires an isolated FilaAgent-E2E-data-* directory under LocalAppData.");
+            var apiText = ReadArgument(args, "--api-url");
+            if (!Uri.TryCreate(apiText, UriKind.Absolute, out var apiUri) || apiUri.Scheme != Uri.UriSchemeHttp || !apiUri.IsLoopback)
+                throw new InvalidOperationException("Test mode requires an HTTP loopback API endpoint.");
+        }
+    }
+
+    private static int? RelaunchElevatedWhenRequired(string[] args, bool testMode)
     {
         var needsTaskSchedulerAccess = args.Any(argument =>
             string.Equals(argument, "--install-package", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(argument, "--uninstall", StringComparison.OrdinalIgnoreCase));
-        if (!needsTaskSchedulerAccess || new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) return null;
+        if (!needsTaskSchedulerAccess || testMode || new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) return null;
 
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Caminho do instalador indisponivel para solicitar permissao.");
         var start = new ProcessStartInfo(executable)
@@ -304,14 +444,15 @@ internal static class Program
     }
     private static void StartTask(string taskName) => Run("schtasks.exe", ["/Run", "/TN", taskName]);
     private static void StopTask(string taskName) { Run("schtasks.exe", ["/End", "/TN", taskName], false); Run("schtasks.exe", ["/Delete", "/TN", taskName, "/F"], false); }
-    private static int Run(string file, IReadOnlyList<string> arguments, bool required = true)
+    private static int Run(string file, IReadOnlyList<string> arguments, bool required = true, TimeSpan? timeout = null)
     {
         var start = new ProcessStartInfo(file) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new InvalidOperationException($"Nao foi possivel iniciar {file}.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(15_000))
+        var timeoutMilliseconds = (int)Math.Clamp((timeout ?? TimeSpan.FromSeconds(15)).TotalMilliseconds, 1, int.MaxValue);
+        if (!process.WaitForExit(timeoutMilliseconds))
         {
             process.Kill(true);
             throw new TimeoutException($"{file} nao terminou no prazo.");
@@ -320,28 +461,147 @@ internal static class Program
         if (required && process.ExitCode != 0) throw new InvalidOperationException($"Falha ao executar {file} (codigo {process.ExitCode}). {details}");
         return process.ExitCode;
     }
-    private static void RegisterProtocol(string host) { using var key = Registry.CurrentUser.CreateSubKey(@"Software\Classes\printflow-agent"); key!.SetValue(null, "URL:PrintFlow Agent Protocol"); key.SetValue("URL Protocol", ""); using var icon = key.CreateSubKey("DefaultIcon"); icon!.SetValue(null, $"{host},0"); using var command = key.CreateSubKey(@"shell\open\command"); command!.SetValue(null, $"\"{host}\" --protocol \"%1\""); }
-    private static void RegisterUninstaller(string root, string version) { using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent"); key!.SetValue("DisplayName", "PrintFlow Agent"); key.SetValue("DisplayVersion", version); key.SetValue("Publisher", "PrintFlow 3D"); key.SetValue("InstallLocation", root); key.SetValue("DisplayIcon", Path.Combine(root, "assets", "printflow-agent-icon.ico")); key.SetValue("UninstallString", $"\"{Path.Combine(root, "PrintFlowAgentSetup.exe")}\" --uninstall"); }
+    private static void RegisterProtocol(string host) { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\printflow-agent", false); RegisterProtocolAlias(host, "fila-agent", "URL:Fila Agent Protocol"); }
+    private static void RegisterProtocolAlias(string host, string scheme, string description) { using var key = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{scheme}"); key!.SetValue(null, description); key.SetValue("URL Protocol", ""); using var icon = key.CreateSubKey("DefaultIcon"); icon!.SetValue(null, $"{host},0"); using var command = key.CreateSubKey(@"shell\open\command"); command!.SetValue(null, $"\"{host}\" --protocol \"%1\""); }
+    private static void RegisterUninstaller(string root, string version) { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent", false); using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FilaAgent"); key!.SetValue("DisplayName", "Fila Agent"); key.SetValue("DisplayVersion", version); key.SetValue("Publisher", "Filamind"); key.SetValue("InstallLocation", root); key.SetValue("DisplayIcon", Path.Combine(root, "assets", "fila-agent-icon.ico")); key.SetValue("UninstallString", $"\"{ResolveInstalledSetup(root)}\" --uninstall"); }
     private static string GetVersion(string package) => JsonDocument.Parse(File.ReadAllText(package)).RootElement.GetProperty("version").GetString() ?? "0.0.0";
-    private static void CreateShortcuts(string host, string apiUrl, string root) { CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "PrintFlow Agent.lnk"), host, $"--api-url \"{apiUrl}\"", root); var menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "PrintFlow 3D"); Directory.CreateDirectory(menu); CreateShortcut(Path.Combine(menu, "PrintFlow Agent.lnk"), host, $"--api-url \"{apiUrl}\"", root); CreateShortcut(Path.Combine(menu, "Desinstalar PrintFlow Agent.lnk"), Path.Combine(root, "PrintFlowAgentSetup.exe"), "--uninstall", root); }
-    private static void CreateShortcut(string path, string target, string arguments, string root) { var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!); dynamic shortcut = shell!.GetType().InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, [path])!; shortcut.TargetPath = target; shortcut.Arguments = arguments; shortcut.WorkingDirectory = root; shortcut.IconLocation = $"{Path.Combine(root, "assets", "printflow-agent-icon.ico")},0"; shortcut.Save(); }
-    private static void DeleteShortcuts() { foreach (var path in new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "PrintFlow Agent.lnk"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "PrintFlow 3D") }) DeleteDirectory(path); }
+    private static void CreateShortcuts(string host, string apiUrl, string root) { var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory); DeleteDirectory(Path.Combine(desktop, "PrintFlow Agent.lnk")); CreateShortcut(Path.Combine(desktop, "Fila Agent.lnk"), host, $"--api-url \"{apiUrl}\"", root); var programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs); var oldMenu = Path.Combine(programs, "PrintFlow 3D"); DeleteDirectory(Path.Combine(oldMenu, "PrintFlow Agent.lnk")); DeleteDirectory(Path.Combine(oldMenu, "Desinstalar PrintFlow Agent.lnk")); var menu = Path.Combine(programs, "Filamind"); Directory.CreateDirectory(menu); CreateShortcut(Path.Combine(menu, "Fila Agent.lnk"), host, $"--api-url \"{apiUrl}\"", root); CreateShortcut(Path.Combine(menu, "Desinstalar Fila Agent.lnk"), Path.Combine(root, "FilaAgentSetup.exe"), "--uninstall", root); }
+    private static void CreateShortcut(string path, string target, string arguments, string root) { var shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!); dynamic shortcut = shell!.GetType().InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, [path])!; shortcut.TargetPath = target; shortcut.Arguments = arguments; shortcut.WorkingDirectory = root; shortcut.IconLocation = $"{Path.Combine(root, "assets", "fila-agent-icon.ico")},0"; shortcut.Save(); }
+    private static void DeleteShortcuts() { var programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs); foreach (var path in new[] { Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "PrintFlow Agent.lnk"), Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Fila Agent.lnk"), Path.Combine(programs, "PrintFlow 3D"), Path.Combine(programs, "Filamind") }) DeleteDirectory(path); }
     private static void DeleteDirectory(string path) { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); }
     private static void CopyDirectory(string source, string target) { Directory.CreateDirectory(target); foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(target, Path.GetFileName(file)), true); foreach (var directory in Directory.EnumerateDirectories(source)) CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory))); }
 
     private static void ValidateOrcaRuntime(string packageRoot, bool testMode)
     {
-        var node = Path.Combine(packageRoot, "runtime", "node.exe");
-        var verifier = Path.Combine(packageRoot, "scripts", "verify-orca-runtime.mjs");
-        if (!File.Exists(node) || !File.Exists(verifier)) throw new InvalidDataException("Validador OrcaSlicer ausente no pacote.");
-        if (testMode)
+        if (testMode) return;
+
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            Run(node, ["--check", Path.Combine(packageRoot, "src", "index.js")]);
-            return;
+            ["FILA_AGENT_ORCA_SLICER_PATH"] = Environment.GetEnvironmentVariable("FILA_AGENT_ORCA_SLICER_PATH"),
+            ["PRINTFLOW_ORCA_SLICER_PATH"] = Environment.GetEnvironmentVariable("PRINTFLOW_ORCA_SLICER_PATH")
+        };
+        var executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
+        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
+        {
+            var winget = ResolveWingetExecutable();
+            Exception? wingetError = null;
+            if (winget is not null)
+            {
+                try
+                {
+                    RunWithProgress("Instalando OrcaSlicer", "O Fila Agent está baixando o OrcaSlicer oficial pela Microsoft Store. Isso pode levar alguns minutos.",
+                        () => Run(winget, ["install", "--id", OrcaStoreProductId, "--exact", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity", "--silent"], timeout: TimeSpan.FromMinutes(20)));
+                }
+                catch (Exception error) { wingetError = error; }
+            }
+
+            executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
+            if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
+            {
+                var openStore = MessageBox.Show(
+                    "O OrcaSlicer oficial é necessário para gerar G-code. O Fila Agent não conseguiu instalá-lo automaticamente. Deseja abrir a página oficial da Microsoft Store para concluir a instalação? Depois, volte aqui e clique em Repetir para validar.",
+                    "Instalar dependência OrcaSlicer", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (openStore != DialogResult.Yes)
+                    throw new InvalidOperationException("OrcaSlicer 2.4.2 não foi encontrado. A instalação do Fila Agent foi cancelada.", wingetError);
+
+                try
+                {
+                    Process.Start(new ProcessStartInfo($"ms-windows-store://pdp/?ProductId={OrcaStoreProductId}") { UseShellExecute = true });
+                }
+                catch (Exception error)
+                {
+                    throw new InvalidOperationException("Não foi possível abrir a página oficial do OrcaSlicer na Microsoft Store. Instale o OrcaSlicer pelo canal oficial e tente novamente.", error);
+                }
+
+                while (true)
+                {
+                    var retry = MessageBox.Show(
+                        "Conclua a instalação do OrcaSlicer na Microsoft Store e clique em Repetir para validar o slicer. Cancelar interrompe a instalação do Fila Agent.",
+                        "Aguardando OrcaSlicer", MessageBoxButtons.RetryCancel, MessageBoxIcon.Information);
+                    if (retry != DialogResult.Retry)
+                        throw new InvalidOperationException("OrcaSlicer 2.4.2 não foi encontrado após a instalação pela Store.", wingetError);
+
+                    executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
+                    if (!string.IsNullOrWhiteSpace(executable) && File.Exists(executable)) break;
+                }
+            }
         }
-        if (Run(node, [verifier], required: false) != 0)
-            Run("winget.exe", ["install", "--id", "9MV6GL23XM59", "--exact", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity", "--silent"]);
-        Run(node, [verifier]);
+
+        var input = Path.Combine(packageRoot, "assets", "slicing-smoke-cube.stl");
+        if (!File.Exists(input)) throw new InvalidDataException("Modelo local de validação do OrcaSlicer ausente no pacote.");
+
+        var temporaryRoot = Path.Combine(Path.GetTempPath(), $"fila-agent-setup-orca-{Guid.NewGuid():N}");
+        var stage = "validar perfis oficiais";
+        try
+        {
+            foreach (var model in new[] { "P1S", "P1P", "X1 Carbon", "A1", "A1 mini" })
+            {
+                var profile = OrcaSlicerService.ResolveOfficialProfile("Bambu Lab", model, executable);
+                foreach (var path in profile.SettingsPaths.Concat(profile.FilamentPaths))
+                    if (!File.Exists(path)) throw new FileNotFoundException($"Perfil oficial OrcaSlicer ausente para {model}.", path);
+            }
+
+            Directory.CreateDirectory(temporaryRoot);
+            stage = "executar fatiamento local de validação";
+            var output = Path.Combine(temporaryRoot, "validation.gcode");
+            var p1sProfile = OrcaSlicerService.ResolveOfficialProfile("Bambu Lab", "P1S", executable);
+            var artifact = new OrcaSlicerService().SliceAsync(executable, input, output, p1sProfile,
+                TimeSpan.FromMinutes(2)).GetAwaiter().GetResult();
+
+            stage = "validar G-code gerado";
+            var gcode = File.ReadAllText(artifact.OutputPath);
+            if (!Regex.IsMatch(gcode, @"(?m)^G[01]\s") || !Regex.IsMatch(gcode, @"(?m)^M10[49]\s"))
+                throw new InvalidDataException("G-code local não contém movimentos e comandos de aquecimento esperados.");
+            if (!gcode.Contains("generated by OrcaSlicer 2.4.2", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Motor OrcaSlicer difere da versão 2.4.2 validada.");
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException($"OrcaSlicer não passou na validação local do instalador ({stage}): {error.Message}", error);
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, recursive: true);
+        }
+    }
+
+    private static string? ResolveWingetExecutable()
+    {
+        var candidates = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps"));
+        foreach (var directory in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var executable = Path.Combine(directory, "winget.exe");
+            if (File.Exists(executable)) return executable;
+        }
+        return null;
+    }
+
+    private static void RunWithProgress(string title, string message, Action operation)
+    {
+        using var dialog = new Form
+        {
+            Text = title,
+            StartPosition = FormStartPosition.CenterScreen,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            ControlBox = false,
+            ShowInTaskbar = true,
+            ClientSize = new Size(460, 118),
+            Font = new Font("Segoe UI", 9F)
+        };
+        var description = new Label { Text = message, Location = new Point(18, 16), Size = new Size(424, 48) };
+        var progress = new ProgressBar { Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 24, Location = new Point(18, 76), Size = new Size(424, 20) };
+        dialog.Controls.AddRange([description, progress]);
+        Exception? failure = null;
+        dialog.Shown += async (_, _) =>
+        {
+            try { await Task.Run(operation); }
+            catch (Exception error) { failure = error; }
+            finally { dialog.Close(); }
+        };
+        dialog.ShowDialog();
+        if (failure is not null) throw new InvalidOperationException("Falha ao instalar OrcaSlicer pelo Windows Package Manager.", failure);
     }
 
     private static bool WaitForHealth(string expectedVersion, string port, bool requirePaired, TimeSpan timeout)
@@ -400,10 +660,20 @@ internal static class Program
         return FindProcessesByExecutable("node", Path.Combine(installRoot, "runtime", "node.exe"));
     }
 
-    private static List<Process> FindAgentHostProcesses(string installRoot)
-    {
-        return FindProcessesByExecutable("PrintFlowAgentHost", Path.Combine(installRoot, "host", "PrintFlowAgentHost.exe"));
-    }
+    private static string ResolveInstalledHost(string installRoot) => new[] { "host/FilaAgent.exe", "host/PrintFlowAgentHost.exe" }
+        .Select(relative => Path.Combine(installRoot, relative.Replace('/', Path.DirectorySeparatorChar)))
+        .FirstOrDefault(File.Exists)
+        ?? throw new FileNotFoundException("Executavel C# do Agent ausente na instalacao restaurada.", installRoot);
+
+    private static string ResolveInstalledSetup(string installRoot) => new[] { "FilaAgentSetup.exe", "PrintFlowAgentSetup.exe" }
+        .Select(name => Path.Combine(installRoot, name))
+        .FirstOrDefault(File.Exists)
+        ?? throw new FileNotFoundException("Instalador C# ausente na instalacao restaurada.", installRoot);
+
+    private static List<Process> FindAgentHostProcesses(string installRoot) =>
+        FindProcessesByExecutable("FilaAgent", Path.Combine(installRoot, "host", "FilaAgent.exe"))
+            .Concat(FindProcessesByExecutable("PrintFlowAgentHost", Path.Combine(installRoot, "host", "PrintFlowAgentHost.exe")))
+            .ToList();
 
     private static List<Process> FindProcessesByExecutable(string processName, string executablePath)
     {

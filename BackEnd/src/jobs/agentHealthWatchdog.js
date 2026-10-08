@@ -23,7 +23,7 @@ export const runAgentHealthWatchdog = async ({ now = new Date(), offlineAfterMs 
       for (const agent of result.rows) {
         const agentId = String(agent.id)
         await writeOperationalNotification(tenant.id, {
-          type: 'agent.offline', severity: 'warning', title: 'PrintFlow Agent offline',
+          type: 'agent.offline', severity: 'warning', title: 'Fila Agent offline',
           message: `O Agent ${agent.machine_name || agentId} deixou de responder. As impressoes em andamento devem ser conferidas.`,
           entityType: 'agent', entityId: agentId, dedupeKey: `agent-offline:${agentId}`
         }, client)

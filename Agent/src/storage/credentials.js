@@ -29,6 +29,7 @@ const pendingPairingFile = path.join(dataDirectory, 'pending-pairing.json')
 const PENDING_PAIRING_MAX_AGE_MS = 10 * 60 * 1000
 const testDpapiValues = new Map()
 const isNodeTest = Boolean(process.env.NODE_TEST_CONTEXT)
+const sourceAgentRoot = path.resolve(import.meta.dirname, '..', '..')
 
 const parseJson = content =>
   JSON.parse(
@@ -50,6 +51,24 @@ const emulateDpapiForTest = (operation, value) => {
   return Buffer.from(plaintext)
 }
 
+export const resolveNativeDpapiHost = () => {
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+  const candidates = [
+    process.env.FILA_AGENT_HOST_PATH,
+    process.env.PRINTFLOW_AGENT_HOST_PATH,
+    path.resolve(path.dirname(process.execPath), '..', 'host', 'FilaAgent.exe'),
+    path.resolve(path.dirname(process.execPath), '..', 'host', 'PrintFlowAgentHost.exe'),
+    path.join(localAppData, 'PrintFlowAgent', 'host', 'FilaAgent.exe'),
+    path.join(localAppData, 'PrintFlowAgent', 'host', 'PrintFlowAgentHost.exe'),
+    path.join(localAppData, 'FilaAgent', 'host', 'FilaAgent.exe'),
+    path.join(sourceAgentRoot, 'windows-host', 'bin', 'Release', 'net8.0-windows', 'FilaAgent.exe'),
+    path.join(sourceAgentRoot, 'windows-host', 'bin', 'Debug', 'net8.0-windows', 'FilaAgent.exe'),
+    path.join(sourceAgentRoot, 'windows-host', 'bin', 'Release', 'net8.0-windows', 'PrintFlowAgentHost.exe'),
+    path.join(sourceAgentRoot, 'windows-host', 'bin', 'Debug', 'net8.0-windows', 'PrintFlowAgentHost.exe')
+  ].filter(Boolean)
+  return candidates.map(candidate => path.resolve(candidate)).find(candidate => existsSync(candidate)) || ''
+}
+
 const runNativeDpapi = async (
   operation,
   value
@@ -61,8 +80,8 @@ const runNativeDpapi = async (
 
   const input =
     Buffer.from(value).toString('base64')
-  const host = path.resolve(path.dirname(process.execPath), '..', 'host', 'PrintFlowAgentHost.exe')
-  if (!existsSync(host)) throw new Error('Host nativo do PrintFlow Agent indisponivel para DPAPI.')
+  const host = resolveNativeDpapiHost()
+  if (!host) throw new Error('Host nativo do Fila Agent indisponivel para DPAPI. Informe FILA_AGENT_HOST_PATH ou compile o host C#.')
 
   return new Promise((resolve, reject) => {
     const child =
