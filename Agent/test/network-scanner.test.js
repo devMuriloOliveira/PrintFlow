@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import {
   discoverBambuSsdp,
+  findOpenPrinterPorts,
   parseSsdpHeaders,
   getNetworkHostRange
 } from '../src/discovery/networkScanner.js'
@@ -19,6 +20,38 @@ test('SSDP extrai serial Bambu e normaliza headers', () => {
 
   assert.equal(headers.server, 'Bambu Lab X1C')
   assert.equal(headers.serial, 'ABC123')
+})
+
+test('descoberta consulta portas de um host em paralelo', async () => {
+  const started = []
+  const releases = []
+  const checks = [80, 7125, 5000, 8883].map(port => new Promise(resolve => {
+    releases.push(resolve)
+  }))
+  const pending = findOpenPrinterPorts('192.168.1.20', {
+    check: async (_ip, port) => {
+      started.push(port)
+      await checks[[80, 7125, 5000, 8883].indexOf(port)]
+      return port === 7125
+    }
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(started.sort((a, b) => a - b), [80, 5000, 7125, 8883])
+  releases.forEach(release => release())
+  assert.deepEqual(await pending, [7125])
+})
+
+test('varredura de portas interrompe conexoes pendentes quando cancelada', async () => {
+  const controller = new AbortController()
+  const pending = findOpenPrinterPorts('192.168.1.20', {
+    ports: [80],
+    check: (_ip, _port, _timeout, signal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }),
+    signal: controller.signal
+  })
+  controller.abort(new Error('teste cancelado'))
+  await assert.rejects(pending, /teste cancelado/)
 })
 
 test('SSDP extrai serial quando a resposta usa XML de dispositivo', async () => {
@@ -103,6 +136,19 @@ test('SSDP falhando em VLAN/firewall retorna vazio para permitir fallback manual
   })
 
   assert.deepEqual(printers, [])
+})
+
+test('SSDP fecha o socket ao cancelar a descoberta', async () => {
+  const socket = new EventEmitter()
+  let closed = false
+  socket.bind = callback => callback()
+  socket.send = () => {}
+  socket.close = () => { closed = true }
+  const controller = new AbortController()
+  const pending = discoverBambuSsdp({ socketFactory: () => socket, timeoutMs: 10_000, signal: controller.signal })
+  controller.abort()
+  assert.deepEqual(await pending, [])
+  assert.equal(closed, true)
 })
 
 test('descoberta calcula faixa pela netmask e exclui rede/broadcast', () => {

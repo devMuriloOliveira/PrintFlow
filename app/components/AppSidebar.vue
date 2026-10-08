@@ -38,7 +38,7 @@ const active = (to: string) => to === '/' ? route.path === '/' : route.path.star
     <div class="tip-card">
       <div class="tip-card__icon"><UiIcon name="box" :size="21" /></div>
       <div>
-        <strong>Dica PrintFlow</strong>
+        <strong>Dica Filamind</strong>
         <p>Transforme seus numeros em decisoes mais seguras.</p>
         <NuxtLink to="/calculadora-3d">Saiba mais <span>→</span></NuxtLink>
       </div>

@@ -5,6 +5,14 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const workflowPath = path.join(root, '.github', 'workflows', 'agent-release.yml')
 const workflow = await fs.readFile(workflowPath, 'utf8')
+const releaseVerifier = await fs.readFile(
+  path.join(root, 'Agent', 'src', 'updates', 'releaseVerifier.js'),
+  'utf8'
+)
+const releasePublisher = await fs.readFile(
+  path.join(root, 'Agent', 'scripts', 'publish-windows-agent-release.ps1'),
+  'utf8'
+)
 const required = [
   "- 'agent-v*'",
   'PRINTFLOW_API_URL',
@@ -16,15 +24,18 @@ const required = [
   'RELEASE-METADATA.json',
   'certificateSha256',
   'validate-agent-release-artifacts.mjs',
-  'DEV_SELF_SIGNED',
-  'PRODUCTION_TRUSTED',
-  'gh release create',
   'PrintFlow-Agent-Transition-Setup.exe',
   'Copy-Item',
   'install-windows-agent-from-package.ps1'
 ]
 
 const missing = required.filter(fragment => !workflow.includes(fragment))
+if (!releaseVerifier.includes('DEV_SELF_SIGNED') || !releaseVerifier.includes('PRODUCTION_TRUSTED')) {
+  missing.push('modos de assinatura DEV_SELF_SIGNED/PRODUCTION_TRUSTED no verificador')
+}
+if (!releasePublisher.includes('gh release create')) {
+  missing.push('gh release create no publicador de releases')
+}
 if (missing.length) {
   console.error(`Agent release contract invalido; ausentes: ${missing.join(', ')}`)
   process.exitCode = 1

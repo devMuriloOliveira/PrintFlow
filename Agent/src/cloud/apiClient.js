@@ -47,6 +47,29 @@ export const getPendingCommand = async (
   return response.data.command
 }
 
+// ======================================================
+// IMPRESSORAS REGISTRADAS PARA RESTAURACAO APOS REINICIO
+// ======================================================
+
+export const getRegisteredPrintersForReconnect = async (
+  apiUrl,
+  credentials
+) => {
+  const response = await cloudHttp.get(
+    `${apiUrl}/api/agents/printers/reconnect`,
+    {
+      headers: {
+        'x-agent-id': credentials.agentId,
+        'x-agent-secret': credentials.agentSecret
+      }
+    }
+  )
+
+  return Array.isArray(response.data?.printers)
+    ? response.data.printers
+    : []
+}
+
 export const completeCommand = async (
   apiUrl,
   credentials,
@@ -69,6 +92,21 @@ export const completeCommand = async (
     }
   )
 
+  return response.data
+}
+
+export const reportCommandProgress = async (apiUrl, credentials, commandId, progress) => {
+  const response = await cloudHttp.post(
+    `${apiUrl}/api/agents/commands/${commandId}/progress`,
+    { progress },
+    {
+      headers: {
+        'x-agent-id': credentials.agentId,
+        'x-agent-secret': credentials.agentSecret,
+        'Content-Type': 'application/json'
+      }
+    }
+  )
   return response.data
 }
 

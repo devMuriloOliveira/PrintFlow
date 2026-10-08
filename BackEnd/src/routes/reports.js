@@ -4,6 +4,7 @@ import { hasDatabase, withTenant } from '../db/pool.js'
 import { sendBuffer, sendJson, sendText } from '../http/response.js'
 import { writeAuditEvent } from '../services/operationalEvents.js'
 import { decryptField } from '../security/crypto.js'
+import { getReportSummary, normalizeReportSummaryOptions } from '../repositories/reportSummaryRepository.js'
 
 const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""').replace(/[\r\n]+/g, ' ')}"`
 const dateValue = (value, fallback) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : fallback
@@ -23,8 +24,8 @@ const loadReport = async (tenantId, filters, section = 'complete') => withTenant
   const [orders, expenses, products, filaments, printers, marketplaces, clients, goals, printJobs, integrations, movements, simulations, history] = await Promise.all([
     queryWhen(selected('financeiro') || selected('produtos'), `
       with sales_rows as (
-        select o.tenant_id, o.id, o.order_date, coalesce(m.name, case when o.sales_channel = 'direct' then 'Venda direta' else 'Sem marketplace' end) as marketplace,
-          coalesce(o.sales_channel, case when lower(coalesce(m.name, '')) = 'manual' then 'direct' else 'marketplace' end) as channel,
+        select o.tenant_id, o.id, o.order_date, coalesce(m.name, case when (case when o.marketplace_id is null then 'direct' else coalesce(nullif(o.sales_channel, ''), 'marketplace') end) = 'direct' then 'Venda direta' else 'Sem marketplace' end) as marketplace,
+          case when o.marketplace_id is null or lower(coalesce(m.name, '')) = 'manual' then 'direct' else coalesce(nullif(o.sales_channel, ''), 'marketplace') end as channel,
           o.product_name as product, o.quantity, o.gross, o.fee, o.shipping, o.net, o.profit
         from orders o
         left join marketplaces m on m.id = o.marketplace_id and m.tenant_id = o.tenant_id
@@ -83,7 +84,7 @@ const summaryRows = (report) => {
 
 export const csvReport = (report, filters, section = 'complete') => {
   const titles = { financeiro: 'Resultado financeiro', produtos: 'Produtos e vendas', estoque: 'Movimentacoes de estoque', historico: 'Registro de custos e precos', complete: 'Relatorio completo' }
-  const lines = [[`PrintFlow - ${titles[section] || titles.complete}`], ['Periodo', filters.from, filters.to]]
+  const lines = [[`Filamind - ${titles[section] || titles.complete}`], ['Periodo', filters.from, filters.to]]
   const appendSales = () => {
     lines.push([], ['Vendas'], ['Data', 'Canal', 'Marketplace', 'Produto', 'Quantidade', 'Bruto', 'Taxas', 'Frete', 'Liquido', 'Lucro'])
     for (const row of report.orders) lines.push([row.date, row.channel, row.marketplace, row.product, row.quantity, row.gross, row.fee, row.shipping, row.net, row.profit])
@@ -132,7 +133,7 @@ export const csvReport = (report, filters, section = 'complete') => {
 }
 
 export const workbookReport = async (report, filters, section = 'complete') => {
-  const workbook = new ExcelJS.Workbook(); workbook.creator = 'PrintFlow'; workbook.created = new Date()
+  const workbook = new ExcelJS.Workbook(); workbook.creator = 'Filamind'; workbook.created = new Date()
   const currencyKeys = new Set(['gross', 'fee', 'shipping', 'net', 'profit', 'amount', 'price', 'cost', 'revenue', 'ticket', 'current_value', 'target_value', 'price_per_kg', 'energy_rate', 'direct_cost', 'suggested_price', 'fixed'])
   const percentKeys = new Set(['margin', 'commission', 'financial', 'ads', 'others'])
   const dateKeys = new Set(['date', 'next_due_date', 'purchase_date', 'last_order', 'period_start', 'period_end'])
@@ -140,7 +141,7 @@ export const workbookReport = async (report, filters, section = 'complete') => {
   const asDate = (value) => { if (value instanceof Date) return value; if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(value)) return value; const date = new Date(`${value.slice(0, 10)}T${value.length > 10 ? value.slice(11) : '00:00:00'}`); return Number.isNaN(date.getTime()) ? value : date }
   const addSheet = (name, columns, rows) => {
     const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 4 }] })
-    sheet.mergeCells(1, 1, 1, columns.length); sheet.getCell('A1').value = `PrintFlow 3D · ${name}`; sheet.getCell('A1').font = { bold: true, size: 15, color: { argb: 'FF172033' } }
+    sheet.mergeCells(1, 1, 1, columns.length); sheet.getCell('A1').value = `Filamind · ${name}`; sheet.getCell('A1').font = { bold: true, size: 15, color: { argb: 'FF172033' } }
     sheet.mergeCells(2, 1, 2, columns.length); sheet.getCell('A2').value = `Período: ${filters.from} a ${filters.to} · Gerado em ${new Date().toLocaleString('pt-BR')}`; sheet.getCell('A2').font = { size: 10, color: { argb: 'FF687386' } }
     sheet.columns = columns.map(([header, key]) => ({ key, width: Math.min(38, Math.max(14, header.length + 3)) }))
     const header = sheet.getRow(4); columns.forEach(([label], index) => { const cell = header.getCell(index + 1); cell.value = label; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1768F2' } }; cell.alignment = { vertical: 'middle' }; cell.border = { bottom: { style: 'medium', color: { argb: 'FF1155C5' } } } })
@@ -194,4 +195,13 @@ export const handleFinancialReportExport = async (req, res, url) => {
   const headers = { 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' }
   if (format === 'xlsx') return sendBuffer(res, 200, await workbookReport(report, filters, section), { ...headers, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   return sendText(res, 200, csvReport(report, filters, section), { ...headers, 'Content-Type': 'text/csv; charset=utf-8' })
+}
+
+export const handleReportSummary = async (req, res, url) => {
+  const user = await getAuthUser(req)
+  if (!user) return sendJson(res, 401, { error: 'Login necessario' })
+  if (!hasDatabase) return sendJson(res, 501, { error: 'Relatorios agregados exigem banco de dados.' })
+  const options = normalizeReportSummaryOptions(Object.fromEntries(url.searchParams.entries()))
+  if (options.from > options.to) return sendJson(res, 400, { error: 'Periodo invalido' })
+  return sendJson(res, 200, await getReportSummary(user.tenantId, options))
 }

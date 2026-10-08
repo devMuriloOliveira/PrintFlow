@@ -7,9 +7,12 @@ process.env.PLATFORM_DEVELOPER_EMAILS = 'developer@example.com'
 
 const {
   canUseSubscriptionRequest,
+  effectiveSubscriptionForEntitlement,
   entitlementFromSubscription,
   isPlatformDeveloper,
+  subscriptionAccessFromEntitlement,
   subscriptionFeatureForRequest,
+  subscriptionCancellationDeadline,
   supportsSubscriptionFeature
 } = await import('../src/services/subscriptionEntitlements.js')
 const { subscriptionTransition } = await import('../src/jobs/subscriptionWatchdog.js')
@@ -64,6 +67,42 @@ test('FREE permite a operacao manual e bloqueia somente recursos PRO', () => {
   assert.equal(canUseSubscriptionRequest({ method: 'GET', pathname: '/api/orders', entitlement }), true)
 })
 
+test('cancelamento agendado mantem PRO ate a data paga e depois entrega FREE', () => {
+  const subscription = {
+    status: 'active',
+    plan_code: 'starter',
+    cancel_at_period_end: true,
+    current_period_end: '2026-11-06T16:26:30.000Z',
+    limits: { products: 100 },
+    features: { agent: true },
+    free_plan_code: 'free',
+    free_plan_limits: { products: 10 },
+    free_plan_features: { agent: false }
+  }
+  const beforeEnd = effectiveSubscriptionForEntitlement(subscription, new Date('2026-11-06T16:26:29.999Z'))
+  const afterEnd = effectiveSubscriptionForEntitlement(subscription, new Date('2026-11-06T16:26:30.000Z'))
+
+  assert.equal(subscriptionCancellationDeadline(subscription), subscription.current_period_end)
+  assert.equal(entitlementFromSubscription(beforeEnd).mode, 'full')
+  assert.equal(beforeEnd.plan_code, 'starter')
+  assert.equal(afterEnd.status, 'cancelled')
+  assert.equal(afterEnd.plan_code, 'free')
+  assert.equal(afterEnd.limits.products, 10)
+  assert.equal(supportsSubscriptionFeature(entitlementFromSubscription(afterEnd), 'agent'), false)
+})
+
+test('resumo de acesso expoe somente limites, recursos e uso do tenant', () => {
+  const entitlement = entitlementFromSubscription({
+    status: 'active', plan_code: 'free', limits: { products: 10 }, features: { agent: false }
+  })
+  const access = subscriptionAccessFromEntitlement(entitlement, { products: { used: 8, limit: 10 } })
+
+  assert.deepEqual(access, {
+    planCode: 'free', status: 'active', mode: 'full',
+    features: { agent: false }, limits: { products: 10 }, usage: { products: { used: 8, limit: 10 } }
+  })
+})
+
 test('PRO mantem acesso durante grace, mas nao quando o provider encerra o acesso', () => {
   const grace = entitlementFromSubscription({ plan_code: 'starter', status: 'grace', features: { agent: true } }, false)
   const paused = entitlementFromSubscription({ plan_code: 'free', status: 'paused', features: { agent: false } }, false)
@@ -95,4 +134,6 @@ test('watchdog apenas encerra carencia e nunca usa vencimento local para cobrar'
   assert.equal(subscriptionTransition({ status: 'active', current_period_end: '2026-09-10T11:59:59.000Z' }, now), null)
   assert.equal(subscriptionTransition({ status: 'grace', grace_ends_at: '2026-09-10T11:59:59.000Z' }, now), 'paused')
   assert.equal(subscriptionTransition({ status: 'grace', grace_ends_at: '2026-09-11T12:00:00.000Z' }, now), null)
+  assert.equal(subscriptionTransition({ status: 'active', provider: 'mercado_pago', cancel_at_period_end: true, current_period_end: '2026-09-10T11:59:59.000Z' }, now), 'cancelled')
+  assert.equal(subscriptionTransition({ status: 'active', provider: 'mercado_pago', cancel_at_period_end: true, current_period_end: '2026-09-11T12:00:00.000Z' }, now), null)
 })

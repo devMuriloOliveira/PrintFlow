@@ -170,6 +170,24 @@ const listCacheFiles =
     return files
   }
 
+export const getPrintFileCacheStats = async ({
+  directory = cacheDirectory
+} = {}) => {
+  const files = await listCacheFiles(directory)
+  return files.reduce((stats, file) => {
+    stats.files += 1
+    stats.bytes += file.size
+    if (file.isPinned) stats.pinnedFiles += 1
+    if (file.isTemp) stats.temporaryFiles += 1
+    return stats
+  }, {
+    files: 0,
+    bytes: 0,
+    pinnedFiles: 0,
+    temporaryFiles: 0
+  })
+}
+
 export const cleanupPrintFileCache =
   async ({
     directory = cacheDirectory,

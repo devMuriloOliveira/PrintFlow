@@ -12,7 +12,8 @@ const isAuthPath = (path) => [
   '/api/auth/password-reset/request',
   '/api/auth/password-reset/confirm',
   '/api/auth/mfa/login',
-  '/api/auth/change-password',
+  '/api/auth/change-password/request-code',
+  '/api/auth/change-password/confirm',
   '/api/auth/invitations/accept',
   '/api/agents/pair'
 ].includes(path)

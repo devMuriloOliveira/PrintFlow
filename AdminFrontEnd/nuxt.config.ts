@@ -13,7 +13,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'pt-BR' },
-      title: 'PrintFlow | Administracao da Plataforma',
+      title: 'Filamind | Administracao da Plataforma',
       meta: [{ name: 'robots', content: 'noindex, nofollow, noarchive' }]
     }
   }

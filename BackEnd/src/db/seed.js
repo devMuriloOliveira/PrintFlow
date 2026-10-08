@@ -1,10 +1,13 @@
 import { pool, query, withTenant } from './pool.js'
 import { migrate } from './migrate.js'
 import { blindIndex, encryptField } from '../security/crypto.js'
+import { hashPassword } from '../auth/password.js'
 import { env } from '../config/env.js'
 
 const TENANT_ID = 'demo'
 const DEMO_MARKER = '[DEMO]'
+const DEMO_USER_EMAIL = 'demo.local@printflow.test'
+const DEMO_USER_PASSWORD = 'DemoLocal#2026'
 const today = new Date()
 const pad = (value) => String(value).padStart(2, '0')
 const dateOnly = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
@@ -23,12 +26,9 @@ const pick = (items, index) => items[index % items.length]
 const assertDemoSeedAllowed = () => {
   if (!pool) throw new Error('DATABASE_URL nao configurada. Configure um banco local de desenvolvimento antes do seed.')
   if (env.isProduction || process.env.NODE_ENV === 'production') throw new Error('Seed demo bloqueado em NODE_ENV=production.')
-  const url = String(env.databaseUrl || '').toLowerCase()
-  const localHints = ['localhost', '127.0.0.1', 'host.docker.internal', 'printflow', 'demo', 'dev']
-  const explicitlyAllowed = process.env.ALLOW_DEMO_SEED === 'true'
-  if (!explicitlyAllowed && !localHints.some((hint) => url.includes(hint))) {
-    throw new Error('Seed demo bloqueado: DATABASE_URL nao parece local/dev. Use ALLOW_DEMO_SEED=true somente se tiver certeza.')
-  }
+  let hostname = ''
+  try { hostname = new URL(env.databaseUrl).hostname.toLowerCase() } catch { throw new Error('Seed demo bloqueado: DATABASE_URL invalida.') }
+  if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) throw new Error('Seed demo bloqueado: o banco precisa estar em localhost, 127.0.0.1 ou ::1.')
 }
 
 const insertEncryptedClient = async (client, data) => {
@@ -73,16 +73,32 @@ const seed = async () => {
   await query(`
     insert into tenants (id, name, email, is_initialized, account_status, billing_status, billing_enforcement_exempt)
     values ($1, $2, $3, true, 'active', 'active', true)
-  `, [TENANT_ID, encryptField(`${DEMO_MARKER} PrintFlow 3D Studio`), encryptField('contato@example.test')])
+  `, [TENANT_ID, encryptField(`${DEMO_MARKER} Filamind Studio`), encryptField('contato@example.test')])
 
   await withTenant(TENANT_ID, async (client) => {
+    const demoUser = await client.query(`
+      insert into users (tenant_id, name, email, email_hash, password_hash, role, status, token_version, email_verified_at)
+      values ($1, $2, $3, $4, $5, 'admin', 'active', 0, now())
+      returning id
+    `, [
+      TENANT_ID,
+      encryptField(`${DEMO_MARKER} Usuário Local`),
+      encryptField(DEMO_USER_EMAIL),
+      blindIndex(DEMO_USER_EMAIL),
+      hashPassword(DEMO_USER_PASSWORD)
+    ])
+    await client.query(`
+      insert into tenant_memberships (tenant_id, user_id, role, status)
+      values ($1, $2, 'owner', 'active')
+    `, [TENANT_ID, demoUser.rows[0].id])
+
     await client.query(`
       insert into company_settings (
         tenant_id, name, document, phone, email, address, district, city, state, zip, country, currency, timezone, kwh, preferences
       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Brasil','Real (R$)','(GMT-03:00) Brasilia',0.92,$11::jsonb)
     `, [
       TENANT_ID,
-      encryptField(`${DEMO_MARKER} PrintFlow 3D Studio`),
+      encryptField(`${DEMO_MARKER} Filamind Studio`),
       encryptField('00.000.000/0001-00'),
       encryptField('(11) 4000-0000'),
       encryptField('contato@example.test'),
@@ -365,6 +381,7 @@ const seed = async () => {
 
   console.log('Seed demo concluido.')
   console.log('Tenant: demo')
+  console.log('Login local: demo.local@printflow.test')
   console.log('Dados: 16 clientes, 10 produtos, 7 filamentos, 5 impressoras, 138 vendas, 64 despesas, 4 metas, 12 chamados.')
 }
 

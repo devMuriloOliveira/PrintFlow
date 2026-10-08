@@ -190,7 +190,7 @@ export const mockAppData: AppData = {
     { label: 'Outros', value: 18.2, color: '#7d8799' }
   ],
   goals: mockGoals,
-  settings: { name: 'PrintFlow 3D Mock', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0.92, preferences: { demoVisual: true } }
+  settings: { name: 'Filamind Mock', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0.92, preferences: { demoVisual: true } }
 }
 
 const movementRows: InventoryOverview['movements'] = [
@@ -259,6 +259,15 @@ export const getMockFinancialHistory = (options: { resource?: string; limit?: nu
 export const getMockOrdersSummary = () => {
   const active = mockOrders.filter(item => item.status !== 'Cancelado')
   const cancelled = mockOrders.filter(item => item.status === 'Cancelado')
+  const marketplaceTotals = new Map<string, number>()
+  const dailyTotals = new Map<string, { key: string; gross: number; net: number; profit: number; orders: number; cancelledGross: number; cancelledOrders: number }>()
+  for (const order of mockOrders) {
+    const key = order.date.includes('/') ? order.date.split('/').reverse().join('-') : order.date.slice(0, 10)
+    const row = dailyTotals.get(key) || { key, gross: 0, net: 0, profit: 0, orders: 0, cancelledGross: 0, cancelledOrders: 0 }
+    if (order.status === 'Cancelado') { row.cancelledGross += order.gross; row.cancelledOrders += 1 }
+    else { row.gross += order.gross; row.net += order.net; row.profit += order.profit; row.orders += 1; marketplaceTotals.set(order.marketplace || 'Sem marketplace', (marketplaceTotals.get(order.marketplace || 'Sem marketplace') || 0) + order.gross) }
+    dailyTotals.set(key, row)
+  }
   return {
     orderCount: active.length,
     gross: active.reduce((sum, item) => sum + item.gross, 0),
@@ -269,7 +278,10 @@ export const getMockOrdersSummary = () => {
     ticket: active.reduce((sum, item) => sum + item.gross, 0) / active.length,
     cancelledCount: cancelled.length,
     cancelledGross: cancelled.reduce((sum, item) => sum + item.gross, 0),
-    byStatus: ['Aguardando', 'Producao', 'Envio', 'Concluido', 'Cancelado'].map(status => ({ status, count: mockOrders.filter(item => item.status === status).length }))
+    byStatus: ['Aguardando', 'Producao', 'Envio', 'Concluido', 'Cancelado'].map(status => ({ status, count: mockOrders.filter(item => item.status === status).length })),
+    byMarketplace: [...marketplaceTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })),
+    daily: [...dailyTotals.values()].sort((a, b) => a.key.localeCompare(b.key)),
+    options: { marketplaces: [...new Set(mockOrders.map(item => item.marketplace || 'Sem marketplace'))].sort(), products: [...new Set(mockOrders.map(item => item.product))].sort() }
   }
 }
 
@@ -278,7 +290,7 @@ export const mockSupportRequests: SupportRequest[] = [
   { id: 'mock-support-2', protocolNumber: '1000000000000002', status: 'under_review', supportStatus: 'in_progress', subject: 'Ajuste de assinatura mock', category: 'billing', priority: 'high', requesterRole: 'admin', reason: 'Chamado visual mock.', scope: {}, createdAt: daysAgo(5).toISOString() }
 ]
 
-export const getMockBackupStatus = (): BackupStatus => ({ databaseAvailable: true, export: { enabled: true, format: 'json', excludes: ['tokens', 'secrets'] }, restore: { enabled: false, reason: 'Restore desativado no modo mock visual.' } })
+export const getMockBackupStatus = (): BackupStatus => ({ databaseAvailable: true, export: { enabled: true, format: 'csv', excludes: ['tokens', 'secrets'] }, restore: { enabled: false, reason: 'Restore desativado no modo mock visual.' }, operational: { lastCompletedAt: new Date(Date.now() - 3_600_000).toISOString(), lastStatus: 'completed', history: [{ status: 'completed', startedAt: new Date(Date.now() - 3_660_000).toISOString(), completedAt: new Date(Date.now() - 3_600_000).toISOString() }] } })
 export const getMockIntegrationsOverview = (): IntegrationsOverview => ({ marketplaces: mockAppData.marketplaceIntegrations || [], agents: [{ id: 'agent-1', name: 'Agent Mock Windows', machineName: 'printflow-review', platform: 'windows', status: 'online', lastSeenAt: daysAgo(0).toISOString() }], email: { provider: 'mock', status: 'connected' } })
 export const getMockCalculatorSimulations = (): CalculatorSimulation[] => [{ id: 'calc-1', name: 'Simulacao suporte headset', pricePerKg: 82, weight: 74, durationMinutes: 165, energyEnabled: true, energyRate: 0.92, watts: 90, margin: 35, directCost: 31.4, suggestedPrice: 129.9, snapshot: { demoVisual: true }, createdAt: daysAgo(3).toISOString() }]
 export const getMockPendingProductionMaterial = (): PendingProductionMaterial[] => [{ printJobId: '2', filamentId: '2', filamentName: 'PLA Branco', title: 'Mascara cosplay', reservedGrams: 320, consumptionGrams: 280, lastError: '', updatedAt: daysAgo(1).toISOString() }]

@@ -1,18 +1,26 @@
 param(
   [string]$ApiUrl = "https://printflow-api-4y5l.onrender.com",
   [string]$TaskName = "PrintFlowAgent",
+  [string]$HostExecutable = "",
   [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
 
 $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$scriptPath = Join-Path $agentRoot "scripts\start-windows-agent-tray.ps1"
 $logPath = Join-Path $agentRoot "logs"
 
+if (-not $HostExecutable) {
+  $HostExecutable = Join-Path $agentRoot "host\PrintFlowAgentHost.exe"
+}
+
+if (-not (Test-Path -LiteralPath $HostExecutable)) {
+  throw "Host nativo do PrintFlow Agent nao encontrado: $HostExecutable"
+}
+
 $action = New-ScheduledTaskAction `
-  -Execute "powershell.exe" `
-  -Argument "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -ApiUrl `"$ApiUrl`""
+  -Execute $HostExecutable `
+  -Argument "--api-url `"$ApiUrl`""
 
 $trigger = New-ScheduledTaskTrigger `
   -AtLogOn `

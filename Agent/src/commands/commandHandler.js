@@ -23,6 +23,7 @@ import {
 } from '../storage/printerCredentials.js'
 
 import { prepareProductionJobSlicing } from '../slicing/prepareProductionJob.js'
+import { recordOperationalMetric } from '../runtime/operationalMetrics.js'
 
 const allowedPrintFormatsByProtocol = {
   bambu:
@@ -76,6 +77,14 @@ const assertPrintFileFormat = (
   }
 }
 
+const assertBambuPrintArtifact = (printer, job) => {
+  if (normalizeText(printer?.protocol) !== 'bambu') return
+  const format = normalizeText(job?.printFile?.format)
+  if (format === '3mf' && !job?.printFile?.slicingArtifactStorageKey && !job?.slicingArtifactStorageKey) {
+    throw new Error('Arquivo 3MF ainda nao foi fatiado. Prepare o G-code antes de iniciar na Bambu.')
+  }
+}
+
 const getOptionsWithStoredCredentials =
   async (
     printer,
@@ -94,7 +103,8 @@ const getOptionsWithStoredCredentials =
 
 const ensurePrinterConnection =
   async (
-    printer
+    printer,
+    operations
   ) => {
     if (
       hasActiveConnection(
@@ -107,21 +117,27 @@ const ensurePrinterConnection =
       }
     }
 
-    const options =
-      await loadPrinterCredentials(
-        printer
-      )
-
-    const connection =
-      await connectPrinter(
-        printer,
-        options
-      )
-
-    return {
-      reconnected:
-        true,
-      connection
+    const startedAt = Date.now()
+    let failed = false
+    try {
+      const options = await loadPrinterCredentials(printer)
+      const connection = await connectPrinter(printer, options)
+      return {
+        reconnected:
+          true,
+        connection
+      }
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
+      recordOperationalMetric({
+        operations,
+        category: 'printer_reconnection',
+        key: printer?.protocol || 'unknown',
+        durationMs: Date.now() - startedAt,
+        failed
+      })
     }
   }
 
@@ -160,15 +176,38 @@ export const handleCommand = async (
     command.type ===
     'discover_printers'
   ) {
-    const discovery =
-      await discoverPrintersWithDiagnostics()
-
-    return {
-      success: true,
-      printers:
-        discovery.printers,
-      diagnostics:
-        discovery.diagnostics
+    const startedAt = Date.now()
+    let failed = false
+    try {
+      const timeoutMs = Number(process.env.PRINTFLOW_AGENT_DISCOVERY_TIMEOUT_MS || 120_000)
+      const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs >= 1_000 && timeoutMs <= 600_000
+        ? timeoutMs
+        : 120_000
+      const signal = context.signal
+        ? AbortSignal.any([context.signal, AbortSignal.timeout(boundedTimeoutMs)])
+        : AbortSignal.timeout(boundedTimeoutMs)
+      const discovery = await discoverPrintersWithDiagnostics({
+        signal,
+        onPrinterDiscovered: context.onDiscoveryProgress
+      })
+      return {
+        success: true,
+        printers:
+          discovery.printers,
+        diagnostics:
+          discovery.diagnostics
+      }
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
+      recordOperationalMetric({
+        operations: context.operations,
+        category: 'discovery',
+        key: 'network',
+        durationMs: Date.now() - startedAt,
+        failed
+      })
     }
   }
 
@@ -239,11 +278,19 @@ export const handleCommand = async (
           commandOptions
         )
 
-      const connection =
-        await connectPrinter(
-          printer,
-          options
-        )
+      const startedAt = Date.now()
+      let connection
+      try {
+        connection = await connectPrinter(printer, options)
+      } finally {
+        recordOperationalMetric({
+          operations: context.operations,
+          category: 'printer_connection',
+          key: printer.protocol,
+          durationMs: Date.now() - startedAt,
+          failed: !connection
+        })
+      }
 
       await savePrinterCredentials(
         printer,
@@ -501,9 +548,12 @@ export const handleCommand = async (
         job
       )
 
-      await ensurePrinterConnection(
-        printer
+      assertBambuPrintArtifact(
+        printer,
+        job
       )
+
+      await ensurePrinterConnection(printer, context.operations)
 
       let pinnedFilePath =
         null
@@ -629,9 +679,7 @@ export const handleCommand = async (
         'Consultando status da impressora...'
       )
 
-      await ensurePrinterConnection(
-        printer
-      )
+      await ensurePrinterConnection(printer, context.operations)
 
       const status =
         await getPrinterStatus(
@@ -694,9 +742,7 @@ export const handleCommand = async (
         'Pausando impressao...'
       )
 
-      await ensurePrinterConnection(
-        printer
-      )
+      await ensurePrinterConnection(printer, context.operations)
 
       const result =
         await pausePrinter(
@@ -756,9 +802,7 @@ export const handleCommand = async (
         'Retomando impressao...'
       )
 
-      await ensurePrinterConnection(
-        printer
-      )
+      await ensurePrinterConnection(printer, context.operations)
 
       const result =
         await resumePrinter(
@@ -818,9 +862,7 @@ export const handleCommand = async (
         'Cancelando impressao...'
       )
 
-      await ensurePrinterConnection(
-        printer
-      )
+      await ensurePrinterConnection(printer, context.operations)
 
       const result =
         await cancelPrinter(

@@ -160,7 +160,7 @@ const cancel = () => {
             </button>
           </div>
           <div class="form-grid marketplace-section__fields">
-            <div class="field col-5" data-field="name" :class="{'field--error':errors.name}"><label>Nome no PrintFlow <b>*</b></label><input v-model="form.name"><small v-if="errors.name" class="field__error">{{ errors.name }}</small></div>
+            <div class="field col-5" data-field="name" :class="{'field--error':errors.name}"><label>Nome no Filamind <b>*</b></label><input v-model="form.name"><small v-if="errors.name" class="field__error">{{ errors.name }}</small></div>
             <div class="field col-2"><label>Sigla</label><input v-model="form.short" maxlength="2"></div>
             <div class="field col-2"><label>Cor</label><input v-model="form.color" type="color"></div>
             <div class="field col-3"><label>Status do canal</label><select v-model="form.active"><option :value="true">Ativo</option><option :value="false">Inativo</option></select></div>

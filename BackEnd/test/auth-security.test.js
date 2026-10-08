@@ -41,9 +41,13 @@ class MockRequest extends Readable {
 }
 
 class MockResponse extends EventEmitter {
+  setHeader(name, value) {
+    this.headers = { ...this.headers, [name]: value }
+  }
+
   writeHead(status, headers) {
     this.statusCode = status
-    this.headers = headers
+    this.headers = { ...this.headers, ...headers }
   }
 
   end(chunk) {
@@ -52,7 +56,7 @@ class MockResponse extends EventEmitter {
   }
 }
 
-const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAgent, forwardedFor, trustedClientIp }) => new Promise((resolve) => {
+const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAgent, forwardedFor, trustedClientIp, requestId }) => new Promise((resolve) => {
   const req = new MockRequest({
     method,
     path,
@@ -63,6 +67,7 @@ const request = ({ method = 'GET', path, body, ip, token, origin, cookie, userAg
       ...(origin ? { origin } : {}),
       ...(cookie ? { cookie } : {}),
       ...(userAgent ? { 'user-agent': userAgent } : {}),
+      ...(requestId ? { 'x-request-id': requestId } : {}),
       ...(forwardedFor ? { 'x-forwarded-for': forwardedFor } : {}),
       ...(trustedClientIp ? { 'cf-connecting-ip': trustedClientIp } : {})
     }
@@ -224,33 +229,14 @@ test('access token contem apenas os dados minimos de sessao e permissao', () => 
   assert.equal(payload.email, undefined)
 })
 
-test('alteracao de senha exige a senha atual e invalida as sessoes anteriores', async () => {
-  const session = await registerSession('troca-senha', '127.10.0.211')
-
-  const rejected = await request({
+test('rota legada nao permite contornar a confirmacao de troca por e-mail', async () => {
+  const session = await registerSession('troca-senha-legada', '127.10.0.211')
+  const response = await request({
     method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.10.0.212',
-    body: { currentPassword: 'SenhaIncorreta1!', newPassword: 'NovaSenhaForte1!' }
-  })
-  assert.equal(rejected.status, 400)
-  assert.equal(rejected.body.error, 'Senha atual invalida.')
-
-  const changed = await request({
-    method: 'POST', path: '/api/auth/change-password', token: session.accessToken, ip: '127.10.0.213',
     body: { currentPassword: 'SenhaForte1!', newPassword: 'NovaSenhaForte1!' }
   })
-  assert.equal(changed.status, 200)
-  assert.ok(changed.body.accessToken)
-  assert.notEqual(changed.body.accessToken, session.accessToken)
-
-  const oldSession = await request({ method: 'GET', path: '/api/auth/me', token: session.accessToken, ip: '127.10.0.214' })
-  assert.equal(oldSession.status, 401)
-  const currentSession = await request({ method: 'GET', path: '/api/auth/me', token: changed.body.accessToken, ip: '127.10.0.215' })
-  assert.equal(currentSession.status, 200)
-
-  const oldPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.10.0.216', body: { email: session.user.email, password: 'SenhaForte1!' } })
-  assert.equal(oldPassword.status, 400)
-  const newPassword = await request({ method: 'POST', path: '/api/auth/login', ip: '127.10.0.217', body: { email: session.user.email, password: 'NovaSenhaForte1!' } })
-  assert.equal(newPassword.status, 200)
+  assert.equal(response.status, 404)
+  assert.equal((await request({ method: 'POST', path: '/api/auth/login', ip: '127.10.0.213', body: { email: session.user.email, password: 'SenhaForte1!' } })).status, 200)
 })
 
 test('auditoria de recursos registra somente campos seguros alterados', () => {
@@ -293,7 +279,7 @@ test('relatorio CSV de auditoria preserva o contexto seguro e escapa celulas', (
     }]
   })
 
-  assert.match(csv, /^\ufeff"Relatorio de auditoria PrintFlow"/)
+  assert.match(csv, /^\ufeff"Relatorio de auditoria Filamind"/)
   assert.match(csv, /"Empresa ""Teste"""/)
   assert.match(csv, /"Produto atualizado"/)
   assert.match(csv, /"products.updated"/)
@@ -410,6 +396,45 @@ test('resumo financeiro exclui vendas canceladas e conserva total cancelado', as
   assert.equal(summary.body.byStatus.find((item) => item.status === 'Cancelado').count, 1)
 })
 
+test('requisicoes devolvem um request ID seguro para correlacionar logs', async () => {
+  const session = await registerSession('request-id', '127.0.8.1')
+  const accepted = await request({ path: '/api/auth/me', token: session.accessToken, requestId: 'trace-abc-123' })
+  assert.equal(accepted.status, 200)
+  assert.equal(accepted.headers['X-Request-Id'], 'trace-abc-123')
+
+  const replaced = await request({ path: '/api/auth/me', token: session.accessToken, requestId: 'trace id com espaço' })
+  assert.equal(replaced.status, 200)
+  assert.match(replaced.headers['X-Request-Id'], /^[0-9a-f]{8}-[0-9a-f-]{27}$/i)
+})
+
+test('dashboard agregado exige autenticacao e retorna contrato resumido', async () => {
+  const denied = await request({ method: 'GET', path: '/api/dashboard-summary' })
+  assert.equal(denied.status, 401)
+
+  const session = await registerSession('dashboard-summary', '127.0.5.14')
+  const response = await request({ method: 'GET', path: '/api/dashboard-summary', token: session.accessToken })
+  assert.equal(response.status, 200)
+  assert.equal(typeof response.body.totals.revenue, 'number')
+  assert.equal(response.body.monthlyRevenue.length, 12)
+  assert.equal(response.body.monthlyExpenses.length, 12)
+  assert.equal(response.body.monthlyOrders.length, 12)
+  assert.ok(Array.isArray(response.body.productPerformance))
+  assert.ok(Array.isArray(response.body.queuePrinters))
+  assert.equal(response.body.orders, undefined)
+  assert.equal(response.body.expenses, undefined)
+  assert.equal(response.body.printJobs, undefined)
+})
+
+test('relatorio agregado exige autenticacao e explicita a dependencia de banco real', async () => {
+  const denied = await request({ method: 'GET', path: '/api/reports/summary?from=2026-01-01&to=2026-12-31' })
+  assert.equal(denied.status, 401)
+
+  const session = await registerSession('report-summary', '127.0.5.16')
+  const response = await request({ method: 'GET', path: '/api/reports/summary?from=2026-01-01&to=2026-12-31', token: session.accessToken })
+  assert.equal(response.status, 501)
+  assert.match(response.body.error, /banco de dados/i)
+})
+
 test('edicao generica nao permite pular a etapa operacional do pedido', async () => {
   const session = await registerSession('edicao-etapa-pedido', '127.0.5.15')
   const created = await request({
@@ -444,13 +469,13 @@ test('sessoes mostram metadados minimos sem expor o IP completo', async () => {
     path: '/api/auth/sessions',
     token: session.accessToken,
     ip: '10.20.30.40',
-    userAgent: 'PrintFlow Test Browser/1.0'
+    userAgent: 'Filamind Test Browser/1.0'
   })
 
   assert.equal(response.status, 200)
   const current = response.body.find((item) => item.sessionId)
   assert.equal(current.ipMasked, '10.20.30.0')
-  assert.equal(current.deviceLabel, 'PrintFlow Test Browser/1.0')
+  assert.equal(current.deviceLabel, 'Filamind Test Browser/1.0')
   assert.ok(current.lastSeenAt)
 })
 

@@ -318,6 +318,34 @@ export const migrate =
       `
     )
 
+    await query(`alter table users add column if not exists google_subject text`)
+    await query(`create unique index if not exists users_google_subject_unique on users (google_subject) where google_subject is not null`)
+
+    await query(
+      `
+        alter table users
+        add column if not exists
+          platform_role
+          text
+          not null
+          default ''
+      `
+    )
+
+    await query(
+      `
+        update users
+           set platform_role = case
+             when role = 'platform_super_admin' then 'platform_super_admin'
+             else ''
+           end
+         where platform_role is distinct from case
+             when role = 'platform_super_admin' then 'platform_super_admin'
+             else ''
+           end
+      `
+    )
+
     await query(
       `
         create index if not exists
@@ -455,9 +483,6 @@ export const migrate =
     `)
     await query(`alter table platform_plans add column if not exists mercado_pago_monthly_plan_id text not null default ''`)
     await query(`alter table platform_plans add column if not exists mercado_pago_yearly_plan_id text not null default ''`)
-    await query(`alter table platform_plans add column if not exists stripe_product_id text not null default ''`)
-    await query(`alter table platform_plans add column if not exists stripe_monthly_price_id text not null default ''`)
-    await query(`alter table platform_plans add column if not exists stripe_yearly_price_id text not null default ''`)
     await query(`alter table platform_plans add column if not exists trial_days integer not null default 7`)
     await query(`alter table platform_plans add column if not exists yearly_enabled boolean not null default false`)
     await query(`alter table platform_plans drop constraint if exists platform_plans_trial_days_check`)
@@ -595,7 +620,7 @@ export const migrate =
       on conflict (code) do nothing
     `)
     await query(`update platform_plans set name = 'FREE', description = 'Organize sua operação com gestão manual dentro dos limites do plano.', monthly_reference_price = 0, yearly_reference_price = 0, limits = '{"clients":20,"products":10,"ordersMonthly":15,"printers":1,"filaments":5,"goals":1}'::jsonb, features = '{"coreOperations":true,"marketplaces":false,"advancedReports":false,"manualPrinters":true,"agent":false,"team":false}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'free'`)
-    await query(`update platform_plans set name = 'PRO', description = 'Conecte e automatize sua produção.', stripe_product_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_product_id end, stripe_monthly_price_id = case when monthly_reference_price <> 19.90 or yearly_reference_price <> 199.90 then '' else stripe_monthly_price_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"manualPrinters":true,"agent":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'starter'`)
+    await query(`update platform_plans set name = 'PRO', description = 'Conecte e automatize sua produção.', mercado_pago_monthly_plan_id = case when monthly_reference_price <> 19.90 then '' else mercado_pago_monthly_plan_id end, mercado_pago_yearly_plan_id = case when yearly_reference_price <> 199.90 then '' else mercado_pago_yearly_plan_id end, monthly_reference_price = 19.90, yearly_reference_price = 199.90, limits = '{"users":8}'::jsonb, features = '{"coreOperations":true,"marketplaces":true,"advancedReports":true,"manualPrinters":true,"agent":true,"team":true,"prioritySupport":true}'::jsonb, trial_days = 0, yearly_enabled = false, active = true, updated_at = now() where code = 'starter'`)
     await query(`update platform_plans set active = false, updated_at = now() where code in ('growth', 'scale')`)
 
     await query(`
@@ -3189,6 +3214,7 @@ export const migrate =
     )
 
     await query(`alter table agent_commands add column if not exists accepted_at timestamptz`)
+    await query(`alter table agent_commands add column if not exists progress jsonb`)
     await query(`alter table agent_commands add column if not exists lease_expires_at timestamptz`)
     await query(`alter table agent_commands add column if not exists attempt integer not null default 0`)
     await query(`create index if not exists agent_commands_lease_idx on agent_commands (tenant_id, agent_id, status, lease_expires_at)`)
@@ -3197,6 +3223,7 @@ export const migrate =
     await query(`alter table agents add column if not exists pending_credential_version integer`)
     await query(`alter table agents add column if not exists pending_secret_expires_at timestamptz`)
     await query(`alter table agents add column if not exists secret_rotated_at timestamptz`)
+    await query(`alter table agents add column if not exists runtime_health jsonb`)
 
     // Production Job and slicing metrics are additive so existing jobs remain compatible.
     await query(`alter table print_jobs add column if not exists slicer_profile_id text`)

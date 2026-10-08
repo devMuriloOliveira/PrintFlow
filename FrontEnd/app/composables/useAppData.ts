@@ -29,7 +29,8 @@ export type PrintJob = {
   printFileName?: string; printFileFormat?: string; validationStatus?: string; validationMessage?: string;
   agentLastStatus?: Record<string, unknown>; source: string; title: string; quantity: number; priority: number;
   status: string; notes?: string; scheduledAt?: string | null; startedAt?: string | null; completedAt?: string | null;
-  cancelledAt?: string | null; createdAt?: string | null; updatedAt?: string | null
+  cancelledAt?: string | null; createdAt?: string | null; updatedAt?: string | null;
+  estimatedPrintSeconds?: number | null; attempts?: Array<{ attemptNo: number; status: string; errorCode?: string; createdAt?: string; completedAt?: string | null }>
 }
 
 export type Product = {
@@ -102,7 +103,7 @@ export type Client = {
   name: string; email: string; phone: string; type?: string; document?: string; zip?: string; address?: string; number?: string; complement?: string; district?: string; city?: string; state?: string; origin?: string; notes?: string; tags?: string; status?: string; orders: number; revenue: number; ticket: number; last: string
 }
 
-export type StripeBillingSummary = {
+export type MercadoPagoBillingSummary = {
   configured: boolean;
   environment: 'sandbox' | 'production';
   plans: Array<{ id: string; code: string; name: string; description: string; monthly: number; yearly: number; monthlyEnabled: boolean; yearlyEnabled: boolean }>;
@@ -136,6 +137,50 @@ export type AppData = {
   settings?: Record<string, unknown> | null
 }
 
+export type SubscriptionAccess = {
+  planCode: string;
+  status: string;
+  mode: 'full' | 'read_only';
+  features: Record<string, boolean>;
+  limits: Record<string, number>;
+  usage: Record<string, { used: number; limit: number }>;
+}
+
+export type DashboardSummary = {
+  totals: { revenue: number; netRevenue: number; profit: number; fees: number; shipping: number; manualExpenses: number; recipeCost: number; expenseTotal: number; orderCount: number; ticket: number; margin: number }
+  monthlyRevenue: number[]
+  monthlyExpenses: number[]
+  monthlyOrders: number[]
+  expenseSegments: ChartSegment[]
+  productPerformance: Array<{ id: string; name: string; sku: string; thumb: string; margin: number; sales: number; orderProfit: number }>
+  goals: Goal[]
+  jobCounts: { active: number; queued: number; occupiedPrinters: number }
+  printerCount: number
+  queuePrinters: Array<{ id: string; name: string; code: string; queued: number; progress: number; activeJob: null | { title?: string; productName?: string; agentLastStatus?: Record<string, unknown> } }>
+  maintenancePrinters: Array<{ name: string }>
+  offlinePrinters: Array<{ name: string }>
+  overdueOrders: Array<{ id: string }>
+  integrationErrors: Array<{ name: string }>
+  onboarding: { companyConfigured: boolean; productCount: number; printerMode: '' | 'manual' | 'agent' }
+  orderStages: { awaiting: number; production: number; shipping: number; completed: number }
+  lowStockItems: Array<{ id: string; name: string; remaining: number; minStock: number }>
+  pendingOrders: Array<{ id: string }>
+}
+
+export type ReportSummary = {
+  filters: { from: string; to: string; grouping: 'day' | 'week' | 'month'; section: 'financeiro' | 'produtos'; marketplace: string; product: string; category: string; channel: string; limit: number; offset: number }
+  totals: { revenue: number; netRevenue: number; fees: number; shipping: number; registeredProfit: number; expenses: number; profit: number; estimatedCurrentCost: number; orderCount: number; itemCount: number; ticket: number; productsCount: number }
+  series: Array<{ key: string; revenue: number; expenses: number; profit: number }>
+  marketplaces: Array<{ name: string; value: number }>
+  channels: Array<{ channel: string; orders: number; revenue: number; profit: number }>
+  clients: Array<{ id: string; name: string; orders: number; revenue: number; profit: number }>
+  productionCostComparison: { jobCount: number; estimatedCurrentRateCost: number; actualRecordedCost: number; variance: number }
+  expenseCategories: Array<{ label: string; total: number }>
+  products: Array<{ name: string; sku?: string; thumb?: string; orders: number; quantity: number; revenue: number; profit: number }>
+  sales: { items: Order[]; total: number; limit: number; offset: number }
+  options: { marketplaces: string[]; products: string[]; categories: string[] }
+}
+
 const emptyData = (): AppData => ({
   products: [],
   orders: [],
@@ -151,6 +196,138 @@ const emptyData = (): AppData => ({
   goals: [],
   settings: null
 })
+
+export const emptyDashboardSummary = (): DashboardSummary => ({
+  totals: { revenue: 0, netRevenue: 0, profit: 0, fees: 0, shipping: 0, manualExpenses: 0, recipeCost: 0, expenseTotal: 0, orderCount: 0, ticket: 0, margin: 0 },
+  monthlyRevenue: Array(12).fill(0), monthlyExpenses: Array(12).fill(0), monthlyOrders: Array(12).fill(0),
+  expenseSegments: [], productPerformance: [], goals: [],
+  jobCounts: { active: 0, queued: 0, occupiedPrinters: 0 }, printerCount: 0, queuePrinters: [], maintenancePrinters: [], offlinePrinters: [], overdueOrders: [], integrationErrors: [],
+  onboarding: { companyConfigured: false, productCount: 0, printerMode: '' },
+  orderStages: { awaiting: 0, production: 0, shipping: 0, completed: 0 }, lowStockItems: [], pendingOrders: []
+})
+
+export const emptyReportSummary = (params: Record<string, any> = {}): ReportSummary => ({
+  filters: { from: String(params.from || ''), to: String(params.to || ''), grouping: ['day', 'week'].includes(params.grouping) ? params.grouping : 'month', section: params.section === 'produtos' ? 'produtos' : 'financeiro', marketplace: String(params.marketplace || ''), product: String(params.product || ''), category: String(params.category || ''), channel: String(params.channel || ''), limit: Number(params.limit || 50), offset: Number(params.offset || 0) },
+  totals: { revenue: 0, netRevenue: 0, fees: 0, shipping: 0, registeredProfit: 0, expenses: 0, profit: 0, estimatedCurrentCost: 0, orderCount: 0, itemCount: 0, ticket: 0, productsCount: 0 },
+  series: [], marketplaces: [], channels: [], clients: [],
+  productionCostComparison: { jobCount: 0, estimatedCurrentRateCost: 0, actualRecordedCost: 0, variance: 0 },
+  expenseCategories: [], products: [],
+  sales: { items: [], total: 0, limit: Number(params.limit || 50), offset: Number(params.offset || 0) },
+  options: { marketplaces: [], products: [], categories: [] }
+})
+
+const mockReportSummary = (source: AppData, params: Record<string, any> = {}): ReportSummary => {
+  const result = emptyReportSummary(params)
+  const from = new Date(`${result.filters.from || '1970-01-01'}T00:00:00`)
+  const to = new Date(`${result.filters.to || '2999-12-31'}T23:59:59`)
+  const parseDate = (value: string) => { const parts = String(value || '').split('/'); const date = parts.length === 3 ? new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00`) : new Date(value); return Number.isNaN(date.getTime()) ? null : date }
+  const productsById = new Map(source.products.map(product => [String(product.id || ''), product]))
+  const productsByName = new Map(source.products.map(product => [product.name, product]))
+  const sales = source.orders.filter(order => {
+    const date = parseDate(order.date)
+    return Boolean(date && date >= from && date <= to && order.status !== 'Cancelado'
+      && (!result.filters.marketplace || (order.marketplace || 'Sem marketplace') === result.filters.marketplace)
+      && (!result.filters.product || order.product === result.filters.product)
+      && (!result.filters.channel || order.salesChannel === result.filters.channel))
+  }).sort((a, b) => Number(parseDate(b.date)) - Number(parseDate(a.date)))
+  const expenses = source.expenses.filter(expense => {
+    const date = parseDate(expense.date)
+    return Boolean(date && date >= from && date <= to && expense.status !== 'Cancelado' && (!result.filters.category || expense.category === result.filters.category))
+  })
+  const periodKey = (date: Date) => {
+    if (result.filters.grouping === 'week') { const monday = new Date(date); monday.setDate(date.getDate() - ((date.getDay() + 6) % 7)); return monday.toISOString().slice(0, 10) }
+    if (result.filters.grouping === 'day') return date.toISOString().slice(0, 10)
+    return `${date.toISOString().slice(0, 7)}-01`
+  }
+  const series = new Map<string, { revenue: number; expenses: number; profit: number }>()
+  const marketplaceTotals = new Map<string, number>(), expenseTotals = new Map<string, number>(), productTotals = new Map<string, { orders: number; quantity: number; revenue: number; profit: number }>()
+  for (const order of sales) {
+    const revenue = Number(order.gross || 0), profit = Number(order.profit || 0), quantity = Number(order.qty || 0)
+    result.totals.revenue += revenue; result.totals.netRevenue += Number(order.net || 0); result.totals.fees += Number(order.fee || 0); result.totals.shipping += Number(order.shipping || 0); result.totals.registeredProfit += profit; result.totals.orderCount += 1; result.totals.itemCount += quantity
+    const product = productsById.get(String(order.productId || '')) || productsByName.get(order.product); result.totals.estimatedCurrentCost += Number(product?.cost || 0) * quantity
+    const date = parseDate(order.date); if (date) { const key = periodKey(date); const row = series.get(key) || { revenue: 0, expenses: 0, profit: 0 }; row.revenue += revenue; row.profit += profit; series.set(key, row) }
+    const marketplace = order.marketplace || 'Sem marketplace'; marketplaceTotals.set(marketplace, (marketplaceTotals.get(marketplace) || 0) + revenue)
+    const row = productTotals.get(order.product) || { orders: 0, quantity: 0, revenue: 0, profit: 0 }; row.orders += 1; row.quantity += quantity; row.revenue += revenue; row.profit += profit; productTotals.set(order.product, row)
+  }
+  for (const expense of expenses) { const value = Number(expense.value || 0); result.totals.expenses += value; expenseTotals.set(expense.category, (expenseTotals.get(expense.category) || 0) + value); const date = parseDate(expense.date); if (date) { const key = periodKey(date); const row = series.get(key) || { revenue: 0, expenses: 0, profit: 0 }; row.expenses += value; row.profit -= value; series.set(key, row) } }
+  result.totals.profit = result.totals.registeredProfit - result.totals.expenses
+  result.totals.ticket = result.totals.orderCount ? result.totals.revenue / result.totals.orderCount : 0
+  result.totals.productsCount = source.products.length
+  result.series = [...series.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, row]) => ({ key, ...row }))
+  result.marketplaces = [...marketplaceTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }))
+  result.expenseCategories = [...expenseTotals.entries()].sort((a, b) => b[1] - a[1]).map(([label, total]) => ({ label, total }))
+  result.products = [...productTotals.entries()].map(([name, totals]) => ({ name, sku: productsByName.get(name)?.sku, thumb: productsByName.get(name)?.thumb, ...totals })).sort((a, b) => b.revenue - a.revenue)
+  result.sales = { items: sales.slice(result.filters.offset, result.filters.offset + result.filters.limit), total: sales.length, limit: result.filters.limit, offset: result.filters.offset }
+  result.options = { marketplaces: [...new Set(source.orders.map(item => item.marketplace || 'Sem marketplace'))].sort(), products: source.products.map(item => item.name).sort(), categories: [...new Set(source.expenses.map(item => item.category))].sort() }
+  return result
+}
+
+const mockDashboardSummary = (source: AppData): DashboardSummary => {
+  const summary = emptyDashboardSummary()
+  const productsById = new Map<string, Product>(), productsByName = new Map<string, Product>()
+  for (const product of source.products) {
+    if (product.id && !productsById.has(String(product.id))) productsById.set(String(product.id), product)
+    if (!productsByName.has(product.name)) productsByName.set(product.name, product)
+  }
+  const performance = new Map<string, { sales: number; profit: number }>()
+  const month = (value: string) => { const parts = String(value || '').split('/').map(Number); const result = parts.length >= 2 ? parts[1] : Number(String(value || '').slice(5, 7)); return result >= 1 && result <= 12 ? result - 1 : -1 }
+  const awaitingOrderStatuses = new Set(['Novo', 'Pendente', 'Aguardando', 'Aguardando confirmação', 'Aguardando confirmacao'])
+  const activeOrderStatuses = new Set(['Produção', 'Producao', 'Em producao', 'Impresso', 'Embalando'])
+  const shippingOrderStatuses = new Set(['Enviado', 'Envio'])
+  const completedOrderStatuses = new Set(['Entregue', 'Concluido', 'Concluído'])
+  for (const order of source.orders) {
+    const status = String(order.status || '')
+    if (status !== 'Cancelado') {
+      const quantity = Number(order.qty || 0)
+      summary.totals.revenue += Number(order.gross || 0); summary.totals.netRevenue += Number(order.net || 0); summary.totals.profit += Number(order.profit || 0)
+      summary.totals.fees += Number(order.fee || 0); summary.totals.shipping += Number(order.shipping || 0); summary.totals.orderCount += 1
+      const product = productsById.get(String(order.productId || '')) || productsByName.get(order.product)
+      summary.totals.recipeCost += Number(product?.cost || 0) * quantity
+      const monthIndex = month(order.date)
+      if (monthIndex >= 0) { summary.monthlyRevenue[monthIndex] += Number(order.gross || 0); summary.monthlyOrders[monthIndex] += quantity || 1 }
+      const item = performance.get(order.product) || { sales: 0, profit: 0 }; item.sales += quantity; item.profit += Number(order.profit || 0); performance.set(order.product, item)
+    }
+    if (awaitingOrderStatuses.has(status)) summary.orderStages.awaiting += 1
+    if (activeOrderStatuses.has(status)) summary.orderStages.production += 1
+    if (shippingOrderStatuses.has(status)) summary.orderStages.shipping += 1
+    if (completedOrderStatuses.has(status)) summary.orderStages.completed += 1
+  }
+  summary.totals.ticket = summary.totals.orderCount ? summary.totals.revenue / summary.totals.orderCount : 0
+  summary.totals.margin = summary.totals.revenue ? summary.totals.profit / summary.totals.revenue * 100 : 0
+  const categories = new Map<string, number>()
+  for (const expense of source.expenses) { const value = Number(expense.value || 0); summary.totals.manualExpenses += value; categories.set(expense.category, (categories.get(expense.category) || 0) + value); const monthIndex = month(expense.date); if (monthIndex >= 0) summary.monthlyExpenses[monthIndex] += value }
+  summary.totals.expenseTotal = summary.totals.manualExpenses + summary.totals.fees + summary.totals.shipping + summary.totals.recipeCost
+  const colors = ['#1768f2', '#29b6c8', '#f59e0b', '#fb923c', '#c83bb7', '#7d8799']
+  summary.expenseSegments = [...categories.entries()].sort((a, b) => b[1] - a[1]).map(([label, value], index) => ({ label, value: summary.totals.manualExpenses ? Number((value / summary.totals.manualExpenses * 100).toFixed(1)) : 0, color: colors[index % colors.length] }))
+  summary.productPerformance = source.products.map(product => { const item = performance.get(product.name) || { sales: 0, profit: 0 }; return { id: String(product.id || ''), name: product.name, sku: product.sku, thumb: product.thumb, margin: Number(product.margin || 0), sales: item.sales, orderProfit: item.profit } }).sort((a, b) => b.orderProfit - a.orderProfit)
+  summary.goals = source.goals || []
+  const settings = source.settings && typeof source.settings === 'object' ? source.settings : null
+  const preferences = settings?.preferences && typeof settings.preferences === 'object' ? settings.preferences as Record<string, unknown> : {}
+  const printerMode = String(preferences.onboardingPrinterMode || '')
+  summary.onboarding = {
+    companyConfigured: Boolean(settings && String(settings.name || '').trim() && String(settings.email || '').trim()),
+    productCount: source.products.length,
+    printerMode: printerMode === 'manual' || printerMode === 'agent' ? printerMode : ''
+  }
+  const activeJobs = source.printJobs.filter(job => ['starting', 'printing', 'paused'].includes(String(job.status || '')))
+  const queuedJobs = source.printJobs.filter(job => ['queued', 'awaiting_confirmation'].includes(String(job.status || '')))
+  summary.jobCounts = { active: activeJobs.length, queued: queuedJobs.length, occupiedPrinters: new Set(activeJobs.map(job => String(job.printerId || '')).filter(Boolean)).size }
+  summary.printerCount = source.printers.length
+  const activeByPrinter = new Map<string, PrintJob>(), queuedByPrinter = new Map<string, number>()
+  for (const job of activeJobs) { const id = String(job.printerId || ''); if (!activeByPrinter.has(id)) activeByPrinter.set(id, job) }
+  for (const job of queuedJobs) { const id = String(job.printerId || ''); queuedByPrinter.set(id, (queuedByPrinter.get(id) || 0) + 1) }
+  summary.queuePrinters = source.printers.map(printer => { const id = String(printer.id || ''); const activeJob = activeByPrinter.get(id) || null; return { id, name: printer.name, code: printer.code, activeJob, queued: queuedByPrinter.get(id) || 0, progress: Number((activeJob?.agentLastStatus as any)?.progress || 0) } }).sort((a, b) => Number(Boolean(b.activeJob)) - Number(Boolean(a.activeJob)) || b.queued - a.queued).slice(0, 5)
+  summary.maintenancePrinters = source.printers.filter(printer => /manuten[cç]/i.test(String(printer.status || ''))).map(printer => ({ name: printer.name }))
+  summary.offlinePrinters = source.printers.filter(printer => /offline|desconect/i.test(`${printer.status || ''} ${printer.agentPrinterStatus || ''}`)).map(printer => ({ name: printer.name }))
+  const now = Date.now()
+  const orderTimestamp = (value: string) => { const parts = String(value || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); const parsed = parts ? new Date(`${parts[3]}-${parts[2]}-${parts[1]}T12:00:00`).getTime() : new Date(value).getTime(); return Number.isFinite(parsed) ? parsed : now }
+  summary.overdueOrders = source.orders.filter(order => !['Cancelado', 'Entregue', 'Concluido', 'Concluído'].includes(String(order.status || '')) && now - orderTimestamp(order.date) > 7 * 86400000).slice(0, 3).map(order => ({ id: order.id }))
+  summary.integrationErrors = (source.marketplaceIntegrations || []).filter(integration => integration.status === 'error' || integration.lastError).slice(0, 3).map(integration => ({ name: integration.connectionName || integration.platform || 'Marketplace' }))
+  summary.lowStockItems = source.filaments.filter(filament => Number(filament.remaining || 0) <= Number(filament.minStock ?? 300)).map(filament => ({ id: String(filament.id || ''), name: filament.name, remaining: Number(filament.remaining || 0), minStock: Number(filament.minStock ?? 300) }))
+  const jobOrders = new Set(source.printJobs.flatMap(job => [String(job.orderId || ''), job.trackedSaleId ? `marketplace:${job.trackedSaleId}` : '']))
+  summary.pendingOrders = source.orders.filter(order => activeOrderStatuses.has(String(order.status || '')) && !jobOrders.has(String(order.dbId || order.id || ''))).slice(0, 3).map(order => ({ id: order.id }))
+  return summary
+}
 
 const currencyCode = (value: unknown) => {
   const setting = String(value || '').toLowerCase()
@@ -174,8 +351,9 @@ export type OrdersPage = {
 
 export type BackupStatus = {
   databaseAvailable: boolean
-  export: { enabled: boolean; format: 'json'; excludes: string[] }
+  export: { enabled: boolean; format: string; excludes: string[] }
   restore: { enabled: false; reason: string }
+  operational: { lastCompletedAt: string | null; lastStatus: string; history: Array<{ status: string; startedAt: string | null; completedAt: string | null }> }
 }
 export type SupportRequest = { id: string; protocolNumber: string; status: string; supportStatus?: 'new' | 'in_progress' | 'waiting_customer' | 'waiting_internal' | 'resolved' | 'reopened'; subject: string; category: string; requestKind?: 'support' | 'privacy'; privacyRight?: string; priority: string; requesterRole: string; reason: string; scope: { entityType?: string; entityId?: string }; responsibleId?: string | null; responsibleName?: string; dueAt?: string | null; supportFirstResponseDueAt?: string | null; supportResolutionDueAt?: string | null; supportReopenUntil?: string | null; supportReopenedAt?: string | null; supportParentRequestId?: string | null; decision?: 'approved' | 'rejected' | null; reviewReason?: string; expiresAt?: string | null; chatOpenedAt?: string | null; chatClosedAt?: string | null; createdAt: string; updatedAt?: string }
 export type SupportMessage = { id: string; senderType: 'requester' | 'support'; body: string; createdAt: string }
@@ -216,29 +394,39 @@ export const useAppData = () => {
 
   const resourceScopeForRoute = () => {
     const path = String(route.path || '')
+    const editingResource = Boolean(route.query.id || route.query.duplicar)
     const scopes: Record<string, string[]> = {
-      '/': ['products', 'orders', 'expenses', 'expenseSegments', 'filaments', 'goals', 'printers', 'printJobs'],
+      '/': ['settings'],
       '/configuracoes': ['settings'],
-      '/clientes': ['clients'],
-      '/vendas': ['orders', 'products', 'printers', 'printJobs', 'clients'],
-      '/produtos': ['products', 'printers', 'filaments'],
-      '/impressoras': ['printers', 'printJobs', 'products', 'filaments'],
-      '/filamentos': ['filaments', 'printJobs', 'products'],
+      '/clientes': path === '/clientes/novo' && !editingResource ? [] : ['clients'],
+      '/vendas': path === '/vendas'
+        ? ['products', 'printers', 'printJobs', 'clients']
+        : path === '/vendas/novo' && !editingResource
+          ? ['products', 'clients']
+          : ['orders', 'products', 'clients'],
+      '/produtos': path === '/produtos/novo' && !editingResource ? ['printers', 'filaments', 'settings'] : ['products', 'printers', 'filaments', 'settings'],
+      '/impressoras': ['/impressoras/nova', '/impressoras/novo'].includes(path)
+        ? ['printers', 'filaments']
+        : ['printers', 'printJobs', 'products', 'filaments'],
+      '/filamentos': path === '/filamentos/novo' && !editingResource ? [] : ['filaments', 'printJobs', 'products'],
       '/estoque': (() => {
+        if (path === '/estoque/registrar-producao') return ['products']
         const section = String(route.query.secao || 'visao')
         if (section === 'filamentos') return ['filaments']
         if (section === 'produtos') return ['products']
         return ['filaments', 'products']
       })(),
-      '/despesas': ['expenses', 'expenseSegments'],
-      '/metas': ['goals'],
-      '/marketplaces': ['marketplaces', 'products'],
-      '/relatorios': (() => {
-        const section = String(route.query.secao || 'financeiro')
-        if (section === 'historico') return []
-        if (section === 'produtos') return ['orders', 'products']
-        return ['orders', 'products', 'expenses', 'expenseSegments']
-      })()
+      '/despesas': ['/despesas/nova', '/despesas/novo'].includes(path) && !editingResource ? [] : ['expenses', 'expenseSegments'],
+      '/metas': ['/metas/nova', '/metas/novo'].includes(path) && !editingResource ? [] : ['goals'],
+      '/marketplaces': path === '/marketplaces/novo' && !editingResource
+        ? []
+        : path === '/marketplaces/novo'
+          ? ['marketplaces']
+          : ['marketplaces', 'products'],
+      '/calculadora-3d': ['filaments', 'printers', 'products', 'marketplaces', 'settings'],
+      '/notificacoes': ['settings'],
+      '/perfil': ['settings'],
+      '/relatorios': []
     }
     const match = Object.entries(scopes).find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))
     return match ? match[1] : null
@@ -271,6 +459,20 @@ export const useAppData = () => {
       goals.value = data.value.goals || []
       return data.value
     }
+    if (scope !== null && scope.length === 0) {
+      const nextData = emptyData()
+      const now = Date.now()
+      data.value = nextData
+      goals.value = []
+      loaded.value = true
+      loadedTenant.value = tenantId.value
+      loadedAt.value = now
+      loadedScope.value = scopeKey
+      scopeCache.value = { ...scopeCache.value, [cacheKey]: { data: nextData, loadedAt: now } }
+      pending.value = false
+      error.value = null
+      return data.value
+    }
     if (!force && loaded.value && loadedTenant.value === tenantId.value && loadedScope.value === scopeKey && Date.now() - loadedAt.value < cacheTtlMs) return data.value
     const inFlight = process.client && !force ? appDataInFlight.get(cacheKey) : null
     if (inFlight) {
@@ -284,7 +486,7 @@ export const useAppData = () => {
         loadedScope.value = scopeKey
         return nextData
       } catch (err) {
-        error.value = err instanceof Error ? err.message : 'NÃ£o foi possÃ­vel carregar os dados.'
+        error.value = err instanceof Error ? err.message : 'Não foi possível carregar os dados.'
         return data.value
       }
     }
@@ -337,6 +539,12 @@ export const useAppData = () => {
   }
 
   const resourceHeaders = () => auth.authHeaders.value
+  const loadDashboardSummary = () => mockEnabled
+    ? Promise.resolve(mockDashboardSummary(cloneMock(mockAppData)))
+    : $fetch<DashboardSummary>(apiUrl('/api/dashboard-summary'), { headers: resourceHeaders() })
+  const loadReportSummary = (params: Record<string, string | number | undefined>) => mockEnabled
+    ? Promise.resolve(mockReportSummary(cloneMock(mockAppData), params))
+    : $fetch<ReportSummary>(apiUrl('/api/reports/summary'), { query: params, headers: resourceHeaders() })
   const setResource = (resource: keyof AppData, list: any[]) => {
     ;(data.value[resource] as any[]) = list
   }
@@ -428,8 +636,8 @@ export const useAppData = () => {
   const enqueuePrintJob = (item: Partial<PrintJob> & Record<string, unknown>) =>
     requestPrintJobAction('/api/print-jobs/enqueue', item, 'Nao foi possivel adicionar na fila.')
 
-  const reorderPrintJob = (id: string, direction: 'up' | 'down') =>
-    requestPrintJobAction(`/api/print-jobs/${id}/reorder`, { direction }, 'Nao foi possivel atualizar a ordem da fila.')
+  const reorderPrintJob = (id: string, direction: 'up' | 'down', targetId = '') =>
+    requestPrintJobAction(`/api/print-jobs/${id}/reorder`, { direction, targetId }, 'Nao foi possivel atualizar a ordem da fila.')
 
   const movePrintJobPrinter = (id: string, printerId: string, agentPrinterId = '') =>
     requestPrintJobAction(`/api/print-jobs/${id}/move-printer`, { printerId, agentPrinterId }, 'Nao foi possivel mover o item da fila.')
@@ -601,7 +809,10 @@ export const useAppData = () => {
 
   const loadOrdersSummary = async () => mockEnabled ? getMockOrdersSummary() : $fetch<{
     orderCount: number; gross: number; net: number; profit: number; fees: number; shipping: number; ticket: number; cancelledCount: number; cancelledGross: number;
-    byStatus: Array<{ status: string; count: number }>
+    byStatus: Array<{ status: string; count: number }>;
+    byMarketplace: Array<{ name: string; value: number }>;
+    daily: Array<{ key: string; gross: number; net: number; profit: number; orders: number; cancelledGross: number; cancelledOrders: number }>;
+    options: { marketplaces: string[]; products: string[] }
   }>(apiUrl('/api/orders/summary'), { headers: resourceHeaders() })
 
   const generateRecurringExpenses = async () => {
@@ -656,6 +867,18 @@ export const useAppData = () => {
     return saved
   }
 
+  const setOnboardingPrinterMode = async (mode: 'manual' | 'agent') => {
+    if (mockEnabled) {
+      const current = data.value.settings || {}
+      const preferences = current.preferences && typeof current.preferences === 'object' ? current.preferences as Record<string, unknown> : {}
+      data.value.settings = { ...current, preferences: { ...preferences, onboardingPrinterMode: mode } }
+      return { mode }
+    }
+    return $fetch<{ mode: 'manual' | 'agent' }>(apiUrl('/api/settings/onboarding-mode'), {
+      method: 'PUT', body: { mode }, headers: resourceHeaders()
+    })
+  }
+
   const lookupCompanyByCnpj = (cnpj: string) => mockEnabled ? Promise.resolve({
     name: 'Empresa Mock LTDA', legalName: 'Empresa Mock LTDA', phone: '(11) 4000-0000', email: 'mock@example.test',
     address: 'Rua Visual', district: 'Centro', city: 'Sao Paulo', state: 'SP', zip: '01000-000', status: 'Ativa'
@@ -667,25 +890,33 @@ export const useAppData = () => {
     query: { groups: groups.join(',') }, responseType: 'blob', headers: resourceHeaders()
   })
 
-  const getStripeBilling = () => mockEnabled ? Promise.resolve({
+  const getMercadoPagoBilling = () => mockEnabled ? Promise.resolve({
     configured: true,
     environment: 'sandbox' as const,
     plans: [{ id: 'pro', code: 'PRO', name: 'Pro Mock', description: 'Plano ficticio para review', monthly: 79.9, yearly: 799, monthlyEnabled: true, yearlyEnabled: true }],
     subscription: { status: 'active', billingCycle: 'monthly', planCode: 'PRO', planName: 'Pro Mock', currentPeriodEnd: new Date(Date.now() + 20 * 86400000).toISOString() },
     checkout: null
-  }) : $fetch<StripeBillingSummary>(apiUrl('/api/billing/stripe'), {
+  }) : $fetch<MercadoPagoBillingSummary>(apiUrl('/api/billing/mercado-pago'), {
     headers: resourceHeaders()
   })
 
-  const createStripeCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
-    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/stripe/checkout'), {
+  const getSubscriptionAccess = () => mockEnabled ? Promise.resolve({
+    planCode: 'starter', status: 'active', mode: 'full' as const,
+    features: { coreOperations: true, marketplaces: true, advancedReports: true, manualPrinters: true, agent: true, team: true },
+    limits: {}, usage: {}
+  }) : $fetch<SubscriptionAccess>(apiUrl('/api/subscription/access'), {
+    headers: resourceHeaders(),
+    timeout: 15_000
+  })
+
+  const createMercadoPagoCheckout = (body: { planCode: string; billingCycle: 'monthly' | 'yearly' }) => mockEnabled ? Promise.resolve({ id: 'checkout-mock', url: '#mock-checkout-disabled', expiresAt: null }) :
+    $fetch<{ id: string; url: string; expiresAt: string | null }>(apiUrl('/api/billing/mercado-pago/checkout'), {
       method: 'POST', body, headers: resourceHeaders()
     })
-  const changeStripeSubscriptionPlan = (billingCycle: 'monthly' | 'yearly') => getStripeBilling()
-  const cancelStripeSubscription = () => getStripeBilling()
-  const resumeStripeSubscription = () => getStripeBilling()
+  const updateMercadoPagoSubscription = (action: 'cancel' | 'pause' | 'resume') => mockEnabled ? getMercadoPagoBilling() :
+    $fetch<MercadoPagoBillingSummary>(apiUrl(`/api/billing/mercado-pago/subscription/${action}`), { method: 'POST', headers: resourceHeaders() })
 
-  const listSettingsExports = () => mockEnabled ? Promise.resolve([{ id: 'export-mock-1', fileName: 'printflow-mock-export.json', type: 'tenant_data', format: 'json', recordCount: 128, status: 'success', createdAt: new Date().toISOString() }]) : $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
+  const listSettingsExports = () => mockEnabled ? Promise.resolve([{ id: 'export-mock-1', fileName: 'filamind-mock-export.json', type: 'tenant_data', format: 'json', recordCount: 128, status: 'success', createdAt: new Date().toISOString() }]) : $fetch<Array<{ id: string; fileName: string; type: string; format: string; recordCount: number; status: string; createdAt: string }>>(apiUrl('/api/settings/export-history'), {
     headers: resourceHeaders()
   })
 
@@ -751,6 +982,8 @@ export const useAppData = () => {
     pending,
     error,
     refreshAppData: loadAppData,
+    loadDashboardSummary,
+    loadReportSummary,
     createProduct
     , uploadProductPrintFile, uploadProductImage, generateRecurringExpenses
     , createMarketplaceIntegration
@@ -762,12 +995,13 @@ export const useAppData = () => {
     , syncMarketplaceOrder
     , linkMarketplaceOrderProduct
     , updateSettings
+    , setOnboardingPrinterMode
     , lookupCompanyByCnpj
     , exportTenantData
-    , getStripeBilling
-    , createStripeCheckout, changeStripeSubscriptionPlan
-    , cancelStripeSubscription
-    , resumeStripeSubscription
+    , getMercadoPagoBilling
+    , getSubscriptionAccess
+    , createMercadoPagoCheckout
+    , updateMercadoPagoSubscription
     , listSettingsExports
     , listFinancialHistory
     , exportFinancialReport

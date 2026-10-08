@@ -18,7 +18,9 @@ const PRODUCTION_API_URL =
   'https://printflow-api-4y5l.onrender.com'
 
 const PRODUCTION_APP_ORIGINS = [
-  'https://print-flow-d5si.vercel.app'
+  'https://print-flow-d5si.vercel.app',
+  'https://filamind.com.br',
+  'https://www.filamind.com.br'
 ]
 
 const isLocalHost = hostname =>

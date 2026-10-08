@@ -21,6 +21,7 @@ $extractRoot = Join-Path $env:TEMP ("PrintFlowAgentSetup-" + [guid]::NewGuid().T
 $script:InstallerSucceeded = $false
 $script:InstallAttempted = $false
 $script:InstallerForm = $null
+$diagnosticLogPath = Join-Path $env:LOCALAPPDATA ('PrintFlowAgentSetup\logs\orca-' + [guid]::NewGuid().ToString('N') + '.log')
 
 $existingVersion = ""
 $existingPackagePath = Join-Path $installRoot "package.json"
@@ -108,6 +109,8 @@ Configuracao no Windows:
 - Inicia automaticamente quando este usuario entrar no Windows.
 - Cria atalhos e registra o protocolo printflow-agent://.
 - Usa o runtime Node.js incluido; nao exige Node.js instalado separadamente.
+- Instala ou reutiliza OrcaSlicer oficial pela Microsoft Store; a primeira instalacao exige internet e App Installer.
+- Valida o fatiamento local antes de substituir o Agent existente. Nao inicia impressao.
 - Mantem pareamento, credenciais protegidas e historico local durante atualizacoes.
 - Conecta-se ao PrintFlow Cloud por HTTPS.
 $certificateNotice
@@ -165,6 +168,16 @@ $cancelButton.Add_Click({
   $form.Close()
 })
 $form.Controls.Add($cancelButton)
+
+$diagnosticButton = New-Object System.Windows.Forms.Button
+$diagnosticButton.Text = 'Abrir diagnostico'
+$diagnosticButton.Size = [System.Drawing.Size]::new(150, 36)
+$diagnosticButton.Location = [System.Drawing.Point]::new(38, 476)
+$diagnosticButton.Visible = $false
+$diagnosticButton.Add_Click({
+  Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $diagnosticLogPath + '"')
+})
+$form.Controls.Add($diagnosticButton)
 
 $installButton = New-Object System.Windows.Forms.Button
 $installButton.Text = $actionLabel
@@ -317,8 +330,8 @@ function Start-Install {
       throw "Instalador interno do PrintFlow Agent nao encontrado."
     }
 
-    Set-InstallerProgress 55 "Registrando atalhos e protocolo local..."
-    & $installScript -ApiUrl $ApiUrl
+    Set-InstallerProgress 55 "Instalando OrcaSlicer e validando o fatiamento..."
+    & $installScript -ApiUrl $ApiUrl -DiagnosticLogPath $diagnosticLogPath
 
     Set-InstallerProgress 90 "Iniciando Agent em segundo plano..."
 
@@ -326,8 +339,13 @@ function Start-Install {
       -Message "PrintFlow Agent $targetVersionText pronto. Ele deve aparecer na bandeja do Windows." `
       -Success $true
   } catch {
+    $failureMessage = "Nao foi possivel instalar: " + $_.Exception.Message
+    if (Test-Path -LiteralPath $diagnosticLogPath) {
+      $diagnosticButton.Visible = $true
+      $failureMessage = 'Instalacao cancelada. Clique em Abrir diagnostico para ver a causa.'
+    }
     Complete-Installer `
-      -Message ("Nao foi possivel instalar: " + $_.Exception.Message) `
+      -Message $failureMessage `
       -Success $false
   } finally {
     $cancelButton.Enabled = $true

@@ -17,6 +17,7 @@ const marketplaceSearch = ref('')
 const linkingOrderId = ref('')
 const changingMarketplaceId = ref('')
 const connectionActionId = ref('')
+const orderSyncForm = reactive({ integrationId: '', externalOrderId: '', mode: 'sync' as 'sync' | 'reprocess' })
 const selectedProductByOrder = reactive<Record<string, string>>({})
 const marketplacePageItems = ref<any[]>([])
 const marketplacePage = ref(0)
@@ -101,14 +102,30 @@ const disconnectConnection = async (integration: any) => {
     connectionActionId.value = ''
   }
 }
-const syncConnectionOrder = async (integration: any) => {
+const openConnectionOrderForm = (integration: any, mode: 'sync' | 'reprocess' = 'sync') => {
   if (!integration?.id || connectionActionId.value) return
-  const externalOrderId = window.prompt('Informe o ID do pedido no Mercado Livre:')?.trim()
-  if (!externalOrderId) return
+  if (orderSyncForm.integrationId === integration.id && orderSyncForm.mode === mode) {
+    orderSyncForm.integrationId = ''
+    orderSyncForm.externalOrderId = ''
+    return
+  }
+  orderSyncForm.integrationId = integration.id
+  orderSyncForm.externalOrderId = ''
+  orderSyncForm.mode = mode
+}
+const closeConnectionOrderForm = () => {
+  orderSyncForm.integrationId = ''
+  orderSyncForm.externalOrderId = ''
+}
+const syncConnectionOrder = async (integration: any) => {
+  const externalOrderId = orderSyncForm.externalOrderId.trim()
+  if (!integration?.id || integration.id !== orderSyncForm.integrationId || !externalOrderId || connectionActionId.value) return
+  const reprocess = orderSyncForm.mode === 'reprocess'
   connectionActionId.value = integration.id
   try {
     await syncMarketplaceOrder(integration.id, externalOrderId)
-    notify('Pedido sincronizado com sucesso.')
+    notify(reprocess ? 'Pedido reprocessado com sucesso.' : 'Pedido sincronizado com sucesso.')
+    closeConnectionOrderForm()
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível sincronizar o pedido.', 'info')
   } finally {
@@ -225,7 +242,26 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
           <div class="table-footer"><span>Exibindo {{ filteredMarketplaces.length }} de {{ marketplaces.length }} marketplaces</span><div class="pagination"><button class="page-btn active">1</button></div></div>
         </PanelCard>
         <PanelCard v-if="activeSection === 'conexoes'" title="Contas conectadas" subtitle="Cada conta OAuth recebe pedidos separadamente. As taxas ficam configuradas no canal correspondente." style="margin-top:12px">
-          <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row"><div><strong>{{ integration.connectionName || 'Mercado Livre' }}</strong><small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small><small v-if="integration.lastError" style="display:block;color:var(--danger,#c0392b)">{{ integration.lastError }}</small></div><div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" aria-label="Sincronizar pedido por ID" @click="syncConnectionOrder(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar autorização" aria-label="Reconectar autorização do Mercado Livre" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" aria-label="Desconectar conta do Mercado Livre" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div></div>
+          <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row">
+            <div>
+              <strong>{{ integration.connectionName || 'Mercado Livre' }}</strong>
+              <small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small>
+              <div v-if="integration.lastError" class="connection-error">
+                <small>{{ integration.lastError }}</small>
+                <button type="button" class="connection-error__retry" :disabled="connectionActionId === integration.id" @click="openConnectionOrderForm(integration, 'reprocess')"><UiIcon name="refresh" :size="13" />Reprocessar pedido</button>
+              </div>
+              <form v-if="orderSyncForm.integrationId === integration.id" class="connection-order-form" @submit.prevent="syncConnectionOrder(integration)">
+                <label :for="`marketplace-order-id-${integration.id}`">ID do pedido no Mercado Livre</label>
+                <div class="connection-order-form__controls">
+                  <input :id="`marketplace-order-id-${integration.id}`" v-model="orderSyncForm.externalOrderId" type="text" maxlength="100" autocomplete="off" required :placeholder="orderSyncForm.mode === 'reprocess' ? 'Informe o pedido que falhou' : 'Ex.: 2000000000000000'" />
+                  <button class="btn btn--compact" type="submit" :disabled="connectionActionId === integration.id || !orderSyncForm.externalOrderId.trim()">{{ connectionActionId === integration.id ? 'Enviando...' : orderSyncForm.mode === 'reprocess' ? 'Reprocessar' : 'Sincronizar' }}</button>
+                  <button class="btn btn--ghost btn--compact" type="button" :disabled="connectionActionId === integration.id" @click="closeConnectionOrderForm">Cancelar</button>
+                </div>
+                <small>{{ orderSyncForm.mode === 'reprocess' ? 'O pedido será consultado novamente na conta conectada.' : 'A sincronização consulta o pedido diretamente na conta conectada.' }}</small>
+              </form>
+            </div>
+            <div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" aria-label="Sincronizar pedido por ID" @click="openConnectionOrderForm(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar autorização" aria-label="Reconectar autorização do Mercado Livre" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" aria-label="Desconectar conta do Mercado Livre" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div>
+          </div>
           <div v-if="!marketplaceConnections.length" class="connection-empty"><span><UiIcon name="store" :size="18" /></span><div><strong>Nenhuma conta conectada</strong><small>Atualmente, somente o Mercado Livre possui integração automática disponível.</small></div><NuxtLink class="btn btn--compact" to="/marketplaces/novo">Conectar Mercado Livre</NuxtLink></div>
         </PanelCard>
       </div>
@@ -237,7 +273,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
     <PanelCard v-if="activeSection === 'pedidos'" title="Pedidos recebidos dos marketplaces" subtitle="Revise o pedido, confira o SKU e vincule ao produto antes de liberar para impressão." style="margin-top:12px">
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto PrintFlow</th><th>Qtd.</th><th>Valor</th><th>Taxa ML</th><th>Frete</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto Filamind</th><th>Qtd.</th><th>Valor</th><th>Taxa ML</th><th>Frete</th><th>Status</th><th></th></tr></thead>
           <tbody>
             <tr v-for="order in pendingMarketplaceOrders" :key="order.id">
               <td><strong>{{ order.externalOrderId || order.id }}</strong></td>
@@ -279,10 +315,12 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
 .connection-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
 .connection-row:last-child{border-bottom:0}
 .connection-row__actions{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.connection-error{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:5px}.connection-error small{color:var(--danger,#c0392b);font-size:9px}.connection-error__retry{display:inline-flex;align-items:center;gap:4px;border:1px solid rgba(192,57,43,.26);border-radius:7px;background:#fff7f6;color:var(--danger,#c0392b);padding:4px 7px;font:inherit;font-size:8px;font-weight:800;cursor:pointer}.connection-error__retry:hover:not(:disabled){background:#feeceb}.connection-error__retry:focus-visible{outline:3px solid rgba(192,57,43,.2);outline-offset:2px}.connection-error__retry:disabled{cursor:wait;opacity:.65}
+.connection-order-form{display:grid;gap:6px;max-width:560px;margin-top:9px;border:1px solid #d9e5f6;border-radius:9px;background:#f8fbff;padding:10px}.connection-order-form label{color:#3f506b;font-size:9px;font-weight:750}.connection-order-form__controls{display:flex;gap:7px}.connection-order-form input{min-width:0;flex:1;border:1px solid #cfd8e6;border-radius:7px;background:#fff;padding:7px 9px;color:#26334d;font:inherit;font-size:10px}.connection-order-form input:focus-visible{outline:3px solid rgba(23,104,242,.2);border-color:#1768f2}.connection-order-form>small{color:var(--muted);font-size:8px;line-height:1.4}
 .section-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;border-bottom:1px solid var(--line);padding:0 0 10px}
 .section-tabs a{flex:0 0 auto;border:1px solid var(--line);border-radius:999px;padding:8px 14px;color:var(--muted);font-size:13px;font-weight:700;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
 .section-tabs a:hover,.section-tabs a.active{border-color:#9ebcf8;background:#eef4ff;color:var(--blue)}
 .section-tabs a:focus-visible{outline:3px solid rgba(23,104,242,.25);outline-offset:2px}
 @media (max-width:980px){.integration-availability__grid{grid-template-columns:1fr}}
-@media (max-width:780px){.integration-availability>header{align-items:flex-start;flex-direction:column}.section-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding:4px 2px 12px;margin-bottom:14px}.section-tabs a{white-space:nowrap}.connection-row,.connection-empty{align-items:flex-start;flex-direction:column}.connection-row__actions{width:100%;justify-content:flex-end}.connection-empty .btn{width:100%}.table-footer{align-items:flex-start;flex-direction:column;gap:10px}.table-footer .pagination{width:100%;justify-content:space-between}}
+@media (max-width:780px){.integration-availability>header{align-items:flex-start;flex-direction:column}.section-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding:4px 2px 12px;margin-bottom:14px}.section-tabs a{white-space:nowrap}.connection-row,.connection-empty{align-items:flex-start;flex-direction:column}.connection-row__actions{width:100%;justify-content:flex-end}.connection-order-form__controls{flex-wrap:wrap}.connection-order-form input{flex-basis:100%}.connection-order-form__controls .btn{flex:1;justify-content:center}.connection-empty .btn{width:100%}.table-footer{align-items:flex-start;flex-direction:column;gap:10px}.table-footer .pagination{width:100%;justify-content:space-between}}
 </style>

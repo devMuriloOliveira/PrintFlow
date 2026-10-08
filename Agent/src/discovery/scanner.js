@@ -3,15 +3,17 @@ import {
 } from './networkScanner.js'
 import { scanUsb } from './usbScanner.js'
 
-export const discoverPrintersWithDiagnostics = async () => {
+export const discoverPrintersWithDiagnostics = async ({ signal, onPrinterDiscovered } = {}) => {
   console.log('')
   console.log('=================================')
   console.log('     DESCOBERTA DE IMPRESSORAS')
   console.log('=================================')
 
   const networkDiscovery =
-    await scanNetworkWithDiagnostics()
-  const usbPrinters = await scanUsb()
+    await scanNetworkWithDiagnostics({ signal, onPrinterDiscovered })
+  const usbPrinters = await scanUsb({ signal, onPrinterDiscovered })
+
+  if (signal?.aborted) throw signal.reason || new Error('Descoberta cancelada.')
 
   const printers = [
     ...networkDiscovery.printers,

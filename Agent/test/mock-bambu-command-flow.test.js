@@ -24,6 +24,26 @@ const { handleCommand } =
     '../src/commands/commandHandler.js'
   )
 
+test('mock Bambu recusa modelo 3MF sem artefato fatiado antes de baixar arquivo', async () => {
+  const originalGet = axios.get
+  let downloaded = false
+  axios.get = async () => { downloaded = true; throw new Error('Download inesperado') }
+  try {
+    const result = await handleCommand({
+      id: 'unsliced-model-check', type: 'start_print',
+      payload: {
+        printer: { protocol: 'bambu', ip: '192.0.2.1' },
+        job: { id: 'unsliced', validationStatus: 'validated', printFile: { name: 'model.3mf', format: '3mf', storageKey: 'models/model.3mf' } }
+      }
+    })
+    assert.equal(result.success, false)
+    assert.match(result.error, /ainda nao foi fatiado/)
+    assert.equal(downloaded, false)
+  } finally {
+    axios.get = originalGet
+  }
+})
+
 const printer = {
   protocol:
     'bambu',
@@ -144,13 +164,14 @@ test(
 
               printFile: {
                 name:
-                  'produto-teste.3mf',
+                  'produto-teste.gcode.3mf',
 
                 format:
                   '3mf',
 
                 hash:
-                  'mock-sha256'
+                  'mock-sha256',
+                slicingArtifactStorageKey: 'mock/sliced/produto-teste.gcode.3mf'
               }
             }
           }
@@ -351,7 +372,7 @@ test(
 
                 printFile: {
                   name:
-                    'produto-mock.3mf',
+                    'produto-mock.gcode.3mf',
 
                   format:
                     '3mf',
@@ -363,7 +384,8 @@ test(
                     fileContent.length,
 
                   storageKey:
-                    'mock/tenant/produto-mock.3mf'
+                    'mock/tenant/produto-mock.3mf',
+                  slicingArtifactStorageKey: 'mock/sliced/produto-mock.gcode.3mf'
                 }
               }
             }
@@ -467,7 +489,7 @@ test(
 
                 printFile: {
                   name:
-                    'produto-mock.3mf',
+                    'produto-mock.gcode.3mf',
 
                   format:
                     '3mf',
@@ -479,7 +501,8 @@ test(
                     29,
 
                   storageKey:
-                    'mock/tenant/produto-mock.3mf'
+                    'mock/tenant/produto-mock.3mf',
+                  slicingArtifactStorageKey: 'mock/sliced/produto-mock.gcode.3mf'
                 }
               }
             }

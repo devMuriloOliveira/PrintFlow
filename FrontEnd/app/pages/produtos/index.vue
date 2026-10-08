@@ -3,6 +3,7 @@ const { products, deleteItem } = useAppData()
 const metrics = useBusinessMetrics()
 const { notify } = useUi()
 const router = useRouter()
+const subscription = useSubscriptionAccess()
 const search = ref('')
 const category = ref('Todas')
 const printerFilter = ref('Todas')
@@ -13,6 +14,7 @@ const selectedMetric = ref<'active' | 'price' | 'cost' | 'margin'>('active')
 const chartPeriod = ref<'week' | 'month' | 'year'>('month')
 const currentPage = ref(1)
 const perPage = ref(5)
+onMounted(() => { void subscription.load() })
 
 const filtered = computed(() => products.value.filter(p => {
   const matchesCategory = category.value === 'Todas' || p.category === category.value
@@ -143,8 +145,9 @@ const removeProduct = async (product: any) => {
 <template>
   <div>
     <PageHeader title="Produtos" subtitle="Gerencie seu catálogo de produtos e acompanhe a performance">
-      <NuxtLink class="btn btn--primary" to="/produtos/novo"><UiIcon name="plus" :size="17"/><span>Novo Produto</span></NuxtLink>
+      <NuxtLink class="btn btn--primary" :to="subscription.isLimitReached('products') ? subscription.upgradePath : '/produtos/novo'"><UiIcon :name="subscription.isLimitReached('products') ? 'lock' : 'plus'" :size="17"/><span>{{ subscription.isLimitReached('products') ? 'Limite atingido · Upgrade' : 'Novo Produto' }}</span></NuxtLink>
     </PageHeader>
+    <PlanLimitNotice resource="products" label="produtos" remaining-text="O catálogo atual, seus custos e as vendas dos produtos cadastrados continuam funcionando." />
     <div class="metrics-grid metrics-grid--4">
       <MetricCard v-for="card in metricCards" :key="card.key" :label="card.label" :value="card.value" :icon="card.icon" :note="card.note" :color="card.color" :points="card.points" :selected="selectedMetric === card.key" interactive @click="selectedMetric = card.key" />
     </div>
@@ -170,7 +173,7 @@ const removeProduct = async (product: any) => {
       <PanelCard>
         <div class="table-scroll"><table class="data-table">
           <thead><tr><th></th><th>Produto</th><th>SKU</th><th>Categoria</th><th>Preço de Venda</th><th>Peso</th><th>Tempo de Impressão</th><th>Filamento</th><th>Custo Total</th><th>Lucro</th><th>Margem</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr v-if="!paginatedProducts.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto encontrado</h3><p>Cadastre produtos ou ajuste os filtros para preencher a lista.</p></div></div></td></tr><tr v-for="p in paginatedProducts" :key="p.sku" :class="{selected: selected?.sku === p.sku}" @click="selectedProductId = p.id || ''"><td><input type="radio" :checked="selected?.sku === p.sku"></td><td><div class="table-product table-product--editable"><ProductThumb :type="p.thumb"/><div><strong>{{p.name}}</strong><small>{{p.subtitle}}</small></div><button class="row-action row-action--edit" title="Editar produto" @click.stop="editProduct(p)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{p.sku}}</td><td>{{p.category}}</td><td><strong>{{formatCurrency(p.price)}}</strong></td><td>{{p.weight}} g</td><td>{{p.time}}</td><td><span style="display:flex;align-items:center;gap:6px"><i class="dot" :style="{background:p.filamentColor}"/>{{p.filament}}</span></td><td>{{formatCurrency(p.cost)}}</td><td class="money-positive">{{formatCurrency(p.profit)}}</td><td class="money-positive">{{p.margin}}%</td><td><span class="badge" :class="p.status === 'Ativo' ? 'badge--green' : ''">{{p.status}}</span></td><td><button class="row-action" title="Excluir produto" @click.stop="removeProduct(p)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
+          <tbody><tr v-if="!paginatedProducts.length"><td colspan="13"><div class="empty-state"><div><div class="empty-state__icon"><UiIcon name="box"/></div><h3>Nenhum produto encontrado</h3><p>Cadastre produtos ou ajuste os filtros para preencher a lista.</p></div></div></td></tr><tr v-for="p in paginatedProducts" :key="p.sku" :class="{selected: selected?.sku === p.sku}" @click="selectedProductId = p.id || ''"><td><input type="radio" name="product-selection" :value="String(p.id || p.sku)" :checked="selected?.sku === p.sku" :aria-label="'Selecionar produto ' + p.name" @change="selectedProductId = p.id || ''"></td><td><div class="table-product table-product--editable"><ProductThumb :type="p.thumb"/><div><strong>{{p.name}}</strong><small>{{p.subtitle}}</small></div><button class="row-action row-action--edit" title="Editar produto" @click.stop="editProduct(p)"><UiIcon name="edit" :size="15"/></button></div></td><td>{{p.sku}}</td><td>{{p.category}}</td><td><strong>{{formatCurrency(p.price)}}</strong></td><td>{{p.weight}} g</td><td>{{p.time}}</td><td><span style="display:flex;align-items:center;gap:6px"><i class="dot" :style="{background:p.filamentColor}"/>{{p.filament}}</span></td><td>{{formatCurrency(p.cost)}}</td><td class="money-positive">{{formatCurrency(p.profit)}}</td><td class="money-positive">{{p.margin}}%</td><td><span class="badge" :class="p.status === 'Ativo' ? 'badge--green' : ''">{{p.status}}</span></td><td><button class="row-action" title="Excluir produto" @click.stop="removeProduct(p)"><UiIcon name="close" :size="16"/></button></td></tr></tbody>
         </table></div>
         <div class="table-footer"><span>{{ paginationSummary }}</span><div class="pagination"><button v-for="page in visiblePages" :key="page" class="page-btn" :class="{ active: page === currentPage }" :disabled="page === '...'" @click="typeof page === 'number' && (currentPage = page)">{{ page }}</button></div><select v-model.number="perPage" class="select-compact"><option :value="5">5 por página</option><option :value="10">10 por página</option><option :value="20">20 por página</option></select></div>
       </PanelCard>

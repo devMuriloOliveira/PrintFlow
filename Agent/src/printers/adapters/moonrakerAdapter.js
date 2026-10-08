@@ -165,7 +165,8 @@ export const moonrakerAdapter = {
 
   async connect(
     printer,
-    options = {}
+    options = {},
+    { signal } = {}
   ) {
     const baseUrl =
       buildBaseUrl(
@@ -187,6 +188,7 @@ export const moonrakerAdapter = {
         `${baseUrl}/server/info`,
         {
           timeout: 8000,
+          signal,
           headers:
             apiKey
               ? {
@@ -213,7 +215,8 @@ export const moonrakerAdapter = {
   },
 
   async disconnect(
-    connection
+    connection,
+    { signal } = {}
   ) {
     if (connection) {
       connection.connected =
@@ -227,7 +230,8 @@ export const moonrakerAdapter = {
   },
 
   async getStatus(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -238,6 +242,7 @@ export const moonrakerAdapter = {
         `${connection.baseUrl}/printer/objects/query?print_stats&display_status&extruder&heater_bed`,
         {
           timeout: 8000,
+          signal,
           headers:
             headers(
               connection
@@ -253,7 +258,8 @@ export const moonrakerAdapter = {
 
   async startPrint(
     connection,
-    job
+    job,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -306,6 +312,7 @@ export const moonrakerAdapter = {
         form,
         {
           timeout: 120_000,
+          signal,
           maxBodyLength: Infinity,
           maxContentLength: Infinity,
           headers: {
@@ -332,7 +339,8 @@ export const moonrakerAdapter = {
   },
 
   async pause(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -343,6 +351,7 @@ export const moonrakerAdapter = {
       {},
       {
         timeout: 8000,
+        signal,
         headers:
           headers(
             connection
@@ -357,7 +366,8 @@ export const moonrakerAdapter = {
   },
 
   async resume(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -368,6 +378,7 @@ export const moonrakerAdapter = {
       {},
       {
         timeout: 8000,
+        signal,
         headers:
           headers(
             connection
@@ -382,7 +393,8 @@ export const moonrakerAdapter = {
   },
 
   async cancel(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -393,6 +405,7 @@ export const moonrakerAdapter = {
       {},
       {
         timeout: 8000,
+        signal,
         headers:
           headers(
             connection

@@ -18,12 +18,6 @@ $targetPath = [System.IO.Path]::GetFullPath((Join-Path $agentRoot $FilePath))
 $pfxPath = [System.IO.Path]::GetFullPath((Join-Path $agentRoot $CertificatePfxPath))
 $pfxPasswordText = $env:PRINTFLOW_AGENT_DEV_CERT_PASSWORD
 
-if (-not $pfxPasswordText) {
-  $pfxPasswordText = "printflow-agent-local-dev-only"
-}
-
-$pfxPassword = ConvertTo-SecureString $pfxPasswordText -AsPlainText -Force
-
 function Find-SignTool {
   $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
   if ($command) {
@@ -64,7 +58,20 @@ if ($RequirePersistedCertificate -and -not (Test-Path $pfxPath)) {
   throw "PFX persistido obrigatorio para a release Early Access."
 }
 
-if (Test-Path $pfxPath) {
+$certificate = Get-ChildItem Cert:\CurrentUser\My |
+  Where-Object {
+    $_.Subject -eq $CertificateSubject -and
+    $_.HasPrivateKey -and
+    $_.NotAfter -gt (Get-Date)
+  } |
+  Sort-Object NotAfter -Descending |
+  Select-Object -First 1
+
+if ((Test-Path $pfxPath) -and -not $certificate) {
+  if (-not $pfxPasswordText) {
+    throw "Defina PRINTFLOW_AGENT_DEV_CERT_PASSWORD para importar a chave privada PFX protegida."
+  }
+  $pfxPassword = ConvertTo-SecureString $pfxPasswordText -AsPlainText -Force
   try {
     Import-PfxCertificate `
       -FilePath $pfxPath `
@@ -95,6 +102,9 @@ if (-not $certificate -and $RequirePersistedCertificate) {
 }
 
 if (-not $certificate) {
+  if (-not $pfxPasswordText) {
+    throw "Defina PRINTFLOW_AGENT_DEV_CERT_PASSWORD antes de criar um certificado de assinatura persistente."
+  }
   $certificate = New-SelfSignedCertificate `
     -Type CodeSigningCert `
     -Subject $CertificateSubject `
@@ -114,6 +124,10 @@ if (-not (Test-Path $pfxDir)) {
 }
 
 if (-not (Test-Path $pfxPath)) {
+  if (-not $pfxPasswordText) {
+    throw "Defina PRINTFLOW_AGENT_DEV_CERT_PASSWORD para exportar a chave privada protegida."
+  }
+  $pfxPassword = ConvertTo-SecureString $pfxPasswordText -AsPlainText -Force
   try {
     Export-PfxCertificate `
       -Cert $certificate `

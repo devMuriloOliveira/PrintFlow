@@ -1,4 +1,5 @@
 import mqtt from 'mqtt'
+import { publishPrinterEvent } from '../printerEventBus.js'
 
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -66,6 +67,14 @@ const requireValue = (
   }
 
   return normalized
+}
+
+const normalizeBambuConnectionError = error => {
+  const message = String(error?.message || error || '')
+  if (/not authorized|not authorised|reason code\s*[:=]?\s*5/i.test(message)) {
+    return new Error('LAN Access Code da Bambu rejeitado. Confira o codigo no menu Rede > LAN Only Mode da impressora e cadastre-o novamente.')
+  }
+  return error instanceof Error ? error : new Error(message || 'Falha ao conectar na Bambu.')
 }
 
 const getTopics = (
@@ -914,7 +923,7 @@ const waitForConnection = (
       const onError =
         error => {
           finish(
-            error
+            normalizeBambuConnectionError(error)
           )
         }
 
@@ -1365,6 +1374,18 @@ export const bambuAdapter = {
         connection.topics.report
       )
 
+      connection.onStatusMessage = (topic, buffer) => {
+        if (topic !== connection.topics.report) return
+        const payload = safeJsonParse(buffer.toString())
+        if (!payload) return
+        publishPrinterEvent({
+          printerKey: `bambu:${connection.serial}`,
+          protocol: 'bambu',
+          status: normalizeStatus(payload, connection.printer)
+        })
+      }
+      connection.client.on('message', connection.onStatusMessage)
+
       console.log(
         '[Bambu] Canal de telemetria assinado'
       )
@@ -1484,6 +1505,11 @@ export const bambuAdapter = {
     console.log(
       `[Bambu] Desconectando ${connection.printer?.ip || connection.serial || ''}...`
     )
+
+    if (connection.onStatusMessage) {
+      connection.client.removeListener('message', connection.onStatusMessage)
+      connection.onStatusMessage = null
+    }
 
     await closeClient(
       connection.client

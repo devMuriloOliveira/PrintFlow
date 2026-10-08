@@ -139,7 +139,8 @@ export const octoprintAdapter = {
 
   async connect(
     printer,
-    options = {}
+    options = {},
+    { signal } = {}
   ) {
     const baseUrl =
       buildBaseUrl(
@@ -161,6 +162,7 @@ export const octoprintAdapter = {
         `${baseUrl}/api/version`,
         {
           timeout: 8000,
+          signal,
           headers: {
             'X-Api-Key':
               apiKey
@@ -184,7 +186,8 @@ export const octoprintAdapter = {
   },
 
   async disconnect(
-    connection
+    connection,
+    { signal } = {}
   ) {
     if (connection) {
       connection.connected =
@@ -198,7 +201,8 @@ export const octoprintAdapter = {
   },
 
   async getStatus(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -209,6 +213,7 @@ export const octoprintAdapter = {
         `${connection.baseUrl}/api/job`,
         {
           timeout: 8000,
+          signal,
           headers:
             headers(
               connection
@@ -221,6 +226,7 @@ export const octoprintAdapter = {
         `${connection.baseUrl}/api/printer`,
         {
           timeout: 8000,
+          signal,
           headers:
             headers(
               connection
@@ -241,7 +247,8 @@ export const octoprintAdapter = {
 
   async startPrint(
     connection,
-    job
+    job,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -279,6 +286,7 @@ export const octoprintAdapter = {
         form,
         {
           timeout: 120_000,
+          signal,
           maxBodyLength: Infinity,
           maxContentLength: Infinity,
           headers: {
@@ -305,7 +313,8 @@ export const octoprintAdapter = {
   },
 
   async pause(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -321,6 +330,7 @@ export const octoprintAdapter = {
       },
       {
         timeout: 8000,
+        signal,
         headers:
           headers(
             connection
@@ -335,7 +345,8 @@ export const octoprintAdapter = {
   },
 
   async resume(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -351,6 +362,7 @@ export const octoprintAdapter = {
       },
       {
         timeout: 8000,
+        signal,
         headers:
           headers(
             connection
@@ -365,7 +377,8 @@ export const octoprintAdapter = {
   },
 
   async cancel(
-    connection
+    connection,
+    { signal } = {}
   ) {
     requireConnection(
       connection
@@ -379,6 +392,7 @@ export const octoprintAdapter = {
       },
       {
         timeout: 8000,
+        signal,
         headers:
           headers(
             connection

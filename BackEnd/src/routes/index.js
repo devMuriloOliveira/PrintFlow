@@ -7,7 +7,9 @@ import {
 
 import {
   handleLogin,
-  handlePasswordChange,
+  handleGoogleLogin,
+  handlePasswordChangeCodeRequest,
+  handlePasswordChangeConfirm,
   handleTenantDeletionRequest,
   handleInvitationAccept,
   handleSessionRevoke,
@@ -65,21 +67,19 @@ import {
   handleSettingsExportHistory,
   handleSettingsBackupStatus,
   handleSettingsUpdate,
+  handleOnboardingModeUpdate,
   handleCompanyCnpjLookup
 } from './settings.js'
 
-import { handleFinancialReportExport } from './reports.js'
+import { handleFinancialReportExport, handleReportSummary } from './reports.js'
 import { handleCalculatorSimulationCreate, handleCalculatorSimulationsList } from './calculator.js'
 import {
   handleMercadoPagoBillingSummary,
   handleMercadoPagoCheckoutCreate,
+  handleMercadoPagoSubscriptionStatus,
   handleMercadoPagoWebhook,
   handleMercadoPagoWebhookProbe,
-  handleStripeBillingSummary,
-  handleStripeCheckoutCreate,
-  handleStripeSubscriptionCancellation,
-  handleStripeSubscriptionPlanChange,
-  handleStripeWebhook
+  handleSubscriptionAccess
 } from './billing.js'
 
 import {
@@ -196,11 +196,13 @@ import {
   handleAgentDiscoverCreate,
   handleAgentCommandsPending,
   handleAgentCommandComplete,
+  handleAgentCommandProgress,
   handleAgentCommandGet,
   handleAgentPrintFileGet,
   handleAgentConnectPrinterCreate,
   handleAgentPrinterStatusCreate,
   handleAgentPrinterControlCreate,
+  handleAgentPrinterReconnectList,
   handleAgentPrintersList
 } from './agents.js'
 
@@ -213,6 +215,8 @@ export const handleRequest =
     req,
     res
   ) => {
+    let requestId = ''
+    let requestRoute = ''
     try {
       const url =
         new URL(
@@ -221,7 +225,10 @@ export const handleRequest =
 
             `http://${req.headers.host}`
         )
-      const requestId = String(req.headers['x-request-id'] || '').trim() || randomUUID()
+      requestRoute = url.pathname
+      const suppliedRequestId = String(req.headers['x-request-id'] || '').trim()
+      requestId = /^[a-zA-Z0-9._:-]{1,120}$/.test(suppliedRequestId) ? suppliedRequestId : randomUUID()
+      req.printflowRequestId = requestId
       const requestStartedAt = Date.now()
       const slowRequestThresholdMs = Math.max(200, Number(process.env.API_SLOW_REQUEST_MS) || 500)
       if (typeof res.setHeader === 'function') res.setHeader('X-Request-Id', requestId)
@@ -397,26 +404,18 @@ export const handleRequest =
         )
       }
 
+      if (req.method === 'POST' && url.pathname === '/api/auth/google') return await handleGoogleLogin(req, res)
+
       if (req.method === 'POST' && url.pathname === '/api/auth/verify-email') return await handleEmailVerification(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/request') return await handlePasswordResetRequest(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/password-reset/confirm') return await handlePasswordResetConfirm(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/change-password/request-code') return await handlePasswordChangeCodeRequest(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/auth/change-password/confirm') return await handlePasswordChangeConfirm(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/login') return await handleMfaLogin(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/setup') return await handleMfaSetup(req, res)
       if (req.method === 'GET' && url.pathname === '/api/auth/mfa/status') return await handleMfaStatus(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/enable') return await handleMfaEnable(req, res)
       if (req.method === 'POST' && url.pathname === '/api/auth/mfa/disable') return await handleMfaDisable(req, res)
-
-      if (
-        req.method ===
-          'POST' &&
-        url.pathname ===
-          '/api/auth/change-password'
-      ) {
-        return await handlePasswordChange(
-          req,
-          res
-        )
-      }
 
       if (req.method === 'POST' && url.pathname === '/api/auth/tenant-deletion-request') {
         return await handleTenantDeletionRequest(req, res)
@@ -508,7 +507,6 @@ export const handleRequest =
         )
       }
 
-      if (req.method === 'POST' && url.pathname === '/webhooks/stripe') return await handleStripeWebhook(req, res)
 
       // ==================================================
       // ROTAS PÚBLICAS DO AGENT
@@ -545,6 +543,18 @@ export const handleRequest =
           '/api/agents/heartbeat'
       ) {
         return await handleAgentHeartbeat(
+          req,
+          res
+        )
+      }
+
+      if (
+        req.method ===
+          'GET' &&
+        url.pathname ===
+          '/api/agents/printers/reconnect'
+      ) {
+        return await handleAgentPrinterReconnectList(
           req,
           res
         )
@@ -595,6 +605,11 @@ export const handleRequest =
         )
       }
 
+      const agentCommandProgressMatch = url.pathname.match(/^\/api\/agents\/commands\/([^/]+)\/progress$/)
+      if (req.method === 'POST' && agentCommandProgressMatch) {
+        return await handleAgentCommandProgress(req, res, agentCommandProgressMatch[1])
+      }
+
       // ==================================================
       // DEFINIR ROTAS PÚBLICAS DO AGENT
       // ==================================================
@@ -616,14 +631,19 @@ export const handleRequest =
             /^\/api\/agents\/commands\/[^/]+\/complete$/.test(
               url.pathname
             ) ||
+            /^\/api\/agents\/commands\/[^/]+\/progress$/.test(url.pathname) ||
             /^\/api\/agents\/print-jobs\/[^/]+\/metrics$/.test(url.pathname)
           )
         ) ||
         (
           req.method ===
             'GET' &&
-          url.pathname ===
-            '/api/agents/events'
+          (
+            url.pathname ===
+              '/api/agents/events' ||
+            url.pathname ===
+              '/api/agents/printers/reconnect'
+          )
         ) ||
         (
           req.method ===
@@ -690,7 +710,7 @@ export const handleRequest =
         if (!canAccessRequest(user, req.method, url.pathname)) {
           return sendJson(res, 403, { error: 'Voce nao possui permissao para esta operacao.' })
         }
-        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/stripe' || url.pathname === '/api/billing/stripe/checkout' || url.pathname === '/api/billing/stripe/subscription/cancel' || url.pathname === '/api/billing/stripe/subscription/resume' || url.pathname === '/api/billing/stripe/subscription/change-plan'
+        const isBillingRecoveryRoute = url.pathname === '/api/billing/mercado-pago' || url.pathname === '/api/billing/mercado-pago/checkout' || url.pathname === '/api/billing/mercado-pago/subscription/cancel' || url.pathname === '/api/billing/mercado-pago/subscription/pause' || url.pathname === '/api/billing/mercado-pago/subscription/resume'
         if (!url.pathname.startsWith('/api/platform-admin/') && !isBillingRecoveryRoute) {
           try {
             await assertTenantRequestEntitlement({ tenantId: user.tenantId, method: req.method, pathname: url.pathname, user })
@@ -708,19 +728,12 @@ export const handleRequest =
         return await handleMembersList(req, res)
       }
 
-      if (req.method === 'GET' && url.pathname === '/api/billing/mercado-pago') {
-        return await handleMercadoPagoBillingSummary(req, res)
-      }
-
-      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') {
-        return await handleMercadoPagoCheckoutCreate(req, res)
-      }
-
-      if (req.method === 'GET' && url.pathname === '/api/billing/stripe') return await handleStripeBillingSummary(req, res)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/checkout') return await handleStripeCheckoutCreate(req, res)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/cancel') return await handleStripeSubscriptionCancellation(req, res, true)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/resume') return await handleStripeSubscriptionCancellation(req, res, false)
-      if (req.method === 'POST' && url.pathname === '/api/billing/stripe/subscription/change-plan') return await handleStripeSubscriptionPlanChange(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/billing/mercado-pago') return await handleMercadoPagoBillingSummary(req, res)
+      if (req.method === 'GET' && url.pathname === '/api/subscription/access') return await handleSubscriptionAccess(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/checkout') return await handleMercadoPagoCheckoutCreate(req, res)
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/subscription/cancel') return await handleMercadoPagoSubscriptionStatus(req, res, 'cancelled')
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/subscription/pause') return await handleMercadoPagoSubscriptionStatus(req, res, 'paused')
+      if (req.method === 'POST' && url.pathname === '/api/billing/mercado-pago/subscription/resume') return await handleMercadoPagoSubscriptionStatus(req, res, 'authorized')
 
       if (req.method === 'POST' && url.pathname === '/api/members/invitations') {
         return await handleInvitationCreate(req, res)
@@ -1052,6 +1065,10 @@ export const handleRequest =
         return await handleSettingsUpdate(req, res)
       }
 
+      if (req.method === 'PUT' && url.pathname === '/api/settings/onboarding-mode') {
+        return await handleOnboardingModeUpdate(req, res)
+      }
+
       if (req.method === 'GET' && url.pathname === '/api/settings/company-lookup') {
         return await handleCompanyCnpjLookup(req, res, url)
       }
@@ -1091,6 +1108,10 @@ export const handleRequest =
 
       if (req.method === 'GET' && url.pathname === '/api/reports/financial-export') {
         return await handleFinancialReportExport(req, res, url)
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/reports/summary') {
+        return await handleReportSummary(req, res, url)
       }
 
       if (req.method === 'GET' && url.pathname === '/api/calculator/simulations') {
@@ -1636,8 +1657,12 @@ export const handleRequest =
           'Registro nao encontrado',
           'Membro nao encontrado',
           'E-mail ou senha invalidos.',
+          'O nome informado no cadastro nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.',
+          'O documento cadastrado nao pode ser alterado por esta tela. Solicite a alteracao ao suporte.',
           'Informe a senha atual.',
           'Senha atual invalida.',
+          'Codigo invalido ou expirado.',
+          'O envio de codigo por e-mail ainda nao esta configurado.',
           'A nova senha deve ser diferente da senha atual.',
           'A senha precisa ter pelo menos 10 caracteres.',
           'A senha precisa conter letra minuscula.',
@@ -1652,6 +1677,8 @@ export const handleRequest =
         error.message === 'Registro nao encontrado' ||
         error.message === 'Membro nao encontrado'
           ? 404
+          : (requestRoute === '/webhooks/mercado-pago' || requestRoute.startsWith('/api/billing/mercado-pago')) && Number(error?.status || error?.statusCode) >= 500
+            ? 503
           : 400
 
       if (
@@ -1662,14 +1689,18 @@ export const handleRequest =
         console.error(
           'Erro ao processar requisicao',
           {
+            requestId,
+            tenantId: req.printflowTenantId || null,
             method:
               req.method,
 
-            url:
-              req.url,
+            route:
+              requestRoute,
 
             message:
-              error.message
+              error.message,
+
+            ...(error.providerDetails ? { providerDetails: error.providerDetails } : {})
           }
         )
       }

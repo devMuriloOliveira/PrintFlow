@@ -1,4 +1,5 @@
-import { connectPrinter, getPrinterStatus, hasActiveConnection } from '../printers/printerManager.js'
+import { connectPrinter, getPrinterKey, getPrinterStatus, hasActiveConnection } from '../printers/printerManager.js'
+import { waitForPrinterStatusEvent } from '../printers/printerEventBus.js'
 import { reportPrintJobMetrics } from '../cloud/productionJobMetrics.js'
 import { loadPrinterCredentials } from '../storage/printerCredentials.js'
 
@@ -18,6 +19,14 @@ const findMetric = (status, keys) => {
 
 export const normalizeCompletionState = (status) => terminalStates.get(String(status?.state || status?.status || '').trim().toLowerCase()) || null
 
+export const getNextPollDelay = ({ status, pollMs, stablePollMs }) => {
+  const state = String(status?.state || status?.status || '').trim().toLowerCase()
+  const progress = numberOrNull(status?.progress ?? status?.raw?.progress)
+  if (['paused', 'pause', 'pausing', 'resuming'].includes(state) || (progress != null && progress >= 90)) return pollMs
+  if (['printing', 'running', 'prepare', 'preparing'].includes(state)) return Math.max(pollMs, stablePollMs)
+  return pollMs
+}
+
 export const measuredMetricsFromStatus = ({ status, startedAt }) => ({
   actualPrintSeconds: findMetric(status, ['actualPrintSeconds', 'elapsedSeconds', 'printSeconds', 'print_time', 'print_duration']) ?? (startedAt ? numberOrNull((Date.now() - new Date(startedAt).getTime()) / 1000) : null),
   actualFilamentGrams: findMetric(status, ['actualFilamentGrams', 'filamentUsedGrams', 'filament_used_g', 'filament_used']),
@@ -31,23 +40,33 @@ export const ensurePrinterConnectionForMonitor = async (printer) => {
   return { connected: true, reused: false }
 }
 
-export const monitorPrintJobCompletion = async ({ command, context, getStatus = getPrinterStatus, ensureConnection = getStatus === getPrinterStatus ? ensurePrinterConnectionForMonitor : async () => ({ connected: true, reused: true }), report = reportPrintJobMetrics, wait = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds)), pollMs = Math.max(1000, Number(process.env.PRINTFLOW_PRINT_COMPLETION_POLL_MS) || 5000), maxPolls = Math.max(1, Number(process.env.PRINTFLOW_PRINT_COMPLETION_MAX_POLLS) || Math.ceil(30 * 24 * 60 * 60 * 1000 / pollMs)) }) => {
+export const monitorPrintJobCompletion = async ({ command, context, getStatus = getPrinterStatus, ensureConnection = getStatus === getPrinterStatus ? ensurePrinterConnectionForMonitor : async () => ({ connected: true, reused: true }), report = reportPrintJobMetrics, wait = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds)), waitForStatusEvent = waitForPrinterStatusEvent, pollMs = Math.max(1000, Number(process.env.PRINTFLOW_PRINT_COMPLETION_POLL_MS) || 5000), stablePollMs = Math.max(pollMs, Number(process.env.PRINTFLOW_PRINT_STABLE_POLL_MS) || 15000), eventWaitMs = Math.max(1000, Number(process.env.PRINTFLOW_PRINT_EVENT_WAIT_MS) || 15000), maxPolls = Math.max(1, Number(process.env.PRINTFLOW_PRINT_COMPLETION_MAX_POLLS) || Math.ceil(30 * 24 * 60 * 60 * 1000 / pollMs)) }) => {
   const printJobId = command?.payload?.printJobId
   const printer = command?.payload?.printer
   if (!printJobId || !printer || !context?.apiUrl || !context?.credentials) return { skipped: true }
   const startedAt = command.payload.startedAt || new Date().toISOString()
   let lastError = null
+  let nextPollDelay = pollMs
   for (let poll = 0; poll < maxPolls; poll += 1) {
+    let receivedEvent = false
     try {
       await ensureConnection(printer)
-      const status = await getStatus(printer)
+      let status = null
+      if (getStatus === getPrinterStatus) {
+        status = await waitForStatusEvent(getPrinterKey(printer), eventWaitMs)
+        receivedEvent = Boolean(status)
+      }
+      if (!status) status = await getStatus(printer)
       const state = normalizeCompletionState(status)
       if (state) return report(context.apiUrl, context.credentials, printJobId, { status: state, idempotencyKey: `agent-${command.id}-completion`, attemptNo: 1, ...measuredMetricsFromStatus({ status, startedAt }) })
       lastError = null
+      nextPollDelay = getNextPollDelay({ status, pollMs, stablePollMs })
     } catch (error) {
       lastError = error
+      nextPollDelay = pollMs
     }
-    await wait(pollMs)
+    if (receivedEvent) continue
+    await wait(nextPollDelay)
   }
   throw new Error(`Monitoramento do Production Job ${printJobId} excedeu o limite de polling.${lastError?.message ? ` Ultimo erro: ${lastError.message}` : ''}`)
 }

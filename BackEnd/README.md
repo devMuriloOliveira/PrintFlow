@@ -1,6 +1,6 @@
-# PrintFlow BackEnd
+# Filamind BackEnd
 
-API HTTP do PrintFlow 3D. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o PrintFlow Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
+API HTTP do Filamind. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o PrintFlow Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
 
 ## Para Que Serve
 
@@ -77,10 +77,11 @@ Variaveis principais:
 - `MERCADO_LIVRE_CLIENT_ID`: App ID privado da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_CLIENT_SECRET`: Secret Key privada da aplicacao Mercado Livre.
 - `MERCADO_LIVRE_REDIRECT_URI`: callback fixa registrada no Mercado Livre.
-- `APP_PUBLIC_URL`: URL publica do FrontEnd usada ao finalizar OAuth e retornar do checkout.
+- `APP_PUBLIC_URL`: URL publica principal do FrontEnd usada nos links de e-mail, OAuth e retorno do checkout. Para este dominio, use `https://filamind.com.br`.
+- `CORS_ALLOWED_ORIGINS`: inclua `https://filamind.com.br` e `https://www.filamind.com.br`, mantendo outras origens que ainda hospedar.
 - `CORS_ALLOWED_ORIGINS`: origens HTTPS autorizadas (FrontEnd e AdminFrontEnd), separadas por virgula; nao use `*` com cookies.
 - `RESEND_API_KEY`: chave privada do Resend para verificacao de e-mail e recuperacao de senha.
-- `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `PrintFlow <acesso@seudominio.com>`.
+- `EMAIL_FROM`: remetente validado no dominio do Resend, por exemplo `Filamind <acesso@seudominio.com>`.
 - `AUTH_REQUIRE_EMAIL_VERIFICATION`: use `true` para exigir confirmacao de e-mail em novos cadastros.
 - `AUTH_REQUIRE_MFA_FOR_PRIVILEGED`: use `true` para exigir MFA em Owner e Superadmin; cada perfil configura o aplicativo autenticador em Configuracoes > Seguranca.
 - `PLATFORM_SUPER_ADMIN_EMAILS`: allowlist privada de superadmins. A API sincroniza essas funções ao iniciar; altere somente com controle administrativo.
@@ -96,7 +97,7 @@ Nao publique valores reais dessas variaveis.
 ### Ativacao da autenticacao reforcada
 
 No Render, cadastre primeiro o dominio do remetente no Resend (SPF/DKIM), crie
-uma API key somente com permissao de envio e informe `APP_PUBLIC_URL` com a URL
+uma API key somente com permissao de envio, valide `filamind.com.br` como dominio remetente no Resend e informe `APP_PUBLIC_URL` com a URL
 real do FrontEnd. Depois defina `RESEND_API_KEY`, `EMAIL_FROM` e
 `AUTH_REQUIRE_EMAIL_VERIFICATION=true`. O cadastro passa a retornar uma tela de
 aguardo e o link de verificacao expira em 15 minutos.
@@ -134,17 +135,19 @@ Checklist de producao:
 - Configurar o monitor externo para consultar somente `GET /healthz`. O resumo
   autenticado `GET /api/operational-health` fica restrito a usuarios com acesso
   de producao e deve ser acompanhado pelo painel de Notificacoes.
-- Para o Stripe, cadastrar no Dashboard o endpoint `POST
-  https://SUA-API.onrender.com/webhooks/stripe` e habilitar `checkout.session.completed`,
-  `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`,
-  `invoice.payment_failed`, `invoice.marked_uncollectible` e `invoice.voided`.
-  Copiar o segredo `whsec_...` exibido pelo Stripe para `STRIPE_WEBHOOK_SECRET` no
-  Render. O retorno do Checkout nao confirma a assinatura: somente o webhook com
-  assinatura valida altera o acesso.
-- Antes da primeira cobrança, configure o preço mensal em Superadmin >
-  Empresas e valide o ambiente Stripe. Novos checkouts não oferecem trial;
-  ciclos anuais existentes permanecem históricos e não são oferecidos para
-  novas assinaturas. A chave privada continua somente no Render.
+- Para assinaturas Mercado Pago, configure o webhook da aplicação com URL
+  `https://SUA-API.onrender.com/webhooks/mercado-pago` e habilite `subscription_preapproval`,
+  `subscription_authorized_payment` e `payment`. Salve o segredo de assinatura
+  em `MERCADO_PAGO_WEBHOOK_SECRET` no Render. Configure `MERCADO_PAGO_ACCESS_TOKEN`
+  com o token de produção e `MERCADO_PAGO_ENVIRONMENT=production` no Render.
+  Localmente use somente credenciais sandbox, `MERCADO_PAGO_ENVIRONMENT=sandbox`
+  e o e-mail de um comprador de teste em `MERCADO_PAGO_TEST_PAYER_EMAIL`.
+  O retorno do checkout não confirma a assinatura: somente webhooks verificados
+  pelo segredo atualizam o acesso.
+- Antes da primeira cobrança, configure os preços em Superadmin > Empresas e
+  valide uma assinatura com usuário comprador de teste. Novos checkouts não
+  oferecem trial. Cancelar encerra a assinatura no Mercado Pago; pausar bloqueia
+  operações PRO até que o Owner retome as cobranças.
 - Manter backup recuperavel antes da primeira migracao e observar os logs do
   Render durante a inicializacao.
 
@@ -170,6 +173,18 @@ Esse comando altera o banco indicado por `DATABASE_URL`; confirme a URL antes
 de executá-lo. `npm.cmd run dev` e `npm.cmd start` já chamam as migrações na
 inicialização do servidor.
 
+Criar dados fictícios para teste local:
+
+```bat
+npm.cmd run seed:demo
+```
+
+O seed recria somente o tenant fictício `demo` e inclui clientes, produtos,
+estoque, impressoras, pedidos, vendas de marketplace, despesas, metas e
+chamados. Para entrar localmente, use `demo.local@printflow.test` e a senha
+`DemoLocal#2026`. Ele aceita exclusivamente `DATABASE_URL` com host
+`localhost`, `127.0.0.1` ou `::1`; não há opção de liberar uma base remota.
+
 Limpar dados demonstrativos em ambiente local:
 
 ```bat
@@ -185,7 +200,7 @@ npm.cmd test
 ```
 
 Os testes automatizados não substituem a validação de RLS no banco de destino,
-webhooks Stripe assinados, OAuth real ou desempenho de homologação.
+webhooks Mercado Pago assinados, OAuth real ou desempenho de homologação.
 
 ## Backup e Restauracao
 
@@ -213,15 +228,20 @@ Autenticacao:
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 
-Assinatura Stripe (restrita ao Owner):
+Assinatura Mercado Pago (restrita ao Owner):
 
-- `GET /api/billing/stripe`
-- `POST /api/billing/stripe/checkout`
-- `POST /webhooks/stripe`
+- `GET /api/billing/mercado-pago`
+- `POST /api/billing/mercado-pago/checkout`
+- `POST /api/billing/mercado-pago/subscription/pause`
+- `POST /api/billing/mercado-pago/subscription/resume`
+- `POST /api/billing/mercado-pago/subscription/cancel`
+- `POST /webhooks/mercado-pago`
 
 Dados do aplicativo:
 
 - `GET /api/app-data`
+- `GET /api/dashboard-summary`: totais, séries e estado operacional agregados para o dashboard, sem retornar os históricos completos.
+- `GET /api/reports/summary`: relatórios financeiro e de produtos agregados por tenant, com vendas paginadas quando há detalhamento.
 - `GET /api/products`
 - `POST /api/products`
 - `GET /api/orders`

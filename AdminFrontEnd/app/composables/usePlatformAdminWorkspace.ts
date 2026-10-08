@@ -303,7 +303,7 @@ export const usePlatformAdminWorkspace = () => {
     requests.value = requests.value.map(request => request.id === requestId ? updated : request)
     return updated
   }
-  const exportSupportRequestsReport = () => session.download('/api/platform-admin/support-requests/report', 'Relatorio_Solicitacoes_PrintFlow.csv')
+  const exportSupportRequestsReport = () => session.download('/api/platform-admin/support-requests/report', 'Relatorio_Solicitacoes_Filamind.csv')
   const loadSupportContact = (requestId: string) => session.request<SupportContact>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/contact`)
   const claimChat = async (requestId: string) => {
     const updated = await session.request<AuditRequest>(`/api/platform-admin/support-requests/${encodeURIComponent(requestId)}/claim`, { method: 'POST', body: {} })
@@ -333,7 +333,7 @@ export const usePlatformAdminWorkspace = () => {
     requests.value = requests.value.map(request => request.id === requestId ? { ...request, ...updated, status: 'under_review', supportStatus: 'reopened' } : request)
     return updated
   }
-  const exportPrivacyPortability = (requestId: string) => session.download(`/api/platform-admin/privacy-requests/${encodeURIComponent(requestId)}/export`, `PrintFlow_Portabilidade_${requestId}.csv`)
+  const exportPrivacyPortability = (requestId: string) => session.download(`/api/platform-admin/privacy-requests/${encodeURIComponent(requestId)}/export`, `Filamind_Portabilidade_${requestId}.csv`)
   const refreshTenants = () => loadTenants(true, tenantPage.value)
 
   const activeRequests = computed(() => requests.value.filter(request => isChatOpen(request.status) && request.supportStatus !== 'resolved'))

@@ -3,7 +3,7 @@ const props = withDefaults(defineProps<{ initialActive?: string; standalone?: bo
 const { notify } = useUi()
 const auth = useAuth()
 const route = useRoute()
-const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getStripeBilling, createStripeCheckout, cancelStripeSubscription, resumeStripeSubscription, createSupportRequest } = useAppData()
+const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getMercadoPagoBilling, createMercadoPagoCheckout, updateMercadoPagoSubscription, createSupportRequest } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 
 const routeActiveSection = computed(() => String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
@@ -15,7 +15,8 @@ const sessions = ref<{ sessionId: string; createdAt: string; expiresAt: string; 
 const sessionsLoading = ref(false)
 const endingSessionGroupKey = ref('')
 const changingPassword = ref(false)
-const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '' })
+const passwordChangeCodeSent = ref(false)
+const passwordForm = reactive({ currentPassword: '', newPassword: '', confirmation: '', code: '' })
 const mfaLoading = ref(false)
 const mfaSetup = ref<{ secret: string; otpauthUri: string } | null>(null)
 const mfaCode = ref('')
@@ -27,7 +28,7 @@ const companyLookupLoading = ref(false)
 const exportingData = ref(false)
 const exportHistory = ref<Array<{ id: string; fileName: string; format: string; recordCount: number; status: string; createdAt: string }>>([])
 const backupLoading = ref(false)
-const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string } }>({ databaseAvailable: false, export: { enabled: false, format: 'json', excludes: [] }, restore: { enabled: false, reason: '' } })
+const backupStatus = ref<{ databaseAvailable: boolean; export: { enabled: boolean; format: string; excludes: string[] }; restore: { enabled: boolean; reason: string }; operational: { lastCompletedAt: string | null; lastStatus: string; history: Array<{ status: string; startedAt: string | null; completedAt: string | null }> } }>({ databaseAvailable: false, export: { enabled: false, format: 'csv', excludes: [] }, restore: { enabled: false, reason: '' }, operational: { lastCompletedAt: null, lastStatus: 'unknown', history: [] } })
 const submittingSupport = ref(false)
 const submittedSupportProtocol = ref('')
 const supportDraft = reactive({
@@ -39,10 +40,11 @@ const supportDraft = reactive({
 const integrationsLoading = ref(false)
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const billingLoading = ref(false)
+const billingError = ref('')
 const creatingBillingLink = ref(false)
 const subscriptionActionLoading = ref(false)
-const stripeBilling = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
-const stripeReturnRetries = ref(0)
+const mercadoPagoBilling = ref<Awaited<ReturnType<typeof getMercadoPagoBilling>> | null>(null)
+const billingReturnRetries = ref(0)
 const deletionForm = reactive({ currentPassword: '', acknowledged: false, confirmation: '' })
 const memberDrafts = reactive<Record<string, { role: string; status: string }>>({})
 const invite = reactive({ email: '', role: 'usuario' as 'admin' | 'financeiro' | 'producao' | 'usuario' })
@@ -62,13 +64,23 @@ const sectionPresentation: Record<string, { title: string; subtitle: string; asi
   Integracoes: { title: 'Integrações', subtitle: 'Acompanhe marketplaces, agentes e serviços conectados.', asideTitle: 'Conexões protegidas', asideDescription: 'A tela mostra o estado das integrações sem revelar credenciais.', checks: ['Tokens e segredos não são exibidos.', 'Conexões permanecem isoladas por empresa.', 'Última sincronização visível para diagnóstico.'] },
   'Backup e Dados': { title: 'Backup e dados', subtitle: 'Gere cópias operacionais e acompanhe cada exportação da empresa.', asideTitle: 'Cópias rastreáveis', asideDescription: 'Esta área separa exportação, restauração e exclusão para evitar ações ambíguas.', checks: ['Arquivos gerados ficam registrados.', 'Credenciais e sessões não são exportadas.', 'Exclusão permanece restrita ao Owner.'] },
   'Privacidade e LGPD': { title: 'Privacidade e LGPD', subtitle: 'Exporte dados da empresa e registre solicitações de titulares no fluxo correto.', asideTitle: 'Fluxos separados e rastreáveis', asideDescription: 'Exportações operacionais, direitos do titular e exclusão da empresa seguem controles próprios.', checks: ['Exportações respeitam a seleção informada.', 'Direitos são registrados com protocolo.', 'Exclusão da empresa exige confirmação do Owner.'] },
-  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Envie uma mensagem diretamente para a equipe do PrintFlow.', asideTitle: 'Contato protegido', asideDescription: 'Sua mensagem permanece vinculada à sua conta e chega ao painel administrativo da equipe.', checks: ['Identidade confirmada pela conta.', 'Mensagem registrada com protocolo.', 'Nenhum aplicativo externo é aberto.'] }
+  'Ajuda e Suporte': { title: 'Ajuda e suporte', subtitle: 'Envie uma mensagem diretamente para a equipe do Filamind.', asideTitle: 'Contato protegido', asideDescription: 'Sua mensagem permanece vinculada à sua conta e chega ao painel administrativo da equipe.', checks: ['Identidade confirmada pela conta.', 'Mensagem registrada com protocolo.', 'Nenhum aplicativo externo é aberto.'] }
 }
 const currentPresentation = computed(() => sectionPresentation[active.value])
 const pageTitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.title : 'Configurações')
 const pageSubtitle = computed(() => props.standalone && currentPresentation.value ? currentPresentation.value.subtitle : 'Gerencie os dados essenciais da empresa e da plataforma.')
 const canExportCompanyData = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
 const latestExport = computed(() => exportHistory.value[0] || null)
+const operationalBackupAge = computed(() => {
+  const value = backupStatus.value.operational.lastCompletedAt
+  if (!value) return backupStatus.value.operational.lastStatus === 'failed' ? 'Última execução falhou · sem cópia concluída' : 'Sem cópia concluída registrada'
+  const ageMs = Math.max(0, Date.now() - new Date(value).getTime())
+  const minutes = Math.floor(ageMs / 60_000)
+  const age = minutes < 1 ? 'agora' : minutes < 60 ? `há ${minutes} min` : minutes < 1440 ? `há ${Math.floor(minutes / 60)} h` : `há ${Math.floor(minutes / 1440)} dia(s)`
+  return backupStatus.value.operational.lastStatus === 'failed' ? `Última execução falhou · cópia concluída ${age}` : `Cópia concluída ${age}`
+})
+const backupRunStatusLabel = (status: string) => ({ success: 'Concluído', completed: 'Concluído', failed: 'Falhou', running: 'Em andamento' }[status] || 'Desconhecido')
+const backupRunStatusClass = (status: string) => ['success', 'completed'].includes(status) ? 'badge--green' : status === 'failed' ? 'badge--red' : 'badge--orange'
 const privacyExportGroups = ref<string[]>(['company', 'customers', 'catalog', 'production', 'financial', 'marketplaces'])
 const privacyExportOptions = [
   { value: 'company', label: 'Cadastro e configurações da empresa', description: 'Dados cadastrais e preferências.' },
@@ -91,7 +103,7 @@ const selectedPrivacyRequest = computed(() => privacyRequestOptions.find((option
 const allPrivacyExportGroupsSelected = computed(() => privacyExportGroups.value.length === privacyExportOptions.length)
 const selectAllPrivacyExportGroups = () => { privacyExportGroups.value = privacyExportOptions.map(option => option.value) }
 const clearPrivacyExportGroups = () => { privacyExportGroups.value = [] }
-const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0, documentLocked: false, documentType: '' })
+const company = reactive({ name: '', cnpj: '', phone: '', email: '', address: '', district: '', city: '', state: '', zip: '', country: 'Brasil', currency: 'Real (R$)', timezone: '(GMT-03:00) Brasilia', kwh: 0, nameLocked: false, documentLocked: false, documentType: '' })
 const companyDocumentKind = ref<'cpf' | 'cnpj'>('cnpj')
 const companyDocumentLabel = computed(() => companyDocumentKind.value === 'cpf' ? 'CPF' : 'CNPJ')
 const companyDocumentPlaceholder = computed(() => companyDocumentKind.value === 'cpf' ? '000.000.000-00' : '00.000.000/0000-00')
@@ -109,7 +121,10 @@ const selectCompanyDocumentKind = (kind: 'cpf' | 'cnpj') => {
   company.cnpj = ''
 }
 const preferences = reactive({ emailAlerts: true, productionAlerts: true, marketplaceAlerts: true, dailySummary: false, compactLayout: false, logoUrl: '', brandName: '', accentColor: '#1768f2', defaultMargin: 40, monthlyFixedCost: 0, plannedMonthlyUnits: 0 })
-const previewBrandName = computed(() => preferences.brandName.trim() || company.name.trim() || 'PrintFlow 3D')
+const previewBrandName = computed(() => {
+  const name = preferences.brandName.trim() || company.name.trim()
+  return !name || /^PrintFlow(?: 3D)?$/i.test(name) ? 'Filamind' : name
+})
 const roles = [
   { value: 'owner', label: 'Owner', description: 'Controle total da empresa, inclusive outros Owners.', access: ['Todas as configuracoes', 'Membros e Owners', 'Auditoria e dados'] },
   { value: 'admin', label: 'Administrador', description: 'Gerencia membros e a operacao, sem poderes reservados de Owner.', access: ['Catalogo e producao', 'Financeiro e marketplaces', 'Membros, sem Owners'] },
@@ -192,7 +207,7 @@ const passwordReady = computed(() => Boolean(passwordForm.currentPassword) && pa
 const securityStatus = computed(() => isPrivileged.value && mfaEnabled.value
   ? { label: 'Proteção reforçada', detail: 'MFA ativo', tone: 'success' }
   : { label: 'Proteção básica', detail: isPrivileged.value ? 'MFA recomendado' : 'Senha e sessões ativas', tone: 'warning' })
-const selectedBillingPlan = computed(() => stripeBilling.value?.plans[0] || null)
+const selectedBillingPlan = computed(() => mercadoPagoBilling.value?.plans[0] || null)
 const billingActionLoading = computed(() => creatingBillingLink.value || subscriptionActionLoading.value)
 const currency = (value: number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const fixedCostPerUnitPreview = computed(() => {
@@ -201,7 +216,7 @@ const fixedCostPerUnitPreview = computed(() => {
   return plannedUnits > 0 ? monthlyCost / plannedUnits : 0
 })
 const subscriptionStatus = (status: string) => ({ trial: 'Trial histórico', active: 'Ativa', past_due: 'Em atraso', grace: 'Em carência', paused: 'Pausada', courtesy: 'Cortesia', cancelled: 'Cancelada', ended: 'Encerrada' }[status] || status)
-const hasProSubscription = computed(() => stripeBilling.value?.subscription?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'courtesy'].includes(stripeBilling.value?.subscription?.status || ''))
+const hasProSubscription = computed(() => mercadoPagoBilling.value?.subscription?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'courtesy', 'paused'].includes(mercadoPagoBilling.value?.subscription?.status || ''))
 const roleCount = (role: string) => members.value.filter((member) => member.role === role).length
 const memberBadge = (status: string) => status === 'active' ? 'badge badge--green' : 'badge badge--orange'
 const memberStatusLabel = (status: string) => status === 'active' ? 'Ativo' : 'Suspenso'
@@ -316,14 +331,35 @@ const submitPasswordChange = async () => {
 
   changingPassword.value = true
   try {
-    await auth.changePassword(passwordForm.currentPassword, passwordForm.newPassword)
+    if (!passwordChangeCodeSent.value) {
+      await auth.requestPasswordChangeCode(passwordForm.currentPassword)
+      passwordChangeCodeSent.value = true
+      notify('Enviamos um código de confirmação para o e-mail da sua conta.')
+      return
+    }
+    await auth.confirmPasswordChange(passwordForm.currentPassword, passwordForm.newPassword, passwordForm.code)
     passwordForm.currentPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmation = ''
+    passwordForm.code = ''
+    passwordChangeCodeSent.value = false
     await loadSessions()
     notify('Senha alterada. As sessoes anteriores foram encerradas por seguranca.')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel alterar a senha.')
+  } finally {
+    changingPassword.value = false
+  }
+}
+
+const resendPasswordChangeCode = async () => {
+  changingPassword.value = true
+  try {
+    await auth.requestPasswordChangeCode(passwordForm.currentPassword)
+    passwordForm.code = ''
+    notify('Enviamos outro código para o e-mail da sua conta.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Não foi possível enviar o código.')
   } finally {
     changingPassword.value = false
   }
@@ -350,7 +386,7 @@ const syncSettings = () => {
   Object.assign(company, {
     name: String(value.name || ''), cnpj: String(value.document || ''), phone: String(value.phone || ''), email: String(value.email || ''),
     address: String(value.address || ''), district: String(value.district || ''), city: String(value.city || ''), state: String(value.state || ''), zip: String(value.zip || ''),
-    country: String(value.country || 'Brasil'), currency: String(value.currency || 'Real (R$)'), timezone: String(value.timezone || '(GMT-03:00) Brasilia'), kwh: Number(value.kwh || 0), documentLocked: Boolean(value.documentLocked), documentType: String(value.documentType || '')
+    country: String(value.country || 'Brasil'), currency: String(value.currency || 'Real (R$)'), timezone: String(value.timezone || '(GMT-03:00) Brasilia'), kwh: Number(value.kwh || 0), nameLocked: Boolean(value.nameLocked), documentLocked: Boolean(value.documentLocked), documentType: String(value.documentType || '')
   })
   companyDocumentKind.value = companyDocumentKindFrom(company.cnpj, company.documentType)
   Object.assign(preferences, (value.preferences && typeof value.preferences === 'object' ? value.preferences : {}))
@@ -375,7 +411,7 @@ const downloadTenantData = async (groups: string[] = ['all']) => {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `printflow-dados-${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `filamind-dados-${new Date().toISOString().slice(0, 10)}.csv`
     link.click()
     URL.revokeObjectURL(url)
     notify('Arquivo CSV gerado e registrado na auditoria.')
@@ -424,32 +460,35 @@ const loadIntegrations = async () => {
   integrationsLoading.value = true
   try { integrationsOverview.value = await loadIntegrationsOverview() } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel carregar as integracoes.') } finally { integrationsLoading.value = false }
 }
-const loadStripeBilling = async () => {
+const loadMercadoPagoBilling = async () => {
   if (!isOwner.value) return
   billingLoading.value = true
+  billingError.value = ''
   try {
-    stripeBilling.value = await getStripeBilling()
-    const billingReturn = String(route.query.billing || '')
-    if (billingReturn === 'cancelled' && stripeReturnRetries.value === 0) notify('Checkout cancelado. Nenhuma cobrança foi criada.')
+    mercadoPagoBilling.value = await getMercadoPagoBilling()
+    // Mercado Pago may append preapproval_id using a second '?' to back_url.
+    const billingReturn = String(route.query.billing || '').split('?')[0]
+    if (billingReturn === 'cancelled' && billingReturnRetries.value === 0) notify('Checkout cancelado. Nenhuma cobrança foi criada.')
     if (billingReturn === 'success') {
       if (hasProSubscription.value) notify('Assinatura confirmada com sucesso.')
-      else if (stripeReturnRetries.value < 3 && import.meta.client) {
-        if (stripeReturnRetries.value === 0) notify('Pagamento recebido. Confirmando sua assinatura...')
-        stripeReturnRetries.value += 1
-        window.setTimeout(() => { void loadStripeBilling() }, 2_000)
+      else if (billingReturnRetries.value < 3 && import.meta.client) {
+        if (billingReturnRetries.value === 0) notify('Pagamento recebido. Confirmando sua assinatura...')
+        billingReturnRetries.value += 1
+        window.setTimeout(() => { void loadMercadoPagoBilling() }, 2_000)
       }
     }
   } catch (error: any) {
-    notify(error?.data?.error || error?.message || 'Nao foi possivel consultar a assinatura.')
+    billingError.value = error?.data?.error || error?.message || 'Não foi possível consultar a assinatura.'
+    notify(billingError.value)
   } finally { billingLoading.value = false }
 }
-const startStripeCheckout = async () => {
+const startMercadoPagoCheckout = async () => {
   const cycle = 'monthly'
   const amount = selectedBillingPlan.value?.monthly || 0
   if (!selectedBillingPlan.value || amount <= 0) return notify('A assinatura ainda nao possui um valor configurado.')
   creatingBillingLink.value = true
   try {
-    const result = await createStripeCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
+    const result = await createMercadoPagoCheckout({ planCode: selectedBillingPlan.value.code, billingCycle: cycle })
     window.location.assign(result.url)
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel gerar o link de pagamento.')
@@ -497,16 +536,28 @@ const copyMfaSecret = async () => {
   if (!mfaSetup.value?.secret) return
   try { await navigator.clipboard.writeText(mfaSetup.value.secret); notify('Chave de configuração copiada.') } catch { notify('Não foi possível copiar. Selecione a chave manualmente.') }
 }
-const changeStripeCancellation = async (cancelAtPeriodEnd: boolean) => {
-  if (!stripeBilling.value?.subscription || subscriptionActionLoading.value) return
-  const message = cancelAtPeriodEnd
-    ? 'A assinatura continuará ativa até o fim do período atual. Deseja programar o cancelamento?'
-    : 'Deseja continuar a assinatura e remover o cancelamento programado?'
+const changeMercadoPagoSubscription = async (action: 'cancel' | 'pause' | 'resume') => {
+  if (!mercadoPagoBilling.value?.subscription || subscriptionActionLoading.value) return
+  const accessUntil = mercadoPagoBilling.value.subscription.currentPeriodEnd
+    ? new Date(mercadoPagoBilling.value.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')
+    : 'o fim do período atual confirmado pelo Mercado Pago'
+  const message = action === 'cancel'
+    ? `O Mercado Pago cancelará a renovação agora, sem fazer novas cobranças. Seu acesso PRO continuará até ${accessUntil}; depois, a empresa volta ao FREE sem apagar os dados. Deseja continuar?`
+    : action === 'pause'
+      ? 'O Mercado Pago pausará as cobranças. O acesso PRO ficará suspenso enquanto a assinatura estiver pausada; você poderá retomá-la depois. Deseja continuar?'
+      : 'O Mercado Pago retomará as cobranças e o acesso PRO desta assinatura. Deseja continuar?'
   if (!window.confirm(message)) return
   subscriptionActionLoading.value = true
   try {
-    stripeBilling.value = cancelAtPeriodEnd ? await cancelStripeSubscription() : await resumeStripeSubscription()
-    notify(cancelAtPeriodEnd ? 'Cancelamento programado para o fim do período.' : 'Assinatura retomada com sucesso.')
+    mercadoPagoBilling.value = await updateMercadoPagoSubscription(action)
+    const cancellationEnd = mercadoPagoBilling.value.subscription?.currentPeriodEnd
+      ? new Date(mercadoPagoBilling.value.subscription.currentPeriodEnd).toLocaleDateString('pt-BR')
+      : ''
+    notify(action === 'cancel'
+      ? mercadoPagoBilling.value.subscription?.cancelAtPeriodEnd
+        ? `Renovação cancelada no Mercado Pago. Acesso PRO até ${cancellationEnd}.`
+        : 'Assinatura cancelada no Mercado Pago.'
+      : action === 'pause' ? 'Cobranças pausadas no Mercado Pago.' : 'Assinatura reativada no Mercado Pago.')
   } catch (error: any) {
     notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar a assinatura.')
   } finally { subscriptionActionLoading.value = false }
@@ -555,7 +606,8 @@ const loadSectionOnce = (key: string, loader: () => Promise<unknown>, force = fa
   sectionRequests[key] = request
   return request
 }
-const openDocumentChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: 'Solicitação de troca de CPF para CNPJ' } })
+const openDocumentChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: company.documentType === 'cpf' ? 'Solicitação de troca de CPF para CNPJ' : 'Solicitação de alteração do documento da empresa' } })
+const openCompanyNameChangeRequest = () => void navigateTo({ path: '/configuracoes/suporte', query: { categoria: 'account', assunto: 'Solicitação de alteração do nome da empresa' } })
 
 watch(active, (tab) => {
   if (tab === 'Usuarios e Permissoes' && canManageMembers.value) void loadSectionOnce('members', loadMembers)
@@ -565,8 +617,11 @@ watch(active, (tab) => {
   }
   if (tab === 'Backup e Dados' && canExportCompanyData.value) void loadSectionOnce('backup', loadBackup)
   if (tab === 'Integracoes') void loadSectionOnce('integrations', loadIntegrations)
-  if (tab === 'Assinatura') void loadSectionOnce('billing', loadStripeBilling)
+  if (tab === 'Assinatura' && isOwner.value) void loadSectionOnce('billing', loadMercadoPagoBilling)
 }, { immediate: true })
+watch(isOwner, (allowed) => {
+  if (allowed && active.value === 'Assinatura') void loadSectionOnce('billing', loadMercadoPagoBilling, true)
+})
 watch(canExportCompanyData, (allowed) => {
   if (allowed && active.value === 'Backup e Dados') void loadSectionOnce('backup', loadBackup)
 })
@@ -603,8 +658,8 @@ watch(() => supportDraft.category, (category) => {
             <section class="company-settings__section">
               <div class="company-settings__section-head"><span><UiIcon name="building" :size="17" /></span><div><h3>Identificação</h3><p>Nome e documento usados no cadastro da conta.</p></div></div>
               <div class="form-grid">
-                <div class="field col-7"><label for="company-name">Nome da empresa *</label><input id="company-name" v-model="company.name" autocomplete="organization" placeholder="Nome da sua empresa"></div>
-                <div class="field col-5"><label for="company-document">{{ companyDocumentLabel }} <small v-if="company.documentLocked" class="company-settings__locked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input id="company-document" v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Depois de salvo, o documento fica protegido contra alterações diretas.</small><small v-if="company.documentLocked && company.documentType === 'cpf'">Para substituir o CPF por CNPJ, <button class="link-button" type="button" @click="openDocumentChangeRequest">abra uma solicitação</button>.</small></div>
+                <div class="field col-7"><label for="company-name">Nome da empresa * <small v-if="company.nameLocked" class="company-settings__locked">· informado no cadastro</small></label><input id="company-name" v-model="company.name" autocomplete="organization" placeholder="Nome da sua empresa" :disabled="company.nameLocked"><small v-if="company.nameLocked">Para solicitar uma alteração, <button class="link-button" type="button" @click="openCompanyNameChangeRequest">fale com o suporte</button>.</small></div>
+                <div class="field col-5"><label for="company-document">{{ companyDocumentLabel }} <small v-if="company.documentLocked" class="company-settings__locked">· documento registrado</small></label><div v-if="!company.documentLocked" class="settings-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cpf' }" @click="selectCompanyDocumentKind('cpf')">CPF</button><button type="button" class="settings-document-kind__item" :class="{ 'settings-document-kind__item--active': companyDocumentKind === 'cnpj' }" @click="selectCompanyDocumentKind('cnpj')">CNPJ</button></div><div class="settings-document-control"><input id="company-document" v-model="company.cnpj" inputmode="numeric" :maxlength="companyDocumentMaxLength" :placeholder="companyDocumentPlaceholder" :disabled="company.documentLocked" @input="formatCompanyDocument"><button v-if="!company.documentLocked && companyDocumentKind === 'cnpj'" class="btn" type="button" :disabled="companyLookupLoading || !company.cnpj.trim()" @click="lookupCompany">{{ companyLookupLoading ? 'Consultando...' : 'Buscar CNPJ' }}</button></div><small v-if="!company.documentLocked">Depois de salvo, o documento fica protegido contra alterações diretas.</small><small v-if="company.documentLocked">Para solicitar uma alteração, <button class="link-button" type="button" @click="openDocumentChangeRequest">fale com o suporte</button>.</small></div>
               </div>
             </section>
 
@@ -659,30 +714,35 @@ watch(() => supportDraft.category, (category) => {
         </div>
 
         <div v-else-if="active === 'Assinatura'" class="settings-security-card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h2>Assinatura da plataforma</h2><p>PRO mensal por preço de lançamento vigente. Cobrança recorrente pelo Stripe, sem fidelidade.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadStripeBilling">Atualizar</button></div>
+          <div class="billing-page-heading"><div><span class="billing-page-heading__eyebrow">PLANO DA EMPRESA</span><h2>Assinatura da plataforma</h2><p>Consulte seu plano e gerencie as cobranças recorrentes.</p></div><button v-if="isOwner" class="btn" :disabled="billingLoading" @click="loadMercadoPagoBilling">{{ billingLoading ? 'Atualizando...' : 'Atualizar' }}</button></div>
           <div v-if="!isOwner" class="info-note" style="margin-top:16px"><UiIcon name="shield" />Somente o Owner pode consultar ou alterar a assinatura da empresa.</div>
           <div v-else-if="billingLoading" class="empty-state"><div><h3>Consultando assinatura</h3></div></div>
-          <template v-else-if="stripeBilling">
-            <div v-if="stripeBilling.subscription" class="billing-subscription-summary">
-              <div class="billing-subscription-summary__status"><UiIcon name="check" /><div><span>Assinatura atual</span><strong>{{ stripeBilling.subscription.planName || stripeBilling.subscription.planCode }} · {{ subscriptionStatus(stripeBilling.subscription.status) }}</strong></div></div>
-              <div v-if="stripeBilling.subscription.status === 'grace' && stripeBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(stripeBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>Você mantém o PRO por 3 dias. Depois, a empresa volta ao FREE sem excluir dados.</small></div><div v-else-if="stripeBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ stripeBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança em' }}</span><strong>{{ new Date(stripeBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="stripeBilling.subscription.status !== 'trial'">{{ currency(stripeBilling.plans[0]?.[stripeBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ stripeBilling.subscription.billingCycle === 'yearly' ? 'anual existente' : 'mensal' }}</small></div>
-              <div class="billing-subscription-summary__actions"><span v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="badge badge--orange">Cancelamento programado</span><button v-if="stripeBilling.subscription.cancelAtPeriodEnd" class="btn" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(false)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Continuar assinatura' }}</button><button v-else-if="['trial', 'active', 'past_due', 'grace'].includes(stripeBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeStripeCancellation(true)">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div>
+          <div v-else-if="billingError" class="info-note" style="margin-top:16px"><UiIcon name="alert" /><span>{{ billingError }}</span><button class="btn" style="margin-left:auto" @click="loadMercadoPagoBilling">Tentar novamente</button></div>
+          <template v-else-if="mercadoPagoBilling">
+            <div v-if="mercadoPagoBilling.subscription" class="billing-subscription-summary">
+              <div class="billing-subscription-summary__overview">
+                <div class="billing-subscription-summary__status" :class="`billing-subscription-summary__status--${mercadoPagoBilling.subscription.status}`"><span class="billing-subscription-summary__status-icon"><UiIcon :name="mercadoPagoBilling.subscription.status === 'active' ? 'check' : 'info'" /></span><div><span>Plano contratado</span><strong>{{ mercadoPagoBilling.subscription.planName || mercadoPagoBilling.subscription.planCode }}</strong><small class="billing-subscription-summary__badge">{{ mercadoPagoBilling.subscription.cancelAtPeriodEnd ? 'Cancelamento agendado' : subscriptionStatus(mercadoPagoBilling.subscription.status) }}</small></div></div>
+                <div v-if="mercadoPagoBilling.subscription.cancelAtPeriodEnd && mercadoPagoBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>Acesso PRO até</span><strong>{{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small>A renovação foi cancelada no Mercado Pago; não haverá nova cobrança.</small></div><div v-else-if="mercadoPagoBilling.subscription.status === 'grace' && mercadoPagoBilling.subscription.graceEndsAt" class="billing-subscription-summary__date"><span>Carência termina em</span><strong>{{ new Date(mercadoPagoBilling.subscription.graceEndsAt).toLocaleString('pt-BR') }}</strong><small>O acesso PRO continua durante o período de carência.</small></div><div v-else-if="mercadoPagoBilling.subscription.currentPeriodEnd" class="billing-subscription-summary__date"><span>{{ mercadoPagoBilling.subscription.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança' }}</span><strong>{{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}</strong><small v-if="mercadoPagoBilling.subscription.status !== 'trial'">{{ currency(mercadoPagoBilling.plans[0]?.[mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'yearly' : 'monthly'] || 0) }} · {{ mercadoPagoBilling.subscription.billingCycle === 'yearly' ? 'anual' : 'mensal' }}</small></div>
+              </div>
+              <div class="billing-subscription-summary__management"><div class="billing-subscription-summary__management-copy"><strong>{{ mercadoPagoBilling.subscription.cancelAtPeriodEnd ? 'Renovação cancelada' : 'Gerencie sua assinatura' }}</strong><span>{{ mercadoPagoBilling.subscription.cancelAtPeriodEnd ? 'O acesso PRO continua até o fim do período pago.' : 'As alterações são enviadas ao Mercado Pago e confirmadas aqui após a resposta.' }}</span></div><div class="billing-subscription-summary__actions"><button v-if="!mercadoPagoBilling.subscription.cancelAtPeriodEnd && mercadoPagoBilling.subscription.status === 'paused'" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('resume')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Retomar cobrança' }}</button><button v-else-if="!mercadoPagoBilling.subscription.cancelAtPeriodEnd && ['trial', 'active', 'past_due', 'grace'].includes(mercadoPagoBilling.subscription.status)" class="btn" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('pause')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Pausar cobranças' }}</button><button v-if="!mercadoPagoBilling.subscription.cancelAtPeriodEnd && ['trial', 'active', 'past_due', 'grace', 'paused'].includes(mercadoPagoBilling.subscription.status)" class="btn btn--danger" :disabled="subscriptionActionLoading" @click="changeMercadoPagoSubscription('cancel')">{{ subscriptionActionLoading ? 'Atualizando...' : 'Cancelar assinatura' }}</button></div></div>
+              <div v-if="['active', 'trial', 'past_due', 'grace', 'paused'].includes(mercadoPagoBilling.subscription.status)" class="billing-subscription-summary__access-note"><UiIcon name="info" /><span v-if="mercadoPagoBilling.subscription.cancelAtPeriodEnd">A renovação foi cancelada no Mercado Pago. O acesso PRO permanece até {{ new Date(mercadoPagoBilling.subscription.currentPeriodEnd).toLocaleDateString('pt-BR') }}; depois, a empresa volta ao FREE sem perder dados.</span><span v-else>Pausar suspende o acesso PRO enquanto a assinatura estiver pausada. Cancelar encerra as próximas cobranças e mantém o acesso até o fim do período pago.</span></div>
             </div>
-            <div v-if="stripeBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(stripeBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="stripeBilling.checkout.url" rel="noopener noreferrer">Abrir link</a>.</div>
-            <div v-if="!stripeBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Stripe ainda precisa do segredo de webhook no ambiente antes de gerar um checkout.</div>
-            <form v-else-if="!hasProSubscription" class="integration-section" style="margin-top:16px" @submit.prevent="startStripeCheckout">
-              <div class="integration-section__head"><div><h3>Assinatura PrintFlow</h3><p>Os dados do meio de pagamento sao informados diretamente ao Stripe e nao ficam no PrintFlow.</p></div><span class="badge badge--orange">Producao</span></div>
+            <div v-if="mercadoPagoBilling.checkout" class="info-note" style="margin-top:16px"><UiIcon name="info" />Ha um link de pagamento pendente criado em {{ new Date(mercadoPagoBilling.checkout.createdAt).toLocaleString('pt-BR') }}. <a :href="mercadoPagoBilling.checkout.url" rel="noopener noreferrer">Abrir link no Mercado Pago</a>.</div>
+            <div v-if="!mercadoPagoBilling.configured" class="info-note" style="margin-top:16px"><UiIcon name="shield" />O Mercado Pago precisa das credenciais e do segredo de webhook no ambiente para gerar um checkout.</div>
+            <form v-else-if="!hasProSubscription" class="integration-section" style="margin-top:16px" @submit.prevent="startMercadoPagoCheckout">
+              <div class="integration-section__head"><div><h3>Assinatura Filamind</h3><p>O pagamento é concluído em uma página segura do Mercado Pago.</p></div><span class="badge badge--orange">{{ mercadoPagoBilling.environment === 'sandbox' ? 'Teste' : 'Produção' }}</span></div>
               <div v-if="selectedBillingPlan" class="billing-plans">
                 <article class="billing-plan-card">
                   <div class="billing-plan-card__title"><h3>PRO mensal</h3><span class="billing-plan-card__caption">Preço de lançamento vigente. Cancele quando quiser.</span></div>
                   <div class="billing-plan-card__price"><small>R$</small>{{ currency(selectedBillingPlan.monthly || 0).replace('R$', '').trim() }}<span>/mês</span></div>
                   <ul class="billing-plan-card__features"><li>Automação com PrintFlow Agent e fila de impressão</li><li>Marketplaces e relatórios avançados</li><li>Equipe com até 8 pessoas</li><li>Operação sem os limites do plano FREE</li></ul>
-                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startStripeCheckout">{{ billingActionLoading ? 'Atualizando...' : 'Assinar PRO' }}</button>
+                  <button class="billing-plan-card__button" type="button" :disabled="billingActionLoading || (selectedBillingPlan?.monthly || 0) <= 0" @click="startMercadoPagoCheckout">{{ billingActionLoading ? 'Atualizando...' : 'Assinar PRO' }}</button>
                 </article>
               </div>
-              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cobrança mensal recorrente pelo Stripe. Você pode programar o cancelamento para o fim do período pago.</div>
+              <div v-if="selectedBillingPlan" class="billing-payment-note"><UiIcon name="wallet" /> Cobrança mensal recorrente pelo Mercado Pago. Você pode pausar ou cancelar a assinatura.</div>
             </form>
           </template>
+          <div v-else class="empty-state"><div><h3>Carregando dados do plano</h3><p>A consulta da assinatura ainda não começou.</p><button class="btn" @click="loadMercadoPagoBilling">Consultar assinatura</button></div></div>
         </div>
 
         <div v-else-if="active === 'Usuarios e Permissoes'" class="members-page">
@@ -742,7 +802,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Seguranca'" class="security-page">
           <header class="security-hero">
             <span class="security-hero__icon"><UiIcon name="shield" :size="24" /></span>
-            <div><span class="security-hero__eyebrow">Segurança da conta</span><h2>Proteja seu acesso ao PrintFlow</h2><p>Gerencie sua senha, a verificação em duas etapas e os dispositivos que permanecem conectados.</p></div>
+            <div><span class="security-hero__eyebrow">Segurança da conta</span><h2>Proteja seu acesso ao Filamind</h2><p>Gerencie sua senha, a verificação em duas etapas e os dispositivos que permanecem conectados.</p></div>
             <div :class="['security-hero__status', `security-hero__status--${securityStatus.tone}`]"><i></i><span><strong>{{ securityStatus.label }}</strong><small>{{ securityStatus.detail }}</small></span></div>
           </header>
 
@@ -753,15 +813,19 @@ watch(() => supportDraft.category, (category) => {
           </section>
 
           <form class="security-panel security-password-panel" @submit.prevent="submitPasswordChange">
-            <div class="security-panel__head"><span><UiIcon name="lock" :size="18" /></span><div><small>Credencial de acesso</small><h3>Alterar senha</h3><p>Use uma senha exclusiva. Ao salvar, os outros dispositivos serão desconectados.</p></div></div>
+            <div class="security-panel__head"><span><UiIcon name="lock" :size="18" /></span><div><small>Credencial de acesso</small><h3>Alterar senha</h3><p>Confirme sua senha atual e o código enviado por e-mail. Os outros dispositivos serão desconectados.</p></div></div>
             <div class="security-password-grid">
               <label class="field"><span>Senha atual</span><input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" required placeholder="Confirme sua identidade"></label>
               <label class="field"><span>Nova senha</span><input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" minlength="10" required placeholder="Crie uma senha forte"></label>
               <label class="field"><span>Confirmar nova senha</span><input v-model="passwordForm.confirmation" type="password" autocomplete="new-password" minlength="10" required placeholder="Repita a nova senha"><small v-if="passwordForm.confirmation" :class="passwordForm.newPassword === passwordForm.confirmation ? 'field-hint--success' : 'field-hint--error'">{{ passwordForm.newPassword === passwordForm.confirmation ? 'As senhas conferem.' : 'As senhas ainda não conferem.' }}</small></label>
             </div>
+            <div v-if="passwordChangeCodeSent" class="security-password-grid">
+              <label class="field"><span>Código enviado por e-mail</span><input v-model="passwordForm.code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" pattern="[0-9]{8}" required placeholder="00000000"></label>
+              <button class="btn" type="button" :disabled="changingPassword || !passwordForm.currentPassword" @click="resendPasswordChangeCode">Reenviar código</button>
+            </div>
             <div class="security-password-footer">
               <ul class="security-password-rules"><li v-for="rule in passwordRules" :key="rule.label" :class="{ 'is-met': rule.met }"><UiIcon :name="rule.met ? 'check' : 'close'" :size="13" />{{ rule.label }}</li></ul>
-              <button class="btn btn--primary" type="submit" :disabled="changingPassword || !passwordReady"><UiIcon name="lock" :size="15" />{{ changingPassword ? 'Alterando...' : 'Atualizar senha' }}</button>
+              <button class="btn btn--primary" type="submit" :disabled="changingPassword || !passwordReady || (passwordChangeCodeSent && !/^\d{8}$/.test(passwordForm.code))"><UiIcon name="lock" :size="15" />{{ changingPassword ? 'Aguarde...' : passwordChangeCodeSent ? 'Confirmar e alterar senha' : 'Enviar código de confirmação' }}</button>
             </div>
           </form>
 
@@ -819,6 +883,13 @@ watch(() => supportDraft.category, (category) => {
                 <article><span><UiIcon name="check" :size="17" /></span><div><small>Exportação</small><strong>{{ backupStatus.export.enabled ? 'Disponível' : 'Indisponível' }}</strong></div></article>
                 <article><span><UiIcon name="receipt" :size="17" /></span><div><small>Formato</small><strong>{{ backupStatus.export.enabled ? backupStatus.export.format.toUpperCase() : '—' }}</strong></div></article>
                 <article><span><UiIcon name="history" :size="17" /></span><div><small>Última exportação</small><strong>{{ latestExport ? new Date(latestExport.createdAt).toLocaleDateString('pt-BR') : 'Nenhuma' }}</strong></div></article>
+                <article><span><UiIcon name="shield" :size="17" /></span><div><small>Último backup operacional</small><strong>{{ operationalBackupAge }}</strong><small v-if="backupStatus.operational.lastCompletedAt">{{ new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(backupStatus.operational.lastCompletedAt)) }}</small></div></article>
+              </section>
+
+              <section class="backup-history-card" aria-labelledby="backup-runs-title">
+                <div class="backup-section-heading"><div><small>ExecuÃ§Ãµes do sistema</small><h3 id="backup-runs-title">HistÃ³rico de backups</h3><p>Ãšltimas execuÃ§Ãµes registradas, separadas das exportaÃ§Ãµes da empresa.</p></div><span>{{ backupStatus.operational.history.length }} {{ backupStatus.operational.history.length === 1 ? 'execuÃ§Ã£o' : 'execuÃ§Ãµes' }}</span></div>
+                <div v-if="backupStatus.operational.history.length" class="table-scroll"><table class="data-table"><thead><tr><th>Status</th><th>Iniciado em</th><th>ConcluÃ­do em</th></tr></thead><tbody><tr v-for="(run, index) in backupStatus.operational.history" :key="`${run.startedAt || 'backup'}-${index}`"><td><span class="badge" :class="backupRunStatusClass(run.status)">{{ backupRunStatusLabel(run.status) }}</span></td><td>{{ run.startedAt ? new Date(run.startedAt).toLocaleString('pt-BR') : '—' }}</td><td>{{ run.completedAt ? new Date(run.completedAt).toLocaleString('pt-BR') : '—' }}</td></tr></tbody></table></div>
+                <div v-else class="backup-history-empty"><span><UiIcon name="history" :size="21" /></span><div><strong>Nenhuma execuÃ§Ã£o de backup registrada</strong><p>Este histÃ³rico mostra cÃ³pias operacionais, nÃ£o os arquivos CSV exportados abaixo.</p></div></div>
               </section>
 
               <section class="backup-export-card" :class="{ 'backup-export-card--disabled': !backupStatus.export.enabled }">
@@ -904,7 +975,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Notificacoes'" class="settings-feature-page">
           <header class="settings-feature-hero settings-feature-hero--notifications">
             <span class="settings-feature-hero__icon"><UiIcon name="bell" :size="23" /></span>
-            <div class="settings-feature-hero__copy"><span>Central de alertas</span><h2>Notificações</h2><p>Escolha quais eventos operacionais devem aparecer para a equipe dentro do PrintFlow.</p></div>
+            <div class="settings-feature-hero__copy"><span>Central de alertas</span><h2>Notificações</h2><p>Escolha quais eventos operacionais devem aparecer para a equipe dentro do Filamind.</p></div>
             <button class="btn btn--primary settings-feature-hero__action" :disabled="savingSettings" @click="saveSettings"><UiIcon name="save" :size="16" />{{ savingSettings ? 'Salvando...' : 'Salvar preferências' }}</button>
           </header>
 
@@ -927,7 +998,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Integracoes'" class="integrations-page">
           <header class="integrations-hero">
             <span class="integrations-hero__icon"><UiIcon name="settings" :size="22" /></span>
-            <div class="integrations-hero__copy"><span>Central de conexões</span><h2>Integrações</h2><p>Acompanhe os serviços que ligam vendas, produção e comunicações ao PrintFlow.</p></div>
+            <div class="integrations-hero__copy"><span>Central de conexões</span><h2>Integrações</h2><p>Acompanhe os serviços que ligam vendas, produção e comunicações ao Filamind.</p></div>
             <div class="integrations-hero__actions">
               <span :class="['integrations-health', `integrations-health--${integrationOverviewStatus.tone}`]"><i></i>{{ integrationOverviewStatus.label }}</span>
               <button class="btn" type="button" :disabled="integrationsLoading" @click="loadIntegrations"><UiIcon name="refresh" :size="15" />{{ integrationsLoading ? 'Atualizando...' : 'Atualizar estados' }}</button>
@@ -989,7 +1060,7 @@ watch(() => supportDraft.category, (category) => {
         <div v-else-if="active === 'Ajuda e Suporte'" class="support-contact-page">
           <header class="support-contact-hero">
             <span class="support-contact-hero__icon"><UiIcon name="chat" :size="24" /></span>
-            <div><span class="support-contact-hero__eyebrow">Fale com a equipe</span><h2>Como podemos ajudar?</h2><p>Envie sua dúvida ou descreva o problema. A mensagem será registrada diretamente no painel de suporte do PrintFlow.</p></div>
+            <div><span class="support-contact-hero__eyebrow">Fale com a equipe</span><h2>Como podemos ajudar?</h2><p>Envie sua dúvida ou descreva o problema. A mensagem será registrada diretamente no painel de suporte do Filamind.</p></div>
             <span class="support-contact-hero__status"><i></i> Canal interno</span>
           </header>
 

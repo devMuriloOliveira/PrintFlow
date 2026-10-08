@@ -25,7 +25,7 @@ export const prepareProductionJobSlicing = async ({
     throw new Error('Contexto do Agent ausente para preparar o G-code.')
   }
   if (!executablePath) {
-    throw new Error('Configure PRINTFLOW_ORCA_SLICER_PATH antes de preparar o G-code.')
+    throw new Error('OrcaSlicer oficial Store indisponivel. Execute o instalador do Agent para configurar o fatiador ou informe PRINTFLOW_ORCA_SLICER_PATH.')
   }
 
   const source = await fileManager.ensureCached({ ...job.printFile, printJobId: job.id })

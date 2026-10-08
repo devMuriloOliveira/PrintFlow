@@ -14,7 +14,7 @@ const notificationsOpen = ref(false)
     </div>
     <div class="topbar-actions">
       <button class="top-control top-control--date"><UiIcon name="calendar" :size="18" /><span>01/05/2024 - 31/05/2024</span><UiIcon name="down" :size="15" /></button>
-      <button class="top-control top-control--company"><UiIcon name="building" :size="18" /><span>PrintFlow 3D LTDA</span><UiIcon name="down" :size="15" /></button>
+      <button class="top-control top-control--company"><UiIcon name="building" :size="18" /><span>Filamind</span><UiIcon name="down" :size="15" /></button>
       <div class="notification-wrap">
         <button class="icon-btn notification" aria-label="Notificacoes" @click="notificationsOpen = !notificationsOpen">
           <UiIcon name="bell" :size="21" /><b>3</b>

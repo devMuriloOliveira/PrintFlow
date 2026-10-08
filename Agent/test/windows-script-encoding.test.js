@@ -25,7 +25,7 @@ test('scripts Windows com texto Unicode usam UTF-8 BOM', async () => {
     )
 
     assert.equal(
-      content.toString('utf8').includes('Ã'),
+      content.toString('utf8').includes('\u00c3\u0192'),
       false,
       `${name} contem texto mojibake`
     )

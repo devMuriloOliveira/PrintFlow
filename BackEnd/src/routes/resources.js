@@ -6,6 +6,7 @@ import { readJsonBody, readRawBody } from '../http/body.js'
 import { sendBuffer, sendJson } from '../http/response.js'
 import { createProduct, listProducts } from '../repositories/productsRepository.js'
 import { getOrdersSummary, listOrdersPage, listResource, loadAppData } from '../repositories/appDataRepository.js'
+import { buildDashboardSummary, getDashboardSummary } from '../repositories/dashboardRepository.js'
 import { listFinancialHistory } from '../repositories/financialHistoryRepository.js'
 import { createFilamentMovement, listFilamentMovements, createProductMovement, createProductMovementWithClient, listProductMovements, listInventoryOverview } from '../repositories/inventoryRepository.js'
 import { listPendingProductionMaterial, reconcilePendingProductionMaterial } from '../services/productionInventory.js'
@@ -33,6 +34,10 @@ const readResource = (resource) => async (req) => {
 }
 
 export const readRoutes = {
+  '/api/dashboard-summary': async (req) => {
+    const tenantId = await getTenantId(req)
+    return hasDatabase ? getDashboardSummary(tenantId) : buildDashboardSummary(getTenantData(tenantId))
+  },
   '/api/orders/summary': async (req) => {
     const tenantId = await getTenantId(req)
     if (hasDatabase) return getOrdersSummary(tenantId)
@@ -40,9 +45,19 @@ export const readRoutes = {
     const activeOrders = orders.filter((order) => order.status !== 'Cancelado')
     const cancelledOrders = orders.filter((order) => order.status === 'Cancelado')
     const byStatus = new Map()
+    const byMarketplace = new Map()
+    const daily = new Map()
     for (const order of orders) {
       const status = order.status || 'Sem status'
       byStatus.set(status, (byStatus.get(status) || 0) + 1)
+      const key = String(order.date || '').includes('/') ? String(order.date).split('/').reverse().join('-') : String(order.date || '').slice(0, 10)
+      const row = daily.get(key) || { key, gross: 0, net: 0, profit: 0, orders: 0, cancelledGross: 0, cancelledOrders: 0 }
+      if (status === 'Cancelado') { row.cancelledGross += Number(order.gross || 0); row.cancelledOrders += 1 }
+      else {
+        row.gross += Number(order.gross || 0); row.net += Number(order.net || 0); row.profit += Number(order.profit || 0); row.orders += 1
+        const marketplace = order.marketplace || 'Sem marketplace'; byMarketplace.set(marketplace, (byMarketplace.get(marketplace) || 0) + Number(order.gross || 0))
+      }
+      daily.set(key, row)
     }
     const totals = activeOrders.reduce((acc, order) => {
       acc.orderCount += 1; acc.gross += Number(order.gross || 0); acc.net += Number(order.net || 0); acc.profit += Number(order.profit || 0); acc.fees += Number(order.fee || 0); acc.shipping += Number(order.shipping || 0)
@@ -53,7 +68,10 @@ export const readRoutes = {
       ticket: totals.orderCount ? totals.gross / totals.orderCount : 0,
       cancelledCount: cancelledOrders.length,
       cancelledGross: cancelledOrders.reduce((sum, order) => sum + Number(order.gross || 0), 0),
-      byStatus: [...byStatus.entries()].map(([status, count]) => ({ status, count }))
+      byStatus: [...byStatus.entries()].map(([status, count]) => ({ status, count })),
+      byMarketplace: [...byMarketplace.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })),
+      daily: [...daily.values()].filter((item) => item.key).sort((a, b) => a.key.localeCompare(b.key)),
+      options: { marketplaces: [...new Set(orders.map((order) => order.marketplace || 'Sem marketplace'))].sort(), products: [...new Set(orders.map((order) => order.product).filter(Boolean))].sort() }
     }
   },
   '/api/products': async (req) => {

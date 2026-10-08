@@ -40,6 +40,22 @@ const pendingTotal = computed(() => filtered.value.filter(expense => ['Pendente'
 const cancelledTotal = computed(() => filtered.value.filter(expense => expense.status === 'Cancelado').reduce((total, expense) => total + Number(expense.value || 0), 0))
 const recurring = computed(() => filtered.value.filter(isRecurring).slice(0, 3))
 const recurringTotal = computed(() => recurring.value.reduce((total, item) => total + Number(item.value || 0), 0))
+const daysUntilDue = (value: string) => {
+  const date = normalizedDate(value)
+  if (!date) return null
+  const due = new Date(`${date}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((due.getTime() - today.getTime()) / 86_400_000)
+}
+const recurringDueSoon = computed(() => filtered.value
+  .filter((expense) => isRecurring(expense) && !['Pago', 'Cancelado'].includes(String(expense.status || '')))
+  .map((expense) => ({ expense, days: daysUntilDue(expense.nextDueDate || '') }))
+  .filter((item): item is { expense: any; days: number } => item.days !== null && item.days <= 7)
+  .sort((a, b) => a.days - b.days)
+  .slice(0, 3))
+const dueLabel = (days: number) => days < 0 ? `Vencida há ${Math.abs(days)} dia(s)` : days === 0 ? 'Vence hoje' : days === 1 ? 'Vence amanhã' : `Vence em ${days} dias`
+const dueBadgeClass = (days: number) => days <= 0 ? 'badge--red' : 'badge--orange'
 const expensePoints = computed(() => filtered.value.map(expense => Number(expense.value || 0)))
 const recurringPoints = computed(() => filtered.value.filter(isRecurring).map(expense => Number(expense.value || 0)))
 const averageExpense = computed(() => filtered.value.length ? totalFiltered.value / filtered.value.length : 0)
@@ -143,12 +159,12 @@ const generateDue = async () => {
       </PanelCard>
       <aside>
         <PanelCard title="Despesas por categoria"><DonutChart :segments="filteredSegments" :total="formatCurrency(totalFiltered)" /></PanelCard>
-        <PanelCard title="Despesas recorrentes" style="margin-top:12px">
+        <PanelCard title="Recorrências a vencer" subtitle="Vencidas ou com prazo nos próximos sete dias." style="margin-top:12px">
           <div class="alerts-list">
-            <div v-if="!recurring.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="calendar" /></div><h3>Nenhuma recorrência</h3><p>Despesas recorrentes dentro dos filtros aparecem aqui.</p></div></div>
-            <div v-for="(item, index) in recurring" :key="item.id || item.description" class="alert-row"><span class="alert-row__icon"><UiIcon :name="index === 0 ? 'bolt' : 'receipt'" :size="17" /></span><div><strong>{{ item.description }}</strong><small>{{ item.supplier || 'Sem fornecedor' }} · {{ item.recurrence }}</small></div><strong>{{ formatCurrency(item.value) }}</strong></div>
+            <div v-if="!recurringDueSoon.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="calendar" /></div><h3>Nenhuma recorrência próxima</h3><p>As despesas vencidas ou com prazo nos próximos sete dias aparecem aqui.</p></div></div>
+            <div v-for="(item, index) in recurringDueSoon" :key="item.expense.id || item.expense.description" class="alert-row"><span class="alert-row__icon"><UiIcon :name="item.days <= 0 || index === 0 ? 'bolt' : 'receipt'" :size="17" /></span><div><strong>{{ item.expense.description }}</strong><small>{{ item.expense.supplier || 'Sem fornecedor' }} · {{ item.expense.nextDueDate || item.expense.recurrence }}</small></div><span class="badge" :class="dueBadgeClass(item.days)">{{ dueLabel(item.days) }}</span></div>
           </div>
-          <div class="summary-box"><div class="detail-list__row"><span>Total exibido</span><strong class="money-negative">{{ formatCurrency(recurringTotal) }}</strong></div></div>
+          <div class="summary-box"><div class="detail-list__row"><span>Total recorrente exibido</span><strong class="money-negative">{{ formatCurrency(recurringTotal) }}</strong></div></div>
         </PanelCard>
       </aside>
     </div>

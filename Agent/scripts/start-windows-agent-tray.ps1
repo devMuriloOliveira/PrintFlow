@@ -191,6 +191,209 @@ $statusItem.Text = "PrintFlow Agent ativo"
 $statusItem.Enabled = $false
 [void]$menu.Items.Add($statusItem)
 
+$localHealthUrl = 'http://127.0.0.1:17873/healthz'
+$script:statusForm = $null
+$script:statusRefreshTimer = $null
+$script:statusBadge = $null
+$script:statusSummary = $null
+$script:statusVersionValue = $null
+$script:statusPairingValue = $null
+$script:statusCloudValue = $null
+$script:statusPrintValue = $null
+
+function Get-AgentLocalHealth {
+  try {
+    return Invoke-RestMethod `
+      -Uri $localHealthUrl `
+      -Method Get `
+      -TimeoutSec 2
+  } catch {
+    return $null
+  }
+}
+
+function Update-AgentStatusWindow {
+  $health = Get-AgentLocalHealth
+
+  if (-not $health) {
+    $statusItem.Text = 'PrintFlow Agent indisponível'
+    $notifyIcon.Text = 'PrintFlow Agent - indisponível'
+    if ($script:statusBadge) {
+      $script:statusBadge.Text = 'INDISPONÍVEL'
+      $script:statusBadge.BackColor = [System.Drawing.Color]::FromArgb(254, 226, 226)
+      $script:statusBadge.ForeColor = [System.Drawing.Color]::FromArgb(185, 28, 28)
+      $script:statusSummary.Text = 'O serviço local ainda não respondeu. O Agent tentará reiniciar automaticamente.'
+      $script:statusVersionValue.Text = "v$version"
+      $script:statusPairingValue.Text = 'Não foi possível verificar'
+      $script:statusCloudValue.Text = 'Sem resposta local'
+      $script:statusPrintValue.Text = 'Não foi possível verificar'
+    }
+    return
+  }
+
+  $installedVersion = if ($health.version) { "v$($health.version)" } else { "v$version" }
+  $pairedText = if ($health.paired) { 'Conectado a uma conta' } else { 'Aguardando conexão pelo site' }
+  $cloudText = if ($health.cloudConnected) { 'Conectado ao Filamind' } else { 'Tentando conectar' }
+  $activePrintJobs = [Math]::Max(0, [int]$health.activePrintJobs)
+  $printText = if ($activePrintJobs -eq 0) { 'Nenhuma impressão ativa' } elseif ($activePrintJobs -eq 1) { '1 impressão ativa' } else { "$activePrintJobs impressões ativas" }
+
+  if (-not $health.paired) {
+    $statusLabel = 'AGUARDANDO CONEXÃO'
+    $summary = 'Abra o Filamind no navegador para conectar este computador à sua conta.'
+    $badgeBackColor = [System.Drawing.Color]::FromArgb(254, 249, 195)
+    $badgeForeColor = [System.Drawing.Color]::FromArgb(133, 77, 14)
+    $statusItem.Text = 'PrintFlow Agent aguardando conexão'
+    $notifyIcon.Text = 'PrintFlow Agent - aguardando conexão'
+  } elseif (-not $health.cloudConnected) {
+    $statusLabel = 'RECONECTANDO'
+    $summary = 'O Agent está aberto e tentando restabelecer a comunicação com o Filamind.'
+    $badgeBackColor = [System.Drawing.Color]::FromArgb(255, 237, 213)
+    $badgeForeColor = [System.Drawing.Color]::FromArgb(154, 52, 18)
+    $statusItem.Text = 'PrintFlow Agent reconectando...'
+    $notifyIcon.Text = 'PrintFlow Agent - reconectando'
+  } else {
+    $statusLabel = 'ONLINE'
+    $summary = 'Este computador está pronto para receber comandos autorizados do Filamind.'
+    $badgeBackColor = [System.Drawing.Color]::FromArgb(220, 252, 231)
+    $badgeForeColor = [System.Drawing.Color]::FromArgb(21, 128, 61)
+    $statusItem.Text = 'PrintFlow Agent online'
+    $notifyIcon.Text = 'PrintFlow Agent - online'
+  }
+
+  if ($script:statusBadge) {
+    $script:statusBadge.Text = $statusLabel
+    $script:statusBadge.BackColor = $badgeBackColor
+    $script:statusBadge.ForeColor = $badgeForeColor
+    $script:statusSummary.Text = $summary
+    $script:statusVersionValue.Text = $installedVersion
+    $script:statusPairingValue.Text = $pairedText
+    $script:statusCloudValue.Text = $cloudText
+    $script:statusPrintValue.Text = $printText
+  }
+}
+
+function Show-AgentStatusWindow {
+  if (-not $script:statusForm -or $script:statusForm.IsDisposed) {
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Status do PrintFlow Agent'
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $true
+    $form.ClientSize = [System.Drawing.Size]::new(620, 430)
+    $form.BackColor = [System.Drawing.Color]::FromArgb(248, 250, 252)
+    $form.Font = [System.Drawing.Font]::new('Segoe UI', 9)
+    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+    if (Test-Path $iconPath) { $form.Icon = New-Object System.Drawing.Icon($iconPath) }
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = 'PrintFlow Agent'
+    $title.Font = [System.Drawing.Font]::new('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
+    $title.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+    $title.AutoSize = $true
+    $title.Location = [System.Drawing.Point]::new(32, 24)
+    $form.Controls.Add($title)
+
+    $subtitle = New-Object System.Windows.Forms.Label
+    $subtitle.Text = 'Conector local do Filamind para impressoras 3D'
+    $subtitle.ForeColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
+    $subtitle.AutoSize = $true
+    $subtitle.Location = [System.Drawing.Point]::new(36, 70)
+    $form.Controls.Add($subtitle)
+
+    $script:statusBadge = New-Object System.Windows.Forms.Label
+    $script:statusBadge.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    $script:statusBadge.Font = [System.Drawing.Font]::new('Segoe UI Semibold', 8)
+    $script:statusBadge.Location = [System.Drawing.Point]::new(454, 31)
+    $script:statusBadge.Size = [System.Drawing.Size]::new(132, 30)
+    $form.Controls.Add($script:statusBadge)
+
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.BackColor = [System.Drawing.Color]::White
+    $panel.Location = [System.Drawing.Point]::new(36, 104)
+    $panel.Size = [System.Drawing.Size]::new(548, 236)
+    $form.Controls.Add($panel)
+
+    $script:statusSummary = New-Object System.Windows.Forms.Label
+    $script:statusSummary.Font = [System.Drawing.Font]::new('Segoe UI', 10)
+    $script:statusSummary.ForeColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
+    $script:statusSummary.Location = [System.Drawing.Point]::new(20, 18)
+    $script:statusSummary.Size = [System.Drawing.Size]::new(508, 42)
+    $panel.Controls.Add($script:statusSummary)
+
+    $rows = @(
+      @{ Label = 'Versão instalada'; Y = 78; Target = 'statusVersionValue' },
+      @{ Label = 'Conta'; Y = 116; Target = 'statusPairingValue' },
+      @{ Label = 'Filamind Cloud'; Y = 154; Target = 'statusCloudValue' },
+      @{ Label = 'Produção'; Y = 192; Target = 'statusPrintValue' }
+    )
+
+    foreach ($row in $rows) {
+      $label = New-Object System.Windows.Forms.Label
+      $label.Text = $row.Label
+      $label.ForeColor = [System.Drawing.Color]::FromArgb(100, 116, 139)
+      $label.Location = [System.Drawing.Point]::new(20, $row.Y)
+      $label.Size = [System.Drawing.Size]::new(150, 22)
+      $panel.Controls.Add($label)
+
+      $value = New-Object System.Windows.Forms.Label
+      $value.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+      $value.Font = [System.Drawing.Font]::new('Segoe UI Semibold', 9)
+      $value.ForeColor = [System.Drawing.Color]::FromArgb(15, 23, 42)
+      $value.Location = [System.Drawing.Point]::new(178, ($row.Y - 3))
+      $value.Size = [System.Drawing.Size]::new(350, 25)
+      $panel.Controls.Add($value)
+      Set-Variable -Scope Script -Name $row.Target -Value $value
+    }
+
+    $updateButton = New-Object System.Windows.Forms.Button
+    $updateButton.Text = 'Verificar atualizações'
+    $updateButton.FlatStyle = 'Flat'
+    $updateButton.Location = [System.Drawing.Point]::new(36, 364)
+    $updateButton.Size = [System.Drawing.Size]::new(174, 36)
+    $updateButton.Add_Click({ Start-InteractiveUpdateCheck })
+    $form.Controls.Add($updateButton)
+
+    $logsButton = New-Object System.Windows.Forms.Button
+    $logsButton.Text = 'Abrir logs'
+    $logsButton.FlatStyle = 'Flat'
+    $logsButton.Location = [System.Drawing.Point]::new(220, 364)
+    $logsButton.Size = [System.Drawing.Size]::new(120, 36)
+    $logsButton.Add_Click({ Start-Process -FilePath 'explorer.exe' -ArgumentList $logPath })
+    $form.Controls.Add($logsButton)
+
+    $closeButton = New-Object System.Windows.Forms.Button
+    $closeButton.Text = 'Fechar'
+    $closeButton.Location = [System.Drawing.Point]::new(464, 364)
+    $closeButton.Size = [System.Drawing.Size]::new(120, 36)
+    $closeButton.Add_Click({ $script:statusForm.Hide() })
+    $form.Controls.Add($closeButton)
+
+    $form.Add_FormClosing({
+      param($sender, $eventArgs)
+      if (-not $script:agentClosing) {
+        $eventArgs.Cancel = $true
+        $sender.Hide()
+      }
+    })
+
+    $script:statusRefreshTimer = New-Object System.Windows.Forms.Timer
+    $script:statusRefreshTimer.Interval = 3000
+    $script:statusRefreshTimer.Add_Tick({ Update-AgentStatusWindow })
+    $script:statusRefreshTimer.Start()
+    $script:statusForm = $form
+  }
+
+  Update-AgentStatusWindow
+  $script:statusForm.Show()
+  $script:statusForm.Activate()
+}
+
+$openStatusItem = New-Object System.Windows.Forms.ToolStripMenuItem
+$openStatusItem.Text = 'Abrir status'
+$openStatusItem.Add_Click({ Show-AgentStatusWindow })
+[void]$menu.Items.Add($openStatusItem)
+
 $restartTimer = New-Object System.Windows.Forms.Timer
 $restartTimer.Interval = 5000
 $restartTimer.Add_Tick({
@@ -208,29 +411,6 @@ $restartTimer.Add_Tick({
     $statusItem.Text = "PrintFlow Agent com erro"
   }
 })
-
-$infoItem = New-Object System.Windows.Forms.ToolStripMenuItem
-$infoItem.Text = "Informacoes"
-$infoItem.Add_Click({
-  $message = @"
-PrintFlow Agent
-Versao: $version
-
-O Agent conecta este computador ao PrintFlow para encontrar e controlar impressoras 3D conectadas por rede ou cabo USB.
-
-Ele envia status, recebe comandos de impressao e mantem uma conexao segura com o PrintFlow Cloud enquanto estiver aberto.
-
-Logs: $logPath
-"@
-
-  [System.Windows.Forms.MessageBox]::Show(
-    $message,
-    "PrintFlow Agent",
-    [System.Windows.Forms.MessageBoxButtons]::OK,
-    [System.Windows.Forms.MessageBoxIcon]::Information
-  ) | Out-Null
-})
-[void]$menu.Items.Add($infoItem)
 
 $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $exitItem.Text = "Fechar Agent"
@@ -333,7 +513,7 @@ $updateTimer.Add_Tick({
 
 $notifyIcon.ContextMenuStrip = $menu
 $notifyIcon.Add_DoubleClick({
-  $infoItem.PerformClick()
+  Show-AgentStatusWindow
 })
 
 try {
@@ -350,6 +530,13 @@ try {
   $updateTimer.Stop()
   $restartTimer.Dispose()
   $updateTimer.Dispose()
+  if ($script:statusRefreshTimer) {
+    $script:statusRefreshTimer.Stop()
+    $script:statusRefreshTimer.Dispose()
+  }
+  if ($script:statusForm) {
+    $script:statusForm.Dispose()
+  }
   Stop-AgentProcess
   $notifyIcon.Visible = $false
   $notifyIcon.Dispose()

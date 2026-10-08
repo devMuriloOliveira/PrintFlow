@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomInt } from 'node:crypto'
 import { env } from '../config/env.js'
 import { createOpaqueId } from '../auth/token.js'
 import { hashPassword, validatePasswordPolicy, verifyPassword } from '../auth/password.js'
@@ -20,6 +20,7 @@ const refreshTokenHash = (token) => createHash('sha256').update(String(token || 
 const createRefreshTokenValue = () => `refresh_${randomBytes(32).toString('base64url')}`
 const refreshExpiresAt = () => new Date(Date.now() + env.refreshTokenTtlSeconds * 1000)
 const authTokenHash = (token) => createHash('sha256').update(String(token || '')).digest('hex')
+const authCodeHash = (userId, purpose, code) => createHmac('sha256', env.authSecret).update(`${purpose}:${userId}:${code}`).digest('hex')
 const authTokenExpiresAt = () => new Date(Date.now() + 15 * 60 * 1000)
 
 const sessionMetadata = (metadata = {}) => ({
@@ -226,7 +227,7 @@ export const revokeRefreshSession = async (refreshToken) => {
 export const registerUser = async ({ name, email, password, company, document }) => {
   const normalizedEmail = normalizeEmail(email)
   const cleanName = String(name || '').trim()
-  const companyName = String(company || cleanName || 'PrintFlow 3D').trim()
+  const companyName = String(company || cleanName || 'Filamind').trim()
   const companyDocument = validCompanyDocument(document)
 
   if (!cleanName) throw new Error('Informe o nome.')
@@ -309,6 +310,60 @@ export const registerUser = async ({ name, email, password, company, document })
   })
 }
 
+export const loginOrRegisterGoogleUser = async ({ subject, email, name, company, document }) => {
+  const normalizedEmail = normalizeEmail(email)
+  const cleanName = String(name || '').trim()
+  const companyName = String(company || cleanName || 'Filamind').trim()
+  const companyDocument = validCompanyDocument(document)
+
+  if (!subject || !normalizedEmail.includes('@')) throw new Error('Conta Google invalida.')
+
+  if (!hasDatabase) {
+    const existing = [...memoryUsers.values()].find((user) => user.google_subject === subject || user.email === normalizedEmail)
+    if (existing) {
+      existing.google_subject = subject
+      existing.email_verified_at = new Date()
+      return publicUser(existing)
+    }
+    const user = { id: createOpaqueId('user'), tenant_id: createOpaqueId('tenant'), name: cleanName, email: normalizedEmail, password_hash: '', google_subject: subject, role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '', status: 'active', token_version: 0, email_verified_at: new Date() }
+    memoryUsers.set(normalizedEmail, user)
+    memoryUsersById.set(String(user.id), user)
+    return { user: publicUser(user), requiresCompanyProfile: !companyDocument }
+  }
+
+  const existing = await query(
+    `select id, tenant_id, name, email, role, status, token_version,
+      case when role = 'platform_super_admin' then role else '' end as platform_role
+       from users where google_subject = $1 or email_hash = any($2::text[]) or email = $3 limit 1`,
+    [subject, blindIndexesForLookup(normalizedEmail), normalizedEmail]
+  )
+  if (existing.rows[0]) {
+    const row = existing.rows[0]
+    await query('update users set google_subject = $1, email_verified_at = coalesce(email_verified_at, now()), updated_at = now() where id = $2', [subject, row.id])
+    const membership = await tenantQuery(row.tenant_id, 'select role, status from tenant_memberships where tenant_id = $1 and user_id = $2 limit 1', [row.tenant_id, row.id])
+    if (!membership.rows[0] || membership.rows[0].status !== 'active') throw new Error('Esta conta nao possui uma empresa ativa.')
+    return publicUser({ ...row, role: membership.rows[0].role })
+  }
+
+  const tenantId = createOpaqueId('tenant')
+  const emailHash = blindIndex(normalizedEmail)
+  await query(
+    `insert into tenants (id, name, document, document_hash, document_type, document_locked_at, email, is_initialized, billing_enforcement_exempt)
+     values ($1, $2, $3, $4, $5, case when $4 <> '' then now() else null end, $6, false, false)`,
+    [tenantId, encryptField(companyName), encryptField(companyDocument?.digits || ''), companyDocument?.hash || '', companyDocument?.type || null, encryptField(normalizedEmail)]
+  )
+  const result = await query(
+    `insert into users (tenant_id, name, email, email_hash, password_hash, google_subject, role, status, token_version, email_verified_at)
+     values ($1, $2, $3, $4, '', $5, $6, 'active', 0, now())
+     returning id, tenant_id, name, email, role, status, token_version`,
+    [tenantId, encryptField(cleanName), encryptField(normalizedEmail), emailHash, subject, isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : 'admin']
+  )
+  await tenantQuery(tenantId, `insert into tenant_memberships (tenant_id, user_id, role, status) values ($1, $2, 'owner', 'active') on conflict (tenant_id, user_id) do nothing`, [tenantId, result.rows[0].id])
+  await tenantQuery(tenantId, `insert into tenant_subscriptions (id, tenant_id, plan_id, status, billing_cycle, started_at, source) select $1, $2, id, 'active', 'manual', now(), 'manual' from platform_plans where code = 'free' and active = true on conflict (tenant_id) do nothing`, [`subscription_free_${tenantId}`, tenantId])
+  await writeAuditEvent(tenantId, { action: 'membership.owner.granted', actorType: 'user', actorId: result.rows[0].id, entityType: 'membership', entityId: result.rows[0].id, details: { role: 'owner', provider: 'google' } })
+  return { user: publicUser({ ...result.rows[0], role: 'owner', platform_role: isConfiguredPlatformSuperAdmin(normalizedEmail) ? 'platform_super_admin' : '' }), requiresCompanyProfile: !companyDocument }
+}
+
 export const loginUser = async ({ email, password }) => {
   const normalizedEmail = normalizeEmail(email)
   if (!normalizedEmail || !password) throw new Error('Informe e-mail e senha.')
@@ -378,6 +433,37 @@ export const consumeAuthEmailToken = async (token, purpose) => {
   return String(result.rows[0].user_id)
 }
 
+export const createAuthEmailCode = async (userId, purpose) => {
+  const code = String(randomInt(0, 100_000_000)).padStart(8, '0')
+  const tokenHash = authCodeHash(userId, purpose, code)
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+  if (!hasDatabase) {
+    for (const entry of memoryAuthTokens.values()) {
+      if (entry.userId === String(userId) && entry.purpose === purpose && !entry.consumedAt) entry.consumedAt = new Date()
+    }
+    memoryAuthTokens.set(tokenHash, { userId: String(userId), purpose, expiresAt, consumedAt: null })
+    return { code, expiresAt }
+  }
+  await query('update auth_email_tokens set consumed_at = now() where user_id = $1 and purpose = $2 and consumed_at is null', [String(userId), purpose])
+  await query('insert into auth_email_tokens (token_hash, user_id, purpose, expires_at) values ($1, $2, $3, $4)', [tokenHash, String(userId), purpose, expiresAt])
+  return { code, expiresAt }
+}
+
+export const consumeAuthEmailCode = async (userId, purpose, code) => {
+  const normalizedCode = String(code || '').trim()
+  if (!/^\d{8}$/.test(normalizedCode)) throw new Error('Codigo invalido ou expirado.')
+  const tokenHash = authCodeHash(userId, purpose, normalizedCode)
+  if (!hasDatabase) {
+    const entry = memoryAuthTokens.get(tokenHash)
+    if (!entry || entry.userId !== String(userId) || entry.purpose !== purpose || entry.consumedAt || entry.expiresAt <= new Date()) throw new Error('Codigo invalido ou expirado.')
+    entry.consumedAt = new Date()
+    return String(userId)
+  }
+  const result = await query(`update auth_email_tokens set consumed_at = now() where token_hash = $1 and user_id = $2 and purpose = $3 and consumed_at is null and expires_at > now() returning user_id`, [tokenHash, String(userId), purpose])
+  if (!result.rows[0]) throw new Error('Codigo invalido ou expirado.')
+  return String(result.rows[0].user_id)
+}
+
 export const markEmailVerified = async (userId) => {
   if (!hasDatabase) {
     const user = memoryUsersById.get(String(userId))
@@ -399,7 +485,7 @@ export const resetUserPassword = async (userId, newPassword) => {
     incrementMemoryTokenVersion(userId)
     return publicUser(stored)
   }
-  const tokenVersion = await query(`update users set password_hash = $1, token_version = token_version + 1, updated_at = now() where id::text = $2 and status = 'active' returning id, tenant_id, name, email, role, platform_role, status, token_version`, [hashPassword(newPassword), String(userId)])
+  const tokenVersion = await query(`update users set password_hash = $1, token_version = token_version + 1, updated_at = now() where id::text = $2 and status = 'active' returning id, tenant_id, name, email, role, case when role = 'platform_super_admin' then role else '' end as platform_role, status, token_version`, [hashPassword(newPassword), String(userId)])
   if (!tokenVersion.rows[0]) throw new Error('Usuario nao encontrado.')
   await query('update refresh_tokens set revoked_at = coalesce(revoked_at, now()) where user_id = $1 and revoked_at is null', [String(userId)])
   return publicUser(tokenVersion.rows[0])
@@ -412,7 +498,7 @@ export const findActiveUserByEmail = async (email) => {
     const stored = memoryUsers.get(normalizedEmail)
     return stored ? publicUser(stored) : null
   }
-  const result = await query(`select id, tenant_id, name, email, role, platform_role, status, token_version from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`, [blindIndexesForLookup(normalizedEmail), normalizedEmail])
+  const result = await query(`select id, tenant_id, name, email, role, case when role = 'platform_super_admin' then role else '' end as platform_role, status, token_version from users where (email_hash = any($1::text[]) or email = $2) and status = 'active' limit 1`, [blindIndexesForLookup(normalizedEmail), normalizedEmail])
   return result.rows[0] ? publicUser(result.rows[0]) : null
 }
 
@@ -421,7 +507,7 @@ export const findActiveUserById = async (userId) => {
     const stored = memoryUsersById.get(String(userId))
     return stored ? publicUser(stored) : null
   }
-  const result = await query(`select id, tenant_id, name, email, role, platform_role, status, token_version from users where id::text = $1 and status = 'active' limit 1`, [String(userId)])
+  const result = await query(`select id, tenant_id, name, email, role, case when role = 'platform_super_admin' then role else '' end as platform_role, status, token_version from users where id::text = $1 and status = 'active' limit 1`, [String(userId)])
   return result.rows[0] ? publicUser(result.rows[0]) : null
 }
 

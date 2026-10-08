@@ -3,18 +3,25 @@ name: Agent Release
 env:
   PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'
   PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'
+  PRINTFLOW_AGENT_RELEASE_TAG: ${{ inputs.agent_tag || github.ref_name }}
 
 on:
   push:
     tags:
       - 'agent-v*'
+  workflow_dispatch:
+    inputs:
+      agent_tag:
+        description: Tag existente do Agent para validar ou publicar
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   package:
-    if: startsWith(github.ref_name, 'agent-v')
+    if: startsWith(inputs.agent_tag || github.ref_name, 'agent-v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +35,7 @@ jobs:
       - name: Validate tag and package
         shell: pwsh
         run: |
-          $tagVersion = '${{ github.ref_name }}' -replace '^agent-v', ''
+          $tagVersion = $env:PRINTFLOW_AGENT_RELEASE_TAG -replace '^agent-v', ''
           $packageVersion = (Get-Content Agent/package.json -Raw | ConvertFrom-Json).version
           $minimumSupportedVersion = $env:PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION.Trim()
           if ($tagVersion -ne $packageVersion) {
@@ -137,7 +144,7 @@ jobs:
             }
           }
           [ordered]@{
-            tag = '${{ github.ref_name }}'
+            tag = $env:PRINTFLOW_AGENT_RELEASE_TAG
             version = $package.version
             minimumSupportedVersion = $env:PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION
             portableRuntime = $true
@@ -167,15 +174,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" `
-            Agent/dist/PrintFlow-Agent-Windows.zip `
-            Agent/dist/PrintFlow-Agent-Setup.exe `
-            Agent/dist/PrintFlow-Agent-Transition-Setup.exe `
-            Agent/dist/PrintFlow-Agent-Dev-Certificate.cer `
-            Agent/dist/RELEASE-METADATA.json `
-            Agent/dist/SHA256SUMS.txt `
-            --title "PrintFlow Agent ${{ github.ref_name }} — Early Access / Pilot" `
-            --notes "signingMode=DEV_SELF_SIGNED. Instale conscientemente PrintFlow-Agent-Dev-Certificate.cer em Trusted Root e Trusted Publishers antes do instalador. O certificado permanece o mesmo entre atualizacoes Early Access. PRODUCTION_TRUSTED permanece pendente de certificado Code Signing confiavel."
+          ./Agent/scripts/publish-windows-agent-release.ps1 `
+            -Tag $env:PRINTFLOW_AGENT_RELEASE_TAG `
+            -Repository $env:GITHUB_REPOSITORY
 
       - name: Remove private signing material
         if: always()

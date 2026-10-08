@@ -1,7 +1,7 @@
 <script setup lang="ts">
-const { products, orders, printers, printJobs, clients, apiBase, createItem, updateItem, deleteItem, loadOrdersPage, loadOrdersSummary, advanceOrderStage: advanceOrderStageRequest } = useAppData()
+const { products, printers, printJobs, clients, apiBase, createItem, updateItem, deleteItem, loadOrdersPage, loadOrdersSummary, advanceOrderStage: advanceOrderStageRequest } = useAppData()
 const auth = useAuth()
-const metrics = useBusinessMetrics()
+const subscription = useSubscriptionAccess()
 const { notify } = useUi()
 const router = useRouter()
 const search = ref('')
@@ -28,12 +28,11 @@ const tablePage = ref(0)
 const tablePageSize = ref(25)
 const tableTotal = ref(0)
 const tableLoading = ref(false)
-const ordersSummary = ref<{ orderCount: number; gross: number; net: number; profit: number; cancelledCount: number; cancelledGross: number } | null>(null)
+const dailyOrders = ref<any[]>([])
+const ordersSummary = ref<Awaited<ReturnType<typeof loadOrdersSummary>> | null>(null)
 let tableSearchTimer: ReturnType<typeof setTimeout> | null = null
-const marketplaceOptions = computed(() => ['Todos', ...new Set(orders.value.map(order => order.marketplace || 'Sem marketplace'))])
-const productOptions = computed(() => ['Todos', ...new Set(orders.value.map(order => order.product).filter(Boolean))])
-const activeOrders = computed(() => orders.value.filter(order => order.status !== 'Cancelado'))
-const cancelledOrders = computed(() => orders.value.filter(order => order.status === 'Cancelado'))
+const marketplaceOptions = computed(() => ['Todos', ...(ordersSummary.value?.options.marketplaces || [])])
+const productOptions = computed(() => ['Todos', ...(ordersSummary.value?.options.products || [])])
 const hasOperationalIssue = (order: any, issue: string) => {
   if (issue === 'product') return !order.marketplaceOrder && (!order.productId || !products.value.some(product => String(product.id || '') === String(order.productId)))
   if (issue === 'printer') return !order.marketplaceOrder && order.status === 'Producao' && !printJobs.value.some((job: any) => String(job.orderId || '') === String(order.dbId || ''))
@@ -60,27 +59,20 @@ const changeTablePage = (page: number) => { const maxPage = Math.max(0, Math.cei
 const loadSummary = async () => {
   try { ordersSummary.value = await loadOrdersSummary() } catch { /* fallback local permanece ativo */ }
 }
-onMounted(() => { void loadTableOrders(); void loadSummary() })
+const loadDailyOrders = async () => {
+  try { dailyOrders.value = (await loadOrdersPage({ from: today(), to: today(), salesChannel: 'direct', limit: 100, offset: 0 })).items } catch { dailyOrders.value = [] }
+}
+onMounted(() => { void subscription.load(); void loadTableOrders(); void loadSummary(); void loadDailyOrders() })
 watch([search, status], () => { if (tableSearchTimer) clearTimeout(tableSearchTimer); tableSearchTimer = setTimeout(() => void loadTableOrders(), 250) })
 const statusColors: Record<string, string> = { Novo: '#1768f2', Producao: '#f6b917', Impresso: '#b23bc1', Embalando: '#f57c1f', Enviado: '#2f77d5', Entregue: '#21aa91', Cancelado: '#ef4444' }
 const metricCards = computed(() => [
-  { key: 'gross' as const, label: 'Receita Bruta', value: formatCurrency(metrics.revenue.value), icon: 'money', note: 'Vendas ativas', color: 'green', points: activeOrders.value.map(order => Number(order.gross || 0)) },
-  { key: 'net' as const, label: 'Receita Líquida', value: formatCurrency(metrics.netRevenue.value), icon: 'wallet', note: 'Vendas ativas', color: 'blue', points: activeOrders.value.map(order => Number(order.net || 0)) },
-  { key: 'profit' as const, label: 'Lucro Total', value: formatCurrency(metrics.profit.value), icon: 'money', change: `Margem ${metrics.percent(metrics.margin.value)}`, color: 'green', points: activeOrders.value.map(order => Number(order.profit || 0)) },
-  { key: 'orders' as const, label: 'Pedidos no Mês', value: formatNumber(metrics.orderCount.value), icon: 'bag', note: 'Pedidos ativos', color: 'purple', points: activeOrders.value.map(() => 1) },
-  { key: 'cancelled' as const, label: 'Vendas canceladas', value: formatCurrency(metrics.cancelledGross.value), icon: 'close', note: `${formatNumber(metrics.cancelledOrderCount.value)} pedido(s)`, color: 'red', points: cancelledOrders.value.map(order => Number(order.gross || 0)) }
+  { key: 'gross' as const, label: 'Receita Bruta', value: formatCurrency(ordersSummary.value?.gross || 0), icon: 'money', note: 'Vendas ativas', color: 'green', points: (ordersSummary.value?.daily || []).map(row => row.gross) },
+  { key: 'net' as const, label: 'Receita Líquida', value: formatCurrency(ordersSummary.value?.net || 0), icon: 'wallet', note: 'Vendas ativas', color: 'blue', points: (ordersSummary.value?.daily || []).map(row => row.net) },
+  { key: 'profit' as const, label: 'Lucro Total', value: formatCurrency(ordersSummary.value?.profit || 0), icon: 'money', change: `Margem ${((ordersSummary.value?.gross || 0) ? (ordersSummary.value?.profit || 0) / (ordersSummary.value?.gross || 1) * 100 : 0).toFixed(1)}%`, color: 'green', points: (ordersSummary.value?.daily || []).map(row => row.profit) },
+  { key: 'orders' as const, label: 'Pedidos no Mês', value: formatNumber(ordersSummary.value?.orderCount || 0), icon: 'bag', note: 'Pedidos ativos', color: 'purple', points: (ordersSummary.value?.daily || []).map(row => row.orders) },
+  { key: 'cancelled' as const, label: 'Vendas canceladas', value: formatCurrency(ordersSummary.value?.cancelledGross || 0), icon: 'close', note: `${formatNumber(ordersSummary.value?.cancelledCount || 0)} pedido(s)`, color: 'red', points: (ordersSummary.value?.daily || []).map(row => row.cancelledGross) }
 ])
-const metricCardsWithSummary = computed(() => {
-  const cards = metricCards.value.map((card) => ({ ...card }))
-  if (!ordersSummary.value) return cards
-  cards[0].value = formatCurrency(ordersSummary.value.gross)
-  cards[1].value = formatCurrency(ordersSummary.value.net)
-  cards[2].value = formatCurrency(ordersSummary.value.profit)
-  cards[3].value = formatNumber(ordersSummary.value.orderCount)
-  cards[4].value = formatCurrency(ordersSummary.value.cancelledGross)
-  cards[4].note = `${formatNumber(ordersSummary.value.cancelledCount)} pedido(s)`
-  return cards
-})
+const metricCardsWithSummary = metricCards
 const metricDetails = {
   gross: { title: 'Evolução da Receita Bruta', color: '#0da566', totalLabel: 'Total no período', formatter: formatCurrency },
   net: { title: 'Evolução da Receita Líquida', color: '#1768f2', totalLabel: 'Total no período', formatter: formatCurrency },
@@ -99,7 +91,7 @@ const dateToDisplay = (date: string) => date.split('-').reverse().join('/')
 const productKey = (product: any) => String(product.id || product.sku || product.name)
 const manualOrderId = (product: any, date = today()) => `MANUAL-${date}-${product.sku || product.id}`
 const sameOrderDate = (orderDate: string, isoDate: string) => orderDate === isoDate || orderDate === dateToDisplay(isoDate)
-const manualOrderFor = (product: any, date = today()) => orders.value.find(order =>
+const manualOrderFor = (product: any, date = today()) => dailyOrders.value.find(order =>
   order.id === manualOrderId(product, date) || (String(order.id || '').startsWith('MANUAL-') && sameOrderDate(order.date, date) && (order.productId === product.id || order.product === product.name))
 )
 const manualProductRows = computed(() => products.value.map(product => {
@@ -115,7 +107,7 @@ const printJobForOrder = (order: any) => printJobs.value.find((job: any) =>
   String(job.orderId || '') === String(order.dbId || '') ||
   (job.externalOrderId && String(job.externalOrderId) === String(order.id || ''))
 )
-const selectedOrder = computed(() => orders.value.find((order) => String(order.dbId || order.id) === selectedOrderId.value) || null)
+const selectedOrder = computed(() => tableOrders.value.find((order) => String(order.dbId || order.id) === selectedOrderId.value) || null)
 const stageIndex = (order: any) => orderStages.indexOf(String(order?.status || 'Novo'))
 const stageLabel = (stage: string) => ({ Producao: 'Produção' }[stage] || stage)
 const selectOrder = (order: any) => { selectedOrderId.value = String(order.dbId || order.id || ''); trackingDraft.value = order.trackingCode || '' }
@@ -189,8 +181,7 @@ const advanceOrderStage = async (stage: string) => {
   try {
     await advanceOrderStageRequest(String(order.dbId || order.id), stage, trackingDraft.value.trim())
     notify(`Pedido atualizado para ${stageLabel(stage)}.`)
-    void loadTableOrders(false)
-    void loadSummary()
+    void Promise.all([loadTableOrders(false), loadSummary(), loadDailyOrders()])
   } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel atualizar o pedido.') } finally { updatingOrderStage.value = false }
 }
 const cancelSelectedOrder = async () => {
@@ -202,8 +193,7 @@ const cancelSelectedOrder = async () => {
   try {
     await advanceOrderStageRequest(String(order.dbId || order.id), 'Cancelado')
     notify('Pedido cancelado. As reservas vinculadas foram liberadas.')
-    void loadTableOrders(false)
-    void loadSummary()
+    void Promise.all([loadTableOrders(false), loadSummary(), loadDailyOrders()])
   } catch (error: any) { notify(error?.data?.error || error?.message || 'Nao foi possivel cancelar o pedido.') } finally { updatingOrderStage.value = false }
 }
 const printerQueue = (printerId: string) => printJobs.value.filter((job: any) =>
@@ -276,7 +266,7 @@ const saveManualQuantity = async (product: any, rawQty: number) => {
     if (!qty) {
       if (existing?.dbId || existing?.id) await deleteItem('orders', existing.dbId || existing.id)
       notify('Registro de venda atualizado.')
-      await loadTableOrders(false)
+      await Promise.all([loadTableOrders(false), loadSummary(), loadDailyOrders()])
       return
     }
 
@@ -305,7 +295,7 @@ const saveManualQuantity = async (product: any, rawQty: number) => {
     if (existing?.dbId) await updateItem('orders', payload)
     else await createItem('orders', payload)
     notify('Venda por produto salva.')
-    await loadTableOrders(false)
+    await Promise.all([loadTableOrders(false), loadSummary(), loadDailyOrders()])
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível salvar a venda manual.', 'info')
     syncManualQuantities()
@@ -331,13 +321,11 @@ const formatChartLabel = (key: string) => {
 const selectedDetail = computed(() => metricDetails[selectedMetric.value])
 const detailedChart = computed(() => {
   const totals = new Map<string, number>()
-  for (const order of orders.value) {
-    const isCancelled = order.status === 'Cancelado'
-    if (isCancelled !== (selectedMetric.value === 'cancelled')) continue
-    const date = parseOrderDate(order.date)
+  for (const row of ordersSummary.value?.daily || []) {
+    const date = parseOrderDate(row.key)
     if (!date) continue
     const key = dateKey(date)
-    const value = selectedMetric.value === 'orders' ? 1 : selectedMetric.value === 'cancelled' ? Number(order.gross || 0) : Number(order[selectedMetric.value] || 0)
+    const value = selectedMetric.value === 'orders' ? row.orders : selectedMetric.value === 'cancelled' ? row.cancelledGross : Number(row[selectedMetric.value] || 0)
     totals.set(key, (totals.get(key) || 0) + value)
   }
 
@@ -358,26 +346,25 @@ const removeOrder = async (order: any) => {
   const id = order.dbId || order.id
   if (!id || !window.confirm(`Tem certeza que deseja excluir este pedido?\n\n${order.id} - ${order.product}\n\nEsta ação não poderá ser desfeita.`)) return
   await deleteItem('orders', id)
-  await loadTableOrders(false)
+  await Promise.all([loadTableOrders(false), loadSummary(), loadDailyOrders()])
   notify('Pedido excluído com sucesso.')
 }
 const statusSegments = computed(() => {
-  const totals = new Map<string, number>()
-  for (const order of orders.value) totals.set(order.status || 'Sem status', (totals.get(order.status || 'Sem status') || 0) + 1)
-  return [...totals.entries()].map(([label, count]) => ({ label, value: metrics.orderCount.value ? count / metrics.orderCount.value * 100 : 0, color: statusColors[label] || '#7d8799' }))
+  const rows = ordersSummary.value?.byStatus || []
+  const total = rows.reduce((sum, item) => sum + item.count, 0)
+  return rows.map(item => ({ label: item.status, value: total ? item.count / total * 100 : 0, color: statusColors[item.status] || '#7d8799' }))
 })
 const marketplaceBars = computed(() => {
   const colors = ['#1768f2', '#0da566', '#f59e0b', '#c83bb7', '#29b6c8', '#7d8799']
-  const totals = new Map<string, number>()
-  for (const order of activeOrders.value) totals.set(order.marketplace || 'Sem marketplace', (totals.get(order.marketplace || 'Sem marketplace') || 0) + order.gross)
-  const rows = [...totals.entries()].sort((a, b) => b[1] - a[1])
-  const max = rows[0]?.[1] || 0
-  return rows.map(([label, value], i) => ({ label, value, percent: max ? value / max * 100 : 0, color: colors[i % colors.length] }))
+  const rows = ordersSummary.value?.byMarketplace || []
+  const max = rows[0]?.value || 0
+  return rows.map((item, i) => ({ label: item.name, value: item.value, percent: max ? item.value / max * 100 : 0, color: colors[i % colors.length] }))
 })
 </script>
 <template>
   <div>
-    <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" to="/vendas/novo"><UiIcon name="plus"/>Nova Venda</NuxtLink></PageHeader>
+    <PageHeader title="Vendas" subtitle="Gerencie seus pedidos e acompanhe o desempenho das suas vendas."><NuxtLink class="btn btn--primary" :to="subscription.isLimitReached('ordersMonthly') ? subscription.upgradePath : '/vendas/novo'"><UiIcon :name="subscription.isLimitReached('ordersMonthly') ? 'lock' : 'plus'"/>{{ subscription.isLimitReached('ordersMonthly') ? 'Limite atingido · Upgrade' : 'Nova Venda' }}</NuxtLink></PageHeader>
+    <PlanLimitNotice resource="ordersMonthly" label="pedidos deste mês" remaining-text="Pedidos já registrados, produção, envio e histórico continuam disponíveis normalmente." />
     <div class="metrics-grid metrics-grid--5 sales-metrics">
       <MetricCard
         v-for="card in metricCardsWithSummary"
@@ -429,7 +416,7 @@ const marketplaceBars = computed(() => {
       </div>
     </PanelCard>
     <div class="filters">
-      <div class="field"><label>Acompanhar pedido</label><select v-model="selectedOrderId"><option value="">Selecione um pedido</option><option v-for="order in orders" :key="order.dbId || order.id" :value="String(order.dbId || order.id)">{{order.id}} · {{order.product}}</option></select></div>
+      <div class="field"><label>Acompanhar pedido</label><select v-model="selectedOrderId"><option value="">Selecione um pedido</option><option v-for="order in tableOrders" :key="order.dbId || order.id" :value="String(order.dbId || order.id)">{{order.id}} · {{order.product}}</option></select></div>
       <div class="field field--search"><label>Buscar</label><div class="search-field"><UiIcon name="search" :size="16"/><input v-model="search" placeholder="Pedido, cliente ou produto"></div></div>
       <div class="field"><label>Marketplace</label><select v-model="marketplaceFilter"><option v-for="item in marketplaceOptions" :key="item">{{item}}</option></select></div>
       <div class="field"><label>Status</label><select v-model="status"><option>Todos</option><option>Novo</option><option>Producao</option><option>Impresso</option><option>Embalando</option><option>Enviado</option><option>Entregue</option><option>Cancelado</option></select></div>
@@ -461,7 +448,7 @@ const marketplaceBars = computed(() => {
           <button v-if="canCancelSelectedOrder" class="btn btn--danger order-cancel-button" :disabled="updatingOrderStage" @click="cancelSelectedOrder">Cancelar pedido</button>
           <section v-if="!selectedOrder.marketplaceOrder" class="order-history"><h3>Histórico do pedido</h3><p v-if="orderAuditLoading" class="order-history__empty">Carregando histórico…</p><p v-else-if="orderAuditUnavailable" class="order-history__empty">Histórico indisponível no momento. As ações do pedido continuam funcionando.</p><p v-else-if="!orderHistory.length" class="order-history__empty">Nenhuma mudança de etapa registrada.</p><ol v-else><li v-for="event in orderHistory" :key="event.id"><span>{{event.label}}</span><time>{{formatOrderHistoryDate(event.at)}}</time></li></ol></section>
         </PanelCard>
-        <PanelCard title="Vendas por Status"><DonutChart :segments="statusSegments" :total="formatNumber(metrics.orderCount.value)" caption="Pedidos" /></PanelCard>
+        <PanelCard title="Vendas por Status"><DonutChart :segments="statusSegments" :total="formatNumber(ordersSummary?.orderCount || 0)" caption="Pedidos" /></PanelCard>
         <PanelCard title="Vendas por Marketplace" style="margin-top:12px">
           <div class="bar-list"><div v-if="!marketplaceBars.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="store"/></div><h3>Nenhuma venda por marketplace</h3><p>Cadastre vendas para preencher este gráfico.</p></div></div><div v-for="bar in marketplaceBars" :key="bar.label" class="bar-row"><span>{{bar.label}}</span><div class="bar-row__track"><div class="bar-row__fill" :style="{width:`${bar.percent}%`,background:bar.color}"/></div><strong>{{ formatCurrency(bar.value) }}</strong></div></div>
         </PanelCard>

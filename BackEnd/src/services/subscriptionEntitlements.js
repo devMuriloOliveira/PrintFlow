@@ -31,6 +31,26 @@ const numberLimit = (value) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
 }
 
+export const subscriptionCancellationDeadline = (subscription = {}) => {
+  if (subscription.status === 'trial') return subscription.trial_ends_at || subscription.current_period_end || null
+  if (subscription.status === 'grace') return subscription.grace_ends_at || subscription.current_period_end || null
+  return subscription.current_period_end || subscription.trial_ends_at || subscription.grace_ends_at || null
+}
+
+export const effectiveSubscriptionForEntitlement = (subscription = null, now = new Date()) => {
+  if (!subscription?.cancel_at_period_end) return subscription
+  const deadline = subscriptionCancellationDeadline(subscription)
+  if (!deadline || new Date(deadline) > now) return subscription
+  return {
+    ...subscription,
+    status: 'cancelled',
+    plan_code: subscription.free_plan_code || 'free',
+    plan_name: subscription.free_plan_name || 'Grátis',
+    limits: subscription.free_plan_limits || {},
+    features: subscription.free_plan_features || {}
+  }
+}
+
 export const entitlementFromSubscription = (subscription = null, billingEnforcementExempt = true) => {
   if (!subscription?.status) {
     return {
@@ -90,15 +110,21 @@ export const resolveTenantEntitlement = async (tenantId, client = null, user = n
 
   const read = async (queryClient) => {
     const result = await queryClient.query(`
-      select subscription.status, plan.code as plan_code, plan.limits, plan.features, tenant.billing_enforcement_exempt
+      select subscription.status, subscription.cancel_at_period_end, subscription.current_period_end,
+             subscription.trial_ends_at, subscription.grace_ends_at,
+             plan.code as plan_code, plan.limits, plan.features,
+             free_plan.code as free_plan_code, free_plan.name as free_plan_name,
+             free_plan.limits as free_plan_limits, free_plan.features as free_plan_features,
+             tenant.billing_enforcement_exempt
         from tenants tenant
         left join tenant_subscriptions subscription on subscription.tenant_id = tenant.id
         left join platform_plans plan on plan.id = subscription.plan_id
+        left join platform_plans free_plan on free_plan.code = 'free' and free_plan.active = true
        where tenant.id = $1
        limit 1
     `, [tenantId])
     const row = result.rows[0] || null
-    return entitlementFromSubscription(row, Boolean(row?.billing_enforcement_exempt))
+    return entitlementFromSubscription(effectiveSubscriptionForEntitlement(row), Boolean(row?.billing_enforcement_exempt))
   }
 
   return client ? read(client) : withTenant(tenantId, read)
@@ -145,3 +171,33 @@ export const assertTenantResourceLimit = async (client, tenantId, resource, { in
 
 export const supportsSubscriptionFeature = (entitlement, feature) =>
   !managedFeatures.has(feature) || !entitlement.configured || entitlement.features[feature] === true
+
+export const subscriptionAccessFromEntitlement = (entitlement, usage = {}) => ({
+  planCode: entitlement.planCode || '',
+  status: entitlement.status,
+  mode: entitlement.mode,
+  features: entitlement.features,
+  limits: entitlement.limits,
+  usage
+})
+
+export const getTenantSubscriptionAccess = async ({ tenantId, user = null }) => {
+  const entitlement = await resolveTenantEntitlement(tenantId, null, user)
+  if (!hasDatabase || isPlatformDeveloper(user)) return subscriptionAccessFromEntitlement(entitlement)
+
+  const limitedResources = Object.entries(resourceLimits)
+    .map(([resource, config]) => ({ resource, config, limit: numberLimit(entitlement.limits[resource]) }))
+    .filter((item) => item.limit)
+
+  const usageEntries = await withTenant(tenantId, async (client) => Promise.all(
+    limitedResources.map(async ({ resource, config, limit }) => {
+      const result = await client.query(
+        `select count(*)::int as count from ${config.table} where tenant_id = $1 and ${config.where}`,
+        [tenantId]
+      )
+      return [resource, { used: Number(result.rows[0]?.count || 0), limit }]
+    })
+  ))
+
+  return subscriptionAccessFromEntitlement(entitlement, Object.fromEntries(usageEntries))
+}

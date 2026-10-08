@@ -6,12 +6,9 @@ const TENANT_ID = 'demo'
 const assertDemoCleanAllowed = () => {
   if (!pool) throw new Error('DATABASE_URL nao configurada. Nenhuma limpeza executada.')
   if (env.isProduction || process.env.NODE_ENV === 'production') throw new Error('Limpeza demo bloqueada em NODE_ENV=production.')
-  const url = String(env.databaseUrl || '').toLowerCase()
-  const localHints = ['localhost', '127.0.0.1', 'host.docker.internal', 'printflow', 'demo', 'dev']
-  const explicitlyAllowed = process.env.ALLOW_DEMO_SEED === 'true'
-  if (!explicitlyAllowed && !localHints.some((hint) => url.includes(hint))) {
-    throw new Error('Limpeza demo bloqueada: DATABASE_URL nao parece local/dev. Use ALLOW_DEMO_SEED=true somente se tiver certeza.')
-  }
+  let hostname = ''
+  try { hostname = new URL(env.databaseUrl).hostname.toLowerCase() } catch { throw new Error('Limpeza demo bloqueada: DATABASE_URL invalida.') }
+  if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) throw new Error('Limpeza demo bloqueada: o banco precisa estar em localhost, 127.0.0.1 ou ::1.')
 }
 
 try {

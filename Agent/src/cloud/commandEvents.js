@@ -129,6 +129,8 @@ export const startCommandEvents = (
     credentials,
     onCommandAvailable,
     onError = () => {},
+    onOpen = () => {},
+    onClose = () => {},
     fetchImpl = fetch
   }
 ) => {
@@ -172,6 +174,7 @@ export const startCommandEvents = (
 
         reconnectDelay =
           1_000
+        onOpen()
 
         await consumeCommandEvents({
           stream:
@@ -194,6 +197,7 @@ export const startCommandEvents = (
           onError(error)
         }
       } finally {
+        if (!stopped) onClose()
         controller =
           null
       }

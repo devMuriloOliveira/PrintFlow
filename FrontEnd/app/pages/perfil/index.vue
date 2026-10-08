@@ -3,19 +3,32 @@ definePageMeta({ layout: 'default' })
 
 const auth = useAuth()
 const route = useRoute()
-const { getStripeBilling } = useAppData()
+const { getMercadoPagoBilling } = useAppData()
+const subscriptionAccess = useSubscriptionAccess()
+const subscriptionLoading = computed(() => subscriptionAccess.loading.value)
+const subscriptionError = computed(() => subscriptionAccess.error.value)
 const initials = computed(() => auth.user.value?.name.split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'PF')
-const billing = ref<Awaited<ReturnType<typeof getStripeBilling>> | null>(null)
+const billing = ref<Awaited<ReturnType<typeof getMercadoPagoBilling>> | null>(null)
 const billingLoading = ref(false)
+const billingError = ref('')
 const canManageBilling = computed(() => auth.user.value?.role === 'owner')
 const subscription = computed(() => billing.value?.subscription || null)
 const hasManagedSubscription = computed(() => subscription.value?.planCode !== 'free' && ['trial', 'active', 'past_due', 'grace', 'paused'].includes(subscription.value?.status || ''))
+const cancellationScheduled = computed(() => Boolean(subscription.value?.cancelAtPeriodEnd && hasManagedSubscription.value))
 const planName = computed(() => hasManagedSubscription.value ? (subscription.value?.planName || 'PRO') : 'Grátis')
 const availablePlan = computed(() => billing.value?.plans[0] || null)
+const isFree = computed(() => subscriptionAccess.isFree.value)
+const planNameFromAccess = computed(() => isFree.value ? 'FREE' : (subscriptionAccess.access.value?.planCode ? 'PRO' : planName.value))
+const usageLabels: Record<string, string> = { clients: 'Clientes', products: 'Produtos', ordersMonthly: 'Pedidos no mês', printers: 'Impressoras manuais', filaments: 'Filamentos', goals: 'Metas' }
+const planUsage = computed(() => Object.entries(subscriptionAccess.access.value?.usage || {}).map(([resource, value]) => ({ resource, label: usageLabels[resource] || resource, ...value, percent: Math.min(100, Math.round(value.used / value.limit * 100)) })))
 const subscriptionStatus = (status = '') => ({ trial: 'Trial histórico', active: 'Assinatura ativa', past_due: 'Pagamento pendente', grace: 'Período de carência', paused: 'Pausada', cancelled: 'Encerrada', ended: 'Encerrada' }[status] || 'Plano não informado')
-const periodLabel = computed(() => subscription.value?.status === 'grace' ? 'Carência termina em' : subscription.value?.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança em')
+const periodLabel = computed(() => cancellationScheduled.value ? 'Acesso PRO até' : subscription.value?.status === 'grace' ? 'Carência termina em' : subscription.value?.status === 'trial' ? 'Período histórico termina em' : 'Próxima cobrança em')
 const periodDate = computed(() => {
-  const value = subscription.value?.status === 'grace' ? subscription.value?.graceEndsAt : subscription.value?.currentPeriodEnd
+  const value = cancellationScheduled.value
+    ? subscription.value?.currentPeriodEnd
+    : subscription.value?.status === 'grace'
+      ? subscription.value?.graceEndsAt || subscription.value?.currentPeriodEnd
+      : subscription.value?.currentPeriodEnd
   return value ? new Date(value).toLocaleDateString('pt-BR') : 'Não informado'
 })
 const proBenefits = ['Automação com PrintFlow Agent e fila de impressão', 'Marketplaces e relatórios avançados', 'Equipe com até 8 pessoas', 'Operação sem os limites do plano FREE']
@@ -23,10 +36,71 @@ const freeBenefits = ['Clientes, produtos e pedidos manuais', '1 impressora manu
 
 const upgradeRequested = computed(() => String(route.query.upgrade || '') === '1')
 
-onMounted(async () => {
-  if (!canManageBilling.value) return
-  billingLoading.value = true
-  try { billing.value = await getStripeBilling() } catch { billing.value = null } finally { billingLoading.value = false }
+let accountPlanRefresh: Promise<void> | null = null
+let lastAccountPlanRefreshAt = 0
+let lastResumeRefreshAt = 0
+let cancellationRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+const refreshAccountPlan = async (force = false) => {
+  if (!force && Date.now() - lastAccountPlanRefreshAt < 5_000) return
+  if (accountPlanRefresh) return accountPlanRefresh
+
+  accountPlanRefresh = (async () => {
+    const accessRefresh = subscriptionAccess.load(force)
+    if (canManageBilling.value) {
+      billingLoading.value = true
+      billingError.value = ''
+      try { billing.value = await getMercadoPagoBilling() }
+      catch (error: any) {
+        billingError.value = error?.data?.error || error?.message || 'Não foi possível consultar a assinatura.'
+      } finally { billingLoading.value = false }
+    }
+    await accessRefresh
+    lastAccountPlanRefreshAt = Date.now()
+  })()
+
+  try { await accountPlanRefresh }
+  finally { accountPlanRefresh = null }
+}
+
+const refreshWhenVisible = () => {
+  if (document.visibilityState === 'visible' && Date.now() - lastResumeRefreshAt > 1_000) {
+    lastResumeRefreshAt = Date.now()
+    void refreshAccountPlan(true)
+  }
+}
+
+const scheduleCancellationRefresh = () => {
+  if (cancellationRefreshTimer) clearTimeout(cancellationRefreshTimer)
+  cancellationRefreshTimer = null
+  if (!cancellationScheduled.value || !subscription.value?.currentPeriodEnd) return
+
+  const remainingMs = Date.parse(subscription.value.currentPeriodEnd) - Date.now()
+  if (!Number.isFinite(remainingMs)) return
+  const delayMs = remainingMs <= 0 ? 60_000 : Math.min(remainingMs + 1_000, 2_147_000_000)
+  cancellationRefreshTimer = setTimeout(async () => {
+    await refreshAccountPlan(true)
+    scheduleCancellationRefresh()
+  }, delayMs)
+}
+
+watch(() => route.fullPath, () => { void refreshAccountPlan(true) })
+watch(canManageBilling, (canManage) => { if (canManage) void refreshAccountPlan(true) })
+watch([cancellationScheduled, () => subscription.value?.currentPeriodEnd], scheduleCancellationRefresh)
+
+onMounted(() => {
+  lastResumeRefreshAt = Date.now()
+  void refreshAccountPlan(true)
+  window.addEventListener('focus', refreshWhenVisible)
+  window.addEventListener('pageshow', refreshWhenVisible)
+  document.addEventListener('visibilitychange', refreshWhenVisible)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshWhenVisible)
+  window.removeEventListener('pageshow', refreshWhenVisible)
+  document.removeEventListener('visibilitychange', refreshWhenVisible)
+  if (cancellationRefreshTimer) clearTimeout(cancellationRefreshTimer)
 })
 
 const profileSections = [
@@ -43,20 +117,27 @@ const profileSections = [
     <PageHeader title="Minha conta e assinatura" subtitle="Centralize os dados da sua conta, assinatura, segurança e solicitações." />
     <section class="profile-overview-grid">
       <div class="profile-summary"><span class="avatar profile-summary__avatar">{{ initials }}</span><div class="profile-summary__content"><h2>{{ auth.user.value?.name || 'Usuário' }}</h2><p>{{ auth.user.value?.email || 'E-mail não informado' }}</p><span class="badge">{{ auth.user.value?.role === 'owner' ? 'Owner da empresa' : 'Usuário da empresa' }}</span><button class="profile-signout" type="button" @click="auth.logout"><UiIcon name="logout" :size="15" />Sair da conta</button></div></div>
-      <div class="profile-plan-highlight" :class="{ 'profile-plan-highlight--active': hasManagedSubscription }"><span class="profile-plan-highlight__icon"><UiIcon name="crown" :size="30" /></span><small>Seu plano</small><strong>{{ billingLoading ? 'Consultando...' : planName }}</strong><span :class="['badge', { 'badge--green': hasManagedSubscription }]">{{ billingLoading ? 'Aguarde' : (hasManagedSubscription ? subscriptionStatus(subscription?.status) : 'Plano gratuito') }}</span></div>
+      <div class="profile-plan-highlight" :class="{ 'profile-plan-highlight--active': hasManagedSubscription }"><span class="profile-plan-highlight__icon"><UiIcon name="crown" :size="30" /></span><small>Seu plano</small><strong>{{ subscriptionLoading ? 'Consultando...' : subscriptionError ? 'Indisponível' : planNameFromAccess }}</strong><span :class="['badge', { 'badge--green': hasManagedSubscription, 'badge--red': subscriptionError }]">{{ subscriptionLoading ? 'Aguarde' : subscriptionError ? 'Falha ao consultar' : (isFree ? 'Plano gratuito' : cancellationScheduled ? 'Cancelamento agendado' : (hasManagedSubscription ? subscriptionStatus(subscription?.status) : 'Plano contratado')) }}</span><button v-if="subscriptionError && !subscriptionLoading" class="profile-plan-retry" type="button" @click="refreshAccountPlan(true)">Tentar novamente</button></div>
     </section>
 
     <section class="profile-billing-card">
-      <div v-if="upgradeRequested && !hasManagedSubscription" class="profile-upgrade-banner"><UiIcon name="lock" :size="18" /><div><strong>Desbloqueie mais do PrintFlow</strong><span>Ative automação, marketplaces, relatórios avançados e equipe no PRO.</span></div></div>
-      <div class="profile-billing-card__head"><span class="profile-section-card__icon"><UiIcon name="wallet" /></span><div><h2>Planos PrintFlow</h2><p>FREE para operação manual; PRO mensal para conectar e automatizar a produção.</p></div></div>
-      <div v-if="canManageBilling && hasManagedSubscription" class="profile-billing-card__details"><div><small>{{ periodLabel }}</small><strong>{{ periodDate }}</strong><span>{{ subscription?.billingCycle === 'yearly' ? 'Cobrança anual recorrente' : 'Cobrança mensal' }}</span></div><div><small>Benefícios incluídos</small><strong>PRO completo</strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul></div></div>
+      <div v-if="upgradeRequested && !hasManagedSubscription" class="profile-upgrade-banner"><UiIcon name="lock" :size="18" /><div><strong>Desbloqueie mais do Filamind</strong><span>Ative automação, marketplaces, relatórios avançados e equipe no PRO.</span></div></div>
+      <div class="profile-billing-card__head"><span class="profile-section-card__icon"><UiIcon name="wallet" /></span><div><h2>Planos Filamind</h2><p>FREE para operação manual; PRO mensal para conectar e automatizar a produção.</p></div></div>
+      <section v-if="isFree && planUsage.length" class="plan-usage" aria-label="Uso dos limites do plano FREE">
+        <div class="plan-usage__head"><div><strong>Uso do plano FREE</strong><small>Acompanhe os limites antes de cadastrar. Ao atingi-los, o cadastro correspondente é bloqueado com uma mensagem explicativa.</small></div><NuxtLink v-if="canManageBilling" class="btn" to="/perfil?upgrade=1">Conhecer PRO</NuxtLink></div>
+        <div class="plan-usage__grid"><article v-for="item in planUsage" :key="item.resource" :class="{ 'plan-usage__item--warning': item.percent >= 80, 'plan-usage__item--limit': item.used >= item.limit }"><div><strong>{{ item.label }}</strong><span>{{ item.used }} de {{ item.limit }}</span></div><i><b :style="{ width: `${item.percent}%` }" /></i><small v-if="item.used >= item.limit">Limite atingido — faça upgrade para continuar.</small><small v-else-if="item.percent >= 80">Você está próximo do limite.</small></article></div>
+      </section>
+      <div v-if="canManageBilling && hasManagedSubscription" class="profile-billing-card__details"><div><small>{{ periodLabel }}</small><strong>{{ periodDate }}</strong><span v-if="cancellationScheduled">Renovação cancelada no Mercado Pago; sem novas cobranças.</span><span v-else>{{ subscription?.billingCycle === 'yearly' ? 'Cobrança anual recorrente' : 'Cobrança mensal' }}</span></div><div><small>Benefícios incluídos</small><strong>PRO completo</strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul></div></div>
+      <div v-if="canManageBilling && cancellationScheduled" class="profile-cancellation-notice" role="status" aria-live="polite"><UiIcon name="info" :size="18" /><div><strong>Renovação cancelada</strong><span>O acesso PRO continua até {{ periodDate }}. Depois, a conta volta ao FREE sem apagar os dados.</span></div></div>
+      <div v-if="canManageBilling && billingError" class="info-note"><UiIcon name="info" /><span>{{ billingError }}</span><button class="btn" style="margin-left:auto" type="button" @click="refreshAccountPlan(true)">Tentar novamente</button></div>
+      <div v-else-if="canManageBilling && billingLoading && !billing" class="info-note"><UiIcon name="info" />Consultando sua assinatura no Mercado Pago...</div>
       <div v-else-if="canManageBilling && !billingLoading && !availablePlan" class="info-note"><UiIcon name="info" />Não foi possível carregar os planos agora.</div>
       <template v-if="canManageBilling && !hasManagedSubscription && availablePlan">
         <div class="profile-plans">
           <article class="profile-plan-option profile-plan-option--free"><div><h3>FREE</h3><p>Organize sua operação manual dentro dos limites do plano.</p></div><strong>R$ 0</strong><ul class="profile-plan-benefits"><li v-for="benefit in freeBenefits" :key="benefit">{{ benefit }}</li></ul><button class="btn" type="button" disabled>Plano atual</button></article>
-          <article class="profile-plan-option profile-plan-option--featured"><span>Preço de lançamento vigente</span><div><h3>PRO mensal</h3><p>Cobrança mensal recorrente pelo Stripe, sem fidelidade.</p></div><strong>{{ new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(availablePlan.monthly) }}<small>/mês</small></strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul><NuxtLink class="btn btn--primary" to="/configuracoes/assinatura">Ver assinatura e assinar PRO</NuxtLink></article>
+          <article class="profile-plan-option profile-plan-option--featured"><span>Preço de lançamento vigente</span><div><h3>PRO mensal</h3><p>Cobrança mensal recorrente pelo Mercado Pago.</p></div><strong>{{ new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(availablePlan.monthly) }}<small>/mês</small></strong><ul class="profile-plan-benefits"><li v-for="benefit in proBenefits" :key="benefit">{{ benefit }}</li></ul><NuxtLink class="btn btn--primary" to="/configuracoes/assinatura">Ver assinatura e assinar PRO</NuxtLink></article>
         </div>
-        <div v-if="!billing?.configured" class="info-note" style="margin-top:14px"><UiIcon name="info" />A assinatura será liberada quando a cobrança Stripe estiver configurada.</div>
+        <div v-if="!billing?.configured" class="info-note" style="margin-top:14px"><UiIcon name="info" />A assinatura será liberada quando a cobrança Mercado Pago estiver configurada.</div>
       </template>
       <div v-else-if="hasManagedSubscription" class="profile-billing-card__actions"><NuxtLink class="btn btn--primary" to="/configuracoes/assinatura">Gerenciar assinatura <UiIcon name="chevron" :size="14" /></NuxtLink></div>
     </section>
@@ -64,3 +145,8 @@ const profileSections = [
     <section class="profile-section-grid" aria-label="Opções do perfil"><NuxtLink v-for="section in profileSections" :key="section.to" class="profile-section-card" :class="{ 'profile-section-card--danger': section.danger }" :to="section.to"><span class="profile-section-card__icon"><UiIcon :name="section.icon" /></span><span class="profile-section-card__content"><strong>{{ section.title }}</strong><small>{{ section.description }}</small></span><UiIcon name="chevron" :size="17" /></NuxtLink></section>
   </div>
 </template>
+
+<style scoped>
+.profile-plan-retry{border:0;border-radius:5px;background:transparent;color:var(--blue);padding:3px 6px;font:inherit;font-size:10px;font-weight:700;text-decoration:underline;cursor:pointer}
+.profile-plan-retry:focus-visible{outline:3px solid rgba(23,104,242,.25);outline-offset:2px}
+</style>

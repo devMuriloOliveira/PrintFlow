@@ -7,6 +7,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'https://printflow-api-4y5l.onrender.com',
+      googleClientId: process.env.NUXT_PUBLIC_GOOGLE_CLIENT_ID || '',
       useMockData: process.env.NUXT_PUBLIC_USE_MOCK_DATA || 'false',
       agentWindowsDownloadUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DOWNLOAD_URL || '',
       agentWindowsDevCertificateUrl: process.env.NUXT_PUBLIC_AGENT_WINDOWS_DEV_CERTIFICATE_URL || '',
@@ -17,7 +18,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'pt-BR' },
-      title: 'PrintFlow 3D',
+      title: 'Filamind',
       meta: [
         { name: 'description', content: 'Gestao financeira e operacional para impressao 3D' },
         { name: 'theme-color', content: '#1768f2' }

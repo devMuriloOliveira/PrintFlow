@@ -1,4 +1,4 @@
-# PrintFlow FrontEnd
+# Filamind FrontEnd
 
 Painel do cliente em Nuxt 4/Vue 3. Ele reúne dashboard, produtos, calculadora,
 vendas, estoque, filamentos, impressoras, marketplaces, relatórios e

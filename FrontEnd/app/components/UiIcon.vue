@@ -20,6 +20,7 @@ const icons: Record<string, string> = {
   building: '<path d="M4 21h16M6 21V4h9v17M15 9h4v12M9 8h2m-2 4h2m-2 4h2"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   down: '<path d="m6 9 6 6 6-6"/>',
   refresh: '<path d="M20 11a8 8 0 1 0 1 4"/><path d="M20 4v7h-7"/>',

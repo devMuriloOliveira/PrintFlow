@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
@@ -49,52 +50,25 @@ const emulateDpapiForTest = (operation, value) => {
   return Buffer.from(plaintext)
 }
 
-const powershellScript = (operation) => `
-$inputText = [Console]::In.ReadToEnd()
-$inputBytes = [Convert]::FromBase64String($inputText)
-Add-Type -AssemblyName System.Security
-if ('${operation}' -eq 'protect') {
-  $outputBytes = [Security.Cryptography.ProtectedData]::Protect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-} else {
-  try {
-    $outputBytes = [Security.Cryptography.ProtectedData]::Unprotect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
-  } catch {
-    # Instalações anteriores usavam LocalMachine. Ler uma vez permite migrar o
-    # arquivo para CurrentUser na próxima gravação sem perder o pareamento.
-    $outputBytes = [Security.Cryptography.ProtectedData]::Unprotect($inputBytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
-  }
-}
-[Console]::Out.Write([Convert]::ToBase64String($outputBytes))
-`
-
-const runPowerShellDpapi = async (
+const runNativeDpapi = async (
   operation,
   value
 ) => {
+  if (isNodeTest) return emulateDpapiForTest(operation, value)
   if (process.platform !== 'win32') {
     return null
   }
 
-  const script =
-    Buffer.from(
-      powershellScript(operation),
-      'utf16le'
-    ).toString('base64')
   const input =
     Buffer.from(value).toString('base64')
+  const host = path.resolve(path.dirname(process.execPath), '..', 'host', 'PrintFlowAgentHost.exe')
+  if (!existsSync(host)) throw new Error('Host nativo do PrintFlow Agent indisponivel para DPAPI.')
 
   return new Promise((resolve, reject) => {
     const child =
       spawn(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-EncodedCommand',
-          script
-        ],
+        host,
+        [`--dpapi-${operation}`],
         {
           windowsHide:
             true,
@@ -148,7 +122,7 @@ const runPowerShellDpapi = async (
 }
 
 export const protectWithWindowsDpapi = async value =>
-  runPowerShellDpapi(
+  runNativeDpapi(
     'protect',
     Buffer.isBuffer(value)
       ? value
@@ -156,7 +130,7 @@ export const protectWithWindowsDpapi = async value =>
   )
 
 export const unprotectWithWindowsDpapi = async value =>
-  runPowerShellDpapi(
+  runNativeDpapi(
     'unprotect',
     Buffer.isBuffer(value)
       ? value
@@ -177,7 +151,7 @@ export const loadCredentials = async () => {
       stored.payload
     ) {
       const plaintext =
-        await runPowerShellDpapi(
+        await runNativeDpapi(
           'unprotect',
           Buffer.from(
             stored.payload,
@@ -226,7 +200,7 @@ export const saveCredentials = async (credentials) => {
       'utf8'
     )
   const protectedValue =
-    await runPowerShellDpapi(
+    await runNativeDpapi(
       'protect',
       plaintext
     )

@@ -12,7 +12,7 @@ test('financial XLSX includes readable headers, filters and typed financial cell
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(output)
   const sales = workbook.getWorksheet('Vendas')
-  assert.equal(workbook.getWorksheet('Resumo').getCell('A1').value, 'PrintFlow 3D · Resumo')
+  assert.equal(workbook.getWorksheet('Resumo').getCell('A1').value, 'Filamind · Resumo')
   assert.equal(sales.getCell('A4').value, 'Data')
   assert.equal(sales.autoFilter, 'A4:J4')
   assert.equal(sales.getCell('F5').numFmt, 'R$ #,##0.00')

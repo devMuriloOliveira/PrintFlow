@@ -34,6 +34,18 @@ const queuedSort = (a, b) => {
   return String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
 }
 
+export const reorderQueueIds = (queue, printJobId, { direction = '', targetId = '' } = {}) => {
+  const ordered = queue.map(String)
+  const index = ordered.indexOf(String(printJobId))
+  if (index < 0) return ordered
+  let targetIndex = targetId ? ordered.indexOf(String(targetId)) : direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= ordered.length || targetIndex === index) return ordered
+  const [removed] = ordered.splice(index, 1)
+  if (index < targetIndex) targetIndex -= 1
+  ordered.splice(targetIndex, 0, removed)
+  return ordered
+}
+
 const localId = () => String(Date.now() + Math.floor(Math.random() * 1000))
 
 const localPrintJobs = async (req) =>
@@ -251,9 +263,10 @@ export const handlePrintJobEnqueue = async (req, res) => {
 export const handlePrintJobReorder = async (req, res, printJobId) => {
   const body = await readJsonBody(req)
   const direction = String(body?.direction || '').trim()
+  const targetId = String(body?.targetId || '').trim()
   const tenantId = await getTenantId(req)
 
-  if (!['up', 'down'].includes(direction)) {
+  if (!targetId && !['up', 'down'].includes(direction)) {
     return sendJson(res, 400, { error: 'Direcao da fila invalida.' })
   }
 
@@ -285,13 +298,7 @@ export const handlePrintJobReorder = async (req, res, printJobId) => {
         [tenantId, job.printer_id, job.agent_printer_id]
       )
 
-      const queue = queueResult.rows.map((row) => String(row.id))
-      const index = queue.indexOf(String(printJobId))
-      const targetIndex = direction === 'up' ? index - 1 : index + 1
-      if (index < 0 || targetIndex < 0 || targetIndex >= queue.length) return
-
-      const [removed] = queue.splice(index, 1)
-      queue.splice(targetIndex, 0, removed)
+      const queue = reorderQueueIds(queueResult.rows.map((row) => String(row.id)), printJobId, { direction, targetId })
 
       for (let currentIndex = 0; currentIndex < queue.length; currentIndex += 1) {
         await client.query(
@@ -312,12 +319,10 @@ export const handlePrintJobReorder = async (req, res, printJobId) => {
   const queue = list
     .filter((item) => String(item.printerId || '') === String(job.printerId || '') && String(item.agentPrinterId || '') === String(job.agentPrinterId || '') && item.status === 'queued')
     .sort(queuedSort)
-  const index = queue.findIndex((item) => itemId(item) === String(printJobId))
-  const targetIndex = direction === 'up' ? index - 1 : index + 1
-  if (index >= 0 && targetIndex >= 0 && targetIndex < queue.length) {
-    const [removed] = queue.splice(index, 1)
-    queue.splice(targetIndex, 0, removed)
-    queue.forEach((item, currentIndex) => {
+  const orderedIds = reorderQueueIds(queue.map(itemId), printJobId, { direction, targetId })
+  if (orderedIds.join(',') !== queue.map(itemId).join(',')) {
+    const orderedItems = orderedIds.map((id) => queue.find((item) => itemId(item) === id)).filter(Boolean)
+    orderedItems.forEach((item, currentIndex) => {
       item.priority = queue.length - currentIndex
       item.updatedAt = new Date().toISOString()
     })

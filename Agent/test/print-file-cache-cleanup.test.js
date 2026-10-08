@@ -6,6 +6,7 @@ import test from 'node:test'
 
 import {
   cleanupPrintFileCache,
+  getPrintFileCacheStats,
   pinPrintFileCache,
   recoverStalePrintFilePins,
   unpinPrintFileCacheByPrintJobId,
@@ -39,6 +40,25 @@ const writeCacheFile =
       mtime
     )
   }
+
+test('estatisticas do cache reportam apenas contagens e bytes dos arquivos', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'printflow-agent-cache-stats-'))
+  try {
+    const pinnedPath = path.join(root, 'active.3mf')
+    await writeCacheFile(pinnedPath, 'payload', new Date())
+    await pinPrintFileCache(pinnedPath, { printJobId: 'job-cache-stats' })
+    await writeCacheFile(path.join(root, 'download.3mf.part'), 'tmp', new Date())
+
+    assert.deepEqual(await getPrintFileCacheStats({ directory: root }), {
+      files: 2,
+      bytes: 10,
+      pinnedFiles: 1,
+      temporaryFiles: 1
+    })
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
 
 test('limpeza do cache do Agent remove arquivos temporarios e expirados', async () => {
   const root =

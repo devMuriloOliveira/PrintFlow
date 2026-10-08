@@ -49,3 +49,17 @@ test('modo mock retorna diagnostico compativel com a descoberta', async () => {
   assert.equal(result.printers.length, 1)
   assert.deepEqual(result.warnings, [])
 })
+
+test('modo mock emite descoberta incremental sem repetir impressoras', async () => {
+  const discovered = []
+  const result = await scanNetworkWithDiagnostics({ onPrinterDiscovered: printer => discovered.push(printer) })
+
+  assert.deepEqual(discovered, result.printers)
+})
+
+test('descoberta cancelada antes de iniciar nao executa o scanner', async () => {
+  const controller = new AbortController()
+  controller.abort(new Error('cancelado antes de iniciar'))
+
+  await assert.rejects(scanNetworkWithDiagnostics({ signal: controller.signal }), /cancelado antes de iniciar/)
+})

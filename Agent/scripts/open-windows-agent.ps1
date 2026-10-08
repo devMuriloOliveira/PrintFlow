@@ -5,6 +5,17 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$hostExecutable = Join-Path $agentRoot "host\PrintFlowAgentHost.exe"
+
+function Start-AgentHost {
+  if (Test-Path -LiteralPath $hostExecutable) {
+    Start-Process -FilePath $hostExecutable -ArgumentList @('--api-url', $ApiUrl) -WorkingDirectory $agentRoot
+    return $true
+  }
+
+  return $false
+}
 
 $pairingCode = ""
 
@@ -37,9 +48,11 @@ if ($pairingCode) {
     createdAt = (Get-Date).ToUniversalTime().ToString("o")
   } | ConvertTo-Json | Set-Content -LiteralPath $pendingPairingFile -Encoding UTF8
 
-  & (Join-Path $PSScriptRoot "start-windows-agent-tray.ps1") `
-    -ApiUrl $ApiUrl `
-    -PairingCode $pairingCode
+  if (-not (Start-AgentHost)) {
+    & (Join-Path $PSScriptRoot "start-windows-agent-tray.ps1") `
+      -ApiUrl $ApiUrl `
+      -PairingCode $pairingCode
+  }
 
   return
 }
@@ -61,5 +74,7 @@ if ($task) {
   return
 }
 
-& (Join-Path $PSScriptRoot "start-windows-agent-tray.ps1") `
-  -ApiUrl $ApiUrl
+if (-not (Start-AgentHost)) {
+  & (Join-Path $PSScriptRoot "start-windows-agent-tray.ps1") `
+    -ApiUrl $ApiUrl
+}

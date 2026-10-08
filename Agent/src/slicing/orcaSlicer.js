@@ -98,7 +98,8 @@ const runProcess = ({ executable, args, timeoutMs, spawnImpl = spawn }) =>
       settled = true
       clearTimeout(timeout)
       if (code !== 0) {
-        reject(new Error(`OrcaSlicer terminou com codigo ${code}. ${stderr.trim()}`.trim()))
+        const diagnostic = (stderr.trim() || stdout.trim()).slice(-2000)
+        reject(new Error(`OrcaSlicer terminou com codigo ${code}. ${diagnostic}`.trim()))
         return
       }
       resolve({ stdout, stderr })

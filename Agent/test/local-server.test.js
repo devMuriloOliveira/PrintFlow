@@ -34,9 +34,10 @@ test(
         port: 0,
         getRuntimeStatus: () => ({
           updateBlocked: true,
-          updateBlockedReason:
+        updateBlockedReason:
             'active_print',
-          activePrintJobs: 2
+          activePrintJobs: 2,
+          cloudConnected: true
         })
       })
 
@@ -65,6 +66,7 @@ test(
       'active_print'
     )
     assert.equal(payload.activePrintJobs, 2)
+    assert.equal(payload.cloudConnected, true)
     const diagnostics = await fetch(`http://127.0.0.1:${address.port}/diagnostics`)
     assert.equal(diagnostics.status, 503)
   }
@@ -194,15 +196,23 @@ test('token de diagnostico e rotacionado no armazenamento local', async () => {
   assert.match(first.token, /^[A-Za-z0-9_-]{40,64}$/)
   assert.equal(await readDiagnosticsToken(), first.token)
   const stored = await fs.readFile(first.tokenPath, 'utf8')
-  assert.equal(stored.includes(first.token), process.platform !== 'win32')
+  assert.equal(stored.includes(first.token), false)
+  assert.match(stored, /windows-dpapi/)
   if (process.platform !== 'win32') {
     assert.equal((await fs.stat(first.tokenPath)).mode & 0o777, 0o600)
-  } else {
-    assert.match(stored, /windows-dpapi/)
   }
 
   const second = await createDiagnosticsToken()
   assert.notEqual(second.token, first.token)
   assert.equal(await readDiagnosticsToken(), second.token)
   removeDiagnosticsToken()
+})
+
+test('server informa falha de bind para impedir uma segunda instancia do Agent', async () => {
+  const first = startLocalServer({ port: 0 })
+  await first.ready
+  const port = first.address().port
+  const duplicate = startLocalServer({ port })
+  await assert.rejects(duplicate.ready, /EADDRINUSE/)
+  await new Promise(resolve => first.close(resolve))
 })

@@ -50,6 +50,8 @@ import {
 import { normalizeAgentMetrics, recordProductionJobMetrics } from '../services/productionJobMetrics.js'
 import { recordProductionJobSlicingArtifact } from '../services/productionJobSlicing.js'
 import { syncAgentPrinterHeartbeat } from '../services/agentPrinterHeartbeat.js'
+import { normalizeAgentRuntimeHealth } from '../services/agentRuntimeHealth.js'
+import { normalizeAgentCommandProgress } from '../services/agentCommandProgress.js'
 import {
   isAgentVersionSupported,
   unsupportedAgentVersionPayload
@@ -1074,6 +1076,8 @@ export const handleAgentHeartbeat =
         ''
       ).trim()
 
+    const runtimeHealth = normalizeAgentRuntimeHealth(body.runtimeHealth)
+
     const secretHash =
       crypto
         .createHash(
@@ -1112,6 +1116,8 @@ export const handleAgentHeartbeat =
                 when $5 <> '' then $5
                 else architecture
               end,
+            runtime_health =
+              coalesce($6::jsonb, runtime_health),
             last_seen_at =
               now(),
 
@@ -1140,7 +1146,8 @@ export const handleAgentHeartbeat =
           secretHash,
           version,
           platform,
-          architecture
+          architecture,
+          runtimeHealth ? JSON.stringify(runtimeHealth) : null
         ]
       )
 
@@ -1182,6 +1189,71 @@ export const handleAgentHeartbeat =
       }
     )
   }
+
+// ======================================================
+// LISTAR IMPRESSORAS PARA RESTAURACAO APOS REINICIO
+// ======================================================
+
+export const handleAgentPrinterReconnectList = async (req, res) => {
+  const agent = await authenticateAgentRequest(req)
+
+  if (!agent) {
+    return sendJson(res, 401, { error: 'Agent invalido' })
+  }
+
+  const result = await tenantQuery(
+    agent.tenant_id,
+    `
+      select
+        id,
+        protocol,
+        connection_type,
+        name,
+        manufacturer,
+        model,
+        serial,
+        ip,
+        port,
+        metadata
+      from agent_printers
+      where tenant_id = $1
+        and agent_id = $2
+        and status <> 'disconnected'
+      order by created_at asc
+    `,
+    [agent.tenant_id, agent.id]
+  )
+
+  const printers = result.rows.map(storedPrinter => {
+    const metadata = storedPrinter.metadata && typeof storedPrinter.metadata === 'object'
+      ? storedPrinter.metadata
+      : {}
+
+    const printer = {
+      id: String(storedPrinter.id),
+      protocol: storedPrinter.protocol,
+      connectionType: storedPrinter.connection_type,
+      name: storedPrinter.name,
+      manufacturer: storedPrinter.manufacturer,
+      model: storedPrinter.model,
+      serial: storedPrinter.serial,
+      ip: storedPrinter.ip,
+      port: storedPrinter.port ? Number(storedPrinter.port) : undefined
+    }
+
+    for (const field of ['software', 'baudRate', 'firmware']) {
+      if (metadata[field] !== undefined && metadata[field] !== null) {
+        printer[field] = field === 'baudRate' ? Number(metadata[field]) : metadata[field]
+      }
+    }
+
+    if (metadata.mock === true) printer.mock = true
+
+    return printer
+  })
+
+  return sendJson(res, 200, { printers })
+}
 
 export const handleAgentCredentialRotate = async (req, res) => {
   const agent = await authenticateAgentRequest(req)
@@ -3662,6 +3734,7 @@ try {
       dedupeKey: `print-started:${command.id}`
     })
   }
+
 } catch (error) {
   console.error('[Operations] Falha ao registrar evento operacional:', error)
 }
@@ -3695,6 +3768,30 @@ try {
       }
     )
   }
+export const handleAgentCommandProgress = async (req, res, commandId) => {
+  const agent = await authenticateAgentRequest(req)
+  if (!agent) return sendJson(res, 401, { error: 'Agent invalido' })
+  if (!/^\d{1,20}$/.test(String(commandId || ''))) return sendJson(res, 400, { error: 'Comando invalido.' })
+
+  const body = await readJsonBody(req)
+  const progress = normalizeAgentCommandProgress(body?.progress)
+  if (!progress) return sendJson(res, 400, { error: 'Progresso de discovery invalido.' })
+
+  const updated = await query(`
+    update agent_commands
+       set progress = $1::jsonb
+     where id = $2
+       and agent_id = $3
+       and tenant_id = $4
+       and command = 'discover_printers'
+       and status = 'running'
+    returning id
+  `, [JSON.stringify(progress), commandId, agent.id, agent.tenant_id])
+
+  if (!updated.rows[0]) return sendJson(res, 409, { error: 'Discovery nao esta mais em andamento.' })
+  return sendJson(res, 200, { accepted: true, progress })
+}
+
 // ======================================================
 // FRONTEND CONSULTA RESULTADO DO COMANDO
 // ======================================================
@@ -3743,6 +3840,7 @@ export const handleAgentCommandGet =
             payload,
             status,
             result,
+            progress,
             created_at,
             started_at,
             completed_at
@@ -3805,6 +3903,9 @@ export const handleAgentCommandGet =
           result:
             command.result ||
             null,
+
+          progress:
+            command.progress || null,
 
           createdAt:
             command.created_at,

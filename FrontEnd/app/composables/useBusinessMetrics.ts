@@ -11,7 +11,22 @@ export const useBusinessMetrics = () => {
     const minutes = Number(time.match(/(\d+(?:[.,]\d+)?)\s*m/i)?.[1]?.replace(',', '.') || 0)
     return hours + minutes / 60
   }
-  const productForOrder = (order: any) => products.value.find((product) => product.id && product.id === order.productId) || products.value.find((product) => product.name === order.product)
+  const productsById = computed(() => {
+    const indexed = new Map<string, (typeof products.value)[number]>()
+    for (const product of products.value) {
+      const id = product.id || ''
+      if (id && !indexed.has(id)) indexed.set(id, product)
+    }
+    return indexed
+  })
+  const productsByName = computed(() => {
+    const indexed = new Map<string, (typeof products.value)[number]>()
+    for (const product of products.value) {
+      if (!indexed.has(product.name)) indexed.set(product.name, product)
+    }
+    return indexed
+  })
+  const productForOrder = (order: any) => productsById.value.get(order.productId) || productsByName.value.get(order.product)
   const soldRecipeRows = computed(() => activeOrders.value.map((order) => ({ order, product: productForOrder(order) })).filter((row) => row.product))
   const filamentUsageById = computed(() => {
     const totals = new Map<string, number>()

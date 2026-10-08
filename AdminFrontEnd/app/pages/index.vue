@@ -36,6 +36,18 @@ const primaryMetrics = computed(() => [
   { label: 'Usuários ativos', value: tenants.value.reduce((sum, tenant) => sum + tenant.activeUsers, 0), note: 'Nas empresas desta página', icon: 'overview', to: '/empresas' },
   { label: 'Agents online', value: overview.value?.onlineAgents ?? 0, note: `De ${overview.value?.agents ?? 0} pareados`, icon: 'reports', to: '/empresas' }
 ])
+const operationalHealthItems = computed(() => {
+  const health = overview.value?.health
+  if (!health) return []
+  return [
+    { label: 'Agents fora de operação', value: health.agentsNotOnline, detail: 'Sem status online agora', alert: health.agentsNotOnline > 0 },
+    { label: 'Impressões sem resposta', value: health.stalePrintStarts, detail: 'Em início há mais de 10 min', alert: health.stalePrintStarts > 0 },
+    { label: 'Fila aguardando', value: health.longWaitingPrintJobs, detail: 'Itens em fila há mais de 1 h', alert: health.longWaitingPrintJobs > 0 },
+    { label: 'Webhooks Mercado Pago atrasados', value: health.delayedMercadoPagoWebhooks, detail: 'Sem processamento após 5 min', alert: health.delayedMercadoPagoWebhooks > 0 },
+    { label: 'Integrações com erro', value: health.marketplaceSyncErrors, detail: 'Contas com falha de sincronização', alert: health.marketplaceSyncErrors > 0 },
+    { label: 'Backup mais recente', value: health.latestBackupStatus === 'success' || health.latestBackupStatus === 'completed' ? 'Concluído' : health.latestBackupStatus, detail: health.lastSuccessfulBackupAt ? `Último sucesso: ${formatDate(health.lastSuccessfulBackupAt)}` : 'Nenhum backup concluído', alert: health.backupStale || health.latestBackupStatus === 'failed' }
+  ]
+})
 
 const refresh = async () => {
   refreshing.value = true
@@ -104,6 +116,15 @@ onMounted(() => void refresh())
         </article>
       </section>
 
+      <section class="panel operational-health" aria-labelledby="operational-health-title" aria-live="polite">
+        <div class="panel-head"><div><span class="section-kicker">OBSERVABILIDADE</span><h2 id="operational-health-title">Saúde operacional</h2><p>Contagens agregadas da plataforma; sem payloads ou dados de clientes.</p></div><small>Verificado {{ formatDate(overview.health.checkedAt) }}</small></div>
+        <div class="operational-health__grid">
+          <article v-for="item in operationalHealthItems" :key="item.label" class="operational-health__item" :class="{ 'operational-health__item--alert': item.alert }">
+            <span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.detail }}</small>
+          </article>
+        </div>
+      </section>
+
       <section v-if="supportMetrics" class="dashboard-columns dashboard-columns--balanced">
         <article class="panel"><div class="panel-head"><div><span class="section-kicker">SUPORTE</span><h2>Desempenho da equipe</h2><p>Tempos médios dos atendimentos comerciais.</p></div></div>
           <div class="dashboard-stat-list"><div><span>Primeira resposta</span><strong>{{ Math.round(supportMetrics.averageFirstResponseMinutes) }} min</strong></div><div><span>Resolução</span><strong>{{ Math.round(supportMetrics.averageResolutionMinutes) }} min</strong></div><div><span>Reabertos</span><strong>{{ supportMetrics.reopened }}</strong></div></div>
@@ -123,3 +144,7 @@ onMounted(() => void refresh())
     </template>
   </AdminShell>
 </template>
+
+<style scoped>
+.operational-health{margin:18px 0}.operational-health .panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.operational-health .panel-head>small{color:#66758b;font-size:11px}.operational-health__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.operational-health__item{display:grid;min-width:0;gap:5px;border:1px solid #dce5f0;border-radius:10px;background:#f8fafc;padding:12px}.operational-health__item>span{color:#52627a;font-size:11px;font-weight:700}.operational-health__item>strong{color:#172033;font-size:22px;overflow-wrap:anywhere}.operational-health__item>small{color:#66758b;font-size:10px;line-height:1.4}.operational-health__item--alert{border-color:#f2c4a5;background:#fff8f2}.operational-health__item--alert>strong{color:#a94416}@media(max-width:760px){.operational-health__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:500px){.operational-health__grid{grid-template-columns:1fr}.operational-health .panel-head{flex-direction:column}}
+</style>
