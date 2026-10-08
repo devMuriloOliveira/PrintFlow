@@ -174,6 +174,7 @@ test('release tool constrói, valida, assina e publica os artefatos C# sem Power
   }
   assert.doesNotMatch(tool, /powershell|iexpress/i)
   assert.doesNotMatch(workflow, /shell:\s*(?:pwsh|powershell)|\.ps1|iexpress/i)
+  assert.match(ciWorkflow, /on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- '\*\*'/)
   for (const fragment of [
     'FILA_AGENT_API_URL',
     'FILA_AGENT_MINIMUM_SUPPORTED_VERSION',

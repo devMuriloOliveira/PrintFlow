@@ -261,6 +261,7 @@ try {
   if (!ciWorkflow.includes('FilaAgent.ReleaseTool.csproj') ||
       !ciWorkflow.includes('FilaAgent.Runtime.ContractTests.csproj') ||
       !ciWorkflow.includes('Fila-Agent-Setup.exe --validate-embedded-package') ||
+      !/^on:\s*\r?\n\s+push:\s*\r?\n\s+branches:\s*\r?\n\s+- '\*\*'/m.test(ciWorkflow) ||
       /shell:\s*(?:pwsh|powershell)/i.test(ciWorkflow) ||
       /\.ps1|\.psm1|\.vbs|iexpress/i.test(ciWorkflow)) {
     errors.push('CI do Agent nao compila o ReleaseTool, exercita contratos C# no Windows e empacota sem PowerShell.')

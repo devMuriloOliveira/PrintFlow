@@ -419,3 +419,9 @@ O run 37830558545 passou por validação, testes do Agent e build Early Access, 
 A etapa de build tem --sign-dev e --require-persisted-certificate no workflow versionado, e o ReleaseTool local confirmou que dotnet run encaminha essas flags; mesmo assim, o artefato no runner não ficou assinado. A razão dessa divergência entre configuração/fonte e saída do runner não foi identificada nesta etapa. Não foram feitas novas tentativas de reparo depois desse diagnóstico.
 
 Verificações locais da última correção: contrato de release 28 checks; validação do pacote 0.1.26; build Release do ReleaseTool sem avisos/erros; git diff --check. O pacote não foi publicado. A branch feature/Alex e a tag agent-v0.1.26 apontam para o commit 6badd4a23f40a95d7206bd147f257d8c6ae3bccb; a branch estava sincronizada com origin no momento desta nota.
+
+### CI duplicada ao enviar tag do Agent — 2026-10-08
+
+Na tela do GitHub, o mesmo commit `6badd4a` iniciou `CI #211` pela branch `feature/Alex`, `CI #212` pela tag `agent-v0.1.26` e `Agent Release #32` pela tag. A causa era `ci.yml` aceitar qualquer `push`, incluindo tags; o workflow de release já tem seu próprio conjunto de validações para tags do Agent.
+
+O filtro de `push` da CI foi limitado a branches (`**`), mantendo `pull_request`. Assim, ao publicar branch e tag juntas, a configuração versionada solicita a CI da branch e o workflow de release da tag, sem uma segunda CI no mesmo tag. Os testes do pacote e do contrato do instalador agora verificam esse filtro. Nenhuma tag foi enviada para exercitar novamente o gatilho remoto nesta alteração; a regra é validada pelo YAML, pelo contrato do projeto e pela documentação oficial do GitHub Actions.
