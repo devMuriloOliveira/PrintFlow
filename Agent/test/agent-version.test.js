@@ -60,6 +60,31 @@ test('separa DEVELOPMENT e rejeita endpoints inseguros em PRODUCTION', () => {
   })
   assert.deepEqual(customOrigin.appOrigins, ['https://app.example.test'])
 
+  const filaEnvironment = resolveRuntimeConfig({
+    FILA_AGENT_ENVIRONMENT: 'PRODUCTION',
+    PRINTFLOW_ENVIRONMENT: 'DEVELOPMENT',
+    FILA_AGENT_API_URL: 'https://fila-api.example.test',
+    PRINTFLOW_API_URL: 'https://legacy-api.example.test',
+    FILA_AGENT_WS_URL: 'wss://fila-api.example.test',
+    PRINTFLOW_WS_URL: 'wss://legacy-api.example.test',
+    FILA_AGENT_APP_ORIGINS: 'https://fila.example.test',
+    PRINTFLOW_APP_ORIGINS: 'https://legacy.example.test'
+  })
+  assert.equal(filaEnvironment.environment, 'PRODUCTION')
+  assert.equal(filaEnvironment.apiUrl, 'https://fila-api.example.test')
+  assert.equal(filaEnvironment.wsUrl, 'wss://fila-api.example.test')
+  assert.deepEqual(filaEnvironment.appOrigins, ['https://fila.example.test'])
+
+  const legacyEnvironment = resolveRuntimeConfig({
+    PRINTFLOW_ENVIRONMENT: 'PRODUCTION',
+    PRINTFLOW_API_URL: 'https://legacy-api.example.test',
+    PRINTFLOW_WS_URL: 'wss://legacy-api.example.test',
+    PRINTFLOW_APP_ORIGINS: 'https://legacy.example.test'
+  })
+  assert.equal(legacyEnvironment.apiUrl, 'https://legacy-api.example.test')
+  assert.equal(legacyEnvironment.wsUrl, 'wss://legacy-api.example.test')
+  assert.deepEqual(legacyEnvironment.appOrigins, ['https://legacy.example.test'])
+
   assert.throws(() => resolveRuntimeConfig({
     PRINTFLOW_ENVIRONMENT: 'PRODUCTION',
     PRINTFLOW_API_URL: 'http://localhost:3333'
@@ -69,6 +94,13 @@ test('separa DEVELOPMENT e rejeita endpoints inseguros em PRODUCTION', () => {
     PRINTFLOW_ENVIRONMENT: 'PRODUCTION',
     PRINTFLOW_API_URL: 'https://api.example.test',
     PRINTFLOW_DEV_MOCK_BAMBU: 'true'
+  }), /mock/i)
+
+  assert.throws(() => resolveRuntimeConfig({
+    FILA_AGENT_ENVIRONMENT: 'PRODUCTION',
+    FILA_AGENT_API_URL: 'https://api.example.test',
+    FILA_AGENT_DEV_MOCK_BAMBU: 'true',
+    PRINTFLOW_DEV_MOCK_BAMBU: 'false'
   }), /mock/i)
 
   assert.throws(() => resolveRuntimeConfig({

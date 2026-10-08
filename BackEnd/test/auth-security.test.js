@@ -308,6 +308,8 @@ test('CORS permite somente as origens configuradas', async () => {
   assert.equal(allowed.headers['Access-Control-Allow-Credentials'], 'true')
   assert.equal(allowed.headers['X-Content-Type-Options'], 'nosniff')
   assert.match(allowed.headers['Access-Control-Allow-Methods'], /PATCH/)
+  assert.match(allowed.headers['Access-Control-Allow-Headers'], /X-Agent-File-Name/)
+  assert.match(allowed.headers['Access-Control-Allow-Headers'], /X-PrintFlow-File-Name/)
 
   const blocked = await request({
     method: 'OPTIONS',

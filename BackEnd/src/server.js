@@ -41,7 +41,7 @@ try {
   startBackupHealthWatchdog()
 
   server.listen(env.port, '0.0.0.0', () => {
-    console.log(`PrintFlow API running at http://localhost:${env.port}`)
+    console.log(`Filamind API running at http://localhost:${env.port}`)
   })
 } catch (error) {
   console.error('Falha ao inicializar a API', error)

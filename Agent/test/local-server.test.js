@@ -128,6 +128,11 @@ test(
       payload.connections[0].printer.ip,
       '192.168.10.x'
     )
+
+    const filaHeader = await fetch(`http://127.0.0.1:${address.port}/diagnostics`, {
+      headers: { 'x-fila-agent-diagnostics-token': 'diagnostics-test-token-0123456789abcdef' }
+    })
+    assert.equal(filaHeader.status, 200)
     assert.equal(payload.connections[0].printer.serial, '***ESTE')
     assert.equal(
       JSON.stringify(payload).includes('NAO-DEVE-APARECER'),

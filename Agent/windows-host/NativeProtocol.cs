@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace PrintFlowAgentHost;
+namespace FilaAgentHost;
 
 internal static partial class NativeProtocol
 {
@@ -14,10 +14,11 @@ internal static partial class NativeProtocol
         if (string.IsNullOrWhiteSpace(protocolUrl)) return false;
         try
         {
-            var code = ParsePairingCode(new Uri(protocolUrl));
+            var code = TryParsePairingCode(protocolUrl);
+            if (code is null) return true;
             var dataDirectory = ReadArgument(args, "--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent");
             SavePendingPairingCode(code, dataDirectory);
-            if (!args.Contains("--no-start", StringComparer.OrdinalIgnoreCase)) StartScheduledAgent(ReadArgument(args, "--task-name") ?? "PrintFlowAgent");
+            if (!args.Contains("--no-start", StringComparer.OrdinalIgnoreCase)) StartScheduledAgent(ReadArgument(args, "--task-name") ?? "FilaAgent");
         }
         catch { }
         return true;
@@ -27,6 +28,13 @@ internal static partial class NativeProtocol
         .SkipWhile(value => !string.Equals(value, name, StringComparison.OrdinalIgnoreCase))
         .Skip(1)
         .FirstOrDefault();
+
+    internal static string? TryParsePairingCode(string protocolUrl)
+    {
+        if (!Uri.TryCreate(protocolUrl, UriKind.Absolute, out var uri) ||
+            !string.Equals(uri.Scheme, "fila-agent", StringComparison.OrdinalIgnoreCase)) return null;
+        return ParsePairingCode(uri);
+    }
 
     private static string ParsePairingCode(Uri uri)
     {

@@ -35,7 +35,7 @@ export const sendJson = (res, status, body, extraHeaders = {}) => {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Accept, Authorization, Content-Type, Origin, X-Requested-With, X-Tenant-Id, X-Agent-Id, X-Agent-Secret, X-PrintFlow-File-Name, X-PrintFlow-File-Format, X-PrintFlow-Webhook-Secret',
+    'Access-Control-Allow-Headers': 'Accept, Authorization, Content-Type, Origin, X-Requested-With, X-Tenant-Id, X-Agent-Id, X-Agent-Secret, X-Agent-File-Name, X-Agent-File-Format, X-Agent-Slicer-Profile-Id, X-Agent-Slicer-Profile-Version, X-Agent-Idempotency-Key, X-Agent-Estimated-Print-Seconds, X-Agent-Estimated-Filament-Grams, X-Agent-Estimated-Filament-Millimeters, X-PrintFlow-File-Name, X-PrintFlow-File-Format, X-PrintFlow-Webhook-Secret',
     ...securityHeaders(),
     ...res.corsHeaders,
     ...(payload.encoding ? { 'Content-Encoding': payload.encoding, Vary: [res.corsHeaders?.Vary, 'Accept-Encoding'].filter(Boolean).join(', ') } : {}),

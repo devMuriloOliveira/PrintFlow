@@ -306,7 +306,7 @@ export const handleRequest =
           200,
           {
             name:
-              'PrintFlow API',
+              'Filamind API',
 
             status:
               'ok',
@@ -1677,6 +1677,8 @@ export const handleRequest =
         error.message === 'Registro nao encontrado' ||
         error.message === 'Membro nao encontrado'
           ? 404
+          : requestRoute === '/webhooks/shopee'
+            ? 503
           : (requestRoute === '/webhooks/mercado-pago' || requestRoute.startsWith('/api/billing/mercado-pago')) && Number(error?.status || error?.statusCode) >= 500
             ? 503
           : 400

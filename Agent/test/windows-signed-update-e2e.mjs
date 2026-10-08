@@ -34,7 +34,7 @@ const server = createServer()
 let apiPort
 
 assert.equal(path.basename(setup).toLowerCase(), 'printflowagentsetup.exe')
-assert.equal(releaseVersion, '0.1.25', `test release must be the next local version, received ${releaseVersion}`)
+assert.equal(releaseVersion, '0.1.26', `test release must be the next local version, received ${releaseVersion}`)
 assert.equal(installRoot, path.resolve(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'PrintFlowAgent'))
 assert.ok(await exists(setup), `native Setup missing: ${setup}`)
 for (const [name, file] of files) assert.ok(await exists(file), `release asset missing: ${name}`)
@@ -51,9 +51,8 @@ const metadata = {
   tag: releaseTag,
   version: releaseVersion,
   minimumSupportedVersion: '0.1.10',
-  portableRuntime: true,
-  nodeRuntimeVersion: '24.19.0',
-  nodeRuntimeArchitecture: 'x64',
+  runtime: '.NET 8 self-contained',
+  selfContained: true,
   signingMode: 'DEV_SELF_SIGNED',
   productionTrusted: false,
   certificateSha256: createHash('sha256').update(certificate).digest('hex').toUpperCase()
@@ -130,8 +129,8 @@ try {
     'C# updater did not record succeeded after post-update health verification')
   assert.equal(await hashFile(credentialsFile), credentialHashBefore, 'updating changed the persisted Agent credential file')
 
-  const task = spawnSync('schtasks.exe', ['/Query', '/TN', 'PrintFlowAgent', '/FO', 'LIST'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
-  assert.equal(task.status, 0, `PrintFlowAgent task unavailable after update: ${task.stderr || task.stdout}`)
+  const task = spawnSync('schtasks.exe', ['/Query', '/TN', 'FilaAgent', '/FO', 'LIST'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
+  assert.equal(task.status, 0, `FilaAgent task unavailable after update: ${task.stderr || task.stdout}`)
   const listener = spawnSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
   assert.match(listener.stdout, /127\.0\.0\.1:17873\s+.*LISTENING/i, 'local Agent port did not return after signed update')
 

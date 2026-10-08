@@ -27,7 +27,7 @@ const marketplacePageLoading = ref(false)
 const emptyMarketplace = { name: '', short: '', color: '#1768f2', commission: 0, fixed: 0, financial: 0, ads: 0, others: 0, gross: 0, net: 0, orders: 0, active: false }
 const integrationAvailability = [
   { id: 'mercado_livre', name: 'Mercado Livre', status: 'Disponível', badge: 'badge--green', description: 'OAuth oficial e importação de pedidos disponíveis.' },
-  { id: 'shopee', name: 'Shopee', status: 'Em breve', badge: 'badge--orange', description: 'Canal manual disponível; integração automática em desenvolvimento.' },
+  { id: 'shopee', name: 'Shopee', status: 'Em breve', badge: 'badge--orange', description: 'Integração automática aguardando avaliação da Shopee.' },
   { id: 'amazon', name: 'Amazon', status: 'Em breve', badge: 'badge--orange', description: 'Canal manual disponível; integração automática ainda não liberada.' }
 ]
 const selected = computed(() => marketplaces.value.find(m=>m.name===selectedName.value) || marketplaces.value[0] || emptyMarketplace)
@@ -49,7 +49,8 @@ const feeRate = (marketplace: any) => marketplace.gross > 0 && marketplace.fees 
 const fees = computed(() => selected.value ? ({ commission: saleValue.value*selected.value.commission/100, fixed:selected.value.fixed, financial:saleValue.value*selected.value.financial/100, ads:saleValue.value*selected.value.ads/100, others:saleValue.value*selected.value.others/100 }) : ({ commission: 0, fixed: 0, financial: 0, ads: 0, others: 0 }))
 const net = computed(() => saleValue.value-Object.values(fees.value).reduce((a,b)=>a+b,0))
 const pendingMarketplaceOrders = computed(() => marketplacePageItems.value.filter((order: any) => !['completed', 'fulfilled', 'cancelled', 'canceled', 'refunded'].includes(String(order.fulfillmentStatus || order.printJobStatus || order.status || '').toLowerCase())))
-const marketplaceConnections = computed(() => marketplaceIntegrations.value.filter((integration: any) => integration.platform === 'mercado_livre'))
+const marketplaceConnections = computed(() => marketplaceIntegrations.value.filter((integration: any) => ['mercado_livre', 'shopee'].includes(integration.platform)))
+const marketplacePlatformName = (integration: any) => ({ mercado_livre: 'Mercado Livre', shopee: 'Shopee' }[integration?.platform] || 'Marketplace')
 const editMarketplace = (marketplace: any) => {
   if (!marketplace.id) return
   router.push(`/marketplaces/novo?id=${marketplace.id}`)
@@ -80,7 +81,8 @@ const toggleMarketplace = async (marketplace: any) => {
 }
 const reconnectConnection = async (integration: any) => {
   if (!integration?.id || connectionActionId.value) return
-  if (!window.confirm('O Mercado Livre vai autorizar a conta que estiver aberta no navegador. Para conectar outra conta, troque de usuário no Mercado Livre antes de continuar.')) return
+  const platformName = marketplacePlatformName(integration)
+  if (!window.confirm(`A ${platformName} vai autorizar a conta que estiver aberta no navegador. Para conectar outra conta, troque de usuário antes de continuar.`)) return
   connectionActionId.value = integration.id
   try {
     window.location.href = await startMarketplaceOAuth(integration.platform)
@@ -91,11 +93,12 @@ const reconnectConnection = async (integration: any) => {
 }
 const disconnectConnection = async (integration: any) => {
   if (!integration?.id || connectionActionId.value) return
-  if (!window.confirm(`Desconectar esta conta do Mercado Livre?\n\n${integration.connectionName || integration.accountExternalId}\n\nO histórico de pedidos será preservado.`)) return
+  const platformName = marketplacePlatformName(integration)
+  if (!window.confirm(`Desconectar esta conta da ${platformName}?\n\n${integration.connectionName || integration.accountExternalId}\n\nO histórico de pedidos será preservado.`)) return
   connectionActionId.value = integration.id
   try {
     await disconnectMarketplaceIntegration(integration.id)
-    notify('Conta do Mercado Livre desconectada. O histórico foi preservado.')
+    notify(`Conta da ${platformName} desconectada. O histórico foi preservado.`)
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Não foi possível desconectar a conta.', 'info')
   } finally {
@@ -143,6 +146,8 @@ const formatSyncDate = (value: string | null | undefined) => value ? new Intl.Da
 const formatTokenExpiry = (value: string | null | undefined) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : 'não informado'
 const marketplaceOrderLabel = (order: any) => {
   if (order.requiresReview) return 'Revisão manual necessária'
+  if (order.status === 'unpaid') return 'Aguardando pagamento'
+  if (order.status === 'pending') return 'Aguardando confirmação'
   if (order.fulfillmentStatus === 'fulfilled') return 'Atendimento concluído'
   if (order.fulfillmentStatus === 'reserved') return 'Estoque reservado'
   if (order.fulfillmentStatus === 'partial_production') return 'Aguardando produção'
@@ -191,8 +196,9 @@ const linkOrderProduct = async (order: any) => {
 const refreshOrdersIfNeeded = () => activeSection.value === 'pedidos' ? loadMarketplacePage() : Promise.resolve()
 onMounted(() => {
   void refreshOrdersIfNeeded()
-  if (route.query.oauth === 'connected' && route.query.platform === 'mercado_livre') {
-    notify('Conta do Mercado Livre conectada com sucesso.')
+  if (route.query.oauth === 'connected' && ['mercado_livre', 'shopee'].includes(String(route.query.platform))) {
+    const platformName = route.query.platform === 'shopee' ? 'Shopee' : 'Mercado Livre'
+    notify(`Conta da ${platformName} conectada com sucesso.`)
     void router.replace({ query: {} })
   }
 })
@@ -203,7 +209,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
   <div>
     <PageHeader title="Marketplaces" :subtitle="pageSubtitle"><a v-if="activeSection === 'canais'" class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Adicionar canal</a><a v-else-if="activeSection === 'conexoes'" class="btn btn--primary" href="/marketplaces/novo"><UiIcon name="plus" />Conectar conta</a></PageHeader>
     <section v-if="activeSection !== 'pedidos'" class="integration-availability">
-      <header><div><span>INTEGRAÇÕES OFICIAIS</span><h2>Disponibilidade por canal</h2><p>Você pode configurar taxas manualmente em qualquer canal. A importação automática depende da integração oficial.</p></div><span class="integration-availability__legend"><i />1 integração disponível</span></header>
+      <header><div><span>INTEGRAÇÕES OFICIAIS</span><h2>Disponibilidade por canal</h2><p>Você pode configurar taxas manualmente em qualquer canal. A importação automática depende da integração oficial.</p></div><span class="integration-availability__legend"><i />{{ integrationAvailability.filter(item => item.status === 'Disponível').length }} integrações disponíveis</span></header>
       <div class="integration-availability__grid">
         <article v-for="item in integrationAvailability" :key="item.id" :class="{ 'is-pending': item.status === 'Em breve' }">
           <MarketplaceLogo :platform="item.id" :name="item.name" :size="34" />
@@ -244,14 +250,14 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
         <PanelCard v-if="activeSection === 'conexoes'" title="Contas conectadas" subtitle="Cada conta OAuth recebe pedidos separadamente. As taxas ficam configuradas no canal correspondente." style="margin-top:12px">
           <div v-for="integration in marketplaceConnections" :key="integration.id" class="connection-row">
             <div>
-              <strong>{{ integration.connectionName || 'Mercado Livre' }}</strong>
+              <strong>{{ integration.connectionName || marketplacePlatformName(integration) }}</strong>
               <small style="display:block;color:var(--muted)">Conta {{ integration.accountExternalId || 'protegida' }} · Última sincronização: {{ formatSyncDate(integration.lastSyncAt) }} · Token expira: {{ formatTokenExpiry(integration.tokenExpiresAt) }}</small>
               <div v-if="integration.lastError" class="connection-error">
                 <small>{{ integration.lastError }}</small>
                 <button type="button" class="connection-error__retry" :disabled="connectionActionId === integration.id" @click="openConnectionOrderForm(integration, 'reprocess')"><UiIcon name="refresh" :size="13" />Reprocessar pedido</button>
               </div>
               <form v-if="orderSyncForm.integrationId === integration.id" class="connection-order-form" @submit.prevent="syncConnectionOrder(integration)">
-                <label :for="`marketplace-order-id-${integration.id}`">ID do pedido no Mercado Livre</label>
+                <label :for="`marketplace-order-id-${integration.id}`">ID do pedido na {{ marketplacePlatformName(integration) }}</label>
                 <div class="connection-order-form__controls">
                   <input :id="`marketplace-order-id-${integration.id}`" v-model="orderSyncForm.externalOrderId" type="text" maxlength="100" autocomplete="off" required :placeholder="orderSyncForm.mode === 'reprocess' ? 'Informe o pedido que falhou' : 'Ex.: 2000000000000000'" />
                   <button class="btn btn--compact" type="submit" :disabled="connectionActionId === integration.id || !orderSyncForm.externalOrderId.trim()">{{ connectionActionId === integration.id ? 'Enviando...' : orderSyncForm.mode === 'reprocess' ? 'Reprocessar' : 'Sincronizar' }}</button>
@@ -260,9 +266,9 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
                 <small>{{ orderSyncForm.mode === 'reprocess' ? 'O pedido será consultado novamente na conta conectada.' : 'A sincronização consulta o pedido diretamente na conta conectada.' }}</small>
               </form>
             </div>
-            <div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" aria-label="Sincronizar pedido por ID" @click="openConnectionOrderForm(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar autorização" aria-label="Reconectar autorização do Mercado Livre" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" aria-label="Desconectar conta do Mercado Livre" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div>
+            <div class="connection-row__actions"><span class="badge" :class="tokenStatusClass(integration)">{{ tokenStatusLabel(integration) }}</span><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Sincronizar pedido por ID" aria-label="Sincronizar pedido por ID" @click="openConnectionOrderForm(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Reconectar autorização" :aria-label="`Reconectar autorização da ${marketplacePlatformName(integration)}`" @click="reconnectConnection(integration)"><UiIcon name="refresh" :size="15" /></button><button type="button" class="row-action" :disabled="connectionActionId === integration.id" title="Desconectar conta" :aria-label="`Desconectar conta da ${marketplacePlatformName(integration)}`" @click="disconnectConnection(integration)"><UiIcon name="close" :size="15" /></button></div>
           </div>
-          <div v-if="!marketplaceConnections.length" class="connection-empty"><span><UiIcon name="store" :size="18" /></span><div><strong>Nenhuma conta conectada</strong><small>Atualmente, somente o Mercado Livre possui integração automática disponível.</small></div><NuxtLink class="btn btn--compact" to="/marketplaces/novo">Conectar Mercado Livre</NuxtLink></div>
+          <div v-if="!marketplaceConnections.length" class="connection-empty"><span><UiIcon name="store" :size="18" /></span><div><strong>Nenhuma conta conectada</strong><small>Conecte uma conta do Mercado Livre. A Shopee será liberada após a avaliação.</small></div><NuxtLink class="btn btn--compact" to="/marketplaces/novo">Conectar Mercado Livre</NuxtLink></div>
         </PanelCard>
       </div>
       <aside>
@@ -273,7 +279,7 @@ watch(() => route.fullPath, () => { void refreshOrdersIfNeeded() })
     <PanelCard v-if="activeSection === 'pedidos'" title="Pedidos recebidos dos marketplaces" subtitle="Revise o pedido, confira o SKU e vincule ao produto antes de liberar para impressão." style="margin-top:12px">
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto Filamind</th><th>Qtd.</th><th>Valor</th><th>Taxa ML</th><th>Frete</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Pedido</th><th>Canal</th><th>SKU externo</th><th>Produto recebido</th><th>Produto Filamind</th><th>Qtd.</th><th>Valor</th><th>Taxa marketplace</th><th>Frete</th><th>Status</th><th></th></tr></thead>
           <tbody>
             <tr v-for="order in pendingMarketplaceOrders" :key="order.id">
               <td><strong>{{ order.externalOrderId || order.id }}</strong></td>

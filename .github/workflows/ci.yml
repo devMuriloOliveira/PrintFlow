@@ -2,14 +2,13 @@ name: CI
 
 on:
   push:
+    branches:
+      - '**'
   pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'
 
 jobs:
   security:
@@ -67,8 +66,16 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: ${{ matrix.path }}/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        if: matrix.name == 'agent'
+        with:
+          dotnet-version: 8.0.x
       - run: npm ci
         working-directory: ${{ matrix.path }}
+      - name: Build Agent release tool
+        if: matrix.name == 'agent'
+        run: dotnet build windows-release-tool/FilaAgent.ReleaseTool.csproj --configuration Release
+        working-directory: Agent
       - run: ${{ matrix.command }}
         working-directory: ${{ matrix.path }}
 
@@ -111,40 +118,35 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.PRINTFLOW_AGENT_NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: Agent/package-lock.json
-      - run: npm ci
-        working-directory: Agent
-      - name: Build Production package without publishing
-        shell: powershell
-        env:
-          PRINTFLOW_API_URL: https://api.example.invalid
-        run: >-
-          npm.cmd --prefix Agent run build:windows --
-          -ApiUrl $env:PRINTFLOW_API_URL
-          -NodeRuntimeVersion $env:PRINTFLOW_AGENT_NODE_VERSION
-          -SkipInstall
-      - name: Validate package contract and generated artifact
-        shell: powershell
+          node-version: 24
+      - name: Restore C# Agent projects
+        shell: cmd
         run: |
+          dotnet restore Agent\windows-host\FilaAgent.csproj --runtime win-x64
+          if errorlevel 1 exit /b %errorlevel%
+          dotnet restore Agent\windows-setup\FilaAgentSetup.csproj --runtime win-x64
+          if errorlevel 1 exit /b %errorlevel%
+          dotnet restore Agent\windows-runtime-live-smoke\FilaAgent.OrcaStore.LiveSmoke.csproj
+          if errorlevel 1 exit /b %errorlevel%
+          dotnet restore Agent\windows-release-tool\FilaAgent.ReleaseTool.csproj
+          if errorlevel 1 exit /b %errorlevel%
+          dotnet restore Agent\windows-runtime-tests\FilaAgent.Runtime.ContractTests.csproj
+          if errorlevel 1 exit /b %errorlevel%
+      - name: Exercise C# runtime contracts on Windows
+        shell: cmd
+        run: dotnet run --project Agent\windows-runtime-tests\FilaAgent.Runtime.ContractTests.csproj --configuration Release
+      - name: Build Production package without publishing
+        shell: cmd
+        env:
+          FILA_AGENT_API_URL: https://api.example.invalid
+        run: dotnet run --project Agent\windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- package --api-url %FILA_AGENT_API_URL% --no-restore
+      - name: Validate package contract and generated artifact
+        shell: cmd
+        run: >-
           node scripts/validate-agent-package.mjs
-          $zip = 'Agent/dist/PrintFlow-Agent-Windows.zip'
-          if (-not (Test-Path $zip)) {
-            throw 'O pacote Production do Agent nao foi gerado.'
-          }
-          $source = Get-Content 'Agent/dist/PrintFlow-Agent-Setup.sed' -Raw
-          if ($source -match 'localhost|127\.0\.0\.1|http://') {
-            throw 'O SED do instalador Production contem endpoint local ou HTTP.'
-          }
-          if ($source -notmatch 'https://api\.example\.invalid') {
-            throw 'O SED do instalador Production nao recebeu o endpoint esperado.'
-          }
-          $extract = Join-Path $env:RUNNER_TEMP 'printflow-agent-package-check'
-          if (Test-Path $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
-          Expand-Archive -LiteralPath $zip -DestinationPath $extract
-          if (-not (Test-Path (Join-Path $extract 'src/index.js'))) {
-            throw 'O ZIP do Agent nao contem o runtime esperado.'
-          }
+          && Agent\dist\Fila-Agent-Setup.exe --validate-embedded-package

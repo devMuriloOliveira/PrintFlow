@@ -15,7 +15,8 @@ const sha256 = async filePath => {
 }
 
 const metadata = await readJson('RELEASE-METADATA.json')
-const minimumSupportedVersion = process.env.PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION || '0.1.10'
+const minimumSupportedVersion = process.env.FILA_AGENT_MINIMUM_SUPPORTED_VERSION ||
+  process.env.PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION || '0.1.10'
 if (!['DEV_SELF_SIGNED', 'PRODUCTION_TRUSTED'].includes(metadata.signingMode)) {
   throw new Error('signingMode da release invalido.')
 }
@@ -28,14 +29,8 @@ if (metadata.signingMode === 'DEV_SELF_SIGNED' && metadata.productionTrusted !==
 if (metadata.minimumSupportedVersion !== minimumSupportedVersion) {
   throw new Error(`Versao minima suportada deve ser ${minimumSupportedVersion}.`)
 }
-if (metadata.portableRuntime !== true) {
-  throw new Error('Release do Agent deve incluir runtime portatil.')
-}
-if (!/^24\.\d+\.\d+$/.test(String(metadata.nodeRuntimeVersion || ''))) {
-  throw new Error('Versao do runtime Node.js da release e invalida.')
-}
-if (metadata.nodeRuntimeArchitecture !== 'x64') {
-  throw new Error('Arquitetura do runtime Node.js da release e invalida.')
+if (metadata.runtime !== '.NET 8 self-contained' || metadata.selfContained !== true) {
+  throw new Error('Release do Agent deve incluir o runtime C# .NET 8 autocontido.')
 }
 
 const sums = await readFile(path.join(dist, 'SHA256SUMS.txt'), 'utf8')
@@ -51,8 +46,33 @@ for (const entry of entries) {
   if (actual !== entry.expected) throw new Error(`Hash divergente: ${entry.relativePath}`)
 }
 
-const certificateEntry = entries.find(entry => entry.relativePath.endsWith('PrintFlow-Agent-Dev-Certificate.cer'))
-if (metadata.signingMode === 'DEV_SELF_SIGNED' && certificateEntry?.expected !== trustedEarlyAccessCertificateSha256) {
+const hashesByName = new Map(entries.map(entry => [entry.relativePath.split(/[\\/]/).at(-1).toLowerCase(), entry.expected]))
+const canonicalAssets = ['Fila-Agent-Windows.zip', 'Fila-Agent-Setup.exe', 'Fila-Agent-Transition-Setup.exe', 'Fila-Agent-Dev-Certificate.cer']
+const compatibilityAssets = ['PrintFlow-Agent-Windows.zip', 'PrintFlow-Agent-Setup.exe', 'PrintFlow-Agent-Transition-Setup.exe', 'PrintFlow-Agent-Dev-Certificate.cer']
+const hasCanonicalAssets = canonicalAssets.every(name => hashesByName.has(name.toLowerCase()))
+const hasLegacyAssets = compatibilityAssets.every(name => hashesByName.has(name.toLowerCase()))
+if (!hasCanonicalAssets && !hasLegacyAssets) {
+  throw new Error('Release sem conjunto completo de artefatos Fila Agent ou aliases PrintFlow legados.')
+}
+if (hasCanonicalAssets && !hasLegacyAssets) {
+  throw new Error('Release nova precisa manter os aliases PrintFlow para atualizar instalacoes existentes.')
+}
+if (hasCanonicalAssets) {
+  for (const [canonical, legacy] of [
+    ['Fila-Agent-Windows.zip', 'PrintFlow-Agent-Windows.zip'],
+    ['Fila-Agent-Setup.exe', 'PrintFlow-Agent-Setup.exe'],
+    ['Fila-Agent-Dev-Certificate.cer', 'PrintFlow-Agent-Dev-Certificate.cer'],
+    ['Fila-Agent-Transition-Setup.exe', 'PrintFlow-Agent-Transition-Setup.exe']
+  ]) {
+    if (hashesByName.get(canonical.toLowerCase()) !== hashesByName.get(legacy.toLowerCase())) {
+      throw new Error(`Alias legado diverge do artefato canonico: ${legacy}`)
+    }
+  }
+}
+
+const certificateEntries = entries.filter(entry => /(?:Fila|PrintFlow)-Agent-Dev-Certificate\.cer$/i.test(entry.relativePath))
+const certificateEntry = certificateEntries.find(entry => /Fila-Agent-Dev-Certificate\.cer$/i.test(entry.relativePath)) || certificateEntries[0]
+if (metadata.signingMode === 'DEV_SELF_SIGNED' && (!certificateEntry || certificateEntries.some(entry => entry.expected !== trustedEarlyAccessCertificateSha256))) {
   throw new Error('Certificado Early Access diverge da identidade confiavel do Agent.')
 }
 if (metadata.certificateSha256 && certificateEntry?.expected !== String(metadata.certificateSha256).toUpperCase()) {

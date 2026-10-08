@@ -20,11 +20,33 @@ const {
   consumePendingPairingCode,
   getAgentDataDirectory,
   loadCredentials,
+  resolveNativeDpapiHost,
   saveCredentials,
   savePendingPairingCode
 } = await import(
   '../src/storage/credentials.js'
 )
+
+test('resolver DPAPI usa host C# configurado e conserva alias legado', async () => {
+  const filaHost = path.join(tempDir, 'fila-agent-host.exe')
+  const legacyHost = path.join(tempDir, 'printflow-agent-host.exe')
+  await fs.writeFile(filaHost, 'fixture')
+  await fs.writeFile(legacyHost, 'fixture')
+  const previousFilaHost = process.env.FILA_AGENT_HOST_PATH
+  const previousLegacyHost = process.env.PRINTFLOW_AGENT_HOST_PATH
+  try {
+    process.env.FILA_AGENT_HOST_PATH = filaHost
+    process.env.PRINTFLOW_AGENT_HOST_PATH = legacyHost
+    assert.equal(resolveNativeDpapiHost(), filaHost)
+    process.env.FILA_AGENT_HOST_PATH = path.join(tempDir, 'missing-host.exe')
+    assert.equal(resolveNativeDpapiHost(), legacyHost)
+  } finally {
+    if (previousFilaHost === undefined) delete process.env.FILA_AGENT_HOST_PATH
+    else process.env.FILA_AGENT_HOST_PATH = previousFilaHost
+    if (previousLegacyHost === undefined) delete process.env.PRINTFLOW_AGENT_HOST_PATH
+    else process.env.PRINTFLOW_AGENT_HOST_PATH = previousLegacyHost
+  }
+})
 
 test('credenciais do Agent usam diretorio local configuravel', async () => {
   assert.equal(

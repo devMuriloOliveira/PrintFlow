@@ -58,7 +58,7 @@ const selectedAgentStatus = computed(() => {
 })
 const connectionGuidance = computed(() => {
   if (selectedAgentStatus.value === 'Agent não encontrado') return 'Este vínculo não aparece entre os Agents desta empresa. Confira se o Agent ainda está pareado e se a impressora está vinculada ao computador correto.'
-  if (selectedAgentStatus.value === 'Agent offline') return 'Abra o PrintFlow Agent no computador e confira a conexão com a internet. O acompanhamento volta quando ele enviar um novo sinal.'
+  if (selectedAgentStatus.value === 'Agent offline') return 'Abra o Fila Agent no computador e confira a conexão com a internet. O acompanhamento volta quando ele enviar um novo sinal.'
   if (selectedLiveStatus.value?.lastConnectionError) return 'Confira se a impressora está ligada e conectada ao Agent. Depois, tente atualizar a leitura.'
   return ''
 })
@@ -349,7 +349,7 @@ const controlPrinter = async (printer: any, action: 'pause' | 'resume' | 'cancel
 const revokeSelectedAgent = async () => {
   const agent = selectedAgent.value
   if (!agent?.id || printerControlLoadingId.value) return
-  if (!window.confirm(`Revogar o Agent deste computador?\n\n${agent.machineName || agent.name || 'PrintFlow Agent'}\n\nEle deixará de receber comandos até ser pareado novamente.`)) return
+  if (!window.confirm(`Revogar o Agent deste computador?\n\n${agent.machineName || agent.name || 'Fila Agent'}\n\nEle deixará de receber comandos até ser pareado novamente.`)) return
   printerControlLoadingId.value = `agent:${agent.id}:revoke`
   try {
     const response = await fetch(`${config.public.apiBase}/api/agents/${agent.id}`, {

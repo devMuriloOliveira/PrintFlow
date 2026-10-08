@@ -600,7 +600,7 @@ export const createLocalOperationsDb = (
         {
           success: false,
           error:
-            'Comando interrompido por reinicio do PrintFlow Agent. A execucao nao foi repetida por seguranca.',
+            'Comando interrompido por reinicio do Fila Agent. A execucao nao foi repetida por seguranca.',
           code:
             'agent_restarted',
           commandType:

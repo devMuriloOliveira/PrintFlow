@@ -1632,10 +1632,16 @@ export const migrate =
           created_at
             timestamptz
             not null
+            default now(),
+
+          updated_at
+            timestamptz
+            not null
             default now()
         )
       `
     )
+    await query(`alter table marketplace_webhook_events add column if not exists updated_at timestamptz not null default now()`)
     await query(`alter table marketplace_webhook_events add column if not exists event_hash text not null default ''`)
     await query(`update marketplace_webhook_events set event_hash = 'legacy-' || id::text where event_hash = ''`)
     await query(`create unique index if not exists marketplace_webhook_events_dedupe_idx on marketplace_webhook_events (tenant_id, integration_id, event_hash)`)
@@ -2040,7 +2046,7 @@ export const migrate =
     // ==================================================
     //
     // Esta tabela representa o cadastro da impressora
-    // dentro do PrintFlow.
+    // dentro do Filamind.
     //
     // Ela NÃO guarda credenciais técnicas.
     // ==================================================

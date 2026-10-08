@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+import { readAgentSlicingHeader } from '../src/routes/agents.js'
 import { normalizeSlicingArtifact, recordProductionJobSlicingArtifact } from '../src/services/productionJobSlicing.js'
 
 const payload = {
@@ -17,6 +18,18 @@ const payload = {
     sizeBytes: 1234
   }
 }
+
+test('cabecalhos novos do Agent tem precedencia e aceitam fallback de transicao', () => {
+  assert.equal(readAgentSlicingHeader({
+    'x-agent-file-name': 'fila-job.gcode',
+    'x-printflow-file-name': 'legacy-job.gcode'
+  }, 'file-name'), 'fila-job.gcode')
+  assert.equal(readAgentSlicingHeader({
+    'x-agent-file-name': ' ',
+    'x-printflow-file-name': 'legacy-job.gcode'
+  }, 'file-name'), 'legacy-job.gcode')
+  assert.equal(readAgentSlicingHeader({ 'x-agent-file-name': 'fila-job.gcode' }, 'file-name'), 'fila-job.gcode')
+})
 
 test('artefato de slicing exige G-code, hash e perfil versionado', () => {
   const normalized = normalizeSlicingArtifact(payload)

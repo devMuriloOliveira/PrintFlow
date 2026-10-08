@@ -363,7 +363,10 @@ export const recordTrackedSales = async (integration, sale) => {
     const gross = distributeLineAmount(sale.gross, item, items, 'gross')
     const marketplaceFee = distributeLineAmount(sale.marketplaceFee, item, items, 'marketplaceFee')
     const shipping = index === 0 ? number(sale.shipping) : 0
-    const net = item.net === undefined ? gross - marketplaceFee - shipping : number(item.net)
+    const useConfiguredAmazonFee = platformName(sale.platform || integration.platform) === 'amazon' && marketplaceFee <= 0 && item.net === undefined
+    const net = item.net === undefined
+      ? useConfiguredAmazonFee ? undefined : gross - marketplaceFee - shipping
+      : number(item.net)
     rows.push(await recordTrackedSale(integration, {
       ...sale,
       ...item,
@@ -372,7 +375,7 @@ export const recordTrackedSales = async (integration, sale) => {
       marketplaceFee,
       shipping,
       net,
-      profit: net - number(item.cost ?? sale.cost),
+      profit: net === undefined ? undefined : net - number(item.cost ?? sale.cost),
       requiresReview: Boolean(item.requiresReview || sale.requiresReview),
       reviewReason: item.reviewReason || sale.reviewReason || ''
     }, text(item.lineKey || (items.length === 1 ? 'default' : item.id || `line-${index}`))))
@@ -406,4 +409,56 @@ export const recordWebhookEvent = async (integration, event) => {
   ])
     return { inserted: Boolean(result.rowCount), id: result.rows[0]?.id || null }
   })
+}
+
+export const claimMarketplaceWebhookEvent = async (integration, event) => {
+  const tenantId = integration.tenant_id
+  if (!tenantId) return { claimed: false, id: null }
+  const payload = JSON.stringify(event.payload || {})
+  const eventHash = blindIndex(`${text(event.eventType)}|${text(event.externalOrderId)}|${payload}`)
+
+  return withTenant(tenantId, async (client) => {
+    const result = await client.query(`
+      insert into marketplace_webhook_events (
+        tenant_id, integration_id, platform, event_type, external_order_id, event_hash, payload, status
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, 'processing')
+      on conflict (tenant_id, integration_id, event_hash) do update
+        set status = 'processing', updated_at = now()
+        where marketplace_webhook_events.status in ('error', 'received')
+           or (marketplace_webhook_events.status = 'processing'
+               and marketplace_webhook_events.updated_at < now() - interval '10 minutes')
+      returning id
+    `, [
+      tenantId,
+      integration.id,
+      platformName(event.platform || integration.platform),
+      text(event.eventType),
+      encryptField(event.externalOrderId || ''),
+      eventHash,
+      encryptField(payload)
+    ])
+    if (result.rowCount) return { claimed: true, id: result.rows[0].id, status: 'processing' }
+    const existing = await client.query(`
+      select id, status
+        from marketplace_webhook_events
+       where tenant_id = $1 and integration_id = $2 and event_hash = $3
+       limit 1
+    `, [tenantId, integration.id, eventHash])
+    return {
+      claimed: false,
+      id: existing.rows[0]?.id || null,
+      status: existing.rows[0]?.status || ''
+    }
+  })
+}
+
+export const markMarketplaceWebhookEventStatus = async (integration, eventId, status) => {
+  const tenantId = integration.tenant_id
+  if (!tenantId || !eventId || !['processed', 'error'].includes(status)) return
+  await withTenant(tenantId, (client) => client.query(`
+    update marketplace_webhook_events
+       set status = $4, updated_at = now()
+     where tenant_id = $1 and integration_id = $2 and id = $3
+  `, [tenantId, integration.id, eventId, status]))
 }

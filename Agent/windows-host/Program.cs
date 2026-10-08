@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Net.Http.Json;
+using FilaAgent.Runtime;
 using System.Text.Json;
 
-namespace PrintFlowAgentHost;
+namespace FilaAgentHost;
 
 internal static class Program
 {
@@ -62,8 +63,8 @@ internal sealed class AgentApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _updateTimer;
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly SemaphoreSlim _healthLock = new(1, 1);
-    private Process? _agentProcess;
-    private AgentProcessJob.SafeJobObjectHandle? _agentProcessJob;
+    private Task? _runtimeTask;
+    private CancellationTokenSource? _runtimeCancellation;
     private StatusForm? _statusForm;
     private bool _closing;
     private bool _checkingUpdate;
@@ -79,7 +80,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
         _logPath = Path.Combine(_agentRoot, "logs");
         Directory.CreateDirectory(_logPath);
 
-        var iconPath = Path.Combine(_agentRoot, "assets", "printflow-agent-icon.ico");
+        var iconPath = Path.Combine(_agentRoot, "assets", "fila-agent-icon.ico");
         _icon = File.Exists(iconPath) ? new Icon(iconPath) : SystemIcons.Application;
 
         var menu = new ContextMenuStrip();
@@ -93,7 +94,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
         _notifyIcon = new NotifyIcon
         {
             Icon = _icon,
-            Text = "PrintFlow Agent - iniciando",
+            Text = "Fila Agent - iniciando",
             Visible = true,
             ContextMenuStrip = menu
         };
@@ -106,15 +107,15 @@ internal sealed class AgentApplicationContext : ApplicationContext
 
         try
         {
-            StartAgentProcess();
+            StartAgentRuntime();
             _monitorTimer.Start();
             if (!_testMode) _updateTimer.Start();
         }
         catch (Exception error)
         {
             WriteLog($"Falha ao iniciar o Agent: {error.Message}");
-            _notifyIcon.Text = "PrintFlow Agent - erro ao iniciar";
-            _notifyIcon.ShowBalloonTip(5_000, "PrintFlow Agent", "Não foi possível iniciar o serviço local. Abra os logs para detalhes.", ToolTipIcon.Error);
+            _notifyIcon.Text = "Fila Agent - erro ao iniciar";
+            _notifyIcon.ShowBalloonTip(5_000, "Fila Agent", "Não foi possível iniciar o serviço local. Abra os logs para detalhes.", ToolTipIcon.Error);
         }
     }
 
@@ -138,10 +139,10 @@ internal sealed class AgentApplicationContext : ApplicationContext
 
         foreach (var candidate in candidates)
         {
-            if (File.Exists(Path.Combine(candidate, "src", "index.js"))) return candidate;
+            if (File.Exists(Path.Combine(candidate, "package.json"))) return candidate;
         }
 
-        throw new InvalidOperationException("Arquivos do PrintFlow Agent não encontrados.");
+        throw new InvalidOperationException("Arquivos do Fila Agent não encontrados.");
     }
 
     private static IEnumerable<string> GetAncestors(string directory)
@@ -164,39 +165,37 @@ internal sealed class AgentApplicationContext : ApplicationContext
         }
     }
 
-    private void StartAgentProcess()
+    private void StartAgentRuntime()
     {
-        if (_closing || (_agentProcess is not null && !_agentProcess.HasExited)) return;
+        if (_closing || (_runtimeTask is not null && !_runtimeTask.IsCompleted)) return;
+        _runtimeCancellation?.Dispose();
+        _runtimeCancellation = new CancellationTokenSource();
+        var values = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
+            .Where(entry => entry.Key is string)
+            .ToDictionary(entry => (string)entry.Key, entry => entry.Value?.ToString(), StringComparer.OrdinalIgnoreCase);
+        values["FILA_AGENT_API_URL"] = _apiUrl;
+        values["FILA_AGENT_ENVIRONMENT"] = _testMode ? "DEVELOPMENT" : "PRODUCTION";
+        values["FILA_AGENT_LOCAL_PORT"] = _localPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        values["FILA_AGENT_LOG_DIR"] = _logPath;
+        if (!string.IsNullOrWhiteSpace(_dataDirectory)) values["FILA_AGENT_DATA_DIR"] = _dataDirectory;
+        var configuration = AgentConfiguration.FromEnvironment(values, _version);
+        _runtimeTask = RunAgentRuntimeAsync(configuration, _runtimeCancellation.Token);
+        WriteLog("Runtime C# iniciado.");
+    }
 
-        var nodePath = Path.Combine(_agentRoot, "runtime", "node.exe");
-        var scriptPath = Path.Combine(_agentRoot, "src", "index.js");
-        if (!File.Exists(nodePath) || !File.Exists(scriptPath)) throw new InvalidOperationException("Runtime do Agent incompleto.");
-
-        var startInfo = new ProcessStartInfo(nodePath, $"\"{scriptPath}\"")
-        {
-            WorkingDirectory = _agentRoot,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        startInfo.Environment["PRINTFLOW_API_URL"] = _apiUrl;
-        startInfo.Environment["PRINTFLOW_ENVIRONMENT"] = _testMode ? "DEVELOPMENT" : "PRODUCTION";
-        startInfo.Environment["PRINTFLOW_AGENT_LOG_DIR"] = _logPath;
-        if (_localPort != 17873) startInfo.Environment["PRINTFLOW_AGENT_LOCAL_PORT"] = _localPort.ToString();
-        if (!string.IsNullOrWhiteSpace(_dataDirectory)) startInfo.Environment["PRINTFLOW_AGENT_DATA_DIR"] = _dataDirectory;
-
-        _agentProcess = Process.Start(startInfo) ?? throw new InvalidOperationException("Não foi possível iniciar o Node.js do Agent.");
+    private async Task RunAgentRuntimeAsync(AgentConfiguration configuration, CancellationToken cancellationToken)
+    {
         try
         {
-            _agentProcessJob = AgentProcessJob.Attach(_agentProcess);
+            await using var runtime = new AgentRuntimeComposition(configuration, WriteLog);
+            await runtime.RunAsync(cancellationToken);
         }
-        catch
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception error)
         {
-            try { if (!_agentProcess.HasExited) _agentProcess.Kill(entireProcessTree: true); } catch { }
-            _agentProcess.Dispose();
-            _agentProcess = null;
+            WriteLog($"Falha no runtime C#: {error.GetType().Name}: {error.Message}");
             throw;
         }
-        WriteLog($"Node iniciado (PID {_agentProcess.Id}).");
     }
 
     private async Task MonitorAsync()
@@ -204,7 +203,7 @@ internal sealed class AgentApplicationContext : ApplicationContext
         if (_closing) return;
         try
         {
-            if (_agentProcess is null || _agentProcess.HasExited) StartAgentProcess();
+            if (_runtimeTask is null || _runtimeTask.IsCompleted) StartAgentRuntime();
             await RefreshStatusAsync();
         }
         catch (Exception error)
@@ -265,7 +264,10 @@ internal sealed class AgentApplicationContext : ApplicationContext
         _checkingUpdate = true;
         try
         {
-            var setup = Path.Combine(_agentRoot, "PrintFlowAgentSetup.exe");
+            var setup = new[] { "FilaAgentSetup.exe", "PrintFlowAgentSetup.exe" }
+                .Select(name => Path.Combine(_agentRoot, name))
+                .FirstOrDefault(File.Exists);
+            if (setup is null) return;
             if (!File.Exists(setup)) return;
             var startInfo = new ProcessStartInfo(setup) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = _agentRoot };
             startInfo.ArgumentList.Add("--check-updates");
@@ -304,13 +306,15 @@ internal sealed class AgentApplicationContext : ApplicationContext
         _monitorTimer.Stop();
         _updateTimer.Stop();
         _statusForm?.Close();
+        _runtimeCancellation?.Cancel();
         try
         {
-            if (_agentProcess is not null && !_agentProcess.HasExited) _agentProcess.Kill(entireProcessTree: true);
+            if (_runtimeTask is not null) _runtimeTask.Wait(TimeSpan.FromSeconds(8));
         }
-        catch { }
-        _agentProcessJob?.Dispose();
-        _agentProcessJob = null;
+        catch (AggregateException error) { WriteLog($"Erro ao encerrar runtime C#: {error.GetBaseException().Message}"); }
+        catch (Exception error) { WriteLog($"Erro ao aguardar encerramento do runtime C#: {error.Message}"); }
+        if (_runtimeTask?.IsCompleted == true) _runtimeCancellation?.Dispose();
+        _runtimeCancellation = null;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _icon.Dispose();
@@ -327,7 +331,7 @@ internal sealed record AgentStatus(string Badge, string Summary, string Version,
     {
         if (health is null)
         {
-            return new("INDISPONÍVEL", "O serviço local ainda não respondeu. O Agent tentará reiniciar automaticamente.", $"v{fallbackVersion}", "Não foi possível verificar", "Sem resposta local", "Não foi possível verificar", Color.FromArgb(254, 226, 226), Color.FromArgb(185, 28, 28), "PrintFlow Agent - indisponível", "Abrir status");
+            return new("INDISPONÍVEL", "O serviço local ainda não respondeu. O Agent tentará reiniciar automaticamente.", $"v{fallbackVersion}", "Não foi possível verificar", "Sem resposta local", "Não foi possível verificar", Color.FromArgb(254, 226, 226), Color.FromArgb(185, 28, 28), "Fila Agent - indisponível", "Abrir status");
         }
 
         var version = $"v{health.Version ?? fallbackVersion}";
@@ -335,9 +339,9 @@ internal sealed record AgentStatus(string Badge, string Summary, string Version,
         var cloud = health.CloudConnected ? "Conectado ao Filamind" : "Tentando conectar";
         var production = health.ActivePrintJobs switch { 0 => "Nenhuma impressão ativa", 1 => "1 impressão ativa", _ => $"{health.ActivePrintJobs} impressões ativas" };
 
-        if (!health.Paired) return new("AGUARDANDO CONEXÃO", "Abra o Filamind no navegador para conectar este computador à sua conta.", version, account, cloud, production, Color.FromArgb(254, 249, 195), Color.FromArgb(133, 77, 14), "PrintFlow Agent - aguardando conexão", "Abrir status");
-        if (!health.CloudConnected) return new("RECONECTANDO", "O Agent está aberto e tentando restabelecer a comunicação com o Filamind.", version, account, cloud, production, Color.FromArgb(255, 237, 213), Color.FromArgb(154, 52, 18), "PrintFlow Agent - reconectando", "Abrir status");
-        return new("ONLINE", "Este computador está pronto para receber comandos autorizados do Filamind.", version, account, cloud, production, Color.FromArgb(220, 252, 231), Color.FromArgb(21, 128, 61), "PrintFlow Agent - online", "Abrir status");
+        if (!health.Paired) return new("AGUARDANDO CONEXÃO", "Abra o Filamind no navegador para conectar este computador à sua conta.", version, account, cloud, production, Color.FromArgb(254, 249, 195), Color.FromArgb(133, 77, 14), "Fila Agent - aguardando conexão", "Abrir status");
+        if (!health.CloudConnected) return new("RECONECTANDO", "O Agent está aberto e tentando restabelecer a comunicação com o Filamind.", version, account, cloud, production, Color.FromArgb(255, 237, 213), Color.FromArgb(154, 52, 18), "Fila Agent - reconectando", "Abrir status");
+        return new("ONLINE", "Este computador está pronto para receber comandos autorizados do Filamind.", version, account, cloud, production, Color.FromArgb(220, 252, 231), Color.FromArgb(21, 128, 61), "Fila Agent - online", "Abrir status");
     }
 }
 
@@ -352,7 +356,7 @@ internal sealed class StatusForm : Form
 
     public StatusForm(Icon icon, string version, Action openLogs, Func<Task> checkUpdates)
     {
-        Text = "Status do PrintFlow Agent";
+        Text = "Status do Fila Agent";
         Icon = icon;
         ShowInTaskbar = true;
         StartPosition = FormStartPosition.CenterScreen;
@@ -363,7 +367,7 @@ internal sealed class StatusForm : Form
         BackColor = Color.FromArgb(248, 250, 252);
         Font = new Font("Segoe UI", 9);
 
-        var title = new Label { Text = "PrintFlow Agent", Font = new Font("Segoe UI", 22, FontStyle.Bold), ForeColor = Color.FromArgb(15, 23, 42), AutoSize = true, Location = new Point(32, 24) };
+        var title = new Label { Text = "Fila Agent", Font = new Font("Segoe UI", 22, FontStyle.Bold), ForeColor = Color.FromArgb(15, 23, 42), AutoSize = true, Location = new Point(32, 24) };
         var subtitle = new Label { Text = "Conector local do Filamind para impressoras 3D", ForeColor = Color.FromArgb(71, 85, 105), AutoSize = true, Location = new Point(36, 70) };
         _badge.TextAlign = ContentAlignment.MiddleCenter;
         _badge.Font = new Font("Segoe UI Semibold", 8);

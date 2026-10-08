@@ -1,0 +1,42 @@
+TERMOS DE USO DO FILA AGENT — EARLY ACCESS
+Versão 1.3 —
+
+1. O que é o Fila Agent
+
+O Fila Agent é um programa opcional para Windows que conecta este computador à conta Filamind e às impressoras 3D que o usuário escolher e autorizar. O pareamento é iniciado pelo usuário no sistema. Depois do pareamento, o Agent pode receber comandos autorizados pela conta, como consultar estado, enviar trabalhos e iniciar, pausar, retomar ou cancelar uma impressão.
+
+2. O que acontece ao instalar
+
+O setup instala os arquivos do Agent no perfil deste usuário, cria uma tarefa para iniciá-lo quando o usuário entrar no Windows, adiciona atalhos e registra uma opção de desinstalação. O pacote inclui os runtimes usados pelo Agent; não é necessário instalar Node.js ou .NET separadamente. O OrcaSlicer não faz parte do pacote e é um software separado sob licença AGPL-3.0; consulte a licença do projeto em https://github.com/OrcaSlicer/OrcaSlicer/blob/main/LICENSE.txt. O setup aceita uma instalação desktop compatível do OrcaSlicer 2.4.2 e também a versão da Microsoft Store cujo motor é 2.4.2. Se não encontrar uma instalação compatível, tenta baixar e instalar a versão oficial da Store pelo Windows Package Manager, mostrando o andamento por até 20 minutos. Se o Windows Package Manager não estiver disponível ou a instalação automática falhar, o setup abre a página oficial do OrcaSlicer na Microsoft Store. Depois que o usuário concluir a instalação, pode clicar em Repetir para validar o slicer e continuar sem reiniciar o setup. O processo requer conexão com a Internet e acesso à Microsoft Store; a instalação silenciosa pelo Windows Package Manager também requer o App Installer do Windows.
+
+Os avisos e textos de licença dos componentes incluídos estão disponíveis no botão “Licenças de terceiros” desta tela e na pasta `legal` da instalação. O OrcaSlicer é instalado separadamente pela Microsoft Store e mantém seus próprios avisos e termos.
+
+O Agent verifica se há atualizações assinadas. Quando encontra uma versão nova, pede confirmação antes de instalá-la. Uma atualização não deve substituir a instalação enquanto houver uma impressão ativa. Atualizações normais preservam pareamento, credenciais e dados locais.
+
+3. Dados usados pelo Agent
+
+Para funcionar, o Agent usa os dados de pareamento da conta e informações operacionais do computador e da impressora, como identificação da impressora, estado, eventos do trabalho, resultado de comandos e métricas que a impressora disponibiliza. A comunicação com o serviço Filamind usa conexão HTTPS.
+
+Arquivos de impressão só são acessados quando fazem parte de um trabalho autorizado. Conforme o fluxo, o Agent pode baixar um modelo, fatiá-lo localmente e enviar o G-code resultante ao serviço para concluir o trabalho. O Agent não procura documentos pessoais nem envia arquivos arbitrários do computador.
+
+As credenciais e os dados operacionais necessários ficam no perfil deste usuário. No Windows, credenciais são protegidas pelo mecanismo DPAPI do próprio Windows. O Agent mantém cache de arquivos de impressão, banco operacional e logs locais. O pacote de suporte só é criado quando solicitado pelo usuário; revise-o antes de compartilhá-lo.
+
+4. Uso responsável e segurança da impressão
+
+O usuário deve ter autorização para instalar o Agent, parear a conta e controlar cada impressora conectada. Antes de iniciar um trabalho, confira o arquivo, a impressora, o material, as configurações e as condições físicas do ambiente. O Agent executa comandos autorizados, mas não substitui a supervisão do usuário nem as instruções de segurança do fabricante da impressora.
+
+Não use o Agent para acessar computadores ou impressoras sem autorização, nem para enviar trabalhos que você não tenha direito de produzir. Mantenha o Windows, a impressora e suas credenciais protegidos.
+
+5. Desinstalação e dados locais
+
+O Agent pode ser removido em Aplicativos Instalados do Windows ou pelo atalho de desinstalação. Por padrão, a desinstalação remove o programa e preserva pareamento, credenciais e arquivos locais. O setup de desinstalação deve oferecer uma escolha separada antes de apagar esses dados.
+
+6. Early Access
+
+Esta versão é oferecida para testes Early Access. Recursos, compatibilidade e disponibilidade podem mudar, e podem ocorrer falhas. Use os canais de suporte que estiverem disponíveis na conta Filamind. Estes termos não retiram direitos que a legislação aplicável assegura ao usuário.
+
+7. Aceite
+
+Ao marcar “Li e aceito os Termos de Uso” e continuar, o usuário confirma que teve acesso a este texto e autoriza a instalação ou atualização descrita na tela. O Agent guarda localmente a versão dos termos aceita e o horário do aceite; esse registro não é enviado ao serviço.
+
+Este texto descreve o funcionamento observado no Fila Agent. Ele não substitui as informações de privacidade e os termos gerais da conta Filamind; o responsável pelo serviço deve disponibilizar esses documentos e um canal de contato antes da distribuição ampla.

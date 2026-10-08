@@ -46,16 +46,18 @@ const retryAgentPlanCheck = () => subscription.load(true)
 const route = useRoute()
 const config = useRuntimeConfig()
 const defaultAgentWindowsDownloadUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Setup.exe'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/Fila-Agent-Setup.exe'
 const defaultAgentWindowsDevCertificateUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Dev-Certificate.cer'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/Fila-Agent-Dev-Certificate.cer'
 const agentTransitionDownloadUrl =
-  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/PrintFlow-Agent-Transition-Setup.exe'
+  'https://github.com/devMuriloOliveira/PrintFlow/releases/latest/download/Fila-Agent-Transition-Setup.exe'
 const firstSelfUpdatingAgentVersion =
   '0.1.4'
 const agentDevCertificateThumbprint =
   '43A798A610B5F9A814C104BEC417A0E9B248EC3E'
 const agentCertificateStorageKey =
+  `fila-agent-certificate-${agentDevCertificateThumbprint}`
+const legacyAgentCertificateStorageKey =
   `printflow-agent-certificate-${agentDevCertificateThumbprint}`
 const agentCertificateAcknowledged =
   ref(false)
@@ -121,7 +123,7 @@ const downloadAgentWindows = () => {
   )
 
   agentOpenMessage.value =
-    'Download iniciado. O instalador deve exibir PrintFlow 3D Local Dev como fornecedor. Depois da instalação, volte para conectar o Agent.'
+    'Download iniciado. O Windows pode exibir uma identidade de signatário diferente do nome Fila Agent neste certificado Early Access. Confira a impressão digital antes de executar; depois, volte para conectar o Fila Agent.'
 }
 
 const downloadAgentWindowsDevCertificate = () => {
@@ -176,15 +178,21 @@ const persistAgentCertificateAcknowledgement = () => {
       agentCertificateStorageKey,
       'confirmed'
     )
+    localStorage.removeItem(
+      legacyAgentCertificateStorageKey
+    )
   } else {
     localStorage.removeItem(
       agentCertificateStorageKey
+    )
+    localStorage.removeItem(
+      legacyAgentCertificateStorageKey
     )
   }
 }
 
 // ======================================================
-// PRINTFLOW AGENT
+// FILA AGENT
 // ======================================================
 
 const agentLoading = ref(false)
@@ -650,8 +658,12 @@ const checkLocalAgent =
 
       if (
         response.ok &&
-        data?.app ===
+        [
+          'fila-agent',
           'printflow-agent'
+        ].includes(
+          data?.app
+        )
       ) {
         agentLocalStatus.value =
           data
@@ -739,7 +751,7 @@ const openInstalledAgent =
       true
 
     agentOpenMessage.value =
-      'Preparando conexão automática com o PrintFlow Agent...'
+      'Preparando conexão automática com o Fila Agent...'
 
     try {
       if (
@@ -790,7 +802,7 @@ const openInstalledAgent =
             0
           ) {
             agentOpenMessage.value =
-              'PrintFlow Agent aberto e conectado.'
+              'Fila Agent aberto e conectado.'
 
             return
           }
@@ -803,13 +815,13 @@ const openInstalledAgent =
       }
 
       const protocolUrl =
-        `printflow-agent://pair?code=${encodeURIComponent(pairingCode.value)}`
+        `fila-agent://pair?code=${encodeURIComponent(pairingCode.value)}`
 
       window.location.href =
         protocolUrl
 
       agentOpenMessage.value =
-        'Solicitação enviada ao Windows. Se o navegador pedir permissão, confirme para abrir o PrintFlow Agent.'
+        'Solicitação enviada ao Windows. Se o navegador pedir permissão, confirme para abrir o Fila Agent.'
 
       for (
         let attempt = 0;
@@ -831,14 +843,14 @@ const openInstalledAgent =
           0
         ) {
           agentOpenMessage.value =
-            'PrintFlow Agent aberto e conectado.'
+            'Fila Agent aberto e conectado.'
 
           return
         }
       }
 
       agentOpenMessage.value =
-        'Ainda não recebemos contato do Agent. Se ele não abrir, use o atalho PrintFlow Agent no Windows.'
+        'Ainda não recebemos contato do Agent. Se ele não abrir, use o atalho Fila Agent no Windows.'
     } finally {
       openingAgent.value =
         false
@@ -1202,7 +1214,7 @@ const findRegisteredAgentPrinter =
       !registeredPrinter
     ) {
       throw new Error(
-        'Esta impressora ainda não está registrada como conectada ao PrintFlow Agent. Conecte a impressora primeiro.'
+        'Esta impressora ainda não está registrada como conectada ao Fila Agent. Conecte a impressora primeiro.'
       )
     }
 
@@ -1322,7 +1334,7 @@ const discoverPrinters =
       )
     ) {
       notify(
-        'Este Agent está offline. Inicie o PrintFlow Agent antes de procurar impressoras.',
+        'Este Agent está offline. Inicie o Fila Agent antes de procurar impressoras.',
         'info'
       )
 
@@ -1352,7 +1364,7 @@ const discoverPrinters =
       []
 
     discoveryMessage.value =
-      'Enviando comando para o PrintFlow Agent...'
+      'Enviando comando para o Fila Agent...'
 
     try {
       const token = auth.token.value
@@ -2303,10 +2315,25 @@ const controlPrinter =
 // ======================================================
 
 onMounted(() => {
-  agentCertificateAcknowledged.value =
+  const legacyAcknowledgement =
+    localStorage.getItem(
+      legacyAgentCertificateStorageKey
+    ) === 'confirmed'
+  const currentAcknowledgement =
     localStorage.getItem(
       agentCertificateStorageKey
     ) === 'confirmed'
+  agentCertificateAcknowledged.value =
+    currentAcknowledgement || legacyAcknowledgement
+  if (agentCertificateAcknowledged.value) {
+    localStorage.setItem(
+      agentCertificateStorageKey,
+      'confirmed'
+    )
+  }
+  localStorage.removeItem(
+    legacyAgentCertificateStorageKey
+  )
   checkLocalAgent()
   loadAgents()
 
@@ -2799,7 +2826,7 @@ onMounted(() => { void subscription.load() })
       :subtitle="
         isEditing
           ? 'Atualize operação, potência e manutenção da impressora.'
-          : 'Cadastre manualmente no FREE. A conexão e automação pelo PrintFlow Agent estão disponíveis no PRO.'
+          : 'Cadastre manualmente no FREE. A conexão e automação pelo Fila Agent estão disponíveis no PRO.'
       "
     />
     <PlanLimitNotice v-if="!isEditing" resource="printers" label="impressoras" remaining-text="As impressoras existentes, seus dados e o controle manual continuam disponíveis no plano FREE." />
@@ -2870,7 +2897,7 @@ onMounted(() => { void subscription.load() })
     </section>
 
     <!-- ================================================= -->
-    <!-- PRINTFLOW AGENT                                   -->
+    <!-- FILA AGENT                                       -->
     <!-- ================================================= -->
 
     <div
@@ -2886,7 +2913,7 @@ onMounted(() => { void subscription.load() })
         <span class="printer-agent-panel__icon"><UiIcon name="settings" :size="24" /></span>
         <div>
           <span class="printer-agent-panel__eyebrow">Conexão automática</span>
-          <h2>PrintFlow Agent</h2>
+          <h2>Fila Agent</h2>
           <p>Siga as etapas para conectar este computador e localizar suas impressoras.</p>
         </div>
         <span
@@ -2918,7 +2945,7 @@ onMounted(() => { void subscription.load() })
                   ? 'Instale a versão de transição uma vez para habilitar as próximas atualizações automáticas.'
                   : agentLocalAvailable
                     ? 'Agora conecte o Agent à sua conta para procurar impressoras.'
-                    : 'Comece instalando o aplicativo do PrintFlow neste computador.'
+                    : 'Comece instalando o Fila Agent neste computador.'
               }}
             </p>
           </div>
@@ -2940,7 +2967,7 @@ onMounted(() => { void subscription.load() })
             <span><UiIcon name="shield" :size="19" /></span>
             <div>
               <strong>Prepare o Windows antes de instalar</strong>
-              <p>Esta versão Early Access usa um certificado próprio do PrintFlow. A instalação é manual, transparente e necessária apenas uma vez neste computador.</p>
+              <p>Esta versão Early Access usa um certificado de desenvolvimento temporário cuja identidade de signatário ainda é legada. Compare a impressão digital abaixo antes de prosseguir. A instalação é manual e necessária apenas uma vez neste computador.</p>
             </div>
           </div>
 
@@ -2955,14 +2982,12 @@ onMounted(() => { void subscription.load() })
             </li>
             <li>
               <strong>Confirme antes do Agent</strong>
-              <span>Confira o fornecedor e marque a confirmação abaixo para liberar o instalador.</span>
+              <span>Confira a impressão digital do certificado e marque a confirmação abaixo para liberar o instalador.</span>
             </li>
           </ol>
 
           <div class="printer-agent-certificate-guide__security">
-            <span>Fornecedor esperado</span>
-            <strong>PrintFlow 3D Local Dev</strong>
-            <span>Impressão digital</span>
+            <span>Impressão digital esperada do certificado Early Access</span>
             <code>{{ agentDevCertificateThumbprint }}</code>
           </div>
 
@@ -2987,7 +3012,7 @@ onMounted(() => { void subscription.load() })
           </div>
 
           <p class="printer-agent-certificate-guide__warning">
-            Não prossiga se o nome ou a impressão digital forem diferentes. O PrintFlow nunca desativa as proteções do Windows nem instala certificados sem sua confirmação.
+            Não prossiga se a impressão digital for diferente. A Filamind não desativa as proteções do Windows nem instala certificados sem sua confirmação.
           </p>
         </section>
 
@@ -3336,7 +3361,7 @@ onMounted(() => { void subscription.load() })
                   margin-top: 10px;
                 "
               >
-                Aguarde enquanto o PrintFlow Agent verifica a rede e os dispositivos USB.
+                Aguarde enquanto o Fila Agent verifica a rede e os dispositivos USB.
               </div>
 
               <div

@@ -107,7 +107,8 @@ const isMockPrinter = (
       true ||
     (
       String(
-        process.env.PRINTFLOW_DEV_MOCK_BAMBU ||
+        process.env.FILA_AGENT_DEV_MOCK_BAMBU ||
+          process.env.PRINTFLOW_DEV_MOCK_BAMBU ||
           ''
       ).toLowerCase() ===
         'true' &&

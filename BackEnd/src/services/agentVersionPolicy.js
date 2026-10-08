@@ -29,7 +29,7 @@ export const isAgentVersionSupported = value => {
 }
 
 export const unsupportedAgentVersionPayload = () => ({
-  error: `Atualize o PrintFlow Agent para a versao ${MINIMUM_SUPPORTED_AGENT_VERSION} ou superior.`,
+  error: `Atualize o Fila Agent para a versao ${MINIMUM_SUPPORTED_AGENT_VERSION} ou superior.`,
   code: 'AGENT_UPDATE_REQUIRED',
   minimumSupportedVersion: MINIMUM_SUPPORTED_AGENT_VERSION
 })

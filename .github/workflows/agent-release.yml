@@ -1,9 +1,9 @@
 name: Agent Release
 
 env:
-  PRINTFLOW_AGENT_NODE_VERSION: '24.19.0'
-  PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'
-  PRINTFLOW_AGENT_RELEASE_TAG: ${{ inputs.agent_tag || github.ref_name }}
+  FILA_AGENT_NODE_VERSION: '24.19.0'
+  FILA_AGENT_MINIMUM_SUPPORTED_VERSION: '0.1.10'
+  FILA_AGENT_RELEASE_TAG: ${{ inputs.agent_tag || github.ref_name }}
 
 on:
   push:
@@ -28,157 +28,45 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.PRINTFLOW_AGENT_NODE_VERSION }}
+          node-version: ${{ env.FILA_AGENT_NODE_VERSION }}
           cache: npm
           cache-dependency-path: Agent/package-lock.json
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
       - name: Validate tag and package
-        shell: pwsh
-        run: |
-          $tagVersion = $env:PRINTFLOW_AGENT_RELEASE_TAG -replace '^agent-v', ''
-          $packageVersion = (Get-Content Agent/package.json -Raw | ConvertFrom-Json).version
-          $minimumSupportedVersion = $env:PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION.Trim()
-          if ($tagVersion -ne $packageVersion) {
-            throw "Tag $tagVersion diverge da versao do Agent $packageVersion."
-          }
-          if ($minimumSupportedVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-            throw 'PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION deve ser SemVer.'
-          }
-          node scripts/validate-agent-package.mjs
+        shell: cmd
+        run: dotnet run --project Agent\windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- validate-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION%
 
       - name: Install production dependencies
         working-directory: Agent
+        shell: cmd
         run: npm ci --omit=dev
 
       - name: Test Agent
         working-directory: Agent
+        shell: cmd
         run: npm test
-
-      - name: Prepare Early Access signing certificate
-        shell: pwsh
-        env:
-          PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64: ${{ secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 }}
-          PRINTFLOW_AGENT_DEV_CERT_PASSWORD: ${{ secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64)) {
-            throw 'Configure o secret PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 antes de publicar o Agent.'
-          }
-          if ([string]::IsNullOrWhiteSpace($env:PRINTFLOW_AGENT_DEV_CERT_PASSWORD)) {
-            throw 'Configure o secret PRINTFLOW_AGENT_DEV_CERT_PASSWORD antes de publicar o Agent.'
-          }
-          New-Item -ItemType Directory -Force -Path 'Agent/certs' | Out-Null
-          try {
-            $bytes = [Convert]::FromBase64String($env:PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64)
-          } catch {
-            throw 'PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 nao contem um PFX Base64 valido.'
-          }
-          [IO.File]::WriteAllBytes(
-            (Join-Path $PWD 'Agent/certs/PrintFlow-Agent-Dev-CodeSigning.pfx'),
-            $bytes
-          )
 
       - name: Build Early Access package
         working-directory: Agent
-        shell: pwsh
+        shell: cmd
         env:
-          PRINTFLOW_API_URL: ${{ vars.PRINTFLOW_API_URL }}
-          PRINTFLOW_AGENT_DEV_CERT_PASSWORD: ${{ secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
-        run: |
-          $apiUrl = $env:PRINTFLOW_API_URL.Trim()
-          if ([string]::IsNullOrWhiteSpace($apiUrl)) {
-            throw 'Configure a variavel de repositorio PRINTFLOW_API_URL antes de publicar uma release.'
-          }
-          if (-not (Test-Path scripts/install-windows-agent-from-package.ps1)) {
-            throw 'Bootstrap do instalador de transicao ausente.'
-          }
-          New-Item -ItemType Directory -Force -Path 'dist' | Out-Null
-          ./scripts/build-windows-package.ps1 `
-            -ApiUrl $apiUrl `
-            -NodeRuntimeVersion $env:PRINTFLOW_AGENT_NODE_VERSION `
-            -SkipInstall `
-            -SignDev `
-            -RequirePersistedCertificate
-          $installerSize = (Get-Item 'dist/PrintFlow-Agent-Setup.exe').Length
-          if ($installerSize -lt 1048576) {
-            throw "Instalador IExpress truncado: $installerSize bytes."
-          }
-          $signature = Get-AuthenticodeSignature 'dist/PrintFlow-Agent-Setup.exe'
-          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-            (Resolve-Path 'dist/PrintFlow-Agent-Dev-Certificate.cer')
-          )
-          if (-not $signature.SignerCertificate) {
-            throw 'Instalador Early Access permaneceu sem assinatura.'
-          }
-          if ($signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
-            throw 'Instalador Early Access nao foi assinado pelo certificado publicado.'
-          }
-          if ($signature.Status -in @('HashMismatch', 'NotSigned')) {
-            throw "Assinatura Early Access invalida: $($signature.Status)."
-          }
+          FILA_AGENT_API_URL: ${{ vars.FILA_AGENT_API_URL || vars.PRINTFLOW_API_URL || 'https://printflow-api-4y5l.onrender.com' }}
+          FILA_AGENT_DEV_CERT_PFX_BASE64: ${{ secrets.FILA_AGENT_DEV_CERT_PFX_BASE64 || secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 }}
+          FILA_AGENT_DEV_CERT_PASSWORD: ${{ secrets.FILA_AGENT_DEV_CERT_PASSWORD || secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
+        run: dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate
 
-      - name: Hash release artifacts
-        shell: pwsh
-        run: |
-          $package = Get-Content Agent/package.json -Raw | ConvertFrom-Json
-          Copy-Item `
-            Agent/dist/PrintFlow-Agent-Setup.exe `
-            Agent/dist/PrintFlow-Agent-Transition-Setup.exe `
-            -Force
-          $certificatePath = 'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer'
-          if (-not (Test-Path $certificatePath)) { throw "Certificado ausente: $certificatePath" }
-          $certificateSha256 = (Get-FileHash $certificatePath -Algorithm SHA256).Hash
-          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-            (Resolve-Path $certificatePath)
-          )
-          foreach ($installerPath in @(
-            'Agent/dist/PrintFlow-Agent-Setup.exe',
-            'Agent/dist/PrintFlow-Agent-Transition-Setup.exe'
-          )) {
-            $signature = Get-AuthenticodeSignature $installerPath
-            if (-not $signature.SignerCertificate) { throw "Instalador sem assinatura: $installerPath" }
-            if ($signature.SignerCertificate.Thumbprint -ne $certificate.Thumbprint) {
-              throw "Certificado divergente no instalador: $installerPath"
-            }
-            if ($signature.Status -in @('HashMismatch', 'NotSigned')) {
-              throw "Assinatura invalida em $installerPath`: $($signature.Status)"
-            }
-          }
-          [ordered]@{
-            tag = $env:PRINTFLOW_AGENT_RELEASE_TAG
-            version = $package.version
-            minimumSupportedVersion = $env:PRINTFLOW_AGENT_MINIMUM_SUPPORTED_VERSION
-            portableRuntime = $true
-            nodeRuntimeVersion = $env:PRINTFLOW_AGENT_NODE_VERSION
-            nodeRuntimeArchitecture = 'x64'
-            signingMode = 'DEV_SELF_SIGNED'
-            productionTrusted = $false
-            certificateSha256 = $certificateSha256
-          } | ConvertTo-Json | Set-Content Agent/dist/RELEASE-METADATA.json
-          $artifacts = @(
-            'Agent/dist/PrintFlow-Agent-Windows.zip',
-            'Agent/dist/PrintFlow-Agent-Setup.exe',
-            'Agent/dist/PrintFlow-Agent-Transition-Setup.exe',
-            'Agent/dist/PrintFlow-Agent-Dev-Certificate.cer',
-            'Agent/dist/RELEASE-METADATA.json'
-          )
-          $hashes = foreach ($artifact in $artifacts) {
-            if (-not (Test-Path $artifact)) { throw "Artefato ausente: $artifact" }
-            Get-FileHash $artifact -Algorithm SHA256
-          }
-          $hashes | Format-Table -AutoSize
-          $hashes | ForEach-Object { "$($_.Hash)  $($_.Path)" } | Set-Content Agent/dist/SHA256SUMS.txt
-          node scripts/validate-agent-release-artifacts.mjs
+      - name: Create release metadata and hashes
+        working-directory: Agent
+        shell: cmd
+        run: dir /b dist && dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- prepare-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION%
 
       - name: Publish Early Access release
-        shell: pwsh
+        working-directory: Agent
+        shell: cmd
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          ./Agent/scripts/publish-windows-agent-release.ps1 `
-            -Tag $env:PRINTFLOW_AGENT_RELEASE_TAG `
-            -Repository $env:GITHUB_REPOSITORY
-
-      - name: Remove private signing material
-        if: always()
-        shell: pwsh
-        run: Remove-Item -LiteralPath 'Agent/certs/PrintFlow-Agent-Dev-CodeSigning.pfx' -Force -ErrorAction SilentlyContinue
+        run: dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- publish-release --tag %FILA_AGENT_RELEASE_TAG% --repository %GITHUB_REPOSITORY%
