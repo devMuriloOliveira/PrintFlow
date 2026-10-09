@@ -181,17 +181,21 @@ using (var realtimeWebSocketCancellation = new CancellationTokenSource())
         "WebSocket C# faz upgrade com autenticaÃ§Ã£o do Agent e sinaliza apenas command_available");
 }
 
-var productionRejected = false;
+InvalidOperationException? productionRejected = null;
 try
 {
     AgentConfiguration.FromEnvironment(new Dictionary<string, string?>
     {
         ["PRINTFLOW_ENVIRONMENT"] = "PRODUCTION",
-        ["PRINTFLOW_API_URL"] = "http://localhost:3333"
+        ["PRINTFLOW_API_URL"] = "http://localhost:3333/private?token=do-not-log"
     });
 }
-catch (InvalidOperationException) { productionRejected = true; }
-Check(productionRejected, "rejeita endpoint local em PRODUCTION");
+catch (InvalidOperationException error) { productionRejected = error; }
+Check(productionRejected is not null, "rejeita endpoint local em PRODUCTION");
+Check(productionRejected?.Message.Contains("http://localhost", StringComparison.Ordinal) == true &&
+    !productionRejected.Message.Contains("private", StringComparison.Ordinal) &&
+    !productionRejected.Message.Contains("do-not-log", StringComparison.Ordinal),
+    "diagnostico de URL insegura informa somente esquema e host, sem caminho ou query");
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "fila-agent-runtime-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);

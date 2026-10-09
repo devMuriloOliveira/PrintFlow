@@ -105,7 +105,7 @@ public sealed record AgentConfiguration(
     private static void ValidateProductionUri(Uri uri, string name, string scheme)
     {
         if (!string.Equals(uri.Scheme, scheme, StringComparison.OrdinalIgnoreCase) || IsLocalHost(uri.Host))
-            throw new InvalidOperationException($"{name} inseguro para PRODUCTION.");
+            throw new InvalidOperationException($"{name} inseguro para PRODUCTION ({uri.Scheme}://{uri.Host}).");
     }
 
     private static bool IsLocalHost(string host) =>
