@@ -38,10 +38,14 @@ if (args.Contains("--bambu-mqtt-local", StringComparer.OrdinalIgnoreCase))
 }
 
 var untrustedRoot = "SignTool Error: A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.\nSignTool Error: Signing verification failed.";
+var runnerUntrustedRoot = "Timestamp: DigiCert Timestamp Responder\nNumber of files successfully Verified: 0\nNumber of warnings: 0\nNumber of errors: 1\nSignTool Error: A certificate chain processed, but terminated in a root\n\tcertificate which is not trusted by the trust provider.";
 Check(NativeProtocol.TryParsePairingCode("fila-agent://pair?code=FILA-PAIR-20261008") == "FILA-PAIR-20261008", "protocolo Fila Agent aceita somente codigo de pareamento valido");
 Check(NativeProtocol.TryParsePairingCode("printflow-agent://pair?code=FILA-PAIR-20261008") is null, "protocolo legado PrintFlow deixa de iniciar o Agent");
 Check(AuthenticodeVerificationPolicy.IsAcceptable(0, "Successfully verified."), "Authenticode aceita somente sucesso sem avisos");
 Check(AuthenticodeVerificationPolicy.IsAcceptable(1, untrustedRoot), "Authenticode permite apenas a falha de raiz não confiável do certificado Early Access");
+Check(AuthenticodeVerificationPolicy.IsAcceptable(1, runnerUntrustedRoot), "Authenticode reconhece a quebra de linha e contadores do SignTool no runner");
+Check(!AuthenticodeVerificationPolicy.IsAcceptable(1, runnerUntrustedRoot.Replace("Number of warnings: 0", "Number of warnings: 1")), "Authenticode rejeita avisos reais do SignTool");
+Check(!AuthenticodeVerificationPolicy.IsAcceptable(1, runnerUntrustedRoot + "\nSignTool Error: hash mismatch."), "Authenticode rejeita hash invalido mesmo com raiz nao confiavel no runner");
 Check(!AuthenticodeVerificationPolicy.IsAcceptable(2, untrustedRoot), "Authenticode rejeita resultado de aviso do SignTool");
 Check(!AuthenticodeVerificationPolicy.IsAcceptable(1, "SignTool Error: hash mismatch."), "Authenticode rejeita hash inválido mesmo quando o SignTool falha");
 Check(!AuthenticodeVerificationPolicy.IsAcceptable(1, untrustedRoot + "\nSignTool Error: bad digest."), "Authenticode rejeita falha de digest combinada com raiz não confiável");
