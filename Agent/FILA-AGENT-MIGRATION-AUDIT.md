@@ -1,10 +1,10 @@
 # Auditoria e plano de migração do Fila Agent
 
-- **Última revisão:** 2026-10-08
-- **Base de código:** `main` em `30092e1`
-- **Versão do Agent:** `0.1.26` (preparação)
-- **Estado do checkout:** alterações locais aguardando publicação
-- **Publicação:** autorizada para `feature/Alex`; push e release `agent-v0.1.26` ainda pendentes de execução e confirmação.
+- **Última revisão:** 2026-10-09
+- **Base de código:** `main` em `cbb872a`
+- **Versão do Agent:** `0.1.26` (código publicado; pacote de download ainda pendente)
+- **Estado do checkout:** `main` sincronizada com `origin/main`; atualização deste registro em andamento.
+- **Publicação:** autorizada diretamente em `main`; a tag `agent-v0.1.26` existe, mas o run #35 falhou antes de publicar os instaladores.
 
 Este arquivo reúne o estado técnico da migração e os registros de validação feitos ao longo do trabalho. As seções iniciais descrevem o estado mais recente; os registros datados ao final preservam o que foi verificado em cada etapa. Para uma decisão atual, use o resumo consolidado e confira a data do registro correspondente.
 
@@ -12,9 +12,11 @@ Este arquivo reúne o estado técnico da migração e os registros de validaçã
 
 A troca do runtime instalado para C# foi concluída em ambiente isolado: o host inicia o runtime .NET diretamente, e o pacote validado não inclui Node nem scripts operacionais PowerShell. O Node continua no repositório como referência de paridade e ferramenta de desenvolvimento. A migração ainda não está liberada para publicação: faltam provas de atualização assinada sobre instalação pareada anterior, instalação do Orca em máquina limpa, chamadas autenticadas ao backend hospedado e operação em impressora física.
 
+O código `0.1.26` está em `main` no commit `cbb872a`, e a CI #219 passou. A execução de release #35 também passou pelos 156 testes, empacotou o Agent e executou o smoke real do OrcaSlicer Store 2.4.3.0, que gerou um `gcode.3mf`; o `.cer` público foi exportado. A etapa `prepare-release` falhou com `Cannot find the requested object` antes de criar manifesto/hashes e chamar a publicação. Na página de `agent-v0.1.26`, os únicos ativos visíveis são os arquivos automáticos de código-fonte do GitHub; o instalador e os pacotes do Agent ainda não estão disponíveis para download.
+
 As validações mais recentes incluem contratos C#, testes Node, contratos de release e um E2E isolado de instalação, pareamento simulado, reinício, rollback e desinstalação. O teste DPAPI real passou em uma execução interativa do Windows; execuções no sandbox podem pular esse caso quando o perfil Windows não está carregado. Consulte as seções de validação para os comandos, contagens e limites de cada execução.
 
-## Estado atual — 2026-10-08
+## Estado atual — 2026-10-09
 
 O host C# inicia `AgentRuntimeComposition` diretamente no processo .NET; não inicia `node.exe`. Runtime, bandeja, setup, desinstalação, atualizador e ReleaseTool são C#/.NET 8. Os 20 scripts `.ps1` de operação/build foram removidos; os passos Windows de CI/release usam `cmd`, sem invocar PowerShell. O ReleaseTool ainda executa validadores Node do repositório como gates de release; isso é dependência de desenvolvimento/publicação, não do Agent instalado. O pacote cliente autocontido não leva Node nem `node_modules`. Os scripts operacionais antigos não estão no código rastreado nem no pacote atual; `Agent/temp` e `Agent/dist`, ignorados pelo Git, ainda guardam extrações históricas de releases 0.1.22 com esses scripts, preservadas como evidência. O setup 0.1.22 que ainda estava rastreado em `Agent/dist/PrintFlow-Agent-Setup.exe` foi removido; builds novos passam a usar `Fila-Agent-*`, enquanto a preparação da release cria aliases `PrintFlow-*` para os atualizadores antigos. Node permanece em `Agent/src` como referência de paridade e em testes/ferramentas auxiliares.
 
@@ -459,3 +461,11 @@ Para manter o certificado e os binários no mesmo contexto de execução, o work
 A execução manual `Agent Release #34`, no commit `2dd5b06` de `main`, falhou antes da publicação porque a verificação CMD não encontrou `Fila-Agent-Dev-Certificate.cer` após o empacotador encerrar. O mesmo job instalou OrcaSlicer Store 2.4.3.0 e o smoke gerou um pacote local `gcode.3mf` de 51.842 bytes; o problema observado permaneceu no asset público do certificado. A origem exata do desaparecimento do arquivo não foi demonstrada.
 
 O ReleaseTool agora tem o comando `export-dev-certificate`, que lê o PFX de arquivo ou do segredo Base64, valida validade, chave privada, EKU de assinatura de código e SHA-256 fixado, importa a chave em modo efêmero e grava/verifica o certificado público em `Agent/dist`. O workflow chama essa exportação após o empacotamento e antes da guarda e dos metadados. Verificações locais desta correção: build Release do `FilaAgent.ReleaseTool` passou sem avisos/erros; contrato de release passou com 30 checks; validador aprovou `0.1.26`; `npm.cmd --prefix Agent test` passou `156/156`; `git diff --check` passou. A exportação com o PFX secreto e a publicação ainda dependem da execução Windows no GitHub. Nenhum dado, endpoint da API, instalação local ou ambiente de produção foi alterado.
+
+### Atualização 2026-10-09 — resultado do run #35 da release
+
+O run manual `Agent Release #35` (ID `37922933414`), executado no commit `cbb872a` para a tag `agent-v0.1.26`, passou pelos 156 testes do Agent. O smoke real do OrcaSlicer Store 2.4.3.0 produziu localmente um `gcode.3mf` de 51.818 bytes usando o perfil `bambu-p1s-pla-basic v2.4.2`. O ReleaseTool concluiu o empacotamento, registrou os caminhos de `Fila-Agent-Windows.zip` e `Fila-Agent-Setup.exe`, exportou `Fila-Agent-Dev-Certificate.cer`, e a listagem de `dist` mostrou esses três artefatos.
+
+Em seguida, `prepare-release` terminou com `Falha no pacote Windows: Cannot find the requested object.` A saída não identifica a operação interna que lançou essa mensagem; portanto a causa exata permanece indeterminada. Os metadados, hashes e cópias de transição não foram confirmados, e `Publish Early Access release` foi ignorada. A página da tag `agent-v0.1.26` mostra apenas os dois arquivos automáticos de código-fonte do GitHub, sem instalador, ZIP do Agent, certificado ou manifesto para clientes. A versão não está disponível como pacote de download.
+
+O CI #219 passou. Esta etapa não alterou API, dados, instalação local, impressoras ou ambiente de produção. A publicação permanece pendente até o `prepare-release` completar a validação e os ativos do Agent aparecerem na página da release.
