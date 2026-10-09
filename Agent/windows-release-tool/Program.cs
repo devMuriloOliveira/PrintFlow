@@ -289,18 +289,28 @@ internal static class Program
             await ExportVerifiedSignerCertificateAsync(setupPath, certificatePath);
         }
 
+        Console.WriteLine($"Criando alias: {Path.GetFileName(legacySetupPath)}");
         File.Copy(setupPath, legacySetupPath, overwrite: true);
+        Console.WriteLine($"Criando alias: {Path.GetFileName(transitionPath)}");
         File.Copy(setupPath, transitionPath, overwrite: true);
+        Console.WriteLine($"Criando alias: {Path.GetFileName(legacyTransitionPath)}");
         File.Copy(transitionPath, legacyTransitionPath, overwrite: true);
+        Console.WriteLine($"Criando alias: {Path.GetFileName(legacyCertificatePath)}");
         File.Copy(certificatePath, legacyCertificatePath, overwrite: true);
+        Console.WriteLine($"Criando alias: {Path.GetFileName(legacyZipPath)}");
         File.Copy(zipPath, legacyZipPath, overwrite: true);
+        Console.WriteLine($"Validando certificado publico: {Path.GetFileName(certificatePath)}");
         using var certificate = new X509Certificate2(await File.ReadAllBytesAsync(certificatePath));
         var certificateSha256 = Convert.ToHexString(SHA256.HashData(certificate.RawData));
         if (!string.Equals(certificateSha256, ExpectedCertificateSha256, StringComparison.OrdinalIgnoreCase))
             throw new CryptographicException("Certificado publicado diverge da identidade fixada pelo atualizador.");
+        Console.WriteLine($"Validando assinatura: {Path.GetFileName(setupPath)}");
         await VerifySignedFileAsync(setupPath, certificate, repositoryRoot);
+        Console.WriteLine($"Validando assinatura: {Path.GetFileName(transitionPath)}");
         await VerifySignedFileAsync(transitionPath, certificate, repositoryRoot);
+        Console.WriteLine($"Validando assinatura: {Path.GetFileName(legacySetupPath)}");
         await VerifySignedFileAsync(legacySetupPath, certificate, repositoryRoot);
+        Console.WriteLine($"Validando assinatura: {Path.GetFileName(legacyTransitionPath)}");
         await VerifySignedFileAsync(legacyTransitionPath, certificate, repositoryRoot);
 
         var metadata = JsonSerializer.Serialize(new
