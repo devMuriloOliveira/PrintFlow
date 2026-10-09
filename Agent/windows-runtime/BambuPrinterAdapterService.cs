@@ -239,6 +239,8 @@ public sealed class FluentFtpBambuUploader(Func<X509Certificate?, X509Chain?, st
         };
 
         await using var client = new AsyncFtpClient(ip, "bblp", accessCode, port, config);
+        client.ConfigureAuthentication += (_, authentication) =>
+            BambuCertificateValidator.SetTlsTargetHost(authentication.Options, serial);
         // Trust only the bundled Bambu CA chain and the device certificate whose CN matches this printer serial.
         client.ValidateCertificate += (_, validation) =>
             validation.Accept = _validateCertificate(validation.Certificate, validation.Chain, serial);

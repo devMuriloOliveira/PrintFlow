@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Net.Security;
 
 namespace FilaAgent.Runtime;
 
@@ -8,6 +9,13 @@ public static class BambuCertificateValidator
 {
     private const string BundleResourceName = "FilaAgent.Runtime.BambuPrinterCaBundle.pem";
     private static readonly Lazy<X509Certificate2Collection> TrustBundle = new(LoadTrustBundleCore);
+
+    public static void SetTlsTargetHost(SslClientAuthenticationOptions options, string expectedSerial)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrWhiteSpace(expectedSerial)) throw new ArgumentException("Serial Bambu obrigatório para TLS.", nameof(expectedSerial));
+        options.TargetHost = expectedSerial;
+    }
 
     public static bool Validate(X509Certificate? certificate, X509Chain? peerChain, string expectedSerial) =>
         Validate(certificate, peerChain, expectedSerial, TrustBundle.Value);

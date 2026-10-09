@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Net.Security;
 using FilaAgent.Runtime;
 
 internal static class BambuCertificateValidationChecks
@@ -11,6 +12,10 @@ internal static class BambuCertificateValidationChecks
         check(officialBundle.Count >= 3 && officialBundle.Cast<X509Certificate2>().Any(certificate =>
                 certificate.GetNameInfo(X509NameType.SimpleName, false) == "BBL CA"),
             "runtime inclui o bundle oficial Bambu de autoridades TLS");
+
+        var ftpsAuthentication = new SslClientAuthenticationOptions();
+        BambuCertificateValidator.SetTlsTargetHost(ftpsAuthentication, "PF-CERT-TEST-001");
+        check(ftpsAuthentication.TargetHost == "PF-CERT-TEST-001", "FTPS envia serial Bambu como alvo TLS e SNI");
 
         using var rootKey = RSA.Create(2048);
         var rootRequest = new CertificateRequest("CN=Fila Agent TLS Test CA", rootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
