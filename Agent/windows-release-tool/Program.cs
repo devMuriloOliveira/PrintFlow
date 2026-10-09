@@ -461,6 +461,12 @@ internal static class Program
     private static async Task VerifySignedFileAsync(string filePath, X509Certificate2 expectedCertificate, string workingDirectory)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException("Arquivo assinado ausente.", filePath);
+        var verify = await RunAsync(FindSignTool(), ["verify", "/pa", "/v", filePath], workingDirectory, TimeSpan.FromMinutes(2));
+        var details = verify.Details;
+        if (!AuthenticodeVerificationPolicy.IsAcceptable(verify.ExitCode, details))
+            throw new CryptographicException($"Assinatura Authenticode invalida: {Path.GetFileName(filePath)}. SignTool: {LastDiagnosticLine(details)}");
+        if (verify.ExitCode != 0) Console.Error.WriteLine($"Aviso: a cadeia do certificado Early Access nao e confiavel automaticamente neste computador ({Path.GetFileName(filePath)}).");
+
         X509Certificate rawSigner;
         try { rawSigner = X509Certificate.CreateFromSignedFile(filePath); }
         catch (CryptographicException error) { throw new CryptographicException($"Nao foi possivel ler o assinante Authenticode de {Path.GetFileName(filePath)}.", error); }
@@ -478,11 +484,12 @@ internal static class Program
         }
         }
 
-        var verify = await RunAsync(FindSignTool(), ["verify", "/pa", "/v", filePath], workingDirectory, TimeSpan.FromMinutes(2));
-        var details = verify.Details;
-        if (!AuthenticodeVerificationPolicy.IsAcceptable(verify.ExitCode, details))
-            throw new CryptographicException($"Assinatura Authenticode invalida: {Path.GetFileName(filePath)}.");
-        if (verify.ExitCode != 0) Console.Error.WriteLine($"Aviso: a cadeia do certificado Early Access nao e confiavel automaticamente neste computador ({Path.GetFileName(filePath)}).");
+    }
+
+    private static string LastDiagnosticLine(string output)
+    {
+        var lines = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return lines.LastOrDefault(line => line.Contains("error", StringComparison.OrdinalIgnoreCase)) ?? lines.LastOrDefault() ?? "sem detalhes";
     }
 
     private static void ValidateTagAndMinimum(string tag, string version, string minimum)
