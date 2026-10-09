@@ -19,6 +19,7 @@ internal static class Program
             switch (args[0].ToLowerInvariant())
             {
                 case "package":
+                    Console.WriteLine($"Opcoes recebidas pelo pacote: {string.Join(", ", args.Skip(1).Select(argument => argument.StartsWith("--", StringComparison.Ordinal) ? argument : "<valor>"))}");
                     await BuildPackageAsync(ParseOptions(args.Skip(1).ToArray()));
                     return 0;
                 case "export-dev-certificate":
