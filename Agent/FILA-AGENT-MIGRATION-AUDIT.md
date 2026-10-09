@@ -864,3 +864,9 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 **Resultado:** o E2E passou. A atualização preservou o pareamento, a conectividade simulada, o hash do arquivo de credenciais, health e listener local; confirmou tarefa agendada, DPAPI protegido e recuperável após reinício, rollback, remoção da tarefa e desinstalação. O harness também confirmou que diretórios, tarefa e dados isolados foram removidos ao final. O health reportou zero impressões ativas.
 
 **Limites e impacto:** este teste exercitou atualização e instalação isoladas neste Windows, sem API hospedada, impressora, conta ou dados de produção. Não valida a causa do erro do PC terceiro nem substitui a comparação do hash e argumentos do Setup usado nele. Os assets temporários do E2E foram removidos após a validação; não houve alteração no backend, instalação normal, certificado instalado ou release.
+
+### Readiness da API hospedada — 2026-10-09
+
+**Verificação:** `curl.exe -i --max-time 90 https://printflow-api-4y5l.onrender.com/healthz` respondeu `HTTP/1.1 200 OK` e `{"status":"ok"}` às 18:37 UTC, com `x-render-origin-server: Render`. A resposta confirma que o endpoint público respondeu nessa hora.
+
+**Limite e impacto:** `/healthz` é uma leitura pública e não valida login, pareamento, heartbeat autenticado ou processamento de comandos. Nenhuma chamada autenticada nem mutação de dados foi feita; API e Agent não foram alterados.
