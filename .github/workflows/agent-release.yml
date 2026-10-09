@@ -50,19 +50,21 @@ jobs:
         shell: cmd
         run: npm test
 
-      - name: Build Early Access package
+      - name: Build package and prepare Early Access release
         working-directory: Agent
         shell: cmd
         env:
           FILA_AGENT_API_URL: ${{ vars.FILA_AGENT_API_URL || vars.PRINTFLOW_API_URL || 'https://printflow-api-4y5l.onrender.com' }}
           FILA_AGENT_DEV_CERT_PFX_BASE64: ${{ secrets.FILA_AGENT_DEV_CERT_PFX_BASE64 || secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 }}
           FILA_AGENT_DEV_CERT_PASSWORD: ${{ secrets.FILA_AGENT_DEV_CERT_PASSWORD || secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
-        run: dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate
-
-      - name: Create release metadata and hashes
-        working-directory: Agent
-        shell: cmd
-        run: dir /b dist && dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- prepare-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION%
+        run: |
+          dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate || exit /b 1
+          if not exist dist\Fila-Agent-Dev-Certificate.cer (
+            echo Certificado publico ausente imediatamente apos o empacotamento assinado.
+            exit /b 1
+          )
+          dir /b dist || exit /b 1
+          dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- prepare-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION%
 
       - name: Publish Early Access release
         working-directory: Agent

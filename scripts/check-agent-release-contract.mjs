@@ -57,13 +57,22 @@ const explicitCmdSteps = workflow.match(/^\s{8}shell:\s*cmd\s*$/gm)?.length ?? 0
 if (windowsRunSteps === 0 || windowsRunSteps !== explicitCmdSteps) {
   missing.push('cada passo run do workflow Windows precisa declarar shell: cmd')
 }
-for (const name of ['Build Early Access package', 'Create release metadata and hashes', 'Publish Early Access release']) {
+for (const name of ['Build package and prepare Early Access release', 'Publish Early Access release']) {
   const stepStart = workflow.indexOf(`      - name: ${name}`)
   const nextStep = stepStart < 0 ? -1 : workflow.indexOf('\n      - name:', stepStart + 1)
   const step = stepStart < 0 ? '' : workflow.slice(stepStart, nextStep < 0 ? undefined : nextStep)
   if (!/^        working-directory:\s*Agent\s*$/m.test(step)) {
     missing.push(`passo ${name} precisa executar na mesma pasta Agent`)
   }
+}
+const packageAndMetadataStart = workflow.indexOf('      - name: Build package and prepare Early Access release')
+const packageAndMetadataEnd = packageAndMetadataStart < 0 ? -1 : workflow.indexOf('\n      - name:', packageAndMetadataStart + 1)
+const packageAndMetadataStep = packageAndMetadataStart < 0 ? '' : workflow.slice(packageAndMetadataStart, packageAndMetadataEnd < 0 ? undefined : packageAndMetadataEnd)
+const packageCommandAt = packageAndMetadataStep.indexOf('-- package')
+const certificateGuardAt = packageAndMetadataStep.indexOf('dist\\Fila-Agent-Dev-Certificate.cer')
+const metadataCommandAt = packageAndMetadataStep.indexOf('-- prepare-release')
+if (packageCommandAt < 0 || certificateGuardAt < packageCommandAt || metadataCommandAt < certificateGuardAt) {
+  missing.push('pacote assinado e metadados devem ser preparados no mesmo passo, com verificacao do certificado entre ambos')
 }
 if (missing.length) {
   console.error(`Agent release contract invalido; ausentes: ${missing.join(', ')}`)
