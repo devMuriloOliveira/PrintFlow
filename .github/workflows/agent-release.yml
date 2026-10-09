@@ -38,7 +38,9 @@ jobs:
 
       - name: Validate tag and package
         shell: cmd
-        run: dotnet run --project Agent\windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- validate-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION%
+        run: |
+          dotnet build Agent\windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release || exit /b 1
+          dotnet Agent\windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll validate-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION% || exit /b 1
 
       - name: Install production dependencies
         working-directory: Agent
@@ -58,18 +60,18 @@ jobs:
           FILA_AGENT_DEV_CERT_PFX_BASE64: ${{ secrets.FILA_AGENT_DEV_CERT_PFX_BASE64 || secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 }}
           FILA_AGENT_DEV_CERT_PASSWORD: ${{ secrets.FILA_AGENT_DEV_CERT_PASSWORD || secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
         run: |
-          dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate || exit /b 1
-          dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- export-dev-certificate --output dist\Fila-Agent-Dev-Certificate.cer || exit /b 1
+          dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate || exit /b 1
+          dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll export-dev-certificate --output dist\Fila-Agent-Dev-Certificate.cer || exit /b 1
           if not exist dist\Fila-Agent-Dev-Certificate.cer (
             echo Certificado publico ausente imediatamente apos o empacotamento assinado.
             exit /b 1
           )
           dir /b dist || exit /b 1
-          dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- prepare-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION%
+          dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll prepare-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION% || exit /b 1
 
       - name: Publish Early Access release
         working-directory: Agent
         shell: cmd
         env:
           GH_TOKEN: ${{ github.token }}
-        run: dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- publish-release --tag %FILA_AGENT_RELEASE_TAG% --repository %GITHUB_REPOSITORY%
+        run: dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll publish-release --tag %FILA_AGENT_RELEASE_TAG% --repository %GITHUB_REPOSITORY%

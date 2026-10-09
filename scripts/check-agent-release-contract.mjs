@@ -70,12 +70,15 @@ for (const name of ['Build package and prepare Early Access release', 'Publish E
 const packageAndMetadataStart = workflow.indexOf('      - name: Build package and prepare Early Access release')
 const packageAndMetadataEnd = packageAndMetadataStart < 0 ? -1 : workflow.indexOf('\n      - name:', packageAndMetadataStart + 1)
 const packageAndMetadataStep = packageAndMetadataStart < 0 ? '' : workflow.slice(packageAndMetadataStart, packageAndMetadataEnd < 0 ? undefined : packageAndMetadataEnd)
-const packageCommandAt = packageAndMetadataStep.indexOf('-- package')
-const certificateExportAt = packageAndMetadataStep.indexOf('-- export-dev-certificate')
+const packageCommandAt = packageAndMetadataStep.indexOf('FilaAgent.ReleaseTool.dll package')
+const certificateExportAt = packageAndMetadataStep.indexOf('FilaAgent.ReleaseTool.dll export-dev-certificate')
 const certificateGuardAt = packageAndMetadataStep.indexOf('dist\\Fila-Agent-Dev-Certificate.cer')
-const metadataCommandAt = packageAndMetadataStep.indexOf('-- prepare-release')
+const metadataCommandAt = packageAndMetadataStep.indexOf('FilaAgent.ReleaseTool.dll prepare-release')
 if (packageCommandAt < 0 || certificateExportAt < packageCommandAt || certificateGuardAt < certificateExportAt || metadataCommandAt < certificateGuardAt) {
   missing.push('pacote assinado deve reexportar/verificar o certificado antes de preparar metadados no mesmo passo')
+}
+if (workflow.includes('dotnet run --project') || !workflow.includes('dotnet build Agent\\windows-release-tool\\FilaAgent.ReleaseTool.csproj')) {
+  missing.push('release deve compilar uma vez e executar o DLL C# com argumentos diretos')
 }
 if (missing.length) {
   console.error(`Agent release contract invalido; ausentes: ${missing.join(', ')}`)
