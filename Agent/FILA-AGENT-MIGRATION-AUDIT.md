@@ -1,10 +1,10 @@
 # Auditoria e plano de migração do Fila Agent
 
 - **Última revisão:** 2026-10-09
-- **Base de código:** branch local `feature/Alex` no commit `c5832ac`, igual a `origin/main`; candidato local declara `0.1.28`.
-- **Versão do Agent:** `0.1.28` no código de trabalho, ainda não publicado; a última verificação de publicação registrada neste arquivo encontrou `agent-v0.1.27` como release pública.
-- **Estado do checkout:** `feature/Alex` está 18 commits à frente de `origin/feature/Alex`, com alterações locais não commitadas; nenhuma alteração foi enviada nesta etapa.
-- **Publicação:** a última verificação registrada encontrou `agent-v0.1.27` pública com instalador, ZIP, certificado, manifesto e checksums. Os metadados declaram `DEV_SELF_SIGNED`, `productionTrusted: false` e o certificado fixado atual. O estado remoto de release não foi consultado novamente nesta etapa.
+- **Base de código:** `main` no commit `5437d803`; o código do Agent declara `0.1.28`.
+- **Versão do Agent:** `0.1.28` está no código e em `main`, mas não foi publicada como release; a release pública mais recente conferida em 2026-10-09 é `agent-v0.1.27`.
+- **Estado do checkout:** `main` está sincronizada com `origin/main`, no commit `5437d803`, com árvore de trabalho limpa após o push.
+- **Publicação:** o commit `5437d803` foi enviado à `main`; o CI #235 concluiu com sucesso, inclusive o build e a validação do pacote de produção C#. O push não criou release nem implantou serviços. `agent-v0.1.27` continua a release pública e inclui instalador, ZIP, certificado, manifesto e checksums; os metadados declaram `DEV_SELF_SIGNED`, `productionTrusted: false` e o certificado fixado atual.
 
 Este arquivo reúne o estado técnico da migração e os registros de validação feitos ao longo do trabalho. As seções iniciais descrevem o estado mais recente; os registros datados ao final preservam o que foi verificado em cada etapa. Para uma decisão atual, use o resumo consolidado e confira a data do registro correspondente.
 
@@ -827,3 +827,9 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 **Correção:** a instalação e a desinstalação agora removem apenas os quatro nomes de atalhos do Agent conhecidos nas duas pastas de menu e os atalhos do Agent na Área de Trabalho. Uma pasta é removida somente se estiver vazia. A limpeza recursiva continua reservada às pastas próprias da instalação e aos dados locais quando o cliente escolhe removê-los explicitamente.
 
 **Verificações:** `node --test test\\windows-installer-contract.test.js` passou 15/15; `npm.cmd test` passou 159/159; `dotnet build windows-setup\\FilaAgentSetup.csproj --configuration Release --no-restore` passou com 0 avisos e 0 erros; `node scripts\\validate-agent-package.mjs` validou o pacote 0.1.28; `node scripts\\check-agent-release-contract.mjs` passou 30 verificações; `git diff --check` passou, com avisos de conversão LF/CRLF do Git. O contrato verifica que `DeleteShortcuts()` não chama a remoção recursiva e que a pasta só é eliminada quando vazia. Não executei a desinstalação normal, pois ela altera atalhos no perfil Windows; o E2E isolado usa modo de teste e não cobre essa superfície. Nenhum dado, API ou release foi alterado.
+
+### Publicação em `main` e verificação do CI — 2026-10-09
+
+**Código e CI:** o commit `5437d803c5d5cceb83c188d5cd65206a332d4d7e` foi publicado em `main`. A API pública do GitHub confirmou `HEAD == origin/main`, divergência `0/0` e checkout limpo. O run [CI #235](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/37963226397) concluiu com `success`; os jobs de segurança, backup/restore, backend, FrontEnd, AdminFrontEnd e Agent passaram. No job `agent-production-package`, restore C#, contratos de runtime Windows, build do pacote de produção sem publicação e validação do artefato terminaram com sucesso.
+
+**Serviços públicos:** `GET https://printflow-api-4y5l.onrender.com/healthz` respondeu `200 {"status":"ok"}` nesta verificação. Não fiz chamada autenticada nem mutação de dados. A release pública mais recente continua `agent-v0.1.27`; não criei release `0.1.28` nem implantei o backend. O CI prova build e validação de pacote no runner Windows, não instalação em PC limpo nem operação física de impressora.
