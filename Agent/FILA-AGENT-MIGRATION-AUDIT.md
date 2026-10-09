@@ -820,6 +820,8 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 
 **Referência de protocolo:** a documentação oficial do Marlin descreve `M115` como consulta de firmware e lista `M105` para temperaturas e `M114` para posição. Ela valida os comandos usados pelo adapter quando a Ender executa Marlin, mas não certifica a combinação de driver/baud rate de uma Ender específica. [M115 — Firmware Info](https://marlinfw.org/docs/gcode/M115.html) · [Índice oficial de G-code](https://marlinfw.org/meta/gcode/).
 
+**Identificação automática:** `M115` é usado pelo Agent para reconhecer firmware Marlin, não para obter o número de série da Ender. A documentação Marlin mostra campos de firmware/capacidades e um `UUID` de exemplo, mas o código C# atual não lê nem persiste esse campo como identidade da impressora; na descoberta USB, a identificação oferecida é a porta COM. Para Bambu, o parser SSDP extrai serial/modelo quando a resposta do dispositivo os contém. O LAN Access Code não é descoberto: SSDP, varredura de portas e fingerprints de rede deixam `accessCode` como credencial obrigatória a ser informada pelo cliente, protegida localmente para reconexão. Isso é consistente com os testes que rejeitam a tentativa de adivinhar ou buscar esse segredo. Portanto, “serial automático” é parcial para Bambu; para Ender há detecção de firmware/COM, sem serial único; e nenhum fluxo consegue provisionar automaticamente o LAN Access Code.
+
 ### Continuação 2026-10-09 — limpeza seletiva dos atalhos na desinstalação
 
 **Problema confirmado:** `DeleteShortcuts()` chamava a remoção recursiva de diretório para `PrintFlow 3D` e `Filamind` no menu Iniciar. Como essas pastas podem conter atalhos de outros produtos, desinstalar o Agent poderia removê-los junto.
