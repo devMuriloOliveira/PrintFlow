@@ -330,7 +330,7 @@ try {
   task('/Query')
   const installedManifest = await readFile(path.join(installRoot, 'package.json'), 'utf8')
   assert.ok(!installedManifest.startsWith('\uFEFF'), 'installed package manifest must be UTF-8 without a BOM')
-  assert.equal(JSON.parse(installedManifest).version, '0.1.26')
+  assert.equal(JSON.parse(installedManifest).version, '0.1.27')
   if (previousSetup) {
     assert.ok(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), 'previous package must start with its old host filename')
     assert.ok(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), 'previous package must start with its old setup filename')
@@ -339,10 +339,11 @@ try {
   } else {
     assert.ok(await exists(path.join(installRoot, 'host', 'FilaAgent.exe')), 'Fila Agent host must use the new executable name')
     assert.ok(await exists(path.join(installRoot, 'FilaAgentSetup.exe')), 'uninstaller and updater must use the new setup name')
+    assert.equal((await stat(path.join(installRoot, 'FilaAgentSetup.exe'))).size, (await stat(setup)).size, 'installed uninstaller must match the setup that performed the install')
     assert.equal(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), false, 'new package must not duplicate the previous host executable')
     assert.equal(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), false, 'new package must not duplicate the previous setup executable')
   }
-  await waitForHealth(health => health.ok && health.version === '0.1.26' && health.activePrintJobs === 0)
+  await waitForHealth(health => health.ok && health.version === '0.1.27' && health.activePrintJobs === 0)
 
   const queuedPairing = await fetch(`http://127.0.0.1:${agentPort}/pair`, {
     method: 'POST',
@@ -351,8 +352,8 @@ try {
   })
   assert.equal(queuedPairing.status, 202)
   const pairedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.activePrintJobs === 0)
-  assert.equal(pairedHealth.version, '0.1.26')
-  assert.ok(pairCalls.some(call => call.code === pairCode && call.version === '0.1.26'))
+  assert.equal(pairedHealth.version, '0.1.27')
+  assert.ok(pairCalls.some(call => call.code === pairCode && call.version === '0.1.27'))
   await waitForHealth(() => heartbeatCount > 0)
   const agentCredentialPath = path.join(testDataRoot, 'agent.json')
   const storedAgentCredentialsText = await readFile(agentCredentialPath, 'utf8')
@@ -367,7 +368,7 @@ try {
     assert.equal(failedTaskMigration.code, 1, `injected task migration unexpectedly succeeded: ${failedTaskMigration.installerLog || failedTaskMigration.stderr}`)
     assert.notEqual(task('/Query', false, taskName).status, 0, 'failed upgrade must not leave the new startup task behind')
     task('/Query', true, legacyTaskName)
-    await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.26')
+    await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
     const renamedUpgrade = await install()
     assert.equal(renamedUpgrade.code, 0, `update from the previous C# package failed (${renamedUpgrade.code}): ${renamedUpgrade.installerLog || renamedUpgrade.stderr}\n${renamedUpgrade.observations || ''}`)
     activeTaskName = taskName
@@ -378,7 +379,7 @@ try {
     assert.equal(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), false, 'successful update must remove the old host binary')
     assert.equal(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), false, 'successful update must remove the old setup binary')
     task('/Query')
-    await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.26')
+    await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
   }
 
   verifyDelayMs = 15_000
@@ -392,7 +393,7 @@ try {
     '--data-dir', testDataRoot,
     '--test-mode'
   ], { windowsHide: true, stdio: 'ignore' })
-  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.26')
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
   const delayedCloudUpdate = await install()
   assert.equal(delayedCloudUpdate.code, 0, `update waited for Cloud reconnect (${delayedCloudUpdate.code}): ${delayedCloudUpdate.installerLog || delayedCloudUpdate.stderr}\n${delayedCloudUpdate.observations || ''}`)
   assert.ok(await waitForChildExit(legacyHostProcess), 'installer must stop the old host executable before replacing it')
@@ -401,7 +402,7 @@ try {
   assert.equal(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), false, 'legacy host must be replaced after a successful update')
   assert.equal(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), false, 'legacy setup must be replaced after a successful update')
   task('/Query')
-  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.26', 90_000)
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27', 90_000)
   verifyDelayMs = 0
 
   const sentinel = path.join(installRoot, 'rollback-sentinel.txt')
@@ -415,16 +416,19 @@ try {
   assert.ok(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), 'rollback must restore the previously installed host filename')
   assert.ok(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), 'rollback must restore the previously installed setup filename')
   task('/Query')
-  const rolledBackHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.26')
+  const rolledBackHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
   assert.equal(rolledBackHealth.activePrintJobs, 0)
 
   task('/End')
   await waitUntilUnavailable()
   task('/Run')
   const heartbeatsBeforeRestart = heartbeatCount
-  const restartedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.26')
+  const restartedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
   assert.equal(restartedHealth.activePrintJobs, 0)
   await waitForHealth(() => heartbeatCount > heartbeatsBeforeRestart)
+  task('/Delete')
+  assert.notEqual(task('/Query', false).status, 0, 'startup task must be removed after it launches the agent')
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
   const reloadedAgentCredentialsText = await readFile(agentCredentialPath, 'utf8')
   assert.ok(!reloadedAgentCredentialsText.includes('e2e-only-secret'), 'restarted host must keep paired secret protected at rest')
 
@@ -445,7 +449,7 @@ try {
 
   process.stdout.write(JSON.stringify({
     status: 'passed',
-    version: '0.1.26',
+    version: '0.1.27',
     installRoot,
     taskName,
     agentPort,
@@ -457,6 +461,7 @@ try {
     dpapiCredentialReloadedAfterRestart: true,
     heartbeatCount,
     rollbackMarkerRestored: true,
+    runningAgentSurvivesStartupTaskRemoval: true,
     taskRemoved: true,
     installRemoved: true
   }, null, 2) + '\n')

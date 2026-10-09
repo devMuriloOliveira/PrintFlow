@@ -310,7 +310,7 @@ try
     using var diagnosticsResponse = await http.SendAsync(diagnosticsRequest);
     var diagnosticsBody = await diagnosticsResponse.Content.ReadAsStringAsync();
     using var diagnosticsJson = JsonDocument.Parse(diagnosticsBody);
-    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.26" &&
+    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.27" &&
         diagnosticsJson.RootElement.GetProperty("network").GetProperty("interfaces").ValueKind == JsonValueKind.Array,
         "diagnostico C# autenticado retorna contrato de agente e interfaces locais redigidas");
     Check(!diagnosticsBody.Contains("LAN-SECRET-1122", StringComparison.Ordinal) && !diagnosticsBody.Contains("printer-password", StringComparison.Ordinal) &&

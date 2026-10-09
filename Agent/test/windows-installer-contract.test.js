@@ -47,6 +47,20 @@ test('setup C# valida o pacote embutido antes de instalar', async () => {
   assert.match(setup, /finally[\s\S]*File\.Delete\(embeddedPackagePath\)/)
 })
 
+test('setup rejeita URL insegura antes de copiar arquivos e registra erros com rollback', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const host = await read('windows-host/Program.cs')
+
+  const validateApi = setup.indexOf('AgentConfiguration.FromEnvironment(new Dictionary<string, string?>')
+  const install = setup.indexOf('return Install(zip, apiUrl,')
+  assert.ok(validateApi >= 0 && validateApi < install, 'URL de Production deve ser validada antes de iniciar a instalação')
+  assert.match(setup, /installer\.log/)
+  assert.match(setup, /Falha na instalação: \{installError\.Message\}\. A reversão também falhou: \{rollbackError\.Message\}/)
+  assert.match(setup, /installationCompleted && Directory\.Exists\(backup\)/)
+  assert.match(host, /var exitTimer = new System\.Windows\.Forms\.Timer \{ Interval = 3_000 \}/)
+  assert.match(host, /ExitThread\(\);/)
+})
+
 test('setup instala Orca pela Store quando necessário e valida slicing local antes da troca', async () => {
   const setup = await read('windows-setup/Program.cs')
   const runtime = await read('windows-runtime/OrcaSlicerService.cs')
@@ -92,15 +106,20 @@ test('registro do Windows identifica Fila Agent e usa setup C# para remover', as
   assert.match(setup, /printflow-agent/)
 })
 
-test('tarefa agendada inicia no logon e não depende de PowerShell', async () => {
+test('startup normal fica visível no Windows e o agendamento fica restrito ao E2E isolado', async () => {
   const setup = await read('windows-setup/Program.cs')
   const host = await read('windows-host/Program.cs')
   const protocol = await read('windows-host/NativeProtocol.cs')
 
+  assert.match(setup, /RegisterStartupEntry\(installedHost, apiUrl, localPort\)/)
+  assert.match(setup, /CurrentVersion\\Run/)
+  assert.match(setup, /StartupValueName = "FilaAgent"/)
+  assert.match(setup, /RemoveStartupEntry\(\)/)
+  assert.match(setup, /CreateTask\(installedHost, apiUrl, taskName, localPort, root, testMode, testDataDirectory\)/)
+  assert.match(setup, /DeleteTask\(taskName\)/)
+  assert.ok(setup.indexOf('WaitForHealth(installedVersion') < setup.indexOf('RegisterStartupEntry(installedHost, apiUrl, localPort)'))
   assert.match(setup, /LogonTrigger/)
   assert.match(setup, /StartWhenAvailable/)
-  assert.match(setup, /DisallowStartIfOnBatteries/)
-  assert.match(setup, /StopIfGoingOnBatteries/)
   assert.match(setup, /DefaultTaskName = "FilaAgent"/)
   assert.match(setup, /LegacyTaskName = "PrintFlowAgent"/)
   assert.match(setup, /--legacy-task-name/)
@@ -108,6 +127,21 @@ test('tarefa agendada inicia no logon e não depende de PowerShell', async () =>
   assert.match(setup, /new\[\] \{ DefaultTaskName, LegacyTaskName \}/)
   assert.match(protocol, /\?\? "FilaAgent"/)
   assert.doesNotMatch(setup + host, /powershell\.exe|ProcessStartInfo\([^)]*powershell/i)
+})
+
+test('confirma sucesso somente depois de validar saúde e preservação do desinstalador', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const installFlow = setup.slice(setup.indexOf('private static int Install('), setup.indexOf('private static int Uninstall('))
+  const uninstallerValidation = installFlow.lastIndexOf('ResolveInstalledSetup(root)')
+  const healthValidation = installFlow.indexOf('WaitForHealth(installedVersion')
+  const successDialog = installFlow.indexOf('Instalação concluída com sucesso!')
+
+  assert.ok(healthValidation >= 0 && uninstallerValidation > healthValidation && successDialog > uninstallerValidation)
+  assert.match(installFlow, /SHA256\.HashData\(File\.ReadAllBytes\(Environment\.ProcessPath!/)
+  assert.match(installFlow, /Gerenciador de Tarefas > Aplicativos de inicialização/)
+  assert.match(installFlow, /Desinstalador registrado em Aplicativos instalados/)
+  assert.match(installFlow, /VerifyUninstallerRegistration\(root\)/)
+  assert.match(setup, /!requirePaired \|\| \(health\.Paired && health\.CloudConnected\)/)
 })
 
 test('atualizador fixa o certificado e valida assinatura, hash, versão e health antes do sucesso', async () => {
@@ -138,10 +172,19 @@ test('atualizador fixa o certificado e valida assinatura, hash, versão e health
 test('updates pedem confirmação quando iniciadas pelo cliente', async () => {
   const updater = await read('windows-setup/SignedUpdateService.cs')
   const host = await read('windows-host/Program.cs')
+  const updateE2E = await read('test/windows-signed-update-e2e.mjs')
 
   assert.match(host, /manual \? "--interactive" : "--confirm-updates"/)
   assert.match(updater, /interactive \|\| confirmUpdates/)
   assert.match(updater, /installer_cancelled_or_closed/)
+  assert.match(updater, /Deseja baixar e instalar agora\?/)
+  assert.match(updater, /Baixando arquivo \{index \+ 1\} de \{required\.Length\}/)
+  assert.match(updater, /Validando assinatura, certificado e arquivos baixados/)
+  assert.match(updater, /Instalação concluída\. Verificando pareamento e conexão com a nuvem/)
+  assert.match(updater, /progress\.Hide\(\)[\s\S]*WaitForExitAsync\(cancellationToken\)[\s\S]*progress\.Show\(\)/)
+  assert.match(host, /using var updateProcess = Process\.Start\(startInfo\)[\s\S]*await updateProcess\.WaitForExitAsync\(\)/)
+  assert.match(updateE2E, /HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run/)
+  assert.match(updateE2E, /persistent scheduled task must not bypass the user-controlled startup entry/)
 })
 
 test('host C# executa o runtime integrado e localiza o pacote ao lado do aplicativo', async () => {

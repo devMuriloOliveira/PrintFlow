@@ -29,7 +29,7 @@ public sealed partial class AgentLocalServer : IAsyncDisposable
     private int _disposed;
 
     public AgentLocalServer(int port, IEnumerable<string> allowedOrigins, AgentCredentialStore credentials,
-        Func<AgentLocalStatus>? getStatus = null, string version = "0.1.26",
+        Func<AgentLocalStatus>? getStatus = null, string version = "0.1.27",
         AgentDiagnosticsTokenStore? diagnosticsToken = null, Func<object>? getDiagnostics = null)
     {
         _port = port is >= 1 and <= 65535 ? port : 17873;

@@ -25,7 +25,7 @@ const releaseAssets = {
 const writeRelease = async (directory, names, divergeSetupAlias = false, minimumSupportedVersion = '0.1.10') => {
   const certificate = releaseAssets['Fila-Agent-Dev-Certificate.cer']
   const metadata = {
-    version: '0.1.26',
+    version: '0.1.27',
     minimumSupportedVersion,
     runtime: '.NET 8 self-contained',
     selfContained: true,

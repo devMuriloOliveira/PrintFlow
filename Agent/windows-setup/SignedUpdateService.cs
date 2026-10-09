@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -58,7 +59,7 @@ internal sealed class SignedUpdateService
             return false;
         }
 
-        if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do Fila Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará as alterações e os termos antes de continuar.", "Fila Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do Fila Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará os termos e pedirá confirmação antes de substituir a versão atual.", "Fila Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             WriteHistory(currentVersion, latest.ToString(), "declined", "user_declined");
             return false;
@@ -86,25 +87,87 @@ internal sealed class SignedUpdateService
 
         var updatesRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent", "updates", latest.ToString());
         Directory.CreateDirectory(updatesRoot);
-        foreach (var name in required) await DownloadAsync(assets[name], Path.Combine(updatesRoot, name), cancellationToken);
-        ValidatePackage(updatesRoot, latest.ToString(), setupName, certificateName);
-
-        WriteHistory(currentVersion, latest.ToString(), "started", "verified_signed_release");
-        var installer = Path.Combine(updatesRoot, setupName);
-        using var process = Process.Start(new ProcessStartInfo(installer) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = updatesRoot })
-            ?? throw new InvalidOperationException("Nao foi possivel iniciar o instalador assinado.");
-        await process.WaitForExitAsync(cancellationToken);
-        if (process.ExitCode != 0) throw new InvalidOperationException($"Instalador retornou {process.ExitCode}.");
-        if (!string.Equals(VersionAt(installRoot), latest.ToString(), StringComparison.Ordinal))
+        var updated = await RunWithProgressAsync($"Preparando a versão {latest} do Fila Agent...", async progress =>
         {
-            WriteHistory(currentVersion, latest.ToString(), "declined", "installer_cancelled_or_closed");
-            return false;
+            for (var index = 0; index < required.Length; index++)
+            {
+                var name = required[index];
+                progress.SetStatus($"Baixando arquivo {index + 1} de {required.Length}:\r\n{name}");
+                await DownloadAsync(assets[name], Path.Combine(updatesRoot, name), cancellationToken);
+            }
+
+            progress.SetStatus("Validando assinatura, certificado e arquivos baixados...");
+            ValidatePackage(updatesRoot, latest.ToString(), setupName, certificateName);
+
+            WriteHistory(currentVersion, latest.ToString(), "started", "verified_signed_release");
+            var installer = Path.Combine(updatesRoot, setupName);
+            progress.SetStatus("Abrindo o instalador. Confirme os termos para continuar a atualização.");
+            progress.Hide();
+            using var process = Process.Start(new ProcessStartInfo(installer) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = updatesRoot })
+                ?? throw new InvalidOperationException("Nao foi possivel iniciar o instalador assinado.");
+            await process.WaitForExitAsync(cancellationToken);
+            progress.Show();
+            if (process.ExitCode != 0) throw new InvalidOperationException($"Instalador retornou {process.ExitCode}.");
+            if (!string.Equals(VersionAt(installRoot), latest.ToString(), StringComparison.Ordinal))
+            {
+                WriteHistory(currentVersion, latest.ToString(), "declined", "installer_cancelled_or_closed");
+                return false;
+            }
+
+            progress.SetStatus("Instalação concluída. Verificando pareamento e conexão com a nuvem...");
+            var healthy = await WaitForHealthAsync(latest.ToString(), requirePaired: true, TimeSpan.FromSeconds(90), cancellationToken);
+            if (!healthy) throw new InvalidOperationException("Nova versao nao confirmou health, pareamento e Cloud depois de iniciar.");
+            WriteHistory(currentVersion, latest.ToString(), "succeeded", "health_verified");
+            return true;
+        });
+        if (!updated && interactive)
+            MessageBox.Show($"A atualização não foi aplicada. O Fila Agent continua na versão {current}.", "Atualização cancelada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        return updated;
+    }
+
+    private static Task<T> RunWithProgressAsync<T>(string initialStatus, Func<UpdateProgressForm, Task<T>> operation)
+    {
+        T? result = default;
+        Exception? failure = null;
+        using var progress = new UpdateProgressForm(initialStatus);
+        progress.Shown += async (_, _) =>
+        {
+            try { result = await operation(progress); }
+            catch (Exception error) { failure = error; }
+            finally { progress.Close(); }
+        };
+        progress.ShowDialog();
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+        return Task.FromResult(result!);
+    }
+
+    private sealed class UpdateProgressForm : Form
+    {
+        private readonly Label _status = new();
+
+        public UpdateProgressForm(string initialStatus)
+        {
+            Text = "Atualização do Fila Agent";
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            ControlBox = false;
+            ShowInTaskbar = true;
+            ClientSize = new Size(470, 132);
+            Font = new Font("Segoe UI", 9F);
+            _status.Text = initialStatus;
+            _status.Location = new Point(18, 18);
+            _status.Size = new Size(434, 46);
+            var progress = new ProgressBar
+            {
+                Style = ProgressBarStyle.Marquee,
+                MarqueeAnimationSpeed = 24,
+                Location = new Point(18, 82),
+                Size = new Size(434, 20)
+            };
+            Controls.AddRange([_status, progress]);
         }
 
-        var healthy = await WaitForHealthAsync(latest.ToString(), requirePaired: true, TimeSpan.FromSeconds(90), cancellationToken);
-        if (!healthy) throw new InvalidOperationException("Nova versao nao confirmou health, pareamento e Cloud depois de iniciar.");
-        WriteHistory(currentVersion, latest.ToString(), "succeeded", "health_verified");
-        return true;
+        public void SetStatus(string message) => _status.Text = message;
     }
 
     private async Task DownloadAsync(string url, string destination, CancellationToken cancellationToken)

@@ -116,6 +116,15 @@ internal sealed class AgentApplicationContext : ApplicationContext
             WriteLog($"Falha ao iniciar o Agent: {error.Message}");
             _notifyIcon.Text = "Fila Agent - erro ao iniciar";
             _notifyIcon.ShowBalloonTip(5_000, "Fila Agent", "Não foi possível iniciar o serviço local. Abra os logs para detalhes.", ToolTipIcon.Error);
+            var exitTimer = new System.Windows.Forms.Timer { Interval = 3_000 };
+            exitTimer.Tick += (_, _) =>
+            {
+                exitTimer.Stop();
+                exitTimer.Dispose();
+                Environment.ExitCode = 1;
+                ExitThread();
+            };
+            exitTimer.Start();
         }
     }
 
@@ -275,7 +284,9 @@ internal sealed class AgentApplicationContext : ApplicationContext
             startInfo.ArgumentList.Add("--install-dir");
             startInfo.ArgumentList.Add(_agentRoot);
             if (_dataDirectory is not null) startInfo.ArgumentList.Add("--test-mode");
-            Process.Start(startInfo);
+            using var updateProcess = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Nao foi possivel iniciar a verificacao de atualizacao.");
+            await updateProcess.WaitForExitAsync();
             _updateTimer.Interval = 6 * 60 * 60 * 1_000;
         }
         catch (Exception error)

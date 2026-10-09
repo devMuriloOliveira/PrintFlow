@@ -29,7 +29,7 @@ public sealed class AgentCloudClient : IDisposable
         _ownsClient = httpClient is null;
         _requestTimeout = timeout ?? TimeSpan.FromSeconds(20);
         if (_ownsClient) _http.Timeout = Timeout.InfiniteTimeSpan;
-        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Fila-Agent", "0.1.26"));
+        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Fila-Agent", "0.1.27"));
     }
 
     public async Task<AgentCredentials> PairAsync(string code, string machineName, string platform, string architecture, string version, CancellationToken cancellationToken = default)

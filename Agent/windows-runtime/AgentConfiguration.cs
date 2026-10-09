@@ -79,7 +79,7 @@ public sealed record AgentConfiguration(
         var ssePollInterval = ReadInterval(Get("FILA_AGENT_SSE_POLL_MS", "PRINTFLOW_AGENT_SSE_POLL_MS", "45000"), 45_000, 30_000);
 
         return new AgentConfiguration(environment, apiUrl, wsUrl, origins, localPort,
-            Path.GetFullPath(dataDirectory), Path.GetFullPath(logDirectory), version ?? "0.1.26")
+            Path.GetFullPath(dataDirectory), Path.GetFullPath(logDirectory), version ?? "0.1.27")
         {
             HealthSnapshotInterval = healthSnapshotInterval,
             WebSocketCommandPollInterval = webSocketPollInterval,

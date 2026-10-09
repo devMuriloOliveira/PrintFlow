@@ -34,7 +34,7 @@ const server = createServer()
 let apiPort
 
 assert.equal(path.basename(setup).toLowerCase(), 'printflowagentsetup.exe')
-assert.equal(releaseVersion, '0.1.26', `test release must be the next local version, received ${releaseVersion}`)
+assert.equal(releaseVersion, '0.1.27', `test release must be the next local version, received ${releaseVersion}`)
 assert.equal(installRoot, path.resolve(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'PrintFlowAgent'))
 assert.ok(await exists(setup), `native Setup missing: ${setup}`)
 for (const [name, file] of files) assert.ok(await exists(file), `release asset missing: ${name}`)
@@ -129,8 +129,11 @@ try {
     'C# updater did not record succeeded after post-update health verification')
   assert.equal(await hashFile(credentialsFile), credentialHashBefore, 'updating changed the persisted Agent credential file')
 
+  const startup = spawnSync('reg.exe', ['QUERY', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'FilaAgent'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
+  assert.equal(startup.status, 0, `FilaAgent startup entry unavailable after update: ${startup.stderr || startup.stdout}`)
+  assert.match(startup.stdout, /host\\FilaAgent\.exe/i, 'startup entry must launch the installed C# host')
   const task = spawnSync('schtasks.exe', ['/Query', '/TN', 'FilaAgent', '/FO', 'LIST'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
-  assert.equal(task.status, 0, `FilaAgent task unavailable after update: ${task.stderr || task.stdout}`)
+  assert.notEqual(task.status, 0, 'persistent scheduled task must not bypass the user-controlled startup entry')
   const listener = spawnSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
   assert.match(listener.stdout, /127\.0\.0\.1:17873\s+.*LISTENING/i, 'local Agent port did not return after signed update')
 
@@ -140,7 +143,8 @@ try {
     paired: after.paired,
     cloudConnected: after.cloudConnected,
     activePrintJobs: after.activePrintJobs,
-    taskPresent: true,
+    startupEntryPresent: true,
+    persistentTaskAbsent: true,
     localPortListening: true,
     updateHistorySucceeded: true,
     credentialsPreserved: true
