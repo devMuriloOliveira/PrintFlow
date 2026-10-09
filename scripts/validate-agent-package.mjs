@@ -140,7 +140,9 @@ try {
   }
   if (!installer.includes('removeUserData') ||
       !installer.includes('args.Contains("--remove-user-data"') ||
-      !installer.includes('DeleteDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)')) {
+      !installer.includes('DeleteUserDataDirectories();') ||
+      !installer.includes('DeleteDirectory(Path.Combine(appData, "Fila Agent"))') ||
+      !installer.includes('DeleteDirectory(Path.Combine(appData, "PrintFlow Agent"))')) {
     errors.push('desinstalador C# nao limita a remocao de dados a escolha explicita do usuario.')
   }
 
@@ -153,12 +155,13 @@ try {
   const consent = await fs.readFile(path.join(agentRoot, 'windows-setup/SetupConsentForm.cs'), 'utf8')
   const terms = await fs.readFile(path.join(agentRoot, 'legal/TERMOS-DE-USO-FILA-AGENT.txt'), 'utf8')
   const notices = await fs.readFile(path.join(agentRoot, 'legal/THIRD-PARTY-NOTICES.txt'), 'utf8')
+  const termsVersion = installer.match(/TermsVersion\s*=\s*"([^"]+)"/)?.[1]
   if (!setupProject.includes('FilaAgentSetup.ThirdParty.00-Overview.txt') ||
       !setupProject.includes('legal\\third-party\\*.txt') ||
       !consent.includes('Licenças de terceiros') ||
       !consent.includes('ThirdPartyLicensesForm') ||
-      !installer.includes('TermsVersion = "1.3"') ||
-      !terms.includes('Versão 1.3')) {
+      !termsVersion ||
+      !terms.includes(`Versão ${termsVersion}`)) {
     errors.push('setup nao mostra licencas de terceiros antes da instalacao ou nao versiona os termos atualizados.')
   }
   for (const file of [

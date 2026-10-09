@@ -1,5 +1,5 @@
 TERMOS DE USO DO FILA AGENT — EARLY ACCESS
-Versão 1.3 —
+Versão 1.4 — 09/10/2026
 
 1. O que é o Fila Agent
 
@@ -7,7 +7,7 @@ O Fila Agent é um programa opcional para Windows que conecta este computador à
 
 2. O que acontece ao instalar
 
-O setup instala os arquivos do Agent no perfil deste usuário, cria uma tarefa para iniciá-lo quando o usuário entrar no Windows, adiciona atalhos e registra uma opção de desinstalação. O pacote inclui os runtimes usados pelo Agent; não é necessário instalar Node.js ou .NET separadamente. O OrcaSlicer não faz parte do pacote e é um software separado sob licença AGPL-3.0; consulte a licença do projeto em https://github.com/OrcaSlicer/OrcaSlicer/blob/main/LICENSE.txt. O setup aceita uma instalação desktop compatível do OrcaSlicer 2.4.2 e também a versão da Microsoft Store cujo motor é 2.4.2. Se não encontrar uma instalação compatível, tenta baixar e instalar a versão oficial da Store pelo Windows Package Manager, mostrando o andamento por até 20 minutos. Se o Windows Package Manager não estiver disponível ou a instalação automática falhar, o setup abre a página oficial do OrcaSlicer na Microsoft Store. Depois que o usuário concluir a instalação, pode clicar em Repetir para validar o slicer e continuar sem reiniciar o setup. O processo requer conexão com a Internet e acesso à Microsoft Store; a instalação silenciosa pelo Windows Package Manager também requer o App Installer do Windows.
+O setup instala os arquivos do Agent no perfil deste usuário, configura a inicialização automática quando o usuário entrar no Windows, adiciona atalhos e registra uma opção de desinstalação. A inicialização aparece em Gerenciador de Tarefas > Aplicativos de inicialização e o usuário pode desativá-la ali. O pacote inclui os runtimes usados pelo Agent; não é necessário instalar Node.js ou .NET separadamente. O OrcaSlicer não faz parte do pacote e é um software separado sob licença AGPL-3.0; consulte a licença do projeto em https://github.com/OrcaSlicer/OrcaSlicer/blob/main/LICENSE.txt. O setup aceita uma instalação desktop compatível do OrcaSlicer 2.4.2 e também a versão da Microsoft Store cujo motor é 2.4.2. Se não encontrar uma instalação compatível, tenta baixar e instalar a versão oficial da Store pelo Windows Package Manager, mostrando o andamento por até 20 minutos. Se o Windows Package Manager não estiver disponível ou a instalação automática falhar, o setup abre a página oficial do OrcaSlicer na Microsoft Store. Depois que o usuário concluir a instalação, pode clicar em Repetir para validar o slicer e continuar sem reiniciar o setup. O processo requer conexão com a Internet e acesso à Microsoft Store; a instalação silenciosa pelo Windows Package Manager também requer o App Installer do Windows.
 
 Os avisos e textos de licença dos componentes incluídos estão disponíveis no botão “Licenças de terceiros” desta tela e na pasta `legal` da instalação. O OrcaSlicer é instalado separadamente pela Microsoft Store e mantém seus próprios avisos e termos.
 

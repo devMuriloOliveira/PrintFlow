@@ -29,7 +29,7 @@ public sealed class AgentCloudClient : IDisposable
         _ownsClient = httpClient is null;
         _requestTimeout = timeout ?? TimeSpan.FromSeconds(20);
         if (_ownsClient) _http.Timeout = Timeout.InfiniteTimeSpan;
-        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Fila-Agent", "0.1.27"));
+        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Fila-Agent", "0.1.28"));
     }
 
     public async Task<AgentCredentials> PairAsync(string code, string machineName, string platform, string architecture, string version, CancellationToken cancellationToken = default)
@@ -158,26 +158,17 @@ public sealed class AgentCloudClient : IDisposable
         request.Headers.TryAddWithoutValidation("x-agent-slicer-profile-id", artifact.Profile.Id);
         request.Headers.TryAddWithoutValidation("x-agent-slicer-profile-version", artifact.Profile.Version);
         request.Headers.TryAddWithoutValidation("x-agent-idempotency-key", idempotencyKey);
-        // Keep legacy aliases until the hosted API has been updated everywhere.
-        request.Headers.TryAddWithoutValidation("x-printflow-file-name", fileName);
-        request.Headers.TryAddWithoutValidation("x-printflow-file-format", artifact.Format);
-        request.Headers.TryAddWithoutValidation("x-printflow-slicer-profile-id", artifact.Profile.Id);
-        request.Headers.TryAddWithoutValidation("x-printflow-slicer-profile-version", artifact.Profile.Version);
-        request.Headers.TryAddWithoutValidation("x-printflow-idempotency-key", idempotencyKey);
         if (metrics?.EstimatedPrintSeconds is { } seconds)
         {
             request.Headers.TryAddWithoutValidation("x-agent-estimated-print-seconds", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            request.Headers.TryAddWithoutValidation("x-printflow-estimated-print-seconds", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         if (metrics?.EstimatedFilamentGrams is { } grams)
         {
             request.Headers.TryAddWithoutValidation("x-agent-estimated-filament-grams", grams.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            request.Headers.TryAddWithoutValidation("x-printflow-estimated-filament-grams", grams.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         if (metrics?.EstimatedFilamentMillimeters is { } millimeters)
         {
             request.Headers.TryAddWithoutValidation("x-agent-estimated-filament-millimeters", millimeters.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            request.Headers.TryAddWithoutValidation("x-printflow-estimated-filament-millimeters", millimeters.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         using var response = await SendAsync(request, TimeSpan.FromMinutes(2), cancellationToken);

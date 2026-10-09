@@ -6,6 +6,7 @@ using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using FilaAgent.Runtime;
 
 namespace FilaAgent.Setup;
 
@@ -16,21 +17,50 @@ internal sealed class SignedUpdateService
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
     private readonly Uri _releaseApi;
     private readonly string? _testAuthority;
+    private readonly bool _testMode;
+    private readonly string _dataDirectory;
+    private readonly string? _testDataDirectory;
+    private readonly string? _testApiUrl;
+    private readonly string? _testTaskName;
+    private readonly string _healthUrl;
 
-    public SignedUpdateService(string? testReleaseApi = null, bool testMode = false)
+    public SignedUpdateService(string? testReleaseApi = null, bool testMode = false, string? testDataDirectory = null,
+        string? testApiUrl = null, string? testTaskName = null, string? localPort = null)
     {
+        _testMode = testMode;
         if (testReleaseApi is null)
         {
+            if (testMode) throw new InvalidDataException("Atualização em modo de teste exige uma API de release local.");
             _releaseApi = new Uri(ReleaseApi);
-            return;
+        }
+        else
+        {
+            if (!testMode || !Uri.TryCreate(testReleaseApi, UriKind.Absolute, out var testUri) ||
+                testUri.Scheme != Uri.UriSchemeHttp || !testUri.IsLoopback)
+                throw new InvalidDataException("Endpoint local de teste permitido somente com --test-mode e loopback HTTP.");
+            _releaseApi = testUri;
+            _testAuthority = testUri.GetLeftPart(UriPartial.Authority);
         }
 
-        if (!testMode || !Uri.TryCreate(testReleaseApi, UriKind.Absolute, out var testUri) ||
-            testUri.Scheme != Uri.UriSchemeHttp || !testUri.IsLoopback)
-            throw new InvalidDataException("Endpoint local de teste permitido somente com --test-mode e loopback HTTP.");
-
-        _releaseApi = testUri;
-        _testAuthority = testUri.GetLeftPart(UriPartial.Authority);
+        if (testMode)
+        {
+            if (string.IsNullOrWhiteSpace(testDataDirectory) ||
+                !Uri.TryCreate(testApiUrl, UriKind.Absolute, out var testApi) ||
+                testApi.Scheme != Uri.UriSchemeHttp || !testApi.IsLoopback ||
+                string.IsNullOrWhiteSpace(testTaskName) || !testTaskName.StartsWith("FilaAgent_E2E_", StringComparison.OrdinalIgnoreCase) ||
+                !int.TryParse(localPort, out var testPort) || testPort is < 1 or > 65535)
+                throw new InvalidDataException("Atualização de teste exige diretório, API, porta e tarefa E2E isolados.");
+            _testDataDirectory = Path.GetFullPath(testDataDirectory);
+            _testApiUrl = testApiUrl;
+            _testTaskName = testTaskName;
+            _healthUrl = $"http://127.0.0.1:{testPort}/healthz";
+            _dataDirectory = _testDataDirectory;
+        }
+        else
+        {
+            _healthUrl = "http://127.0.0.1:17873/healthz";
+            _dataDirectory = AgentLocalPaths.ResolveDataDirectory();
+        }
     }
 
     public async Task<bool> CheckAndInstallAsync(string installRoot, bool interactive, bool confirmUpdates, CancellationToken cancellationToken = default)
@@ -85,7 +115,7 @@ internal sealed class SignedUpdateService
         var required = new[] { setupName, certificateName, "RELEASE-METADATA.json", "SHA256SUMS.txt" };
         if (required.Any(name => !assets.ContainsKey(name))) throw new InvalidDataException("Release incompleta: falta um artefato obrigatorio.");
 
-        var updatesRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent", "updates", latest.ToString());
+        var updatesRoot = Path.Combine(_dataDirectory, "updates", latest.ToString());
         Directory.CreateDirectory(updatesRoot);
         var updated = await RunWithProgressAsync($"Preparando a versão {latest} do Fila Agent...", async progress =>
         {
@@ -102,11 +132,25 @@ internal sealed class SignedUpdateService
             WriteHistory(currentVersion, latest.ToString(), "started", "verified_signed_release");
             var installer = Path.Combine(updatesRoot, setupName);
             progress.SetStatus("Abrindo o instalador. Confirme os termos para continuar a atualização.");
-            progress.Hide();
-            using var process = Process.Start(new ProcessStartInfo(installer) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = updatesRoot })
+            // Keep the modal message loop alive until the child installer and post-update health check finish.
+            var installerStartInfo = new ProcessStartInfo(installer) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = updatesRoot };
+            if (_testMode)
+            {
+                installerStartInfo.ArgumentList.Add("--test-mode");
+                installerStartInfo.ArgumentList.Add("--install-dir");
+                installerStartInfo.ArgumentList.Add(installRoot);
+                installerStartInfo.ArgumentList.Add("--test-data-dir");
+                installerStartInfo.ArgumentList.Add(_testDataDirectory!);
+                installerStartInfo.ArgumentList.Add("--api-url");
+                installerStartInfo.ArgumentList.Add(_testApiUrl!);
+                installerStartInfo.ArgumentList.Add("--local-port");
+                installerStartInfo.ArgumentList.Add(new Uri(_healthUrl).Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                installerStartInfo.ArgumentList.Add("--task-name");
+                installerStartInfo.ArgumentList.Add(_testTaskName!);
+            }
+            using var process = Process.Start(installerStartInfo)
                 ?? throw new InvalidOperationException("Nao foi possivel iniciar o instalador assinado.");
             await process.WaitForExitAsync(cancellationToken);
-            progress.Show();
             if (process.ExitCode != 0) throw new InvalidOperationException($"Instalador retornou {process.ExitCode}.");
             if (!string.Equals(VersionAt(installRoot), latest.ToString(), StringComparison.Ordinal))
             {
@@ -223,17 +267,17 @@ internal sealed class SignedUpdateService
         _ = pinnedCertificate;
     }
 
-    private static async Task<AgentHealth?> GetHealthAsync(CancellationToken cancellationToken)
+    private async Task<AgentHealth?> GetHealthAsync(CancellationToken cancellationToken)
     {
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            return await http.GetFromJsonAsync<AgentHealth>("http://127.0.0.1:17873/healthz", cancellationToken);
+            return await http.GetFromJsonAsync<AgentHealth>(_healthUrl, cancellationToken);
         }
         catch { return null; }
     }
 
-    private static async Task<bool> WaitForHealthAsync(string expectedVersion, bool requirePaired, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<bool> WaitForHealthAsync(string expectedVersion, bool requirePaired, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -251,9 +295,9 @@ internal sealed class SignedUpdateService
         catch { return "0.0.0"; }
     }
 
-    private static void WriteHistory(string previous, string next, string result, string detail)
+    private void WriteHistory(string previous, string next, string result, string detail)
     {
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent", "updates", "update-history.jsonl");
+        var path = Path.Combine(_dataDirectory, "updates", "update-history.jsonl");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var item = JsonSerializer.Serialize(new { occurredAt = DateTime.UtcNow.ToString("O"), previousVersion = previous, newVersion = next, result, detail });
         File.AppendAllText(path, item + Environment.NewLine);

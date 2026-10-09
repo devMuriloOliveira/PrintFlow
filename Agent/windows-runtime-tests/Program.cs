@@ -26,6 +26,14 @@ if (args.Length > 0 && args[0].Equals("--orca-live-smoke", StringComparison.Ordi
     var executable = args.Length > 1 ? args[1] : OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>());
     return await RunOrcaLiveSmokeAsync(executable);
 }
+if (args.Length > 0 && args[0].Equals("--orca-store-discovery-smoke", StringComparison.OrdinalIgnoreCase))
+{
+    var executable = OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>());
+    var unsupportedVersion = OrcaSlicerService.FindUnvalidatedStorePackageVersion();
+    Console.WriteLine($"Resolved Orca executable: {(string.IsNullOrWhiteSpace(executable) ? "none" : executable)}");
+    Console.WriteLine($"Unvalidated Store package version: {unsupportedVersion ?? "none"}");
+    return 0;
+}
 if (args.Contains("--bambu-ftps-only", StringComparer.OrdinalIgnoreCase))
 {
     await BambuRuntimeIntegrationChecks.RunFtpsAsync(Check);
@@ -187,6 +195,31 @@ Check(productionRejected, "rejeita endpoint local em PRODUCTION");
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "fila-agent-runtime-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
+var appDataFixture = Path.Combine(tempRoot, "app-data-fixture");
+var newDataRoot = Path.Combine(appDataFixture, "Fila Agent");
+var legacyDataRoot = Path.Combine(appDataFixture, "PrintFlow Agent");
+Check(AgentLocalPaths.ResolveDataDirectory(new Dictionary<string, string?>(), appDataFixture) == Path.GetFullPath(newDataRoot),
+    "instalacao nova escolhe o diretorio de dados Fila Agent");
+Directory.CreateDirectory(legacyDataRoot);
+Check(AgentLocalPaths.ResolveDataDirectory(new Dictionary<string, string?>(), appDataFixture) == Path.GetFullPath(legacyDataRoot),
+    "diretorio PrintFlow existente preserva os dados durante upgrade e rollback");
+Directory.CreateDirectory(newDataRoot);
+Check(AgentLocalPaths.ResolveDataDirectory(new Dictionary<string, string?>(), appDataFixture) == Path.GetFullPath(legacyDataRoot),
+    "diretorio legado prevalece quando ambos existem para evitar perder o pareamento");
+var explicitNewDataRoot = Path.Combine(tempRoot, "explicit-fila-data");
+var configuredNewDataRoot = AgentLocalPaths.ResolveDataDirectory(new Dictionary<string, string?>
+{
+    ["FILA_AGENT_DATA_DIR"] = explicitNewDataRoot,
+    ["PRINTFLOW_AGENT_DATA_DIR"] = Path.Combine(tempRoot, "ignored-legacy-data")
+}, appDataFixture);
+Check(configuredNewDataRoot == Path.GetFullPath(explicitNewDataRoot),
+    "FILA_AGENT_DATA_DIR prevalece sobre caminho legado e diretórios detectados");
+var explicitLegacyDataRoot = Path.Combine(tempRoot, "explicit-legacy-data");
+Check(AgentLocalPaths.ResolveDataDirectory(new Dictionary<string, string?>
+{
+    ["PRINTFLOW_AGENT_DATA_DIR"] = explicitLegacyDataRoot
+}, appDataFixture) == Path.GetFullPath(explicitLegacyDataRoot),
+    "alias PRINTFLOW_AGENT_DATA_DIR preserva configuração explícita antiga");
 try
 {
     var protector = new ReversibleTestProtector();
@@ -297,31 +330,31 @@ try
     Check(health.Headers.GetValues("Access-Control-Allow-Origin").Single() == "https://filamind.com.br", "CORS devolve somente a origem permitida");
 
     using var diagnosticsUnauthorizedRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/diagnostics");
-    diagnosticsUnauthorizedRequest.Headers.Add("x-printflow-diagnostics-token", "invalid-token");
+    diagnosticsUnauthorizedRequest.Headers.Add("x-fila-agent-diagnostics-token", "invalid-token");
     using var diagnosticsUnauthorized = await http.SendAsync(diagnosticsUnauthorizedRequest);
     Check(diagnosticsUnauthorized.StatusCode == HttpStatusCode.Unauthorized, "diagnostico C# rejeita token local ausente ou invalido");
 
     using var diagnosticsOriginRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/diagnostics");
     diagnosticsOriginRequest.Headers.Add("Origin", "https://filamind.com.br");
-    diagnosticsOriginRequest.Headers.Add("x-printflow-diagnostics-token", diagnosticsTokenStore.Token);
+    diagnosticsOriginRequest.Headers.Add("x-fila-agent-diagnostics-token", diagnosticsTokenStore.Token);
     using var diagnosticsOrigin = await http.SendAsync(diagnosticsOriginRequest);
     Check(diagnosticsOrigin.StatusCode == HttpStatusCode.Forbidden, "diagnostico C# bloqueia acesso originado em navegador mesmo com token valido");
 
     using var diagnosticsRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/diagnostics");
-    diagnosticsRequest.Headers.Add("x-printflow-diagnostics-token", diagnosticsTokenStore.Token);
+    diagnosticsRequest.Headers.Add("x-fila-agent-diagnostics-token", diagnosticsTokenStore.Token);
     using var diagnosticsResponse = await http.SendAsync(diagnosticsRequest);
     var diagnosticsBody = await diagnosticsResponse.Content.ReadAsStringAsync();
     using var diagnosticsJson = JsonDocument.Parse(diagnosticsBody);
-    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.27" &&
+    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.28" &&
         diagnosticsJson.RootElement.GetProperty("network").GetProperty("interfaces").ValueKind == JsonValueKind.Array,
         "diagnostico C# autenticado retorna contrato de agente e interfaces locais redigidas");
     Check(!diagnosticsBody.Contains("LAN-SECRET-1122", StringComparison.Ordinal) && !diagnosticsBody.Contains("printer-password", StringComparison.Ordinal) &&
         diagnosticsBody.Contains("***1234", StringComparison.Ordinal) && diagnosticsBody.Contains("192.168.10.x", StringComparison.Ordinal),
         "diagnostico C# remove segredos, mascara serial e reduz endereco IPv4");
-    using var filaDiagnosticsRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/diagnostics");
-    filaDiagnosticsRequest.Headers.Add("x-fila-agent-diagnostics-token", diagnosticsTokenStore.Token);
-    using var filaDiagnosticsResponse = await http.SendAsync(filaDiagnosticsRequest);
-    Check(filaDiagnosticsResponse.StatusCode == HttpStatusCode.OK, "diagnostico C# aceita o cabecalho atual Fila Agent e preserva o alias PrintFlow");
+    using var legacyDiagnosticsRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/diagnostics");
+    legacyDiagnosticsRequest.Headers.Add("x-printflow-diagnostics-token", diagnosticsTokenStore.Token);
+    using var legacyDiagnosticsResponse = await http.SendAsync(legacyDiagnosticsRequest);
+    Check(legacyDiagnosticsResponse.StatusCode == HttpStatusCode.OK, "diagnostico C# preserva o alias PrintFlow somente para suporte legado");
 
     using var blockedRequest = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/healthz");
     blockedRequest.Headers.Add("Origin", "https://evil.example");
@@ -513,7 +546,15 @@ try
     Directory.CreateDirectory(Path.GetDirectoryName(newerStoreExe)!);
     await File.WriteAllTextAsync(expectedStoreExe, "validated Store build");
     await File.WriteAllTextAsync(newerStoreExe, "not yet validated Store build");
-    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), storeProgramFiles) == expectedStoreExe, "resolver C# escolhe somente o Orca Store 2.4.3.0 validado");
+    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), storeProgramFiles) == newerStoreExe, "resolver C# seleciona o pacote Store Orca mais recente e valida o motor pela saída G-code");
+    Check(OrcaSlicerService.FindUnvalidatedStorePackageVersion(storeProgramFiles) == "2.5.0.0", "detector identifica pacote Store Orca novo sem aprova-lo para slicing");
+    Check(OrcaSlicerService.FindUnvalidatedStorePackageVersion([
+        "OrcaSlicer.OrcaSlicer_2.4.3.0_x64__3qd7h69xpne0g",
+        "OrcaSlicer.OrcaSlicer_2.5.0.0_x64__3qd7h69xpne0g",
+        "Example.App_9.9.9.9_x64__0000000000000"
+    ]) == "2.5.0.0", "consulta de pacotes registrados seleciona somente a familia Orca e reporta o pacote novo");
+    var currentUserOrcaVersion = OrcaSlicerService.FindUnvalidatedStorePackageVersion();
+    Check(currentUserOrcaVersion is null || Version.TryParse(currentUserOrcaVersion, out _), "consulta Win32 da Store para o usuario atual retorna versao valida ou ausencia");
     var desktopStoreRoot = Path.Combine(tempRoot, "desktop-store", "OrcaSlicer");
     Directory.CreateDirectory(Path.Combine(desktopStoreRoot, "resources", "profiles", "BBL"));
     await File.WriteAllTextAsync(Path.Combine(desktopStoreRoot, "orca-slicer.exe"), "validated Store launcher");
@@ -524,7 +565,8 @@ try
     var newerOnlyExe = Path.Combine(newerOnlyProgramFiles, "WindowsApps", "OrcaSlicer.OrcaSlicer_2.5.0.0_x64__3qd7h69xpne0g", "orca-slicer.exe");
     Directory.CreateDirectory(Path.GetDirectoryName(newerOnlyExe)!);
     await File.WriteAllTextAsync(newerOnlyExe, "not yet validated Store build");
-    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), newerOnlyProgramFiles) == string.Empty, "resolver C# nao adota automaticamente uma versao Store sem validacao");
+    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), newerOnlyProgramFiles) == newerOnlyExe, "resolver C# localiza pacote Store novo para validar o motor em runtime");
+    Check(OrcaSlicerService.FindUnvalidatedStorePackageVersion(newerOnlyProgramFiles) == "2.5.0.0", "detector reporta versao Store nao validada quando nao ha fallback conhecido");
     var configuredOrca = Path.Combine(tempRoot, "configured-orca.exe");
     Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?> { ["FILA_AGENT_ORCA_SLICER_PATH"] = configuredOrca }, storeProgramFiles) == configuredOrca, "caminho Orca FILA_AGENT configurado tem precedencia sobre a versao Store");
     var officialProfile = OrcaSlicerService.ResolveOfficialProfile("Bambu Lab", "P1S", executablePath);
@@ -555,6 +597,27 @@ try
     Check(orcaRunner.LastUseShellExecute == false && artifact.Format == "gcode", "processo Orca e iniciado sem shell e retorna G-code");
     Check(File.Exists(outputPath) && artifact.SizeBytes == new FileInfo(outputPath).Length && artifact.Sha256.Length == 64, "G-code novo e normalizado ao destino com SHA-256 calculado");
     Check(artifact.Profile.Id == "bambu-p1s-pla-basic" && artifact.Stdout == "slice complete", "resultado preserva perfil e diagnostico do Orca");
+
+    foreach (var packageOutput in new[] { false, true })
+    {
+        var unsupportedOutput = Path.Combine(tempRoot, packageOutput ? "slice-unsupported-package" : "slice-unsupported-plain",
+            packageOutput ? "unsupported.gcode.3mf" : "unsupported.gcode");
+        var unsupportedRunner = new FakeOrcaProcessRunner(writeOutput: true, engineVersion: "2.5.0");
+        var unsupportedRejected = false;
+        try
+        {
+            await new OrcaSlicerService(unsupportedRunner).SliceAsync(executablePath, inputPath, unsupportedOutput,
+                officialProfile, exportGcode3mf: packageOutput);
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("exige o motor validado 2.4.2", StringComparison.Ordinal))
+        {
+            unsupportedRejected = true;
+        }
+        Check(unsupportedRejected && unsupportedRunner.InvocationCount == 1,
+            packageOutput
+                ? "Orca C# rejeita motor novo dentro do pacote gcode.3mf antes do upload"
+                : "Orca C# rejeita motor novo em G-code simples antes do upload");
+    }
 
     var binaryStlPath = Path.Combine(tempRoot, "model-binary.stl");
     var binaryStl = new byte[134];
@@ -672,6 +735,30 @@ try
         Check(slicingHandler.LastFileFormat == "gcode" && slicingHandler.LastFileName?.EndsWith(".gcode.3mf", StringComparison.OrdinalIgnoreCase) == true &&
             packagedPlateText.Contains("G28", StringComparison.Ordinal) && productionResult.Metrics.EstimatedPrintSeconds == 3723,
             "Production Job Bambu envia pacote gcode.3mf valido no campo gcode atual e le metricas do G-code interno");
+    }
+
+    var incompatibleSlicingHandler = new PrintFileCloudHandler(productionFileBytes);
+    using (var incompatibleSlicingHttp = new HttpClient(incompatibleSlicingHandler))
+    using (var incompatibleSlicingCloud = new AgentCloudClient(new Uri("https://api.fixture/"), incompatibleSlicingHttp))
+    {
+        var incompatibleCache = new AgentPrintFileCache(incompatibleSlicingCloud, Path.Combine(tempRoot, "incompatible-orca-cache"));
+        var incompatibleRunner = new FakeOrcaProcessRunner(writeOutput: true, engineVersion: "2.5.0");
+        var incompatibleService = new ProductionJobSlicingService(incompatibleSlicingCloud, incompatibleCache,
+            new OrcaSlicerService(incompatibleRunner), new Dictionary<string, string?> { ["FILA_AGENT_ORCA_SLICER_PATH"] = executablePath });
+        var rejected = false;
+        try
+        {
+            await incompatibleService.PrepareAsync(credentials,
+                new ProductionJobSlicingRequest("unsupported-engine-job", productionFile,
+                    new PrinterPinMetadata(Protocol: "bambu", Name: "P1S", Manufacturer: "Bambu Lab", Model: "P1S", Serial: "SERIAL-FIXTURE")));
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("exige o motor validado 2.4.2", StringComparison.Ordinal))
+        {
+            rejected = true;
+        }
+        Check(rejected && incompatibleSlicingHandler.UploadCount == 0 && incompatibleRunner.LastOutputDirectory is not null &&
+            !Directory.Exists(incompatibleRunner.LastOutputDirectory),
+            "Production Job C# não envia à API artefato gerado por motor Orca não validado e limpa temporários");
     }
 
     var commandSlicingHandler = new PrintFileCloudHandler(productionFileBytes) { FailCommandCompletions = true };
@@ -1390,8 +1477,8 @@ using (var api = new AgentCloudClient(new Uri("https://api.example.test"), apiHt
             new PrintJobEstimate(EstimatedPrintSeconds: 900, EstimatedFilamentGrams: 12.5, EstimatedFilamentMillimeters: 420));
         var artifactRequest = apiHandler.LastRequest ?? throw new InvalidOperationException("Request de slicing ausente.");
         Check(artifactRequest.RequestUri?.AbsolutePath == "/api/agents/print-jobs/print%20job%2F42/slicing-artifact" && artifactRequest.Method == HttpMethod.Post, "upload C# de G-code usa rota de Production Job codificada");
-        Check(artifactRequest.Headers.GetValues("x-agent-file-name").Single() == Path.GetFileName(uploadPath) && artifactRequest.Headers.GetValues("x-agent-idempotency-key").Single() == "idempotency-fixture" && artifactRequest.Headers.GetValues("x-printflow-file-name").Single() == Path.GetFileName(uploadPath), "upload C# envia metadados Fila Agent e preserva os aliases de transição");
-        Check(artifactRequest.Headers.GetValues("x-agent-slicer-profile-id").Single() == "bambu-p1s-pla-basic" && artifactRequest.Headers.GetValues("x-agent-estimated-print-seconds").Single() == "900" && artifactRequest.Headers.GetValues("x-printflow-estimated-print-seconds").Single() == "900" && apiHandler.LastBody?.Contains("M104 S210", StringComparison.Ordinal) == true, "upload C# transmite perfil, métricas e bytes do G-code fatiado");
+        Check(artifactRequest.Headers.GetValues("x-agent-file-name").Single() == Path.GetFileName(uploadPath) && artifactRequest.Headers.GetValues("x-agent-file-format").Single() == "gcode" && artifactRequest.Headers.GetValues("x-agent-idempotency-key").Single() == "idempotency-fixture" && !artifactRequest.Headers.Contains("x-printflow-file-name"), "upload C# envia somente metadados atuais do Agent");
+        Check(artifactRequest.Headers.GetValues("x-agent-slicer-profile-id").Single() == "bambu-p1s-pla-basic" && artifactRequest.Headers.GetValues("x-agent-estimated-print-seconds").Single() == "900" && !artifactRequest.Headers.Contains("x-printflow-estimated-print-seconds") && apiHandler.LastBody?.Contains("M104 S210", StringComparison.Ordinal) == true, "upload C# transmite perfil, métricas e bytes do G-code fatiado sem aliases legados");
     }
     finally { try { File.Delete(uploadPath); } catch { } }
 }
@@ -1838,7 +1925,7 @@ sealed class UnavailableDpapiTestProtector : IAgentDataProtector
     public byte[] Unprotect(byte[] protectedData) => throw new System.Security.Cryptography.CryptographicException("The data protection operation was unsuccessful because the user profile is not loaded.");
 }
 
-sealed class FakeOrcaProcessRunner(bool writeOutput) : IExternalProcessRunner
+sealed class FakeOrcaProcessRunner(bool writeOutput, string engineVersion = "2.4.2") : IExternalProcessRunner
 {
     public int InvocationCount { get; private set; }
     public bool? LastUseShellExecute { get; private set; }
@@ -1860,7 +1947,7 @@ sealed class FakeOrcaProcessRunner(bool writeOutput) : IExternalProcessRunner
             var input = args[0];
             Directory.CreateDirectory(outputDirectory);
             LastOutputDirectory = outputDirectory;
-            const string generatedGcode = "; generated by OrcaSlicer 2.4.2\n; estimated printing time (normal mode) = 1h 2m 3s\n; total filament used [g] = 5.25\n; filament used [mm] = 1234.5\nG28\n";
+            var generatedGcode = $"; generated by OrcaSlicer {engineVersion}\n; estimated printing time (normal mode) = 1h 2m 3s\n; total filament used [g] = 5.25\n; filament used [mm] = 1234.5\nG28\n";
             var exportIndex = Array.IndexOf(args, "--export-3mf");
             var generatedPath = exportIndex >= 0
                 ? Path.Combine(outputDirectory, Path.GetFileName(args[exportIndex + 1]))

@@ -4,20 +4,31 @@ import { createServer } from 'node:http'
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-const [setupArgument, zipArgument, previousSetupArgument, previousZipArgument] = process.argv.slice(2)
+const [setupArgument, zipArgument, previousSetupArgument, previousZipArgument, previousVersionArgument,
+  signedUpdateReleaseDirectoryArgument] = process.argv.slice(2)
 if (!setupArgument || !zipArgument) {
-  throw new Error('Uso: node test/windows-native-install-e2e.mjs <setup.exe> <agent.zip>')
+  throw new Error('Uso: node test/windows-native-install-e2e.mjs <setup.exe> <agent.zip> [setup-anterior.exe zip-anterior.zip [versao-anterior [release-assinada-dir]]]')
 }
 if (Boolean(previousSetupArgument) !== Boolean(previousZipArgument)) {
   throw new Error('Informe juntos o setup e o ZIP da instalação anterior, ou omita ambos.')
+}
+if (previousVersionArgument && !previousSetupArgument) {
+  throw new Error('Informe uma versão anterior somente junto com o setup e o ZIP anteriores.')
 }
 
 const setup = path.resolve(setupArgument)
 const zip = path.resolve(zipArgument)
 const previousSetup = previousSetupArgument ? path.resolve(previousSetupArgument) : null
 const previousZip = previousZipArgument ? path.resolve(previousZipArgument) : null
+const signedUpdateReleaseDirectory = signedUpdateReleaseDirectoryArgument ? path.resolve(signedUpdateReleaseDirectoryArgument) : null
+if (signedUpdateReleaseDirectory && (!previousSetup || !previousVersionArgument))
+  throw new Error('O E2E assinado exige um pacote-base C# e sua versão explícita.')
+const currentVersion = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version
+const previousVersion = previousVersionArgument || currentVersion
+const previousUsesLegacyExecutableNames = Boolean(previousSetup && !previousVersionArgument)
 let setupForInstall = previousSetup || setup
 let zipForInstall = previousZip || zip
 const localAppData = path.resolve(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'))
@@ -26,6 +37,8 @@ const installRoot = path.join(localAppData, `FilaAgent-E2E-${testId}`)
 const testDataRoot = path.join(localAppData, `FilaAgent-E2E-data-${testId}`)
 const taskName = `FilaAgent_E2E_${testId}`
 const legacyTaskName = `FilaAgent_E2E_Legacy_${testId}`
+const startupRegistryKey = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+const startupValueName = taskName
 let activeTaskName = previousSetup ? legacyTaskName : taskName
 let legacyTaskMigrationPending = Boolean(previousSetup)
 const pairCode = `E2E-${String(process.pid).padStart(6, '0')}`
@@ -159,6 +172,20 @@ const task = (operation, required = true, name = activeTaskName) => {
   return result
 }
 
+const queryStartupEntry = () => spawnSync('reg.exe', ['query', startupRegistryKey, '/v', startupValueName], {
+  encoding: 'utf8',
+  windowsHide: true,
+  timeout: 5_000
+})
+
+const assertStartupEntry = (expectedHost = 'FilaAgent.exe') => {
+  const result = queryStartupEntry()
+  assert.equal(result.status, 0, `isolated startup Run entry is missing: ${result.stderr || result.stdout}`)
+  assert.ok(result.stdout.includes(expectedHost), `startup command does not target ${expectedHost}: ${result.stdout}`)
+  assert.ok(result.stdout.includes('--test-mode'), 'isolated startup command must preserve test mode')
+  assert.ok(result.stdout.includes(testDataRoot), 'isolated startup command must preserve its test data directory')
+}
+
 const healthUrl = () => `http://127.0.0.1:${agentPort}/healthz`
 
 const waitForHealth = async (predicate, timeoutMs = 90_000) => {
@@ -242,6 +269,7 @@ const install = async extra => {
   }
   const result = await running
   result.observations = observations.join('\n\n')
+  if (result.code === 0 && setupForInstall === setup) assertStartupEntry()
   if (result.code !== 0) {
     try {
       result.installerLog = await readFile(path.join(testDataRoot, 'installer.log'), 'utf8')
@@ -329,9 +357,10 @@ try {
   installed = true
   task('/Query')
   const installedManifest = await readFile(path.join(installRoot, 'package.json'), 'utf8')
+  const initialVersion = previousSetup ? previousVersion : currentVersion
   assert.ok(!installedManifest.startsWith('\uFEFF'), 'installed package manifest must be UTF-8 without a BOM')
-  assert.equal(JSON.parse(installedManifest).version, '0.1.27')
-  if (previousSetup) {
+  assert.equal(JSON.parse(installedManifest).version, initialVersion)
+  if (previousUsesLegacyExecutableNames) {
     assert.ok(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), 'previous package must start with its old host filename')
     assert.ok(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), 'previous package must start with its old setup filename')
     assert.equal(await exists(path.join(installRoot, 'host', 'FilaAgent.exe')), false)
@@ -339,11 +368,11 @@ try {
   } else {
     assert.ok(await exists(path.join(installRoot, 'host', 'FilaAgent.exe')), 'Fila Agent host must use the new executable name')
     assert.ok(await exists(path.join(installRoot, 'FilaAgentSetup.exe')), 'uninstaller and updater must use the new setup name')
-    assert.equal((await stat(path.join(installRoot, 'FilaAgentSetup.exe'))).size, (await stat(setup)).size, 'installed uninstaller must match the setup that performed the install')
+    assert.equal((await stat(path.join(installRoot, 'FilaAgentSetup.exe'))).size, (await stat(setupForInstall)).size, 'installed uninstaller must match the setup that performed the install')
     assert.equal(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), false, 'new package must not duplicate the previous host executable')
     assert.equal(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), false, 'new package must not duplicate the previous setup executable')
   }
-  await waitForHealth(health => health.ok && health.version === '0.1.27' && health.activePrintJobs === 0)
+  await waitForHealth(health => health.ok && health.version === initialVersion && health.activePrintJobs === 0)
 
   const queuedPairing = await fetch(`http://127.0.0.1:${agentPort}/pair`, {
     method: 'POST',
@@ -352,14 +381,41 @@ try {
   })
   assert.equal(queuedPairing.status, 202)
   const pairedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.activePrintJobs === 0)
-  assert.equal(pairedHealth.version, '0.1.27')
-  assert.ok(pairCalls.some(call => call.code === pairCode && call.version === '0.1.27'))
+  assert.equal(pairedHealth.version, initialVersion)
+  assert.ok(pairCalls.some(call => call.code === pairCode && call.version === initialVersion))
   await waitForHealth(() => heartbeatCount > 0)
   const agentCredentialPath = path.join(testDataRoot, 'agent.json')
   const storedAgentCredentialsText = await readFile(agentCredentialPath, 'utf8')
   const storedAgentCredentials = JSON.parse(storedAgentCredentialsText)
   assert.equal(storedAgentCredentials.protection, 'windows-dpapi', 'installed host must protect paired credentials with Windows DPAPI')
   assert.ok(!storedAgentCredentialsText.includes('e2e-only-secret'), 'paired secret must not be readable from the credential file')
+
+  let installedVersion = initialVersion
+  let signedUpdateResult = null
+  if (signedUpdateReleaseDirectory) {
+    const signedUpdateHarness = fileURLToPath(new URL('./windows-signed-update-e2e.mjs', import.meta.url))
+    const signedUpdate = await run(process.execPath, [
+      signedUpdateHarness,
+      setup,
+      signedUpdateReleaseDirectory,
+      installRoot,
+      testDataRoot,
+      `http://127.0.0.1:${apiPort}`,
+      String(agentPort),
+      activeTaskName,
+      initialVersion
+    ], 600_000)
+    assert.equal(signedUpdate.code, 0,
+      `signed update E2E failed (${signedUpdate.code}): ${signedUpdate.stderr || signedUpdate.stdout}`)
+    signedUpdateResult = JSON.parse(signedUpdate.stdout.slice(signedUpdate.stdout.indexOf('{')))
+    assert.equal(signedUpdateResult.status, 'passed')
+    assert.equal(signedUpdateResult.previousVersion, initialVersion)
+    installedVersion = signedUpdateResult.version
+    setupForInstall = setup
+    zipForInstall = zip
+    await waitForHealth(health => health.paired && health.cloudConnected && health.version === installedVersion)
+  }
+  spawnSync('reg.exe', ['delete', startupRegistryKey, '/v', startupValueName, '/f'], { encoding: 'utf8', windowsHide: true, timeout: 5_000 })
 
   if (previousSetup) {
     setupForInstall = setup
@@ -368,7 +424,7 @@ try {
     assert.equal(failedTaskMigration.code, 1, `injected task migration unexpectedly succeeded: ${failedTaskMigration.installerLog || failedTaskMigration.stderr}`)
     assert.notEqual(task('/Query', false, taskName).status, 0, 'failed upgrade must not leave the new startup task behind')
     task('/Query', true, legacyTaskName)
-    await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
+    await waitForHealth(health => health.paired && health.cloudConnected && health.version === installedVersion)
     const renamedUpgrade = await install()
     assert.equal(renamedUpgrade.code, 0, `update from the previous C# package failed (${renamedUpgrade.code}): ${renamedUpgrade.installerLog || renamedUpgrade.stderr}\n${renamedUpgrade.observations || ''}`)
     activeTaskName = taskName
@@ -379,7 +435,8 @@ try {
     assert.equal(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), false, 'successful update must remove the old host binary')
     assert.equal(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), false, 'successful update must remove the old setup binary')
     task('/Query')
-    await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
+    await waitForHealth(health => health.paired && health.cloudConnected && health.version === currentVersion)
+    installedVersion = currentVersion
   }
 
   verifyDelayMs = 15_000
@@ -393,7 +450,7 @@ try {
     '--data-dir', testDataRoot,
     '--test-mode'
   ], { windowsHide: true, stdio: 'ignore' })
-  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === currentVersion)
   const delayedCloudUpdate = await install()
   assert.equal(delayedCloudUpdate.code, 0, `update waited for Cloud reconnect (${delayedCloudUpdate.code}): ${delayedCloudUpdate.installerLog || delayedCloudUpdate.stderr}\n${delayedCloudUpdate.observations || ''}`)
   assert.ok(await waitForChildExit(legacyHostProcess), 'installer must stop the old host executable before replacing it')
@@ -402,7 +459,7 @@ try {
   assert.equal(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), false, 'legacy host must be replaced after a successful update')
   assert.equal(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), false, 'legacy setup must be replaced after a successful update')
   task('/Query')
-  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27', 90_000)
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === currentVersion, 90_000)
   verifyDelayMs = 0
 
   const sentinel = path.join(installRoot, 'rollback-sentinel.txt')
@@ -415,20 +472,21 @@ try {
   assert.equal(await readFile(sentinel, 'utf8'), 'prior isolated installation must survive a failed upgrade\n')
   assert.ok(await exists(path.join(installRoot, 'host', 'PrintFlowAgentHost.exe')), 'rollback must restore the previously installed host filename')
   assert.ok(await exists(path.join(installRoot, 'PrintFlowAgentSetup.exe')), 'rollback must restore the previously installed setup filename')
+  assertStartupEntry('PrintFlowAgentHost.exe')
   task('/Query')
-  const rolledBackHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
+  const rolledBackHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === currentVersion)
   assert.equal(rolledBackHealth.activePrintJobs, 0)
 
   task('/End')
   await waitUntilUnavailable()
   task('/Run')
   const heartbeatsBeforeRestart = heartbeatCount
-  const restartedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
+  const restartedHealth = await waitForHealth(health => health.paired && health.cloudConnected && health.version === currentVersion)
   assert.equal(restartedHealth.activePrintJobs, 0)
   await waitForHealth(() => heartbeatCount > heartbeatsBeforeRestart)
   task('/Delete')
   assert.notEqual(task('/Query', false).status, 0, 'startup task must be removed after it launches the agent')
-  await waitForHealth(health => health.paired && health.cloudConnected && health.version === '0.1.27')
+  await waitForHealth(health => health.paired && health.cloudConnected && health.version === currentVersion)
   const reloadedAgentCredentialsText = await readFile(agentCredentialPath, 'utf8')
   assert.ok(!reloadedAgentCredentialsText.includes('e2e-only-secret'), 'restarted host must keep paired secret protected at rest')
 
@@ -445,11 +503,13 @@ try {
   while (Date.now() < deleteDeadline && await exists(installRoot)) await delay(250)
   assert.equal(await exists(installRoot), false, 'test install directory remains after uninstall')
   assert.notEqual(task('/Query', false).status, 0, 'isolated scheduled task remains after uninstall')
+  assert.notEqual(queryStartupEntry().status, 0, 'isolated startup Run entry remains after uninstall')
   installed = false
 
   process.stdout.write(JSON.stringify({
     status: 'passed',
-    version: '0.1.27',
+    version: currentVersion,
+    signedUpdate: signedUpdateResult,
     installRoot,
     taskName,
     agentPort,
@@ -462,6 +522,7 @@ try {
     heartbeatCount,
     rollbackMarkerRestored: true,
     runningAgentSurvivesStartupTaskRemoval: true,
+    startupRunEntryCreatedAndRemoved: true,
     taskRemoved: true,
     installRemoved: true
   }, null, 2) + '\n')

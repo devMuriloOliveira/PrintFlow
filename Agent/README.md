@@ -98,9 +98,9 @@ Adapter com base para conectar, ler status, pausar, retomar, cancelar, enviar ar
 
 ## Armazenamento Local
 
-No Windows, o diretório padrão é `%APPDATA%\PrintFlow Agent`. Para um ambiente de desenvolvimento isolado, defina `PRINTFLOW_AGENT_DATA_DIR` **antes de iniciar** o processo. O Agent não usa, por padrão, uma pasta `data` dentro do código-fonte.
+Em instalações novas, o diretório padrão é `%APPDATA%\Fila Agent`. Se `%APPDATA%\PrintFlow Agent` já existir, o runtime continua usando esse caminho legado para preservar pareamento, credenciais, banco local, cache e histórico durante upgrades e rollback. `FILA_AGENT_DATA_DIR` tem precedência; `PRINTFLOW_AGENT_DATA_DIR` continua aceito como alias. O Agent não usa, por padrão, uma pasta `data` dentro do código-fonte.
 
-O nome `PrintFlow Agent` nesses diretórios e nas variáveis antigas é mantido para que atualizações preservem pareamento e credenciais das instalações anteriores. O nome exibido do aplicativo é `Fila Agent`.
+O instalador não move nem duplica automaticamente os dados legados. A pasta `Fila Agent` é usada quando não existe uma pasta legada; se ambas existirem, a legada tem precedência para evitar iniciar com credenciais ou histórico vazios.
 
 Arquivos locais principais (todos sob `PRINTFLOW_AGENT_DATA_DIR`, ou no diretório gerenciado do Agent):
 
@@ -128,8 +128,9 @@ Para gerar um pacote JSON seguro com o snapshot local, sem logs brutos nem
 credenciais, execute `npm.cmd run support-bundle -- "C:\\Temp\\fila-agent-support.json"`.
 O comando recusa sobrescrever um arquivo existente.
 
-O conteúdo de `%APPDATA%\PrintFlow Agent` inclui credenciais e histórico
-operacional. Não o inclua em Git, anexos de suporte ou capturas de tela. A
+As pastas de dados ativa (`%APPDATA%\Fila Agent` em instalação nova ou a
+legada `%APPDATA%\PrintFlow Agent`) incluem credenciais e histórico operacional.
+Não as inclua em Git, anexos de suporte ou capturas de tela. A
 proteção DPAPI `CurrentUser` vincula os envelopes à conta Windows; copiar os
 arquivos para outro usuário não é um procedimento de migração suportado.
 
@@ -177,7 +178,7 @@ Use uma API local ou de homologação. Para não misturar pareamento e credencia
 com uma instalação existente, escolha um diretório de dados de teste próprio:
 
 ```bat
-set FILA_AGENT_DATA_DIR=%LOCALAPPDATA%\PrintFlowAgent-Teste
+set FILA_AGENT_DATA_DIR=%LOCALAPPDATA%\FilaAgent-Teste
 npm.cmd run start
 ```
 
@@ -220,7 +221,7 @@ permitir instalar aplicativos Store.
 Se o fatiamento falhar, o setup interrompe a instalação antes de parar o Agent
 ou substituir arquivos existentes e mostra a causa na mensagem de erro. Quando
 executado em modo silencioso ou de teste, grava detalhes em
-`%APPDATA%\PrintFlow Agent\logs\installer.log` ou no diretório temporário do
+`%LOCALAPPDATA%\FilaAgentSetup\logs\installer.log` ou no diretório temporário do
 teste; não registra credenciais nem inicia impressão.
 Para repetir somente esse teste no CMD, execute
 `dotnet run --project windows-runtime-live-smoke\FilaAgent.OrcaStore.LiveSmoke.csproj --configuration Release`.
@@ -327,7 +328,7 @@ divergir do `.cer` publicado. Nunca salve o PFX, a senha ou seu Base64 no Git.
 
 Este canal continua sendo self-signed e adequado somente ao Early Access com consentimento explicito. Para distribuicao publica sem instalacao manual de certificado, use Microsoft Store/MSIX ou Code Signing confiavel.
 
-Depois de extraido, o instalador copia o Agent para `%LOCALAPPDATA%\PrintFlowAgent`, registra a inicializacao no login, cria atalhos e registra o protocolo local.
+Depois de extraído, uma instalação nova copia o Agent para `%LOCALAPPDATA%\FilaAgent`, registra a inicialização no login, cria atalhos e registra o protocolo local. Uma instalação existente em `%LOCALAPPDATA%\PrintFlowAgent` é atualizada e desinstalada no próprio caminho para preservar tarefa, atalhos e rollback; o comando de desinstalação detecta ambos os caminhos.
 
 O instalador informa a versao atual e a versao do pacote, o destino e a
 arquitetura. O executavel autocontido inclui o runtime C# e o ZIP do Agent.
@@ -336,8 +337,8 @@ as credenciais protegidas e o historico operacional local.
 
 O desinstalador preserva esses dados por padrao para permitir reinstalacao sem
 novo pareamento. A remocao completa e opcional, exige confirmacao explicita e
-apaga o conteudo de `%APPDATA%\PrintFlow Agent`, incluindo pareamento,
-credenciais de impressoras, cache, historico e logs.
+apaga as pastas de dados Fila Agent e PrintFlow Agent conhecidas, incluindo
+pareamento, credenciais de impressoras, cache, historico e logs.
 
 ## Variaveis de Ambiente
 

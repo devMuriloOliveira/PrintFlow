@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using FilaAgent.Runtime;
 
 namespace FilaAgentHost;
 
@@ -16,7 +17,7 @@ internal static partial class NativeProtocol
         {
             var code = TryParsePairingCode(protocolUrl);
             if (code is null) return true;
-            var dataDirectory = ReadArgument(args, "--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PrintFlow Agent");
+            var dataDirectory = ReadArgument(args, "--data-dir") ?? AgentLocalPaths.ResolveDataDirectory();
             SavePendingPairingCode(code, dataDirectory);
             if (!args.Contains("--no-start", StringComparer.OrdinalIgnoreCase)) StartScheduledAgent(ReadArgument(args, "--task-name") ?? "FilaAgent");
         }

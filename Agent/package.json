@@ -1,6 +1,6 @@
 {
   "name": "fila-agent",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "private": true,
   "type": "module",
   "engines": {
@@ -19,7 +19,7 @@
     "build:windows": "dotnet run --project windows-release-tool/FilaAgent.ReleaseTool.csproj --configuration Release -- package",
     "build:windows:dev-signed": "dotnet run --project windows-release-tool/FilaAgent.ReleaseTool.csproj --configuration Release -- package --sign-dev --require-persisted-certificate",
     "install:agent": "npm run build:windows && dist\\Fila-Agent-Setup.exe",
-    "uninstall:agent": "\"%LOCALAPPDATA%\\PrintFlowAgent\\FilaAgentSetup.exe\" --uninstall"
+    "uninstall:agent": "if exist \"%LOCALAPPDATA%\\FilaAgent\\FilaAgentSetup.exe\" (\"%LOCALAPPDATA%\\FilaAgent\\FilaAgentSetup.exe\" --uninstall) else (\"%LOCALAPPDATA%\\PrintFlowAgent\\FilaAgentSetup.exe\" --uninstall)"
   },
   "dependencies": {
     "axios": "^1.0.0",

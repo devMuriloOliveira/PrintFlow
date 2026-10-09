@@ -68,10 +68,9 @@ public sealed record AgentConfiguration(
 
         var appDataRoot = appData ?? System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData);
         var localAppDataRoot = localAppData ?? System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
-        var dataDirectory = Get("FILA_AGENT_DATA_DIR", "PRINTFLOW_AGENT_DATA_DIR",
-            Path.Combine(appDataRoot, "PrintFlow Agent"));
+        var dataDirectory = AgentLocalPaths.ResolveDataDirectory(values, appDataRoot);
         var logDirectory = Get("FILA_AGENT_LOG_DIR", "PRINTFLOW_AGENT_LOG_DIR",
-            Path.Combine(localAppDataRoot, "PrintFlowAgentSetup", "logs"));
+            Path.Combine(localAppDataRoot, "FilaAgentSetup", "logs"));
         var portText = Get("FILA_AGENT_LOCAL_PORT", "PRINTFLOW_AGENT_LOCAL_PORT", "17873");
         if (!int.TryParse(portText, out var localPort) || localPort is < 0 or > 65535) localPort = 17873;
         var healthSnapshotInterval = ReadInterval(Get("FILA_AGENT_HEALTH_SNAPSHOT_MS", "PRINTFLOW_AGENT_HEALTH_SNAPSHOT_MS", "60000"), 60_000, 60_000);
@@ -79,7 +78,7 @@ public sealed record AgentConfiguration(
         var ssePollInterval = ReadInterval(Get("FILA_AGENT_SSE_POLL_MS", "PRINTFLOW_AGENT_SSE_POLL_MS", "45000"), 45_000, 30_000);
 
         return new AgentConfiguration(environment, apiUrl, wsUrl, origins, localPort,
-            Path.GetFullPath(dataDirectory), Path.GetFullPath(logDirectory), version ?? "0.1.27")
+            Path.GetFullPath(dataDirectory), Path.GetFullPath(logDirectory), version ?? "0.1.28")
         {
             HealthSnapshotInterval = healthSnapshotInterval,
             WebSocketCommandPollInterval = webSocketPollInterval,

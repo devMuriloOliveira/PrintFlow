@@ -27,7 +27,14 @@ public sealed class ProductionJobSlicingService(
 
         var executablePath = OrcaSlicerService.ResolveConfiguredExecutable(_environment);
         if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            var unsupportedVersion = OrcaSlicerService.FindUnvalidatedStorePackageVersion();
+            if (unsupportedVersion is not null)
+                throw new FileNotFoundException(
+                    $"OrcaSlicer Store {unsupportedVersion} está instalado, mas ainda não foi validado com esta versão do Fila Agent. " +
+                    "A geração de G-code foi interrompida; atualize o Fila Agent quando essa versão do Orca tiver sido validada.");
             throw new FileNotFoundException("OrcaSlicer Store validado não encontrado. Instale-o pelo canal oficial ou informe FILA_AGENT_ORCA_SLICER_PATH.");
+        }
 
         var source = await fileCache.EnsureCachedAsync(credentials, job.PrintJobId, job.PrintFile, cancellationToken);
         var pinned = false;
