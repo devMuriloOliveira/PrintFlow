@@ -133,6 +133,17 @@ internal static class Program
             await ExportVerifiedSignerCertificateAsync(setupExecutable, certificatePath!);
         }
         File.Copy(setupExecutable, installerPath, overwrite: true);
+        if (options.SignDev)
+        {
+            using var sourceStream = File.OpenRead(setupExecutable);
+            using var copiedStream = File.OpenRead(installerPath);
+            var sourceHash = await SHA256.HashDataAsync(sourceStream);
+            var copiedHash = await SHA256.HashDataAsync(copiedStream);
+            if (!sourceHash.SequenceEqual(copiedHash))
+                throw new CryptographicException("A copia do instalador diverge do executavel assinado.");
+            using var publicCertificate = new X509Certificate2(await File.ReadAllBytesAsync(certificatePath!));
+            await VerifySignedFileAsync(installerPath, publicCertificate, agentRoot);
+        }
 
         if (options.SignDev && !File.Exists(certificatePath)) throw new InvalidDataException("Certificado publico do instalador nao foi exportado.");
         Console.WriteLine($"Pacote Windows: {zipPath}");
@@ -450,12 +461,22 @@ internal static class Program
     private static async Task VerifySignedFileAsync(string filePath, X509Certificate2 expectedCertificate, string workingDirectory)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException("Arquivo assinado ausente.", filePath);
-        using var rawSigner = X509Certificate.CreateFromSignedFile(filePath);
-        using var signer = new X509Certificate2(rawSigner);
-        var expectedSha256 = Convert.ToHexString(SHA256.HashData(expectedCertificate.RawData));
-        var signerSha256 = Convert.ToHexString(SHA256.HashData(signer.RawData));
-        if (!string.Equals(expectedSha256, signerSha256, StringComparison.OrdinalIgnoreCase))
-            throw new CryptographicException($"Assinante diverge do certificado publicado: {Path.GetFileName(filePath)}.");
+        X509Certificate rawSigner;
+        try { rawSigner = X509Certificate.CreateFromSignedFile(filePath); }
+        catch (CryptographicException error) { throw new CryptographicException($"Nao foi possivel ler o assinante Authenticode de {Path.GetFileName(filePath)}.", error); }
+        using (rawSigner)
+        {
+        X509Certificate2 signer;
+        try { signer = new X509Certificate2(rawSigner); }
+        catch (CryptographicException error) { throw new CryptographicException($"Nao foi possivel carregar o certificado do assinante de {Path.GetFileName(filePath)}.", error); }
+        using (signer)
+        {
+            var expectedSha256 = Convert.ToHexString(SHA256.HashData(expectedCertificate.RawData));
+            var signerSha256 = Convert.ToHexString(SHA256.HashData(signer.RawData));
+            if (!string.Equals(expectedSha256, signerSha256, StringComparison.OrdinalIgnoreCase))
+                throw new CryptographicException($"Assinante diverge do certificado publicado: {Path.GetFileName(filePath)}.");
+        }
+        }
 
         var verify = await RunAsync(FindSignTool(), ["verify", "/pa", "/v", filePath], workingDirectory, TimeSpan.FromMinutes(2));
         var details = verify.Details;
