@@ -77,6 +77,9 @@ const metadataCommandAt = packageAndMetadataStep.indexOf('FilaAgent.ReleaseTool.
 if (packageCommandAt < 0 || certificateExportAt < packageCommandAt || certificateGuardAt < certificateExportAt || metadataCommandAt < certificateGuardAt) {
   missing.push('pacote assinado deve reexportar/verificar o certificado antes de preparar metadados no mesmo passo')
 }
+if (packageAndMetadataStep.includes('%FILA_AGENT_API_URL%')) {
+  missing.push('URL da API deve ser lida da variavel de ambiente sem expansao no comando CMD')
+}
 if (workflow.includes('dotnet run --project') || !workflow.includes('dotnet build Agent\\windows-release-tool\\FilaAgent.ReleaseTool.csproj')) {
   missing.push('release deve compilar uma vez e executar o DLL C# com argumentos diretos')
 }

@@ -60,7 +60,7 @@ jobs:
           FILA_AGENT_DEV_CERT_PFX_BASE64: ${{ secrets.FILA_AGENT_DEV_CERT_PFX_BASE64 || secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64 }}
           FILA_AGENT_DEV_CERT_PASSWORD: ${{ secrets.FILA_AGENT_DEV_CERT_PASSWORD || secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
         run: |
-          dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate || exit /b 1
+          dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll package --output-dir dist --sign-dev --require-persisted-certificate || exit /b 1
           dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll export-dev-certificate --output dist\Fila-Agent-Dev-Certificate.cer || exit /b 1
           if not exist dist\Fila-Agent-Dev-Certificate.cer (
             echo Certificado publico ausente imediatamente apos o empacotamento assinado.
