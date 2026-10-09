@@ -169,7 +169,7 @@ test('release tool constrói, valida, assina e publica os artefatos C# sem Power
   const workflow = await fs.readFile(path.join(process.cwd(), '..', '.github', 'workflows', 'agent-release.yml'), 'utf8')
   const ciWorkflow = await fs.readFile(path.join(process.cwd(), '..', '.github', 'workflows', 'ci.yml'), 'utf8')
 
-  for (const fragment of ['--self-contained', 'FilaAgentPackagePath=', '--validate-embedded-package', 'ValidateReleaseFiles', 'ExpectedCertificateSha256', 'SHA256SUMS.txt', 'RELEASE-METADATA.json', '"release", "create"']) {
+  for (const fragment of ['--self-contained', 'FilaAgentPackagePath=', '--validate-embedded-package', 'ValidateReleaseFiles', 'ExpectedCertificateSha256', 'ExportDevCertificateAsync', 'EphemeralKeySet', 'SHA256SUMS.txt', 'RELEASE-METADATA.json', '"release", "create"']) {
     assert.ok(tool.includes(fragment), `ReleaseTool sem ${fragment}`)
   }
   assert.doesNotMatch(tool, /powershell|iexpress/i)

@@ -15,11 +15,14 @@ internal static class Program
     {
         try
         {
-            if (args.Length == 0) throw new ArgumentException("Comando obrigatorio: package, validate-release, prepare-release ou publish-release.");
+            if (args.Length == 0) throw new ArgumentException("Comando obrigatorio: package, export-dev-certificate, validate-release, prepare-release ou publish-release.");
             switch (args[0].ToLowerInvariant())
             {
                 case "package":
                     await BuildPackageAsync(ParseOptions(args.Skip(1).ToArray()));
+                    return 0;
+                case "export-dev-certificate":
+                    await ExportDevCertificateAsync(args.Skip(1).ToArray());
                     return 0;
                 case "validate-release":
                     await ValidateReleaseAsync(args.Skip(1).ToArray());
@@ -146,6 +149,37 @@ internal static class Program
             throw new CryptographicException("Certificado extraido do instalador diverge da identidade fixada pelo atualizador.");
         Directory.CreateDirectory(Path.GetDirectoryName(certificatePath)!);
         await File.WriteAllBytesAsync(certificatePath, signer.Export(X509ContentType.Cert));
+    }
+
+    private static async Task ExportDevCertificateAsync(string[] args)
+    {
+        var agentRoot = FindAgentRoot();
+        var pfxPath = ResolveInside(agentRoot, ReadOption(args, "--certificate-pfx") ?? Path.Combine("certs", "PrintFlow-Agent-Dev-CodeSigning.pfx"));
+        var outputPath = ResolveInside(agentRoot, ReadOption(args, "--output") ?? Path.Combine("dist", "Fila-Agent-Dev-Certificate.cer"));
+        var password = Environment.GetEnvironmentVariable("FILA_AGENT_DEV_CERT_PASSWORD") ??
+            Environment.GetEnvironmentVariable("PRINTFLOW_AGENT_DEV_CERT_PASSWORD");
+        if (string.IsNullOrEmpty(password)) throw new InvalidOperationException("Defina FILA_AGENT_DEV_CERT_PASSWORD para abrir o PFX persistido.");
+
+        byte[] pfxBytes;
+        if (File.Exists(pfxPath)) pfxBytes = await File.ReadAllBytesAsync(pfxPath);
+        else
+        {
+            var encoded = Environment.GetEnvironmentVariable("FILA_AGENT_DEV_CERT_PFX_BASE64") ??
+                Environment.GetEnvironmentVariable("PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64");
+            if (string.IsNullOrWhiteSpace(encoded)) throw new FileNotFoundException("PFX persistido obrigatorio para exportar o certificado publico.", pfxPath);
+            try { pfxBytes = Convert.FromBase64String(encoded); }
+            catch (FormatException error) { throw new CryptographicException("FILA_AGENT_DEV_CERT_PFX_BASE64 nao contem um PFX Base64 valido.", error); }
+        }
+
+        using var certificate = new X509Certificate2(pfxBytes, password,
+            X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+        ValidateSigningCertificate(certificate);
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        await File.WriteAllBytesAsync(outputPath, certificate.Export(X509ContentType.Cert));
+        using var exported = new X509Certificate2(await File.ReadAllBytesAsync(outputPath));
+        if (!string.Equals(Convert.ToHexString(SHA256.HashData(exported.RawData)), ExpectedCertificateSha256, StringComparison.OrdinalIgnoreCase))
+            throw new CryptographicException("Certificado publico exportado diverge da identidade fixada pelo atualizador.");
+        Console.WriteLine($"Certificado publico Early Access exportado: {outputPath}");
     }
 
     private static async Task VerifyPackagedHostMatchesSignedBuildAsync(string zipPath, string signedHostPath)
@@ -485,15 +519,7 @@ internal static class Program
 
         using var certificate = new X509Certificate2(absolutePfx, password,
             X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable);
-        if (!certificate.HasPrivateKey || certificate.NotAfter.ToUniversalTime() <= DateTime.UtcNow)
-            throw new CryptographicException("O PFX nao possui chave privada de assinatura valida.");
-        var sha256 = Convert.ToHexString(SHA256.HashData(certificate.RawData));
-        if (!string.Equals(sha256, ExpectedCertificateSha256, StringComparison.OrdinalIgnoreCase))
-            throw new CryptographicException("O certificado PFX nao corresponde a identidade fixada pelo atualizador.");
-        var canCodeSign = certificate.Extensions.OfType<X509EnhancedKeyUsageExtension>()
-            .SelectMany(extension => extension.EnhancedKeyUsages.Cast<System.Security.Cryptography.Oid>())
-            .Any(oid => oid.Value == "1.3.6.1.5.5.7.3.3");
-        if (!canCodeSign) throw new CryptographicException("Certificado PFX sem uso de assinatura de codigo.");
+        ValidateSigningCertificate(certificate);
 
         Directory.CreateDirectory(Path.GetDirectoryName(certificateOutput)!);
         await File.WriteAllBytesAsync(certificateOutput, certificate.Export(X509ContentType.Cert));
@@ -523,6 +549,19 @@ internal static class Program
         {
             if (importedForBuild) store.Remove(signingCertificate);
         }
+    }
+
+    private static void ValidateSigningCertificate(X509Certificate2 certificate)
+    {
+        if (!certificate.HasPrivateKey || certificate.NotAfter.ToUniversalTime() <= DateTime.UtcNow)
+            throw new CryptographicException("O PFX nao possui chave privada de assinatura valida.");
+        var sha256 = Convert.ToHexString(SHA256.HashData(certificate.RawData));
+        if (!string.Equals(sha256, ExpectedCertificateSha256, StringComparison.OrdinalIgnoreCase))
+            throw new CryptographicException("O certificado PFX nao corresponde a identidade fixada pelo atualizador.");
+        var canCodeSign = certificate.Extensions.OfType<X509EnhancedKeyUsageExtension>()
+            .SelectMany(extension => extension.EnhancedKeyUsages.Cast<System.Security.Cryptography.Oid>())
+            .Any(oid => oid.Value == "1.3.6.1.5.5.7.3.3");
+        if (!canCodeSign) throw new CryptographicException("Certificado PFX sem uso de assinatura de codigo.");
     }
 
     private static string FindSignTool()

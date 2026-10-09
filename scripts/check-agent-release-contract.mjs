@@ -15,6 +15,7 @@ const requiredWorkflow = [
   '--sign-dev',
   '--require-persisted-certificate',
   '--output-dir dist',
+  'export-dev-certificate',
   'working-directory: Agent',
   'prepare-release',
   'publish-release',
@@ -29,6 +30,7 @@ const requiredReleaseTool = [
   'SHA256SUMS.txt',
   'RELEASE-METADATA.json',
   'certificateSha256',
+  'ExportDevCertificateAsync',
   'ExportVerifiedSignerCertificateAsync',
   'VerifyPackagedHostMatchesSignedBuildAsync',
   'validate-agent-release-artifacts.mjs',
@@ -69,10 +71,11 @@ const packageAndMetadataStart = workflow.indexOf('      - name: Build package an
 const packageAndMetadataEnd = packageAndMetadataStart < 0 ? -1 : workflow.indexOf('\n      - name:', packageAndMetadataStart + 1)
 const packageAndMetadataStep = packageAndMetadataStart < 0 ? '' : workflow.slice(packageAndMetadataStart, packageAndMetadataEnd < 0 ? undefined : packageAndMetadataEnd)
 const packageCommandAt = packageAndMetadataStep.indexOf('-- package')
+const certificateExportAt = packageAndMetadataStep.indexOf('-- export-dev-certificate')
 const certificateGuardAt = packageAndMetadataStep.indexOf('dist\\Fila-Agent-Dev-Certificate.cer')
 const metadataCommandAt = packageAndMetadataStep.indexOf('-- prepare-release')
-if (packageCommandAt < 0 || certificateGuardAt < packageCommandAt || metadataCommandAt < certificateGuardAt) {
-  missing.push('pacote assinado e metadados devem ser preparados no mesmo passo, com verificacao do certificado entre ambos')
+if (packageCommandAt < 0 || certificateExportAt < packageCommandAt || certificateGuardAt < certificateExportAt || metadataCommandAt < certificateGuardAt) {
+  missing.push('pacote assinado deve reexportar/verificar o certificado antes de preparar metadados no mesmo passo')
 }
 if (missing.length) {
   console.error(`Agent release contract invalido; ausentes: ${missing.join(', ')}`)

@@ -59,6 +59,7 @@ jobs:
           FILA_AGENT_DEV_CERT_PASSWORD: ${{ secrets.FILA_AGENT_DEV_CERT_PASSWORD || secrets.PRINTFLOW_AGENT_DEV_CERT_PASSWORD }}
         run: |
           dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- package --api-url "%FILA_AGENT_API_URL%" --output-dir dist --sign-dev --require-persisted-certificate || exit /b 1
+          dotnet run --project windows-release-tool\FilaAgent.ReleaseTool.csproj --configuration Release -- export-dev-certificate --output dist\Fila-Agent-Dev-Certificate.cer || exit /b 1
           if not exist dist\Fila-Agent-Dev-Certificate.cer (
             echo Certificado publico ausente imediatamente apos o empacotamento assinado.
             exit /b 1
