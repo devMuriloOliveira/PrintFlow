@@ -47,6 +47,10 @@ internal static class Program
     private static async Task BuildPackageAsync(BuildOptions options)
     {
         var agentRoot = FindAgentRoot();
+        Console.WriteLine($"Assinatura do pacote: sign-dev={options.SignDev}, require-persisted-certificate={options.RequirePersistedCertificate}.");
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FILA_AGENT_RELEASE_TAG")) &&
+            (!options.SignDev || !options.RequirePersistedCertificate))
+            throw new InvalidOperationException("Release do Agent exige assinatura e certificado persistido.");
         var package = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(agentRoot, "package.json")));
         var version = package.RootElement.GetProperty("version").GetString() ?? "";
         if (!System.Text.RegularExpressions.Regex.IsMatch(version, @"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$"))
