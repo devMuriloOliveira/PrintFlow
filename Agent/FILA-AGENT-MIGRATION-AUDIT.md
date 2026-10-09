@@ -3,7 +3,7 @@
 - **Última revisão:** 2026-10-09
 - **Base de código:** `main` em `cbb872a`
 - **Versão do Agent:** `0.1.26` (código publicado; pacote de download ainda pendente)
-- **Estado do checkout:** `main` sincronizada com `origin/main`; atualização deste registro em andamento.
+- **Estado do checkout:** `main` sincronizada com `origin/main` no commit `5117b9a`; registro atualizado.
 - **Publicação:** autorizada diretamente em `main`; a tag `agent-v0.1.26` existe, mas o run #35 falhou antes de publicar os instaladores.
 
 Este arquivo reúne o estado técnico da migração e os registros de validação feitos ao longo do trabalho. As seções iniciais descrevem o estado mais recente; os registros datados ao final preservam o que foi verificado em cada etapa. Para uma decisão atual, use o resumo consolidado e confira a data do registro correspondente.
