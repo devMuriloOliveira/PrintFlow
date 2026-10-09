@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -47,7 +48,7 @@ public interface IBambuMqttClientFactory
 
 public interface IBambuFtpsUploader
 {
-    Task UploadAsync(string ip, int port, string accessCode, string localPath, string remotePath, CancellationToken cancellationToken = default);
+    Task UploadAsync(string ip, string serial, int port, string accessCode, string localPath, string remotePath, CancellationToken cancellationToken = default);
 }
 
 public sealed record BambuPrintFile(string LocalPath, string? Name = null, string? Format = null);
@@ -120,17 +121,19 @@ public sealed class BambuPrinterConnection
     }
 }
 
-public sealed class MqttNetBambuClientFactory : IBambuMqttClientFactory
+public sealed class MqttNetBambuClientFactory(Func<X509Certificate?, X509Chain?, string, bool>? validateCertificate = null) : IBambuMqttClientFactory
 {
-    public IBambuMqttClient Create() => new MqttNetBambuClient();
+    public IBambuMqttClient Create() => new MqttNetBambuClient(validateCertificate);
 }
 
 internal sealed class MqttNetBambuClient : IBambuMqttClient
 {
     private readonly IMqttClient _client = new MqttClientFactory().CreateMqttClient();
+    private readonly Func<X509Certificate?, X509Chain?, string, bool> _validateCertificate;
 
-    public MqttNetBambuClient()
+    public MqttNetBambuClient(Func<X509Certificate?, X509Chain?, string, bool>? validateCertificate = null)
     {
+        _validateCertificate = validateCertificate ?? BambuCertificateValidator.Validate;
         _client.ApplicationMessageReceivedAsync += args =>
         {
             var message = args.ApplicationMessage;
@@ -158,9 +161,11 @@ internal sealed class MqttNetBambuClient : IBambuMqttClient
             .WithKeepAlivePeriod(options.KeepAlive)
             .WithCleanSession(true)
             .WithTimeout(options.ConnectTimeout)
-            // Bambu LAN firmware presents a self-signed certificate. This callback belongs only to this
-            // MQTT client connected to the configured printer IP; no process-wide TLS validation is changed.
-            .WithTlsOptions(tls => tls.WithCertificateValidationHandler(_ => true))
+            // MQTT uses the serial as the TLS target name; validation checks the Bambu CA bundle and certificate CN.
+            .WithTlsOptions(tls => tls
+                .WithTargetHost(options.Serial)
+                .WithCertificateValidationHandler(validation =>
+                    _validateCertificate(validation.Certificate, validation.Chain, options.Serial)))
             .Build();
         await _client.ConnectAsync(clientOptions, cancellationToken);
     }
@@ -205,12 +210,14 @@ internal sealed class MqttNetBambuClient : IBambuMqttClient
     };
 }
 
-public sealed class FluentFtpBambuUploader : IBambuFtpsUploader
+public sealed class FluentFtpBambuUploader(Func<X509Certificate?, X509Chain?, string, bool>? validateCertificate = null) : IBambuFtpsUploader
 {
     private static readonly TimeSpan TransferTimeout = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(20);
 
-    public async Task UploadAsync(string ip, int port, string accessCode, string localPath, string remotePath, CancellationToken cancellationToken = default)
+    private readonly Func<X509Certificate?, X509Chain?, string, bool> _validateCertificate = validateCertificate ?? BambuCertificateValidator.Validate;
+
+    public async Task UploadAsync(string ip, string serial, int port, string accessCode, string localPath, string remotePath, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(localPath)) throw new FileNotFoundException("Arquivo 3MF local da Bambu não encontrado.", localPath);
 
@@ -232,8 +239,9 @@ public sealed class FluentFtpBambuUploader : IBambuFtpsUploader
         };
 
         await using var client = new AsyncFtpClient(ip, "bblp", accessCode, port, config);
-        // As with the MQTT callback, this exception is limited to one FTPS client and the local Bambu endpoint.
-        client.ValidateCertificate += (_, validation) => validation.Accept = true;
+        // Trust only the bundled Bambu CA chain and the device certificate whose CN matches this printer serial.
+        client.ValidateCertificate += (_, validation) =>
+            validation.Accept = _validateCertificate(validation.Certificate, validation.Chain, serial);
         try
         {
             await client.Connect(timeoutSource.Token);
@@ -383,7 +391,7 @@ public sealed class BambuPrinterAdapterService
         var remoteDirectory = GetText(job.PrintProfile, "bambuRemoteDirectory") ?? connection.Printer.BambuRemoteDirectory ?? "/cache";
         var remotePath = JoinRemotePath(remoteDirectory, remoteName);
 
-        await _uploader.UploadAsync(connection.Printer.Ip, connection.Printer.FtpsPort, connection.AccessCode,
+        await _uploader.UploadAsync(connection.Printer.Ip, connection.Printer.Serial, connection.Printer.FtpsPort, connection.AccessCode,
             printFile.LocalPath, remotePath, cancellationToken);
 
         var payload = BuildProjectFilePayload(job, remotePath, remoteName);

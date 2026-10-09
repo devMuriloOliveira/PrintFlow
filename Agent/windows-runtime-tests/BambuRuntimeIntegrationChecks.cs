@@ -13,12 +13,18 @@ internal static class BambuRuntimeIntegrationChecks
 {
     public static async Task RunMqttAsync(Action<bool, string> check)
     {
-        using var certificate = CreateCertificate();
         var mqttSerial = "PFLOCALMQTT001";
+        using var authority = CreateCertificateAuthority();
+        using var certificate = CreateCertificate(authority, mqttSerial);
+        var testTrustBundle = new X509Certificate2Collection { authority };
+        bool ValidateFixtureCertificate(X509Certificate? presented, X509Chain? chain, string expectedSerial) =>
+            FilaAgent.Runtime.BambuCertificateValidator.Validate(presented, chain, expectedSerial, testTrustBundle);
         const string mqttSecret = "LOCAL-MQTT-SECRET";
         await using (var broker = await LocalMqttTlsBroker.StartAsync(certificate, mqttSerial, mqttSecret))
         {
-            var adapter = new FilaAgent.Runtime.BambuPrinterAdapterService();
+            var adapter = new FilaAgent.Runtime.BambuPrinterAdapterService(
+                new FilaAgent.Runtime.MqttNetBambuClientFactory(ValidateFixtureCertificate),
+                new FilaAgent.Runtime.FluentFtpBambuUploader(ValidateFixtureCertificate));
             FilaAgent.Runtime.BambuPrinterConnection connection;
             try
             {
@@ -51,7 +57,12 @@ internal static class BambuRuntimeIntegrationChecks
 
     public static async Task RunFtpsAsync(Action<bool, string> check)
     {
-        using var certificate = CreateCertificate();
+        const string ftpSerial = "PFLOCALFTPS001";
+        using var authority = CreateCertificateAuthority();
+        using var certificate = CreateCertificate(authority, ftpSerial);
+        var testTrustBundle = new X509Certificate2Collection { authority };
+        bool ValidateFixtureCertificate(X509Certificate? presented, X509Chain? chain, string expectedSerial) =>
+            FilaAgent.Runtime.BambuCertificateValidator.Validate(presented, chain, expectedSerial, testTrustBundle);
         const string ftpSecret = "LOCAL-FTPS-SECRET";
         var localFile = Path.Combine(Path.GetTempPath(), "fila-bambu-ftps-" + Guid.NewGuid().ToString("N") + ".gcode.3mf");
         var fileBytes = Encoding.UTF8.GetBytes("local Bambu FTPS payload\n");
@@ -59,8 +70,8 @@ internal static class BambuRuntimeIntegrationChecks
         try
         {
             await using var ftpServer = await LocalImplicitFtpsServer.StartAsync(certificate);
-            await new FilaAgent.Runtime.FluentFtpBambuUploader().UploadAsync(
-                "127.0.0.1", ftpServer.Port, ftpSecret, localFile, "/cache/fixture.gcode.3mf")
+            await new FilaAgent.Runtime.FluentFtpBambuUploader(ValidateFixtureCertificate).UploadAsync(
+                "127.0.0.1", ftpSerial, ftpServer.Port, ftpSecret, localFile, "/cache/fixture.gcode.3mf")
                 .WaitAsync(TimeSpan.FromSeconds(15));
             await ftpServer.Completion.WaitAsync(TimeSpan.FromSeconds(3));
             check(ftpServer.Username == "bblp" && ftpServer.Password == ftpSecret && ftpServer.RemotePath == "/cache/fixture.gcode.3mf",
@@ -83,19 +94,23 @@ internal static class BambuRuntimeIntegrationChecks
             : null;
     }
 
-    private static X509Certificate2 CreateCertificate()
+    private static X509Certificate2 CreateCertificateAuthority()
     {
         using var key = RSA.Create(2048);
-        var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
-        var enhancedUsage = new OidCollection { new("1.3.6.1.5.5.7.3.1") };
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(enhancedUsage, critical: false));
-        var names = new SubjectAlternativeNameBuilder();
-        names.AddIpAddress(IPAddress.Loopback);
-        names.AddDnsName("localhost");
-        request.CertificateExtensions.Add(names.Build());
+        var request = new CertificateRequest("CN=Fila Agent Local TLS Test CA", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-2), DateTimeOffset.UtcNow.AddHours(1));
+    }
+
+    private static X509Certificate2 CreateCertificate(X509Certificate2 authority, string serial)
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest($"CN={serial}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        var certificate = request.Create(authority, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(30), RandomNumberGenerator.GetBytes(16));
+        return certificate.CopyWithPrivateKey(key);
     }
 
     private sealed class LocalMqttTlsBroker : IAsyncDisposable

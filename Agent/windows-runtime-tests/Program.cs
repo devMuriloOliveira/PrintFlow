@@ -37,6 +37,8 @@ if (args.Contains("--bambu-mqtt-local", StringComparer.OrdinalIgnoreCase))
     return 0;
 }
 
+BambuCertificateValidationChecks.Run(Check);
+
 var untrustedRoot = "SignTool Error: A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.\nSignTool Error: Signing verification failed.";
 var runnerUntrustedRoot = "Timestamp: DigiCert Timestamp Responder\nNumber of files successfully Verified: 0\nNumber of warnings: 0\nNumber of errors: 1\nSignTool Error: A certificate chain processed, but terminated in a root\n\tcertificate which is not trusted by the trust provider.";
 Check(NativeProtocol.TryParsePairingCode("fila-agent://pair?code=FILA-PAIR-20261008") == "FILA-PAIR-20261008", "protocolo Fila Agent aceita somente codigo de pareamento valido");
@@ -879,8 +881,8 @@ try
     var bambuProjectMessage = JsonDocument.Parse(bambuMqtt.Published[^1].Payload);
     var bambuPrintPayload = bambuProjectMessage.RootElement.GetProperty("print");
     var bambuUpload = bambuUploader.Uploads.Single();
-    Check(bambuUpload is { Ip: "192.168.2.50", Port: 990, AccessCode: "LAN-SECRET-FIXTURE", LocalPath: var uploadedPath, RemotePath: "/cache/pe_a_teste.gcode.3mf" } && uploadedPath == Path.GetFullPath(bambuFilePath) && bambuUploadEvents.SequenceEqual(["upload", "publish"]),
-        "Bambu C# envia o 3MF por FTPS passivo implícito antes de disparar o comando MQTT");
+    Check(bambuUpload is { Ip: "192.168.2.50", Serial: "PFTESTP1S0001", Port: 990, AccessCode: "LAN-SECRET-FIXTURE", LocalPath: var uploadedPath, RemotePath: "/cache/pe_a_teste.gcode.3mf" } && uploadedPath == Path.GetFullPath(bambuFilePath) && bambuUploadEvents.SequenceEqual(["upload", "publish"]),
+        "Bambu C# valida a identidade serial também no FTPS antes de iniciar impressão");
     Check(bambuPrint is { Success: true, Started: true, Uploaded: true, Command: "project_file", RemotePath: "/cache/pe_a_teste.gcode.3mf" } && bambuPrintPayload.GetProperty("url").GetString() == "ftp:///cache/pe_a_teste.gcode.3mf" && bambuPrintPayload.GetProperty("param").GetString() == "Metadata/plate_2.gcode" && bambuPrintPayload.GetProperty("subtask_name").GetString() == "Peça de teste",
         "Bambu C# conserva o payload project_file, plate e nome da tarefa atuais");
     Check(!bambuPrintPayload.GetProperty("use_ams").GetBoolean() && bambuPrintPayload.GetProperty("ams_mapping").GetArrayLength() == 1 && bambuPrintPayload.GetProperty("timelapse").GetBoolean() && !bambuPrintPayload.GetProperty("flow_cali").GetBoolean() && bambuPrintPayload.GetProperty("bed_leveling").GetBoolean() && !bambuPrintPayload.GetProperty("layer_inspect").GetBoolean() && bambuPrintPayload.GetProperty("vibration_cali").GetBoolean() && !bambuProjectMessage.RootElement.GetRawText().Contains("LAN-SECRET-FIXTURE", StringComparison.Ordinal),
@@ -2056,16 +2058,16 @@ sealed class FakeBambuMqttClient(Exception? connectError, List<string>? events) 
     }
 }
 
-sealed record FakeBambuUpload(string Ip, int Port, string AccessCode, string LocalPath, string RemotePath);
+sealed record FakeBambuUpload(string Ip, string Serial, int Port, string AccessCode, string LocalPath, string RemotePath);
 
 sealed class FakeBambuFtpsUploader(List<string> events) : IBambuFtpsUploader
 {
     public List<FakeBambuUpload> Uploads { get; } = [];
 
-    public Task UploadAsync(string ip, int port, string accessCode, string localPath, string remotePath, CancellationToken cancellationToken = default)
+    public Task UploadAsync(string ip, string serial, int port, string accessCode, string localPath, string remotePath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Uploads.Add(new FakeBambuUpload(ip, port, accessCode, localPath, remotePath));
+        Uploads.Add(new FakeBambuUpload(ip, serial, port, accessCode, localPath, remotePath));
         events.Add("upload");
         return Task.CompletedTask;
     }
