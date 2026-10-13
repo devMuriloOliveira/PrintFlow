@@ -1623,6 +1623,7 @@ export const handleAgentsList =
             updated_at
           from agents
           where tenant_id = $1
+            and status <> 'revoked'
           order by
             created_at desc
         `,
@@ -1722,6 +1723,9 @@ export const handleAgentRevoke =
           set
             status = 'revoked',
             secret_hash = null,
+            pending_secret_hash = null,
+            pending_credential_version = null,
+            pending_secret_expires_at = null,
             updated_at = now()
           where tenant_id = $1
             and id = $2

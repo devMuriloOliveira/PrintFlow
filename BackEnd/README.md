@@ -260,6 +260,7 @@ Agent:
 - `POST /api/agents/verify`: valida a credencial local do Agent.
 - `POST /api/agents/heartbeat`: marca Agent online e atualiza metadados.
 - `GET /api/agents`: lista Agents da conta.
+- `DELETE /api/agents/:id`: revoga o Agent, encerra comandos pendentes e exige novo pareamento para reconectar.
 - `POST /api/agents/:id/discover`: cria comando de descoberta.
 - `POST /api/agents/:id/connect-printer`: cria comando de conexao.
 - `POST /api/agents/:id/printer-status`: cria comando de status.

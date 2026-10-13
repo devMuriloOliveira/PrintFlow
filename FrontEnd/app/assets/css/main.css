@@ -823,6 +823,8 @@ input, select, textarea { color: var(--ink); }
 .integration-panel__head .btn { min-height: 34px; }
 .integration-connection-list { display: grid; }
 .integration-connection-row { display: grid; grid-template-columns: auto minmax(150px,1.2fr) minmax(145px,.8fr) auto; align-items: center; gap: 12px; padding: 13px 16px; }
+.integration-connection-row--agent { grid-template-columns: auto minmax(150px,1.2fr) minmax(145px,.8fr) auto auto; }
+.integration-connection-row__remove { min-height: 32px; padding: 0 10px; }
 .integration-connection-row + .integration-connection-row { border-top: 1px solid #edf0f4; }
 .integration-connection-row__logo,.integration-connection-row__device { display: grid; width: 36px; height: 36px; place-items: center; overflow: hidden; border: 1px solid #e4e9f1; border-radius: 9px; background: #fff; }
 .integration-connection-row__logo img { display: block; width: 25px; height: 25px; object-fit: contain; }
@@ -1198,6 +1200,7 @@ input, select, textarea { color: var(--ink); }
   .integrations-hero__actions { grid-column: 1 / -1; align-items: stretch; flex-direction: row; justify-content: space-between; }
   .integrations-overview { grid-template-columns: 1fr; }
   .integration-connection-row { grid-template-columns: auto minmax(0,1fr) auto; }
+  .integration-connection-row--agent { grid-template-columns: auto minmax(0,1fr) auto auto; }
   .integration-connection-row__activity { grid-column: 2 / 3; }
   .billing-plans { grid-template-columns: 1fr; }
   .billing-subscription-summary__overview { grid-template-columns: 1fr; gap: 16px; }.billing-subscription-summary__date { min-width: 0; border-left: 0; border-top: 1px solid #dcebe3; padding: 14px 0 0; }.billing-subscription-summary__management { align-items: flex-start; flex-direction: column; }.billing-subscription-summary__actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
@@ -1277,8 +1280,10 @@ input, select, textarea { color: var(--ink); }
   .integration-panel__head { grid-template-columns: auto minmax(0,1fr); padding: 14px; }
   .integration-panel__head .btn { grid-column: 1 / -1; justify-content: center; width: 100%; }
   .integration-connection-row { grid-template-columns: auto minmax(0,1fr); align-items: start; padding: 14px; }
+  .integration-connection-row--agent { grid-template-columns: auto minmax(0,1fr); }
   .integration-connection-row__activity { grid-column: 2; }
   .integration-connection-row > .badge { grid-column: 2; justify-self: start; }
+  .integration-connection-row__remove { grid-column: 2; justify-self: start; }
   .integration-empty { grid-template-columns: auto minmax(0,1fr); padding: 15px 14px; }
   .integration-empty .btn { grid-column: 1 / -1; justify-content: center; width: 100%; }
   .integration-service-note { grid-template-columns: auto minmax(0,1fr); padding: 14px; }

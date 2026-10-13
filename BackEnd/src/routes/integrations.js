@@ -74,6 +74,7 @@ export const handleIntegrationsOverview = async (req, res) => {
       select id, name, machine_name, platform, status, last_seen_at, runtime_health
         from agents
        where tenant_id = $1
+         and status <> 'revoked'
        order by created_at desc
     `, [user.tenantId])
   ])

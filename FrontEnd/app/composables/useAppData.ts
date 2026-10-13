@@ -963,6 +963,14 @@ export const useAppData = () => {
     headers: resourceHeaders()
   })
 
+  const revokeAgent = async (agentId: string) => {
+    if (mockEnabled) return
+    await $fetch(apiUrl(`/api/agents/${encodeURIComponent(agentId)}`), {
+      method: 'DELETE',
+      headers: resourceHeaders()
+    })
+  }
+
   return {
     products: computed(() => data.value.products),
     orders: computed(() => data.value.orders),
@@ -1019,6 +1027,7 @@ export const useAppData = () => {
     , listSupportMessages, getSupportUnread
     , sendSupportMessage
     , loadIntegrationsOverview
+    , revokeAgent
     , enqueuePrintJob
     , reorderPrintJob
     , movePrintJobPrinter

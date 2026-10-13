@@ -3,7 +3,7 @@ const props = withDefaults(defineProps<{ initialActive?: string; standalone?: bo
 const { notify } = useUi()
 const auth = useAuth()
 const route = useRoute()
-const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, getMercadoPagoBilling, createMercadoPagoCheckout, updateMercadoPagoSubscription, createSupportRequest } = useAppData()
+const { settings, updateSettings, lookupCompanyByCnpj, exportTenantData, listSettingsExports, loadBackupStatus, loadIntegrationsOverview, revokeAgent, getMercadoPagoBilling, createMercadoPagoCheckout, updateMercadoPagoSubscription, createSupportRequest } = useAppData()
 const { members, loading: membersLoading, invitations, refreshMembers, updateMember, createInvitation, refreshInvitations, revokeInvitation, resendInvitation } = useTenantMembers()
 
 const routeActiveSection = computed(() => String(route.query.billing || '') ? 'Assinatura' : props.initialActive)
@@ -38,6 +38,7 @@ const supportDraft = reactive({
   reason: ''
 })
 const integrationsLoading = ref(false)
+const removingAgentId = ref('')
 const integrationsOverview = ref<{ marketplaces: Array<{ id?: string; platform: string; connectionName: string; accountExternalId: string; status: string; lastSyncAt?: string | null }>; agents: Array<{ id: string; name: string; machineName: string; platform: string; status: string; lastSeenAt?: string | null }>; email: { provider: string; status: 'connected' | 'not_configured' } }>({ marketplaces: [], agents: [], email: { provider: 'Resend', status: 'not_configured' } })
 const billingLoading = ref(false)
 const billingError = ref('')
@@ -134,6 +135,7 @@ const roles = [
 ]
 
 const canManageMembers = computed(() => ['owner', 'admin'].includes(String(auth.user.value?.role || '')))
+const canManageAgents = computed(() => ['owner', 'admin', 'producao'].includes(String(auth.user.value?.role || '')))
 const isOwner = computed(() => auth.user.value?.role === 'owner')
 const activeMemberCount = computed(() => members.value.filter(member => member.status === 'active').length)
 const suspendedMemberCount = computed(() => members.value.filter(member => member.status === 'suspended').length)
@@ -459,6 +461,22 @@ const formatSupportProtocol = (value: string) => String(value || '').replace(/(\
 const loadIntegrations = async () => {
   integrationsLoading.value = true
   try { integrationsOverview.value = await loadIntegrationsOverview() } catch (error: any) { notify(error?.data?.error || 'Nao foi possivel carregar as integracoes.') } finally { integrationsLoading.value = false }
+}
+const removeAgent = async (agent: { id: string; name: string; machineName: string }) => {
+  if (!agent.id || removingAgentId.value) return
+  const machineName = agent.machineName || agent.name || 'Fila Agent'
+  if (!window.confirm(`Remover o acesso deste computador?\n\n${machineName}\n\nA comunicação com a plataforma será interrompida e os comandos pendentes serão encerrados. Uma impressão já iniciada pode continuar na impressora e deve ser conferida localmente. Para usar o Agent novamente, será necessário pareá-lo outra vez.`)) return
+
+  removingAgentId.value = agent.id
+  try {
+    await revokeAgent(agent.id)
+    integrationsOverview.value.agents = integrationsOverview.value.agents.filter((item) => item.id !== agent.id)
+    notify('Computador removido. Para reconectá-lo, pareie o Agent novamente.')
+  } catch (error: any) {
+    notify(error?.data?.error || error?.message || 'Não foi possível remover este computador.')
+  } finally {
+    removingAgentId.value = ''
+  }
 }
 const loadMercadoPagoBilling = async () => {
   if (!isOwner.value) return
@@ -1041,11 +1059,12 @@ watch(() => supportDraft.category, (category) => {
             <section class="integration-panel">
               <div class="integration-panel__head"><span><UiIcon name="printer" :size="18" /></span><div><h3>Fila Agent</h3><p>Computadores autorizados a operar impressoras nesta empresa.</p></div><NuxtLink class="btn" to="/impressoras">Ver impressoras</NuxtLink></div>
               <div v-if="integrationsOverview.agents.length" class="integration-connection-list">
-                <article v-for="agent in integrationsOverview.agents" :key="agent.id" class="integration-connection-row">
+                <article v-for="agent in integrationsOverview.agents" :key="agent.id" class="integration-connection-row integration-connection-row--agent">
                   <span class="integration-connection-row__device"><UiIcon name="printer" :size="18" /></span>
                   <div class="integration-connection-row__identity"><strong>{{ agent.name || agent.machineName }}</strong><span>{{ agent.machineName && agent.machineName !== agent.name ? agent.machineName : (agent.platform || 'Plataforma não informada') }}</span></div>
                   <div class="integration-connection-row__activity"><small>Último contato</small><strong>{{ formatIntegrationDate(agent.lastSeenAt) }}</strong></div>
                   <span :class="integrationBadge(agent.status)">{{ integrationStatus(agent.status) }}</span>
+                  <button v-if="canManageAgents" class="btn btn--danger integration-connection-row__remove" type="button" :disabled="Boolean(removingAgentId)" :aria-label="`Remover computador ${agent.machineName || agent.name}`" @click="removeAgent(agent)">{{ removingAgentId === agent.id ? 'Removendo...' : 'Remover' }}</button>
                 </article>
               </div>
               <div v-else class="integration-empty"><span><UiIcon name="printer" :size="21" /></span><div><strong>Nenhum Agent pareado</strong><p>Instale ou conecte o Agent para detectar e controlar impressoras locais.</p></div><NuxtLink class="btn btn--primary" to="/impressoras/nova">Configurar Agent</NuxtLink></div>
