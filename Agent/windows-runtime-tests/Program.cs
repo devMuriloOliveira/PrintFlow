@@ -182,6 +182,15 @@ using (var realtimeWebSocketCancellation = new CancellationTokenSource())
 }
 
 InvalidOperationException? productionRejected = null;
+var productionConfig = AgentConfiguration.FromEnvironment(new Dictionary<string, string?>
+{
+    ["FILA_AGENT_ENVIRONMENT"] = "PRODUCTION"
+}, appData: Path.GetTempPath(), localAppData: Path.GetTempPath());
+Check(productionConfig.ApiUrl.AbsoluteUri == "https://printflow-api-4y5l.onrender.com/" &&
+    productionConfig.WebSocketUrl.Scheme == "wss" &&
+    productionConfig.AppOrigins.All(origin => Uri.TryCreate(origin, UriKind.Absolute, out var parsed) && parsed.Scheme == "https"),
+    "aceita endpoints HTTPS/WSS oficiais na configuracao padrao de PRODUCTION");
+
 try
 {
     AgentConfiguration.FromEnvironment(new Dictionary<string, string?>
@@ -349,7 +358,7 @@ try
     using var diagnosticsResponse = await http.SendAsync(diagnosticsRequest);
     var diagnosticsBody = await diagnosticsResponse.Content.ReadAsStringAsync();
     using var diagnosticsJson = JsonDocument.Parse(diagnosticsBody);
-    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.29" &&
+    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.30" &&
         diagnosticsJson.RootElement.GetProperty("network").GetProperty("interfaces").ValueKind == JsonValueKind.Array,
         "diagnostico C# autenticado retorna contrato de agente e interfaces locais redigidas");
     Check(!diagnosticsBody.Contains("LAN-SECRET-1122", StringComparison.Ordinal) && !diagnosticsBody.Contains("printer-password", StringComparison.Ordinal) &&

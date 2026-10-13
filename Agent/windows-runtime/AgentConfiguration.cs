@@ -59,9 +59,9 @@ public sealed record AgentConfiguration(
 
         if (environment == "PRODUCTION")
         {
-            ValidateProductionUri(apiUrl, "FILA_AGENT_API_URL", "https:");
-            ValidateProductionUri(wsUrl, "FILA_AGENT_WS_URL", "wss:");
-            foreach (var origin in origins) ValidateProductionUri(ParseUri(origin, "FILA_AGENT_APP_ORIGINS"), "FILA_AGENT_APP_ORIGINS", "https:");
+            ValidateProductionUri(apiUrl, "FILA_AGENT_API_URL", "https");
+            ValidateProductionUri(wsUrl, "FILA_AGENT_WS_URL", "wss");
+            foreach (var origin in origins) ValidateProductionUri(ParseUri(origin, "FILA_AGENT_APP_ORIGINS"), "FILA_AGENT_APP_ORIGINS", "https");
             if (string.Equals(Get("FILA_AGENT_DEV_MOCK_BAMBU", "PRINTFLOW_DEV_MOCK_BAMBU"), "true", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("FILA_AGENT_DEV_MOCK_BAMBU nao pode ser usado em PRODUCTION.");
         }
@@ -78,7 +78,7 @@ public sealed record AgentConfiguration(
         var ssePollInterval = ReadInterval(Get("FILA_AGENT_SSE_POLL_MS", "PRINTFLOW_AGENT_SSE_POLL_MS", "45000"), 45_000, 30_000);
 
         return new AgentConfiguration(environment, apiUrl, wsUrl, origins, localPort,
-            Path.GetFullPath(dataDirectory), Path.GetFullPath(logDirectory), version ?? "0.1.29")
+            Path.GetFullPath(dataDirectory), Path.GetFullPath(logDirectory), version ?? "0.1.30")
         {
             HealthSnapshotInterval = healthSnapshotInterval,
             WebSocketCommandPollInterval = webSocketPollInterval,
