@@ -886,3 +886,11 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 **Limpeza:** removi `Agent\temp\public-agent-0.1.21.zip`, `downloaded-release-0.1.22`, `public-installer-0.1.22-f5e5d31aba17487298a93a74a9a8bb44`, `signed-payload-0.1.22-e54c88ec36ea495baec60281ae3ea76d` e `Agent\dist\release-0.1.22`. Permanecem os pacotes Fila Agent de teste, QA C#, baselines recentes do atualizador e caches/backups Orca/Store.
 
 **Verificação e impacto:** `git check-ignore -v` confirmou que os alvos são artefatos locais ignorados; buscas de nomes no código-fonte atual não encontraram consumidores. A limpeza não alterou arquivos rastreados, runtime, instalador atual, dados do usuário, API, certificado ou release. Não executei testes porque os alvos excluídos não participam de build nem de execução atual.
+
+### Reanálise cronológica do erro no PC terceiro — 2026-10-13
+
+**Evidência:** os registros anexados têm timestamps `17:32:19Z`, `17:40:31Z` e `17:42:39Z` em 2026-10-09. O endpoint público do GitHub informa que `agent-v0.1.29` foi publicada às `18:22:23Z`; os três erros antecedem a publicação em aproximadamente 50, 42 e 40 minutos. A release `latest` consultada em 2026-10-13 continua sendo [Fila Agent 0.1.29](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.29).
+
+**Interpretação:** esses logs não podem ser de uma execução do Setup 0.1.29. A mensagem sem esquema/host é a mensagem anterior, compatível com o Setup 0.1.28 informado pelo usuário. No código atual, a URL padrão de produção é HTTPS do Render e o botão de download abre o asset `releases/latest` sem passar `--api-url`; isso confirma o comportamento do código-fonte, não a configuração do site implantado nem os argumentos efetivamente recebidos pelo Setup 0.1.28.
+
+**Limite e impacto:** a URL rejeitada originalmente permanece desconhecida, pois os logs antigos não registram argumento ou host. A confirmação requer hash do Setup executado ou um log novo gerado após a publicação da 0.1.29, cuja mensagem informa somente esquema e host. Nenhum pacote foi executado, e API, instalação, dados e release não foram alterados nesta reanálise.
