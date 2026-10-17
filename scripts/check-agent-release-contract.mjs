@@ -36,7 +36,11 @@ const requiredReleaseTool = [
   'validate-agent-release-artifacts.mjs',
   'PrintFlow-Agent-Transition-Setup.exe',
   '"release", "create"',
-  '"--verify-tag"'
+  '"--verify-tag"',
+  'OrcaSlicer 2.4.2 for Windows x64',
+  'OrcaSlicer_Windows_V2.4.2_x64_portable.zip',
+  'AGPL-3.0',
+  'SQLitePCLRaw.lib.e_sqlite3 2.1.12'
 ]
 
 const missing = [
@@ -45,6 +49,9 @@ const missing = [
 ]
 if (!releaseVerifier.includes('DEV_SELF_SIGNED') || !releaseVerifier.includes('PRODUCTION_TRUSTED')) {
   missing.push('modos de assinatura DEV_SELF_SIGNED/PRODUCTION_TRUSTED no verificador')
+}
+if (releaseTool.includes('OrcaSlicer is not included')) {
+  missing.push('ReleaseTool ainda exige aviso antigo que exclui OrcaSlicer do pacote')
 }
 if (/shell:\s*(?:pwsh|powershell)|\.ps1|\.psm1|\.vbs|iexpress/i.test(workflow)) {
   missing.push('workflow ainda depende de PowerShell/IExpress')

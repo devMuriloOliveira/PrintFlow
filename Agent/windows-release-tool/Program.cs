@@ -670,7 +670,9 @@ internal static class Program
         if (missingLegalFiles.Length > 0)
             throw new InvalidDataException("Pacote C# sem avisos/licencas de dependencias: " + string.Join(", ", missingLegalFiles));
         var notices = File.ReadAllText(Path.Combine(legalRoot, "THIRD-PARTY-NOTICES.txt"));
-        if (!notices.Contains("OrcaSlicer is not included", StringComparison.Ordinal) ||
+        if (!notices.Contains("OrcaSlicer 2.4.2 for Windows x64", StringComparison.Ordinal) ||
+            !notices.Contains("OrcaSlicer_Windows_V2.4.2_x64_portable.zip", StringComparison.Ordinal) ||
+            !notices.Contains("AGPL-3.0", StringComparison.Ordinal) ||
             !notices.Contains("SQLitePCLRaw.lib.e_sqlite3 2.1.12", StringComparison.Ordinal))
             throw new InvalidDataException("Aviso de licenca nao identifica corretamente OrcaSlicer e SQLitePCLRaw.");
     }
