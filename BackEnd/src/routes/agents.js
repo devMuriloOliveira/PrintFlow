@@ -4851,6 +4851,8 @@ export const handleAgentPrinterControlCreate =
 
     let printJob =
       null
+    let storedJob =
+      null
 
     if (
       ['start', 'slice'].includes(action)
@@ -4935,7 +4937,7 @@ export const handleAgentPrinterControlCreate =
           ]
         )
 
-      const storedJob =
+      storedJob =
         jobResult
           .rows[0]
 
@@ -5146,11 +5148,11 @@ export const handleAgentPrinterControlCreate =
 
       manufacturer:
         storedPrinter.manufacturer ||
-        storedJob.catalog_printer_manufacturer,
+        storedJob?.catalog_printer_manufacturer,
 
       model:
         storedPrinter.model ||
-        storedJob.catalog_printer_model,
+        storedJob?.catalog_printer_model,
 
       serial:
         storedPrinter.serial,
