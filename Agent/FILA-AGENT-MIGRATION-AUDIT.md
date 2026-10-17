@@ -960,3 +960,13 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 **Publicação da versão 0.1.33 — 2026-10-17:** o commit `889424d` foi enviado a `main`; CI #264 e Agent Release #50 concluíram com sucesso. A release pública está como latest: [Fila Agent 0.1.33](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.33). SHA-256 do Setup (incluindo Transition Setup): `35A47D3FC33056DE4AFBAC729A4EC4D235A799D45F3F2F28CD4345534D2D0ED4`; ZIP: `1AFC1D371D17C43E467A25472945F9E4DCF39053075275FBD71EED56D25D37BA`. Os aliases PrintFlow têm os mesmos hashes dos correspondentes assets Fila Agent.
 
 **Limites:** a release está disponível para instalação manual no computador afetado; o auto-update não pôde ser testado nesse cliente e a instalação local continua necessária para confirmar a correção. Nenhuma máquina de impressora foi acessada nem impressora física operada. A assinatura continua `DEV_SELF_SIGNED` e `productionTrusted: false`.
+
+### Diagnóstico de inicialização duplicada e preparação da versão 0.1.34 — 2026-10-17
+
+**Evidência:** o pacote instalado era 0.1.33. O `host.log` local registrou dois hosts iniciados com cerca de 1 segundo de diferença; um deles falhou repetidamente ao abrir a porta `127.0.0.1:17873` (`SocketException: endereço de soquete já em uso`) e o monitor reiniciou o runtime a cada 5 segundos. O processo que mantinha a porta respondia ao health como 0.1.33, conectado, com zero impressões ativas. O histórico do atualizador também registra duas tentativas para instalar 0.1.32 a partir de dois hosts.
+
+**Correção:** a versão 0.1.34 impede que outro host da mesma sessão inicie o runtime e impede verificações de atualização e instalações concorrentes. Isso protege o Agent mesmo que o Windows ou dois hosts antigos iniciem mais de uma cópia. A causa exata que disparou a segunda cópia não consta nos logs atuais; o bloqueio elimina a disputa e as tentativas repetidas resultantes.
+
+**Verificações locais:** `npm test` passou 162/162; contratos C# passaram 231 (o teste real de DPAPI foi pulado por ausência de perfil Windows carregado); contrato de release passou 36 checks; validação do pacote aprovou 0.1.34; builds Release do host e Setup passaram sem avisos/erros. Teste funcional isolado do host: a primeira instância respondeu `/healthz` em porta temporária e a segunda encerrou com código 0 sem assumir a porta.
+
+**Limites e impacto:** a leitura de health foi somente local e confirmou zero impressões ativas naquele momento. O teste funcional usou API, porta e dados de teste isolados. Não encerrei os processos em uso, não acessei a outra máquina nem opere uma impressora física. A publicação e a atualização no computador afetado ainda estão pendentes.

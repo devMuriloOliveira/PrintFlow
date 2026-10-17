@@ -222,6 +222,10 @@ test('updates pedem confirmação quando iniciadas pelo cliente', async () => {
   assert.match(host, /using var updateProcess = Process\.Start\(startInfo\)[\s\S]*await updateProcess\.WaitForExitAsync\(\)/)
   const setup = await read('windows-setup/Program.cs')
   assert.match(setup, /checkingUpdates = args\.Contains\("--check-updates"/)
+  assert.match(setup, /Local\\FilaAgentUpdateCheck/)
+  assert.match(setup, /if \(!updateMutexCreated\) return 0;/)
+  assert.match(setup, /Local\\FilaAgentInstall/)
+  assert.match(setup, /if \(!installMutexCreated\) return 0;/)
   assert.match(setup, /if \(installing \|\| checkingUpdates\)/)
   assert.match(setup, /new SignedUpdateService\(ReadArgument\(args, "--test-release-api"\), testMode, testDataDirectory,[\s\S]*apiUrl, taskName, localPort\)/)
   assert.match(updater, /Path\.Combine\(_dataDirectory, "updates", latest\.ToString\(\)\)/)
@@ -254,6 +258,14 @@ test('host C# executa o runtime integrado e localiza o pacote ao lado do aplicat
   assert.match(setup, /PrintFlowAgentHost\.exe/)
   assert.match(setup, /FilaAgentSetup\.exe/)
   assert.match(setup, /PrintFlowAgentSetup\.exe/)
+})
+
+test('host impede duas instancias concorrentes de disputar a porta local e a fila', async () => {
+  const host = await read('windows-host/Program.cs')
+  const main = host.slice(host.indexOf('private static void Main('), host.indexOf('\n}\n\ninternal static class NativeDpapi'))
+
+  assert.match(main, /new Mutex\(initiallyOwned: true, name: @"Local\\FilaAgentHost", createdNew: out var createdNew\)/)
+  assert.ok(main.indexOf('if (!createdNew) return;') < main.indexOf('Application.Run('))
 })
 
 test('release tool constrói, valida, assina e publica os artefatos C# sem PowerShell', async () => {

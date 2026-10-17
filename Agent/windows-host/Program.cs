@@ -13,6 +13,8 @@ internal static class Program
     {
         if (NativeDpapi.TryHandle(args)) return;
         if (NativeProtocol.TryHandle(args)) return;
+        using var singleInstance = new Mutex(initiallyOwned: true, name: @"Local\FilaAgentHost", createdNew: out var createdNew);
+        if (!createdNew) return;
         ApplicationConfiguration.Initialize();
         Application.Run(new AgentApplicationContext(args));
     }

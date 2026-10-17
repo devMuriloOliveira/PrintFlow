@@ -28,6 +28,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         string? embeddedPackagePath = null;
+        Mutex? installMutex = null;
         var testMode = args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -67,11 +68,20 @@ internal static class Program
                 });
             var elevatedExitCode = RelaunchElevatedWhenRequired(args, testMode);
             if (elevatedExitCode.HasValue) return elevatedExitCode.Value;
+            if (args.Contains("--install-package", StringComparer.OrdinalIgnoreCase))
+            {
+                installMutex = new Mutex(initiallyOwned: true, name: @"Local\FilaAgentInstall", createdNew: out var installMutexCreated);
+                if (!installMutexCreated) return 0;
+            }
             if (args.Contains("--check-updates", StringComparer.OrdinalIgnoreCase))
+            {
+                using var updateMutex = new Mutex(initiallyOwned: true, name: @"Local\FilaAgentUpdateCheck", createdNew: out var updateMutexCreated);
+                if (!updateMutexCreated) return 0;
                 return new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode, testDataDirectory,
                     apiUrl, taskName, localPort).CheckAndInstallAsync(installRoot,
                     args.Contains("--interactive", StringComparer.OrdinalIgnoreCase),
                     args.Contains("--confirm-updates", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult() ? 0 : 0;
+            }
             if (args.Contains("--finalize-uninstall", StringComparer.OrdinalIgnoreCase))
             {
                 DeleteDirectory(ReadArgument(args, "--install-dir") ?? DefaultInstallRoot);
@@ -117,6 +127,7 @@ internal static class Program
         }
         finally
         {
+            installMutex?.Dispose();
             if (!string.IsNullOrWhiteSpace(embeddedPackagePath))
             {
                 try { File.Delete(embeddedPackagePath); } catch { }
