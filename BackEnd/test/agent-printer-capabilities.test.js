@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  isAgentPrinterActionSupported
+  isAgentPrinterActionSupported,
+  isAgentPrinterControlAction
 } from '../src/services/agentPrinterCapabilities.js'
 
 test(
@@ -48,6 +49,34 @@ test(
         metadata,
         'pause'
       ),
+      false
+    )
+  }
+)
+
+test(
+  'preparar G-code e uma acao permitida e exige capacidade de inicio remoto',
+  () => {
+    assert.equal(
+      isAgentPrinterControlAction('slice'),
+      true
+    )
+    assert.equal(
+      isAgentPrinterActionSupported(
+        { capabilities: { startPrint: true } },
+        'slice'
+      ),
+      true
+    )
+    assert.equal(
+      isAgentPrinterActionSupported(
+        { capabilities: { startPrint: false } },
+        'slice'
+      ),
+      false
+    )
+    assert.equal(
+      isAgentPrinterControlAction('status'),
       false
     )
   }

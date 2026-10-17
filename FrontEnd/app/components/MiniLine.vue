@@ -1,10 +1,14 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{ points: number[]; color?: string }>(), { color: 'currentColor' })
 const polyline = computed(() => {
-  const max = Math.max(...props.points)
-  const min = Math.min(...props.points)
+  const points = props.points.map(Number).filter(Number.isFinite)
+  if (!points.length) return ''
+  const max = Math.max(...points)
+  const min = Math.min(...points)
   const range = max - min || 1
-  return props.points.map((p, i) => `${(i / (props.points.length - 1)) * 78 + 2},${28 - ((p - min) / range) * 22}`).join(' ')
+  if (points.length === 1) return `2,28 80,28`
+  const denominator = Math.max(points.length - 1, 1)
+  return points.map((p, i) => `${(i / denominator) * 78 + 2},${28 - ((p - min) / range) * 22}`).join(' ')
 })
 </script>
 <template>

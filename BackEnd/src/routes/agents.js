@@ -28,6 +28,7 @@ import {
 } from '../services/printFileStorage.js'
 
 import {
+  isAgentPrinterControlAction,
   isAgentPrinterActionSupported
 } from '../services/agentPrinterCapabilities.js'
 
@@ -4677,17 +4678,8 @@ export const handleAgentPrinterControlCreate =
     // AÃ‡Ã•ES PERMITIDAS
     // ==================================================
 
-    const allowedActions =
-      new Set([
-        'start',
-        'pause',
-        'resume',
-        'cancel',
-        'disconnect'
-      ])
-
     if (
-      !allowedActions.has(
+      !isAgentPrinterControlAction(
         action
       )
     ) {

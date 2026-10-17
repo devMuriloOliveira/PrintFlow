@@ -8,6 +8,18 @@ const capabilityByAction = {
   disconnect: 'disconnect'
 }
 
+const controlActions = new Set([
+  'start',
+  'slice',
+  'pause',
+  'resume',
+  'cancel',
+  'disconnect'
+])
+
+export const isAgentPrinterControlAction = (action) =>
+  controlActions.has(action)
+
 export const isAgentPrinterActionSupported = (
   metadata,
   action
