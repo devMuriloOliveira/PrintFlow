@@ -938,3 +938,13 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 **Publicação:** o CI #255 do commit `de935a0` passou, incluindo `agent-production-package`. O Agent Release #48 da tag `agent-v0.1.31` passou e publicou a release como latest: [Fila Agent 0.1.31](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.31). Setup e Transition Setup: SHA-256 `d5d5691a2114a7b1b1f30bbc3f4c58e32da4cfbfd6dcb62da6655d5876557db9`; ZIP: `49acccdd15f2bf285e790069107aa2a6eee952b884271b4a33b87ca940b4aa7b`. Os assets PrintFlow usam os mesmos hashes dos correspondentes assets Fila Agent.
 
 **Limites e impacto:** o workflow empacotou e validou o instalador; não houve instalação em cliente, chamada autenticada à API hospedada, mutação de dados nem operação de impressora física. A assinatura permanece `DEV_SELF_SIGNED` e `productionTrusted: false`; continua sem prova para Smart App Control. A instalação e atualização em cada cliente precisam ser confirmadas após disponibilização do download.
+
+### Normalização do perfil Bambu A1 mini e release 0.1.32 — 2026-10-17
+
+**Causa e correção:** o cadastro fornecia `Bambu Lab` como fabricante e `Bambu Lab A1-mini` como modelo. O resolver oficial do Orca concatenava os dois campos e exigia a grafia exata `Bambu Lab A1 mini`, rejeitando o modelo válido. Os resolvers Node e C# agora removem o fabricante repetido no início do modelo e normalizam `A1-mini` para o perfil oficial `A1 mini`; modelos sem perfil continuam sendo rejeitados, sem fallback genérico.
+
+**Verificações:** `npm test` no Agent passou 160/160; os contratos do runtime C# passaram 231 (o teste DPAPI real foi pulado porque o executor não tem perfil Windows carregado); `node scripts/check-agent-release-contract.mjs` passou 36 checks; `node scripts/validate-agent-package.mjs` aprovou 0.1.32; o ReleaseTool compilou com zero avisos/erros; `git diff --check` passou.
+
+**Publicação:** o CI #262 do commit `98948e7` e o Agent Release #49 da tag `agent-v0.1.32` concluíram com sucesso. A release está publicada como latest: [Fila Agent 0.1.32](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.32). SHA-256 do Setup: `6346E2195AEAA2995A1669620A32318A6E9C7BC0C25913BACC356895A4692E26`; SHA-256 do ZIP: `D7B6C98A40DC327486DA3C6F4BB1711C0CFA163019354265C8DF6C3B34B9A605`. Os assets PrintFlow têm os mesmos hashes dos assets Fila Agent correspondentes.
+
+**Limites e impacto:** a release não foi instalada na máquina do cliente e nenhum G-code foi enviado à impressora. A mudança precisa ser instalada ou atualizada no computador com o Agent para confirmar o fatiamento real. A assinatura permanece `DEV_SELF_SIGNED` e `productionTrusted: false`.
