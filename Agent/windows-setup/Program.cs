@@ -17,12 +17,13 @@ namespace FilaAgent.Setup;
 
 internal static class Program
 {
-    private const string TermsVersion = "1.4";
+    private const string TermsVersion = "1.5";
     private const string DefaultTaskName = "FilaAgent";
     private const string LegacyTaskName = "PrintFlowAgent";
     private const string StartupRunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string StartupValueName = "FilaAgent";
-    private const string OrcaStoreProductId = "9MV6GL23XM59";
+    private const string OrcaPortableUrl = "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Windows_V2.4.2_x64_portable.zip";
+    private const string OrcaPortableSha256 = "feba3009dfb9d268779cca5758a1a5bc3b7d0722bf8fa48d5c57340de975d6be";
     [STAThread]
     private static int Main(string[] args)
     {
@@ -655,61 +656,17 @@ internal static class Program
     {
         if (testMode) return;
 
-        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["FILA_AGENT_ORCA_SLICER_PATH"] = Environment.GetEnvironmentVariable("FILA_AGENT_ORCA_SLICER_PATH"),
-            ["PRINTFLOW_ORCA_SLICER_PATH"] = Environment.GetEnvironmentVariable("PRINTFLOW_ORCA_SLICER_PATH")
-        };
-        var executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
-        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
-        {
-            ThrowIfUnsupportedOrcaStoreVersion();
-            var winget = ResolveWingetExecutable();
-            Exception? wingetError = null;
-            if (winget is not null)
-            {
-                try
-                {
-                    RunWithProgress("Instalando OrcaSlicer", "O Fila Agent está baixando o OrcaSlicer oficial pela Microsoft Store. Isso pode levar alguns minutos.",
-                        () => Run(winget, ["install", "--id", OrcaStoreProductId, "--exact", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity", "--silent"], timeout: TimeSpan.FromMinutes(20)));
-                }
-                catch (Exception error) { wingetError = error; }
-            }
-
-            executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
-            if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
-            {
-                ThrowIfUnsupportedOrcaStoreVersion();
-                var openStore = MessageBox.Show(
-                    "O OrcaSlicer oficial é necessário para gerar G-code. A instalação automática pela Store não pôde ser concluída neste computador; o WinGet do App Installer pode estar indisponível ou ter falhado. Deseja abrir a página oficial da Microsoft Store para instalar o OrcaSlicer? Depois, volte aqui e clique em Repetir para validar.",
-                    "Instalar dependência OrcaSlicer", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-                if (openStore != DialogResult.Yes)
-                    throw new InvalidOperationException("OrcaSlicer 2.4.2 não foi encontrado. A instalação do Fila Agent foi cancelada.", wingetError);
-
-                try
-                {
-                    Process.Start(new ProcessStartInfo($"ms-windows-store://pdp/?ProductId={OrcaStoreProductId}") { UseShellExecute = true });
-                }
-                catch (Exception error)
-                {
-                    throw new InvalidOperationException("Não foi possível abrir a página oficial do OrcaSlicer na Microsoft Store. Instale o OrcaSlicer pelo canal oficial e tente novamente.", error);
-                }
-
-                while (true)
-                {
-                    var retry = MessageBox.Show(
-                        "Conclua a instalação do OrcaSlicer na Microsoft Store e clique em Repetir para validar o slicer. Cancelar interrompe a instalação do Fila Agent.",
-                        "Aguardando OrcaSlicer", MessageBoxButtons.RetryCancel, MessageBoxIcon.Information);
-                    if (retry != DialogResult.Retry)
-                        throw new InvalidOperationException("OrcaSlicer 2.4.2 não foi encontrado após a instalação pela Store.", wingetError);
-
-                    executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
-                    if (!string.IsNullOrWhiteSpace(executable) && File.Exists(executable)) break;
-                    ThrowIfUnsupportedOrcaStoreVersion();
-                }
-            }
-        }
-
+        var configuredExecutable = Environment.GetEnvironmentVariable("FILA_AGENT_ORCA_SLICER_PATH");
+        if (string.IsNullOrWhiteSpace(configuredExecutable))
+            configuredExecutable = Environment.GetEnvironmentVariable("PRINTFLOW_ORCA_SLICER_PATH");
+        var useBundledRuntime = string.IsNullOrWhiteSpace(configuredExecutable) || configuredExecutable.Replace('/', '\\').Contains("\\WindowsApps\\", StringComparison.OrdinalIgnoreCase);
+        var executable = useBundledRuntime
+            ? Path.Combine(packageRoot, "dependencies", "OrcaSlicer", "orca-slicer.exe")
+            : Path.GetFullPath(configuredExecutable!);
+        if (useBundledRuntime && !File.Exists(executable))
+            RunWithProgress("Preparando OrcaSlicer", "Baixando o OrcaSlicer oficial validado para este computador. Isso pode levar alguns minutos.",
+                () => DownloadAndExtractOrca(packageRoot));
+        if (!File.Exists(executable)) throw new FileNotFoundException("OrcaSlicer nao encontrado no caminho configurado.", executable);
         var input = Path.Combine(packageRoot, "assets", "slicing-smoke-cube.stl");
         if (!File.Exists(input)) throw new InvalidDataException("Modelo local de validação do OrcaSlicer ausente no pacote.");
 
@@ -748,26 +705,45 @@ internal static class Program
         }
     }
 
-    private static void ThrowIfUnsupportedOrcaStoreVersion()
+    private static void DownloadAndExtractOrca(string packageRoot)
     {
-        var version = OrcaSlicerService.FindUnvalidatedStorePackageVersion();
-        if (version is null) return;
-        throw new InvalidOperationException(
-            $"OrcaSlicer Store {version} está instalado, mas ainda não foi validado com esta versão do Fila Agent. " +
-            "A instalação foi interrompida sem substituir o Orca. O Agent exige um motor e perfis testados para gerar G-code.");
-    }
-
-    private static string? ResolveWingetExecutable()
-    {
-        var candidates = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps"));
-        foreach (var directory in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        var dependencyRoot = Path.Combine(packageRoot, "dependencies", "OrcaSlicer");
+        var archivePath = Path.Combine(Path.GetTempPath(), $"fila-agent-orca-{Guid.NewGuid():N}.zip");
+        try
         {
-            var executable = Path.Combine(directory, "winget.exe");
-            if (File.Exists(executable)) return executable;
+            using (var client = new HttpClient { Timeout = TimeSpan.FromMinutes(20) })
+            using (var request = new HttpRequestMessage(HttpMethod.Get, OrcaPortableUrl))
+            {
+                request.Headers.UserAgent.ParseAdd("FilaAgent-Setup/0.1");
+                using var response = client.Send(request, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+                using var responseStream = response.Content.ReadAsStream();
+                using var archive = File.Create(archivePath);
+                responseStream.CopyTo(archive);
+            }
+
+            using (var archive = File.OpenRead(archivePath))
+            {
+                var actualHash = Convert.ToHexString(SHA256.HashData(archive));
+                if (!actualHash.Equals(OrcaPortableSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("O hash do pacote oficial OrcaSlicer nao corresponde a versao aprovada.");
+            }
+
+            Directory.CreateDirectory(dependencyRoot);
+            ZipFile.ExtractToDirectory(archivePath, dependencyRoot);
+            if (!File.Exists(Path.Combine(dependencyRoot, "orca-slicer.exe")) ||
+                !Directory.Exists(Path.Combine(dependencyRoot, "resources", "profiles", "BBL")))
+                throw new InvalidDataException("O pacote oficial OrcaSlicer nao contem o executavel e os perfis esperados.");
         }
-        return null;
+        catch (Exception error) when (error is not InvalidDataException || !error.Message.Contains("hash", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Directory.Exists(dependencyRoot)) Directory.Delete(dependencyRoot, recursive: true);
+            throw new InvalidOperationException("Nao foi possivel baixar e validar o OrcaSlicer oficial. Verifique a conexao com a internet e tente novamente.", error);
+        }
+        finally
+        {
+            if (File.Exists(archivePath)) File.Delete(archivePath);
+        }
     }
 
     private static void RunWithProgress(string title, string message, Action operation)

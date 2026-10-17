@@ -24,7 +24,8 @@ try
 if (args.Length > 0 && args[0].Equals("--orca-live-smoke", StringComparison.OrdinalIgnoreCase))
 {
     var executable = args.Length > 1 ? args[1] : OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>());
-    return await RunOrcaLiveSmokeAsync(executable);
+    var applicationBase = args.Length > 2 ? args[2] : null;
+    return await RunOrcaLiveSmokeAsync(executable, applicationBase);
 }
 if (args.Length > 0 && args[0].Equals("--orca-store-discovery-smoke", StringComparison.OrdinalIgnoreCase))
 {
@@ -553,13 +554,19 @@ try
     Directory.CreateDirectory(Path.GetDirectoryName(executablePath)!);
     await File.WriteAllTextAsync(executablePath, "mock executable");
     var storeProgramFiles = Path.Combine(tempRoot, "store-program-files");
+    var bundledOrcaBase = Path.Combine(tempRoot, "installed", "host");
+    var bundledOrcaExecutable = Path.Combine(tempRoot, "installed", "dependencies", "OrcaSlicer", "orca-slicer.exe");
+    Directory.CreateDirectory(Path.GetDirectoryName(bundledOrcaExecutable)!);
+    await File.WriteAllTextAsync(bundledOrcaExecutable, "pinned standalone Orca build");
+    Check(OrcaSlicerService.ResolveBundledExecutable(bundledOrcaBase) == bundledOrcaExecutable, "resolver seleciona o Orca standalone fixado ao lado do Agent");
     var expectedStoreExe = Path.Combine(storeProgramFiles, "WindowsApps", "OrcaSlicer.OrcaSlicer_2.4.3.0_x64__3qd7h69xpne0g", "orca-slicer.exe");
     var newerStoreExe = Path.Combine(storeProgramFiles, "WindowsApps", "OrcaSlicer.OrcaSlicer_2.5.0.0_x64__3qd7h69xpne0g", "orca-slicer.exe");
     Directory.CreateDirectory(Path.GetDirectoryName(expectedStoreExe)!);
     Directory.CreateDirectory(Path.GetDirectoryName(newerStoreExe)!);
     await File.WriteAllTextAsync(expectedStoreExe, "validated Store build");
     await File.WriteAllTextAsync(newerStoreExe, "not yet validated Store build");
-    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), storeProgramFiles) == newerStoreExe, "resolver C# seleciona o pacote Store Orca mais recente e valida o motor pela saída G-code");
+    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?> { ["FILA_AGENT_ORCA_SLICER_PATH"] = expectedStoreExe }, storeProgramFiles, bundledOrcaBase) == bundledOrcaExecutable, "resolver ignora caminho direto WindowsApps e usa o Orca standalone empacotado");
+    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), storeProgramFiles) == string.Empty, "resolver nao executa diretamente nenhum pacote Orca dentro de WindowsApps");
     Check(OrcaSlicerService.FindUnvalidatedStorePackageVersion(storeProgramFiles) == "2.5.0.0", "detector identifica pacote Store Orca novo sem aprova-lo para slicing");
     Check(OrcaSlicerService.FindUnvalidatedStorePackageVersion([
         "OrcaSlicer.OrcaSlicer_2.4.3.0_x64__3qd7h69xpne0g",
@@ -578,7 +585,7 @@ try
     var newerOnlyExe = Path.Combine(newerOnlyProgramFiles, "WindowsApps", "OrcaSlicer.OrcaSlicer_2.5.0.0_x64__3qd7h69xpne0g", "orca-slicer.exe");
     Directory.CreateDirectory(Path.GetDirectoryName(newerOnlyExe)!);
     await File.WriteAllTextAsync(newerOnlyExe, "not yet validated Store build");
-    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), newerOnlyProgramFiles) == newerOnlyExe, "resolver C# localiza pacote Store novo para validar o motor em runtime");
+    Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>(), newerOnlyProgramFiles) == string.Empty, "resolver nao seleciona Orca Store quando nao ha copia standalone empacotada");
     Check(OrcaSlicerService.FindUnvalidatedStorePackageVersion(newerOnlyProgramFiles) == "2.5.0.0", "detector reporta versao Store nao validada quando nao ha fallback conhecido");
     var configuredOrca = Path.Combine(tempRoot, "configured-orca.exe");
     Check(OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?> { ["FILA_AGENT_ORCA_SLICER_PATH"] = configuredOrca }, storeProgramFiles) == configuredOrca, "caminho Orca FILA_AGENT configurado tem precedencia sobre a versao Store");
@@ -1706,9 +1713,12 @@ static async Task WriteWebSocketTextFrameAsync(Stream stream, string message, Ca
     await stream.WriteAsync(frame, cancellationToken);
 }
 
-static async Task<int> RunOrcaLiveSmokeAsync(string executablePath)
+static async Task<int> RunOrcaLiveSmokeAsync(string executablePath, string? applicationBaseDirectory = null)
 {
-    var configuredExecutable = OrcaSlicerService.ResolveConfiguredExecutable(new Dictionary<string, string?>());
+    var environment = applicationBaseDirectory is null
+        ? new Dictionary<string, string?>()
+        : new Dictionary<string, string?> { ["FILA_AGENT_ORCA_SLICER_PATH"] = @"C:\Program Files\WindowsApps\OrcaSlicer.Store\orca-slicer.exe" };
+    var configuredExecutable = OrcaSlicerService.ResolveConfiguredExecutable(environment, applicationBaseDirectory: applicationBaseDirectory);
     if (string.IsNullOrWhiteSpace(executablePath) || !string.Equals(Path.GetFullPath(executablePath), configuredExecutable, StringComparison.OrdinalIgnoreCase))
         throw new InvalidOperationException("O resolver automático não encontrou o OrcaSlicer validado deste PC.");
 

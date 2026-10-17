@@ -42,10 +42,13 @@ component notices are in third-party/DOTNET-THIRD-PARTY-NOTICES.txt.
 These files were taken from the .NET 8 SDK/runtime available when this
 package was prepared. Recheck them whenever the SDK/runtime baseline changes.
 
-SEPARATE SOFTWARE INSTALLED FROM THE OFFICIAL STORE
+ORCASLICER RUNTIME
 
-OrcaSlicer is not included in this package. If the installer cannot find
-a compatible installation, it can request installation from the official
-Microsoft Store through Windows Package Manager. OrcaSlicer is licensed
-separately under GNU AGPL version 3; see
-https://github.com/OrcaSlicer/OrcaSlicer/blob/main/LICENSE.txt.
+- OrcaSlicer 2.4.2 for Windows x64 is downloaded by setup directly from the
+  official OrcaSlicer GitHub release and installed as a local dependency.
+  Release: https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/v2.4.2
+  Package URL:
+  https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Windows_V2.4.2_x64_portable.zip
+  SHA-256: feba3009dfb9d268779cca5758a1a5bc3b7d0722bf8fa48d5c57340de975d6be
+  License: GNU Affero General Public License v3.0 or later (AGPL-3.0).
+  License text and source: https://github.com/OrcaSlicer/OrcaSlicer

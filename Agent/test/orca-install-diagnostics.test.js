@@ -5,7 +5,7 @@ import test from 'node:test'
 test('setup C# preserva stdout e stderr do Orca e informa falha antes de mover instalação', async () => {
   const setup = await fs.readFile('windows-setup/Program.cs', 'utf8')
   const install = setup.slice(setup.indexOf('private static int Run('), setup.indexOf('private static void RegisterProtocol('))
-  const validation = setup.slice(setup.indexOf('private static void ValidateOrcaRuntime'), setup.indexOf('private static string? ResolveWingetExecutable'))
+  const validation = setup.slice(setup.indexOf('private static void ValidateOrcaRuntime'), setup.indexOf('private static void DownloadAndExtractOrca'))
 
   assert.match(install, /RedirectStandardOutput = true/)
   assert.match(install, /RedirectStandardError = true/)

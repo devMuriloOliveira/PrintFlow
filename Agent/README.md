@@ -7,6 +7,8 @@ em `src/config/config.js`; mantenha origens personalizadas em
 
 Programa local para Windows que conecta este computador ao Filamind e às impressoras 3D autorizadas pelo usuário. Ele roda no computador do usuário, aparece na bandeja do sistema quando iniciado pelo instalador e executa comandos enviados pelo [BackEnd](../BackEnd/README.md). A versão do pacote neste repositório está em `package.json`; a versão mínima aceita pela API é configurável e tem padrão `0.1.10`.
 
+O setup baixa diretamente do [GitHub Releases oficial do OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer/releases/tag/v2.4.2) a versão portátil x64 2.4.2, valida seu SHA-256 e a instala ao lado do Agent. O runtime usa essa cópia local validada para o slicing; não inicia o executável da Microsoft Store dentro de `WindowsApps`, pois o Windows pode negar esse acesso. A dependência permanece dentro da instalação do Agent e é substituída junto com a versão do Agent. O OrcaSlicer é AGPL-3.0 e seus avisos estão em `legal/THIRD-PARTY-NOTICES.txt`.
+
 ## Para Que Serve
 
 O Agent existe porque o navegador e o servidor em nuvem nao conseguem acessar diretamente impressoras na rede local ou conectadas por cabo USB. Ele faz essa ponte de forma controlada.

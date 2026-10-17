@@ -61,48 +61,29 @@ public sealed class OrcaSlicerService(IExternalProcessRunner? processRunner = nu
             ["bambu lab a1 mini"] = ("bambu-a1-mini-pla-basic", "Bambu Lab A1 mini", "0.20mm Standard @BBL A1M.json", "Bambu PLA Basic @BBL A1M.json")
         };
 
-    public static string ResolveConfiguredExecutable(IReadOnlyDictionary<string, string?> environment, string? programFiles = null)
+    public static string ResolveConfiguredExecutable(IReadOnlyDictionary<string, string?> environment, string? programFiles = null, string? applicationBaseDirectory = null)
     {
         var configured = FirstNonBlank(environment.GetValueOrDefault("FILA_AGENT_ORCA_SLICER_PATH"), environment.GetValueOrDefault("PRINTFLOW_ORCA_SLICER_PATH"));
-        if (configured.Length > 0) return Path.GetFullPath(configured);
+        if (configured.Length > 0 && !IsStorePackageExecutable(configured)) return Path.GetFullPath(configured);
+        var bundledExecutable = ResolveBundledExecutable(applicationBaseDirectory);
+        if (bundledExecutable.Length > 0) return bundledExecutable;
         var installedVersion = ReadRegisteredStoreEngineVersion();
         var installRoot = Path.Combine(programFiles ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "OrcaSlicer");
         var registeredExecutable = ResolveRegisteredDesktopExecutable(installRoot, installedVersion);
         if (registeredExecutable.Length > 0) return registeredExecutable;
-
-        if (programFiles is null)
-        {
-            foreach (var packageFullName in GetStorePackageFullNames()
-                .Select(name => (Name: name, Valid: TryParseStorePackageFullName(name, out var version), Version: version))
-                .Where(item => item.Valid)
-                .OrderByDescending(item => item.Version)
-                .Select(item => item.Name))
-            {
-                var packagePath = GetStorePackagePath(packageFullName);
-                var packageExecutable = string.IsNullOrWhiteSpace(packagePath) ? string.Empty : Path.Combine(packagePath, "orca-slicer.exe");
-                if (File.Exists(packageExecutable)) return packageExecutable;
-            }
-            return string.Empty;
-        }
-
-        var windowsApps = Path.Combine(programFiles ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps");
-        try
-        {
-            foreach (var package in Directory.EnumerateDirectories(windowsApps)
-                .Select(path => (Path: path, Name: Path.GetFileName(path)))
-                .Where(item => TryParseStorePackageFullName(item.Name, out _))
-                .Select(item => (item.Path, Version: ParseStorePackageVersion(Path.GetFileName(item.Path))))
-                .OrderByDescending(item => item.Version))
-            {
-                var executable = Path.Combine(package.Path, "orca-slicer.exe");
-                if (File.Exists(executable)) return executable;
-            }
-        }
-        catch (UnauthorizedAccessException) { }
-        catch (IOException) { }
-        catch (System.Security.SecurityException) { }
         return string.Empty;
     }
+
+    public static string ResolveBundledExecutable(string? applicationBaseDirectory = null)
+    {
+        var baseDirectory = applicationBaseDirectory ?? AppContext.BaseDirectory;
+        var executable = Path.GetFullPath(Path.Combine(baseDirectory, "..", "dependencies", "OrcaSlicer", "orca-slicer.exe"));
+        return File.Exists(executable) ? executable : string.Empty;
+    }
+
+    private static bool IsStorePackageExecutable(string path) =>
+        path.Contains($"{Path.DirectorySeparatorChar}WindowsApps{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains($"{Path.AltDirectorySeparatorChar}WindowsApps{Path.AltDirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
 
     public static string? FindUnvalidatedStorePackageVersion(string? programFiles = null)
     {
@@ -188,20 +169,6 @@ public sealed class OrcaSlicerService(IExternalProcessRunner? processRunner = nu
         catch (OverflowException) { return []; }
     }
 
-    private static string GetStorePackagePath(string packageFullName)
-    {
-        uint pathLength = 0;
-        var result = GetPackagePathByFullName(packageFullName, ref pathLength, IntPtr.Zero);
-        if (result != ErrorInsufficientBuffer || pathLength == 0) return string.Empty;
-        var path = Marshal.AllocHGlobal(checked((int)pathLength * sizeof(char)));
-        try
-        {
-            result = GetPackagePathByFullName(packageFullName, ref pathLength, path);
-            return result == ErrorSuccess ? Marshal.PtrToStringUni(path) ?? string.Empty : string.Empty;
-        }
-        finally { Marshal.FreeHGlobal(path); }
-    }
-
     private static bool TryParseStorePackageFullName(string? packageFullName, out Version version)
     {
         version = new Version(0, 0);
@@ -214,22 +181,12 @@ public sealed class OrcaSlicerService(IExternalProcessRunner? processRunner = nu
         return true;
     }
 
-    private static Version ParseStorePackageVersion(string packageFullName)
-    {
-        if (!TryParseStorePackageFullName(packageFullName, out var version))
-            throw new InvalidDataException("Nome de pacote OrcaSlicer Store inválido.");
-        return version;
-    }
-
     private const int ErrorSuccess = 0;
     private const int ErrorInsufficientBuffer = 122;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int GetPackagesByPackageFamily(string packageFamilyName, ref uint count,
         IntPtr packageFullNames, ref uint bufferLength, IntPtr buffer);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int GetPackagePathByFullName(string packageFullName, ref uint pathLength, IntPtr path);
 
     public static string ResolveRegisteredDesktopExecutable(string installRoot, string? installedVersion)
     {
