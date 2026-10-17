@@ -4893,6 +4893,8 @@ export const handleAgentPrinterControlCreate =
               p.compatibility,
               p.validation_status,
               p.validation_message,
+              pr.maker as catalog_printer_manufacturer,
+              pr.model as catalog_printer_model,
               pr.volume as printer_volume,
               pr.agent_protocol as printer_protocol,
               pr.nozzle_mm as printer_nozzle_mm,
@@ -5143,10 +5145,12 @@ export const handleAgentPrinterControlCreate =
         storedPrinter.name,
 
       manufacturer:
-        storedPrinter.manufacturer,
+        storedPrinter.manufacturer ||
+        storedJob.catalog_printer_manufacturer,
 
       model:
-        storedPrinter.model,
+        storedPrinter.model ||
+        storedJob.catalog_printer_model,
 
       serial:
         storedPrinter.serial,
