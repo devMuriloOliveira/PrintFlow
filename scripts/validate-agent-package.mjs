@@ -180,7 +180,16 @@ try {
       errors.push(`aviso/licenca de dependencias ausente: Agent/legal/third-party/${file}`)
     }
   }
-  for (const component of ['BouncyCastle.Cryptography 2.7.0', 'FluentFTP 55.0.0', 'MQTTnet 5.2.0.1603', 'SQLitePCLRaw.lib.e_sqlite3 2.1.12', 'OrcaSlicer is not included']) {
+  for (const component of [
+    'BouncyCastle.Cryptography 2.7.0',
+    'FluentFTP 55.0.0',
+    'MQTTnet 5.2.0.1603',
+    'SQLitePCLRaw.lib.e_sqlite3 2.1.12',
+    'OrcaSlicer 2.4.2 for Windows x64',
+    'OrcaSlicer_Windows_V2.4.2_x64_portable.zip',
+    'SHA-256: feba3009dfb9d268779cca5758a1a5bc3b7d0722bf8fa48d5c57340de975d6be',
+    'AGPL-3.0'
+  ]) {
     if (!notices.includes(component)) errors.push(`THIRD-PARTY-NOTICES.txt sem ${component}.`)
   }
 
