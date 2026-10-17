@@ -7,7 +7,8 @@ using FilaAgent.ReleaseTool;
 
 internal static class Program
 {
-    private const string OrcaStoreProductId = "9MV6GL23XM59";
+    private const string OrcaPortableUrl = "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Windows_V2.4.2_x64_portable.zip";
+    private const string OrcaPortableSha256 = "feba3009dfb9d268779cca5758a1a5bc3b7d0722bf8fa48d5c57340de975d6be";
     private const string TimestampUrl = "http://timestamp.digicert.com";
     private const string ExpectedCertificateSha256 = "AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB";
 
@@ -248,19 +249,40 @@ internal static class Program
     private static async Task EnsureOrcaSmokeAsync(string agentRoot)
     {
         var smokeProject = Path.Combine(agentRoot, "windows-runtime-live-smoke", "FilaAgent.OrcaStore.LiveSmoke.csproj");
-        var dotnet = await RunAsync("dotnet.exe", ["run", "--project", smokeProject, "--configuration", "Release"], agentRoot, TimeSpan.FromMinutes(8));
-        if (dotnet.ExitCode == 0) return;
-        if (!dotnet.Details.Contains("OrcaSlicer Store validado nao foi localizado", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Smoke C# do OrcaSlicer falhou: {dotnet.Details}");
+        var temporaryRoot = Directory.CreateTempSubdirectory("fila-agent-orca-portable-smoke-");
+        var archivePath = Path.Combine(temporaryRoot.FullName, "orca-slicer.zip");
+        var slicerRoot = Path.Combine(temporaryRoot.FullName, "OrcaSlicer");
+        try
+        {
+            using (var client = new HttpClient { Timeout = TimeSpan.FromMinutes(20) })
+            using (var response = await client.GetAsync(OrcaPortableUrl, HttpCompletionOption.ResponseHeadersRead))
+            {
+                response.EnsureSuccessStatusCode();
+                await using var archive = File.Create(archivePath);
+                await response.Content.CopyToAsync(archive);
+            }
 
-        var winget = ResolveWinget();
-        if (winget is null) throw new InvalidOperationException("OrcaSlicer nao foi localizado e o WinGet nao esta disponivel. Instale o OrcaSlicer pela Microsoft Store e tente novamente.");
-        await RunRequiredAsync(winget,
-            ["install", "--id", OrcaStoreProductId, "--exact", "--source", "msstore", "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity", "--silent"],
-            agentRoot, TimeSpan.FromMinutes(20));
+            await using (var archive = File.OpenRead(archivePath))
+            {
+                var actualHash = Convert.ToHexString(await SHA256.HashDataAsync(archive));
+                if (!actualHash.Equals(OrcaPortableSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("O hash do pacote oficial OrcaSlicer nao corresponde a versao aprovada.");
+            }
 
-        var retry = await RunAsync("dotnet.exe", ["run", "--project", smokeProject, "--configuration", "Release"], agentRoot, TimeSpan.FromMinutes(8));
-        if (retry.ExitCode != 0) throw new InvalidOperationException($"OrcaSlicer Store nao passou no smoke local: {retry.Details}");
+            Directory.CreateDirectory(slicerRoot);
+            ZipFile.ExtractToDirectory(archivePath, slicerRoot);
+            var executable = Path.Combine(slicerRoot, "orca-slicer.exe");
+            if (!File.Exists(executable) || !Directory.Exists(Path.Combine(slicerRoot, "resources", "profiles", "BBL")))
+                throw new InvalidDataException("O pacote oficial OrcaSlicer nao contem o executavel e os perfis esperados.");
+
+            await RunRequiredAsync("dotnet.exe",
+                ["run", "--project", smokeProject, "--configuration", "Release", "--", executable],
+                agentRoot, TimeSpan.FromMinutes(8));
+        }
+        finally
+        {
+            temporaryRoot.Delete(recursive: true);
+        }
     }
 
     private static async Task ValidateReleaseAsync(string[] args)
@@ -623,14 +645,6 @@ internal static class Program
     }
 
     private static string FindNode() => FindOnPath("node.exe") ?? FindOnPath("node") ?? "node.exe";
-
-    private static string? ResolveWinget()
-    {
-        var fromPath = FindOnPath("winget.exe");
-        if (fromPath is not null) return fromPath;
-        var localApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "winget.exe");
-        return File.Exists(localApps) ? localApps : null;
-    }
 
     private static string? FindOnPath(string executable)
     {

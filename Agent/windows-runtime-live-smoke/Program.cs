@@ -34,14 +34,16 @@ endsolid FilaAgentSmoke
 """;
 
 var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-var executable = OrcaSlicerService.ResolveConfiguredExecutable(environment);
+var executable = args.Length > 0
+    ? Path.GetFullPath(args[0])
+    : OrcaSlicerService.ResolveConfiguredExecutable(environment);
 if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
 {
-    Console.Error.WriteLine("OrcaSlicer Store validado nao foi localizado neste contexto do Windows; nenhum processo foi iniciado.");
+    Console.Error.WriteLine("OrcaSlicer validado nao foi localizado neste contexto do Windows; nenhum processo foi iniciado.");
     return 2;
 }
 
-var root = Directory.CreateTempSubdirectory("fila-agent-orca-store-smoke-");
+var root = Directory.CreateTempSubdirectory("fila-agent-orca-live-smoke-");
 try
 {
     var modelPath = Path.Combine(root.FullName, "modelo-tetraedro.stl");
@@ -54,7 +56,7 @@ try
     if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0 || result.Artifact.Format != "gcode")
         throw new InvalidDataException("OrcaSlicer nao produziu o pacote de G-code esperado.");
 
-    Console.WriteLine("PASS: OrcaSlicer instalado produziu pacote .gcode.3mf local.");
+    Console.WriteLine("PASS: OrcaSlicer produziu pacote .gcode.3mf local.");
     Console.WriteLine($"Executable: {executable}");
     Console.WriteLine($"Profile: {result.Profile.Id} v{result.Profile.Version}");
     Console.WriteLine($"SHA-256: {result.Artifact.Sha256}");

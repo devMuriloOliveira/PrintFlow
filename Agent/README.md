@@ -199,38 +199,30 @@ executado no hardware.
 
 ### OrcaSlicer local
 
-O instalador Windows instala ou reutiliza o OrcaSlicer oficial pela Microsoft
-Store (`9MV6GL23XM59`). A identidade verificada e
-`OrcaSlicer.OrcaSlicer_3qd7h69xpne0g`, com assinatura Store. A versao de pacote
-testada e 2.4.3.0, cujo motor gera G-code como OrcaSlicer 2.4.2. Outras versoes
-exigem nova validacao antes de serem aceitas automaticamente.
+O setup baixa o ZIP portátil oficial do OrcaSlicer 2.4.2 para Windows x64,
+confere o SHA-256 fixado no código e extrai a dependência junto ao Agent. O
+runtime prioriza essa cópia local e ignora caminhos diretos dentro de
+`WindowsApps`, que podem retornar Acesso negado ao iniciar o processo.
 
-A primeira instalacao exige internet, acesso a Microsoft Store e App Installer
-(WinGet). Uma instalacao existente validada e reutilizada sem novo download.
-O Agent resolve o caminho Store uma vez ao iniciar, incluindo a pasta da versao
-atual; `PRINTFLOW_ORCA_SLICER_PATH` explicito continua tendo prioridade.
-Nao ha fallback automatico para copias sem assinatura em Program Files.
-O instalador fica menor porque nao inclui o ZIP portatil de 171 MB.
+A primeira instalação exige internet e acesso ao GitHub Releases oficial; não
+exige Microsoft Store nem WinGet. O construtor de pacotes também baixa o mesmo
+arquivo, valida seu SHA-256 e executa slicing C# local antes de gerar o
+instalador. O teste usa um modelo sintético e não acessa impressora, API ou dados
+do usuário.
 
-O ZIP oficial portatil foi descartado deste fluxo: seu `TKSTEPBase.dll` foi
-bloqueado pelo Code Integrity (evento 3077, erro 4551). A versao Store passou
-no fatiamento real neste Windows, sem alteracao nas protecoes do sistema.
-O construtor C# e o setup verificam os perfis dos modelos suportados e geram
-G-code de um cubo local usando o Orca instalado. Nenhuma impressora e acessada.
-Uma falha bloqueia o pacote ou cancela a instalacao antes de parar o Agent,
-copiar arquivos ou registrar tarefas. O ambiente de build/release tambem precisa
-permitir instalar aplicativos Store.
-Se o fatiamento falhar, o setup interrompe a instalação antes de parar o Agent
-ou substituir arquivos existentes e mostra a causa na mensagem de erro. Quando
-executado em modo silencioso ou de teste, grava detalhes em
-`%LOCALAPPDATA%\FilaAgentSetup\logs\installer.log` ou no diretório temporário do
-teste; não registra credenciais nem inicia impressão.
-Para repetir somente esse teste no CMD, execute
-`dotnet run --project windows-runtime-live-smoke\FilaAgent.OrcaStore.LiveSmoke.csproj --configuration Release`.
-Essa verificacao nao instala software nem altera o Agent existente.
-O Orca e independente: a reversao/desinstalacao do Agent nao remove o pacote
-Store nem as configuracoes do usuario. Publicacao, instalador assinado e
-validacao em outra maquina continuam sendo etapas separadas.
+Se download, hash, arquivos do pacote, perfis ou slicing falharem, o setup
+interrompe a instalação antes de parar o Agent ou substituir arquivos
+existentes. Em modo silencioso/de teste, grava detalhes em
+`%LOCALAPPDATA%\FilaAgentSetup\logs\installer.log` ou no diretório temporário;
+não registra credenciais nem inicia impressão. Políticas Code Integrity que
+bloqueiem uma DLL do pacote podem impedir o slicing e serão reportadas como
+falha de validação, sem desativar proteções do Windows. Reverter ou desinstalar
+o Agent não remove o Orca já instalado nem configurações do usuário.
+
+Para executar somente o smoke no CMD, passe o executável a validar:
+`dotnet run --project windows-runtime-live-smoke\FilaAgent.OrcaStore.LiveSmoke.csproj --configuration Release -- <caminho\orca-slicer.exe>`.
+Isso executa o slicer localmente sem instalar software, chamar API ou alterar
+a instalação existente do Agent.
 
 O Agent possui um contrato local para executar o OrcaSlicer em modo headless.
 O perfil precisa referenciar arquivos de máquina/processo e filamento

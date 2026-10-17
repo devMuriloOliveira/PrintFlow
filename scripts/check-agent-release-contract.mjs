@@ -38,7 +38,9 @@ const requiredReleaseTool = [
   '"release", "create"',
   '"--verify-tag"',
   'OrcaSlicer 2.4.2 for Windows x64',
+  'https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Windows_V2.4.2_x64_portable.zip',
   'OrcaSlicer_Windows_V2.4.2_x64_portable.zip',
+  'feba3009dfb9d268779cca5758a1a5bc3b7d0722bf8fa48d5c57340de975d6be',
   'AGPL-3.0',
   'SQLitePCLRaw.lib.e_sqlite3 2.1.12'
 ]
@@ -52,6 +54,9 @@ if (!releaseVerifier.includes('DEV_SELF_SIGNED') || !releaseVerifier.includes('P
 }
 if (releaseTool.includes('OrcaSlicer is not included')) {
   missing.push('ReleaseTool ainda exige aviso antigo que exclui OrcaSlicer do pacote')
+}
+if (releaseTool.includes('OrcaStoreProductId') || releaseTool.includes('ResolveWinget')) {
+  missing.push('smoke do pacote ainda depende da Microsoft Store/WinGet em vez do Orca portátil validado')
 }
 if (/shell:\s*(?:pwsh|powershell)|\.ps1|\.psm1|\.vbs|iexpress/i.test(workflow)) {
   missing.push('workflow ainda depende de PowerShell/IExpress')
