@@ -14,8 +14,16 @@ const PROFILE_PRESETS = Object.freeze({
   'bambu lab a1 mini': { id: 'bambu-a1-mini-pla-basic', machine: 'Bambu Lab A1 mini', process: '0.20mm Standard @BBL A1M.json', filament: 'Bambu PLA Basic @BBL A1M.json' }
 })
 
-const printerKey = ({ manufacturer = '', model = '', name = '' } = {}) =>
-  `${String(manufacturer).trim()} ${String(model || name).trim()}`.trim().toLowerCase().replace(/\s+/g, ' ')
+const printerKey = ({ manufacturer = '', model = '', name = '' } = {}) => {
+  const normalizedManufacturer = String(manufacturer).trim().toLowerCase().replace(/\s+/g, ' ')
+  let normalizedModel = String(model || name).trim().toLowerCase().replace(/\s+/g, ' ')
+  const manufacturerPrefix = `${normalizedManufacturer} `
+  if (normalizedManufacturer && normalizedModel.startsWith(manufacturerPrefix)) {
+    normalizedModel = normalizedModel.slice(manufacturerPrefix.length)
+  }
+  normalizedModel = normalizedModel.replace(/\ba1\s*-\s*mini\b/g, 'a1 mini')
+  return `${normalizedManufacturer} ${normalizedModel}`.trim().replace(/\s+/g, ' ')
+}
 
 /** Resolve an exact official printer profile; there is no unsafe generic fallback. */
 export const resolveOfficialOrcaProfileForPrinter = ({ printer, executablePath, version = '2.4.2', nozzle = '0.4' } = {}) => {

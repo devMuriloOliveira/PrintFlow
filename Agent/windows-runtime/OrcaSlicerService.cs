@@ -235,8 +235,16 @@ public sealed class OrcaSlicerService(IExternalProcessRunner? processRunner = nu
             [Path.Combine(resources, "filament", preset.Filament)]);
     }
 
-    public static string NormalizePrinterKey(string manufacturer, string model) =>
-        Regex.Replace($"{manufacturer} {model}".Trim().ToLowerInvariant(), "\\s+", " ");
+    public static string NormalizePrinterKey(string manufacturer, string model)
+    {
+        var normalizedManufacturer = Regex.Replace((manufacturer ?? string.Empty).Trim().ToLowerInvariant(), "\\s+", " ");
+        var normalizedModel = Regex.Replace((model ?? string.Empty).Trim().ToLowerInvariant(), "\\s+", " ");
+        var manufacturerPrefix = $"{normalizedManufacturer} ";
+        if (normalizedManufacturer.Length > 0 && normalizedModel.StartsWith(manufacturerPrefix, StringComparison.Ordinal))
+            normalizedModel = normalizedModel[manufacturerPrefix.Length..];
+        normalizedModel = Regex.Replace(normalizedModel, @"\ba1\s*-\s*mini\b", "a1 mini");
+        return Regex.Replace($"{normalizedManufacturer} {normalizedModel}".Trim(), "\\s+", " ");
+    }
 
     public static IReadOnlyList<string> BuildArguments(string inputPath, string outputPath, OrcaProfile profile, bool exportGcode3mf = false)
     {

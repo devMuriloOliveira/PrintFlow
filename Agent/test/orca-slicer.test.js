@@ -68,6 +68,15 @@ test('registro resolve modelos oficiais sem reutilizar perfil de outra impressor
   assert.match(profile.settingsPaths[1], /process[\\/]0\.20mm Standard @BBL A1M\.json$/)
 })
 
+test('registro normaliza fabricante duplicado e A1-mini para o perfil oficial A1 mini', () => {
+  const profile = resolveOfficialOrcaProfileForPrinter({
+    printer: { manufacturer: 'Bambu Lab', model: 'Bambu Lab A1-mini' },
+    executablePath: 'C:/Program Files/OrcaSlicer/orca-slicer.exe'
+  })
+  assert.equal(profile.id, 'bambu-a1-mini-pla-basic')
+  assert.match(profile.settingsPaths[0], /machine[\\/]Bambu Lab A1 mini 0\.4 nozzle\.json$/)
+})
+
 test('registro recusa modelo sem perfil oficial cadastrado', () => {
   assert.throws(
     () => resolveOfficialOrcaProfileForPrinter({

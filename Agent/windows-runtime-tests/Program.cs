@@ -359,7 +359,7 @@ try
     using var diagnosticsResponse = await http.SendAsync(diagnosticsRequest);
     var diagnosticsBody = await diagnosticsResponse.Content.ReadAsStringAsync();
     using var diagnosticsJson = JsonDocument.Parse(diagnosticsBody);
-    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.31" &&
+    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.32" &&
         diagnosticsJson.RootElement.GetProperty("network").GetProperty("interfaces").ValueKind == JsonValueKind.Array,
         "diagnostico C# autenticado retorna contrato de agente e interfaces locais redigidas");
     Check(!diagnosticsBody.Contains("LAN-SECRET-1122", StringComparison.Ordinal) && !diagnosticsBody.Contains("printer-password", StringComparison.Ordinal) &&
@@ -592,6 +592,9 @@ try
     var officialProfile = OrcaSlicerService.ResolveOfficialProfile("Bambu Lab", "P1S", executablePath);
     Check(officialProfile.Id == "bambu-p1s-pla-basic" && officialProfile.Version == "2.4.2", "resolve perfil oficial e versao do motor OrcaSlicer para P1S");
     Check(Path.GetFileName(officialProfile.SettingsPaths[0]) == "Bambu Lab P1S 0.4 nozzle.json", "perfil oficial seleciona arquivo de maquina correto");
+    var officialA1MiniProfile = OrcaSlicerService.ResolveOfficialProfile("Bambu Lab", "Bambu Lab A1-mini", executablePath);
+    Check(officialA1MiniProfile.Id == "bambu-a1-mini-pla-basic" && Path.GetFileName(officialA1MiniProfile.SettingsPaths[0]) == "Bambu Lab A1 mini 0.4 nozzle.json",
+        "normaliza fabricante duplicado e A1-mini para o perfil oficial A1 mini");
     var unsupportedModelRejected = false;
     try { OrcaSlicerService.ResolveOfficialProfile("Bambu Lab", "H2D", executablePath); }
     catch (InvalidOperationException) { unsupportedModelRejected = true; }
