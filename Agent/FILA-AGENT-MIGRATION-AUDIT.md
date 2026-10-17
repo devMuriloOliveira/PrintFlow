@@ -948,3 +948,11 @@ O repositório não tem uma licença técnica/token Beta do Agent: o setup exige
 **Publicação:** o CI #262 do commit `98948e7` e o Agent Release #49 da tag `agent-v0.1.32` concluíram com sucesso. A release está publicada como latest: [Fila Agent 0.1.32](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.32). SHA-256 do Setup: `6346E2195AEAA2995A1669620A32318A6E9C7BC0C25913BACC356895A4692E26`; SHA-256 do ZIP: `D7B6C98A40DC327486DA3C6F4BB1711C0CFA163019354265C8DF6C3B34B9A605`. Os assets PrintFlow têm os mesmos hashes dos assets Fila Agent correspondentes.
 
 **Limites e impacto:** a release não foi instalada na máquina do cliente e nenhum G-code foi enviado à impressora. A mudança precisa ser instalada ou atualizada no computador com o Agent para confirmar o fatiamento real. A assinatura permanece `DEV_SELF_SIGNED` e `productionTrusted: false`.
+
+### Correção do atualizador e preparação da versão 0.1.33 — 2026-10-17
+
+**Causa e correção:** ao atualizar, o Setup encerrava a árvore inteira do processo do Agent. Como o próprio Setup pode ter sido iniciado pelo Agent, o encerramento incluía o processo chamador e lançava `Cannot be used to terminate a process tree containing the calling process.` O Setup agora encerra somente o processo host encontrado, sem percorrer a árvore. A versão do Agent foi avançada para 0.1.33 para distribuir a correção.
+
+**Verificações locais:** `npm.cmd test` passou 161/161; `node scripts/check-agent-release-contract.mjs` passou 36 checks; `node scripts/validate-agent-package.mjs` aprovou 0.1.33; os contratos C# passaram 231 (DPAPI real pulado por ausência de perfil Windows carregado); o ReleaseTool compilou sem avisos/erros; `git diff --check` passou.
+
+**Limites:** a regressão foi coberta pelo contrato de que o Setup não mata a árvore inteira, mas não foi possível executar a atualização em um PC cliente nesta etapa. Nenhuma API hospedada, dado de produção ou impressora foi acessada. A publicação da release e a instalação no computador afetado ainda precisam ser confirmadas.

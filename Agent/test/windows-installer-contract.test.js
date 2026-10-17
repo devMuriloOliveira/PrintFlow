@@ -302,3 +302,13 @@ test('runtime e pacote compilado não contêm scripts PowerShell nem o runtime N
   assert.match(setup, /node\.exe/)
   assert.match(setup, /\.ps1/)
 })
+
+test('update stops the Agent host without terminating an installer launched by it', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const start = setup.indexOf('private static void StopAgentProcesses(')
+  const end = setup.indexOf('private static bool HasAgentProcesses(', start)
+  assert.ok(start >= 0 && end > start)
+  const stopAgent = setup.slice(start, end)
+  assert.match(stopAgent, /process\.Kill\(entireProcessTree: false\)/)
+  assert.doesNotMatch(stopAgent, /process\.Kill\(entireProcessTree: true\)/)
+})

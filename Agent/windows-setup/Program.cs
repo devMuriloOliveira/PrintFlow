@@ -810,7 +810,8 @@ internal static class Program
             using (process)
             {
                 if (process.HasExited) continue;
-                process.Kill(entireProcessTree: true);
+                // This installer can be a child of the Agent host. Killing the whole tree would include this process.
+                process.Kill(entireProcessTree: false);
                 if (!process.WaitForExit(15_000)) throw new InvalidOperationException("O Agent antigo continuou em execucao; a instalacao foi interrompida para preservar os arquivos.");
             }
         }
