@@ -237,7 +237,7 @@ const tokenHeaders = () => {
     'Content-Type': 'application/json'
   }
 }
-const loadAgents = async () => {
+const loadAgents = async (silent = false) => {
   agentLoading.value = true
   try {
     const response = await fetch(`${config.public.apiBase}/api/agents`, {
@@ -247,7 +247,7 @@ const loadAgents = async () => {
     if (!response.ok) throw new Error(data?.error || 'Não foi possível carregar os Agents.')
     agents.value = data.agents || []
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Não foi possível carregar os Agents.', 'info')
+    if (!silent) notify(error instanceof Error ? error.message : 'Não foi possível carregar os Agents.', 'info')
   } finally {
     agentLoading.value = false
   }
@@ -613,7 +613,8 @@ onMounted(() => {
   seedPrinterStatusCache()
   loadAgents().then(() => refreshAllPrinterStatuses()).catch(() => {})
   statusRefreshTimer.value = setInterval(() => {
-    refreshAllPrinterStatuses().catch(() => {})
+    if (agentLoading.value) return
+    loadAgents(true).then(() => refreshAllPrinterStatuses()).catch(() => {})
   }, 30_000)
 })
 watch(printers, () => {
