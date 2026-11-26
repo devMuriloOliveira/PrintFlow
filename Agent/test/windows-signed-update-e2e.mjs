@@ -180,31 +180,24 @@ try {
 }
 
 async function trustCertificateForCurrentUser(certificateFile) {
+  assert.equal(process.env.GITHUB_ACTIONS, 'true',
+    'temporary certificate trust is restricted to a disposable GitHub Actions runner')
   const certificate = new X509Certificate(await readFile(certificateFile))
   const thumbprint = certificate.fingerprint.replaceAll(':', '')
-  const stores = ['Root']
-  const addedStores = []
-  for (const store of stores) {
-    const existing = runCertUtil(['-user', '-store', store, thumbprint])
-    const normalizedOutput = existing.stdout.replace(/[^a-f\d]/gi, '').toLowerCase()
-    if (existing.status === 0 && normalizedOutput.includes(thumbprint.toLowerCase())) continue
-    const added = runCertUtil(['-user', '-addstore', store, certificateFile])
-    assert.equal(added.status, 0,
-      `could not temporarily trust the isolated E2E certificate in CurrentUser\\${store}: ${added.stderr || added.stdout}`)
-    addedStores.push(store)
-  }
+  const store = 'Root'
+  const added = runCertUtil(['-f', '-user', '-addstore', store, certificateFile])
+  assert.equal(added.status, 0,
+    `could not temporarily trust the isolated E2E certificate in CurrentUser\\${store}: ${added.stderr || added.stdout}`)
 
   return async () => {
-    for (const store of addedStores.reverse()) {
-      const removed = runCertUtil(['-user', '-delstore', store, thumbprint])
-      assert.equal(removed.status, 0,
-        `could not remove temporary E2E certificate trust from CurrentUser\\${store}: ${removed.stderr || removed.stdout}`)
-    }
+    const removed = runCertUtil(['-user', '-delstore', store, thumbprint])
+    assert.equal(removed.status, 0,
+      `could not remove temporary E2E certificate trust from CurrentUser\\${store}: ${removed.stderr || removed.stdout}`)
   }
 }
 
 function runCertUtil(args) {
-  const result = spawnSync('certutil.exe', args, { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
+  const result = spawnSync('certutil.exe', args, { encoding: 'utf8', windowsHide: true, timeout: 60_000 })
   if (result.error) throw result.error
   return result
 }
