@@ -5,16 +5,21 @@ $storeNames = @('Root', 'TrustedPublisher')
 $addedStores = [System.Collections.Generic.List[string]]::new()
 
 if ($env:FILA_AGENT_E2E_CERTIFICATE_ACTION -eq 'add') {
+  [Console]::Error.WriteLine('certificate-store: load certificate')
   try {
     foreach ($storeName in $storeNames) {
+      [Console]::Error.WriteLine("certificate-store: open $storeName")
       $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
       try {
         $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        [Console]::Error.WriteLine("certificate-store: find $storeName")
         $exists = $store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $certificate.Thumbprint, $false).Count -gt 0
         if (-not $exists) {
+          [Console]::Error.WriteLine("certificate-store: add $storeName")
           $store.Add($certificate)
           $addedStores.Add($storeName)
         }
+        [Console]::Error.WriteLine("certificate-store: verify $storeName")
         $verified = $store.Certificates.Find([System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint, $certificate.Thumbprint, $false).Count -gt 0
         if (-not $verified) { throw "Certificate trust was not visible in CurrentUser\\$storeName after adding" }
       } finally {
@@ -43,6 +48,7 @@ if ($env:FILA_AGENT_E2E_CERTIFICATE_ACTION -eq 'add') {
   $removeErrors = [System.Collections.Generic.List[string]]::new()
   foreach ($storeName in ($env:FILA_AGENT_E2E_ADDED_STORES -split ',')) {
     if (-not $storeName) { continue }
+    [Console]::Error.WriteLine("certificate-store: remove $storeName")
     $store = [System.Security.Cryptography.X509Certificates.X509Store]::new($storeName, [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
     try {
       $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)

@@ -197,7 +197,7 @@ function runCertificateStoreAction(action, certificateFile, stores = []) {
   const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript], {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 30_000,
+    timeout: 60_000,
     env: {
       ...process.env,
       FILA_AGENT_E2E_CERTIFICATE_FILE: certificateFile,
@@ -205,7 +205,9 @@ function runCertificateStoreAction(action, certificateFile, stores = []) {
       FILA_AGENT_E2E_ADDED_STORES: stores.join(',')
     }
   })
-  if (result.error) throw result.error
+  if (result.error) {
+    throw new Error(`PowerShell certificate store ${action} failed: ${result.error.code}; stdout: ${result.stdout || '(empty)'}; stderr: ${result.stderr || '(empty)'}`, { cause: result.error })
+  }
   assert.equal(result.status, 0,
     `could not ${action} temporary E2E certificate trust in CurrentUser stores: ${result.stderr || result.stdout}`)
   return action === 'add' ? result.stdout.trim().split(',').filter(Boolean) : []
