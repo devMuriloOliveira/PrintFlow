@@ -53,3 +53,8 @@ docs/PRINTFLOW_AGENT_FASE_0_AUDITORIA.md
 
 # Dados operacionais locais que nao fazem parte do codigo-fonte.
 /BackEnd/backups/
+
+# Configuracao local do Codex; nao publicar no repositorio.
+/AGENTS.md
+/.codex/
+/.agents/skills/

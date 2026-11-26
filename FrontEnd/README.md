@@ -5,6 +5,8 @@ vendas, estoque, filamentos, impressoras, marketplaces, relatórios e
 configurações. Os dados reais, a autenticação e as permissões pertencem ao
 [BackEnd](../BackEnd/README.md).
 
+Documentação detalhada: [docs/frontend](../docs/frontend/README.md).
+
 ## Rodar localmente
 
 Use Node.js 24 e npm. No CMD, a partir da raiz do repositório:

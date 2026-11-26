@@ -10,6 +10,14 @@ using FilaAgent.Runtime;
 
 namespace FilaAgent.Setup;
 
+internal enum UpdateCheckResult
+{
+    Updated,
+    NoUpdate,
+    Deferred,
+    Declined
+}
+
 internal sealed class SignedUpdateService
 {
     private const string ReleaseApi = "https://api.github.com/repos/devMuriloOliveira/PrintFlow/releases/latest";
@@ -63,13 +71,28 @@ internal sealed class SignedUpdateService
         }
     }
 
-    public async Task<bool> CheckAndInstallAsync(string installRoot, bool interactive, bool confirmUpdates, CancellationToken cancellationToken = default)
+    public async Task<UpdateCheckResult> CheckAndInstallAsync(string installRoot, bool interactive, bool confirmUpdates, CancellationToken cancellationToken = default)
+    {
+        var currentAtStart = VersionAt(installRoot);
+        try { return await CheckAndInstallCoreAsync(installRoot, interactive, confirmUpdates, cancellationToken); }
+        catch (Exception error)
+        {
+            try { WriteHistory(currentAtStart, "", "failed", error.GetType().Name); }
+            catch { }
+            throw;
+        }
+    }
+
+    private async Task<UpdateCheckResult> CheckAndInstallCoreAsync(string installRoot, bool interactive, bool confirmUpdates, CancellationToken cancellationToken)
     {
         var health = await GetHealthAsync(cancellationToken);
         if (health is null || health.UpdateBlocked || !health.CloudConnected)
         {
-            WriteHistory(VersionAt(installRoot), "", "deferred", health?.UpdateBlockedReason ?? "health_unavailable");
-            return false;
+            var reason = health is null ? "health_unavailable" : health.UpdateBlocked
+                ? health.UpdateBlockedReason ?? "updates_blocked"
+                : "cloud_disconnected";
+            WriteHistory(VersionAt(installRoot), "", "deferred", reason);
+            return UpdateCheckResult.Deferred;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, _releaseApi);
@@ -86,13 +109,13 @@ internal sealed class SignedUpdateService
         if (latest <= current)
         {
             if (interactive) MessageBox.Show($"Você já está usando a versão mais recente do Fila Agent ({current}).", "Fila Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return false;
+            return UpdateCheckResult.NoUpdate;
         }
 
         if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do Fila Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará os termos e pedirá confirmação antes de substituir a versão atual.", "Fila Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
         {
             WriteHistory(currentVersion, latest.ToString(), "declined", "user_declined");
-            return false;
+            return UpdateCheckResult.Declined;
         }
 
         var assets = root.GetProperty("assets").EnumerateArray().ToDictionary(
@@ -166,7 +189,7 @@ internal sealed class SignedUpdateService
         });
         if (!updated && interactive)
             MessageBox.Show($"A atualização não foi aplicada. O Fila Agent continua na versão {current}.", "Atualização cancelada", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        return updated;
+        return updated ? UpdateCheckResult.Updated : UpdateCheckResult.Declined;
     }
 
     private static Task<T> RunWithProgressAsync<T>(string initialStatus, Func<UpdateProgressForm, Task<T>> operation)

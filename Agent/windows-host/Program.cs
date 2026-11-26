@@ -51,6 +51,8 @@ internal static class NativeDpapi
 internal sealed class AgentApplicationContext : ApplicationContext
 {
     private const string DefaultApiUrl = "https://printflow-api-4y5l.onrender.com";
+    private static readonly TimeSpan UpdateSuccessInterval = TimeSpan.FromHours(6);
+    private static readonly TimeSpan UpdateRetryInterval = TimeSpan.FromMinutes(15);
     private readonly string _agentRoot;
     private readonly string _apiUrl;
     private readonly int _localPort;
@@ -289,11 +291,23 @@ internal sealed class AgentApplicationContext : ApplicationContext
             using var updateProcess = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Nao foi possivel iniciar a verificacao de atualizacao.");
             await updateProcess.WaitForExitAsync();
-            _updateTimer.Interval = 6 * 60 * 60 * 1_000;
+            if (updateProcess.ExitCode == 0)
+            {
+                _updateTimer.Interval = (int)UpdateSuccessInterval.TotalMilliseconds;
+            }
+            else
+            {
+                _updateTimer.Interval = (int)UpdateRetryInterval.TotalMilliseconds;
+                var result = updateProcess.ExitCode == 2
+                    ? "foi adiada por indisponibilidade ou bloqueio"
+                    : $"falhou com código {updateProcess.ExitCode}";
+                WriteLog($"Verificação de atualização {result}; nova tentativa em 15 minutos.");
+            }
         }
         catch (Exception error)
         {
             WriteLog($"Falha ao iniciar verificação de atualização: {error.Message}");
+            _updateTimer.Interval = (int)UpdateRetryInterval.TotalMilliseconds;
         }
         finally
         {

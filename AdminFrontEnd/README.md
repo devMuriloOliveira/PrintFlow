@@ -8,6 +8,8 @@ rotas administrativas. Ações sensíveis e exportações seguem os contratos de
 auditoria do servidor; uma leitura comum não deve ser descrita como alteração
 auditada.
 
+Documentação detalhada: [docs/frontend](../docs/frontend/README.md).
+
 ## Rodar localmente
 
 Use Node.js 24, npm, uma API local ou de homologação e uma conta de teste

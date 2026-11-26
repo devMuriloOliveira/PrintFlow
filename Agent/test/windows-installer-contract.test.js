@@ -118,6 +118,32 @@ test('desinstalação remove apenas atalhos do Agent em pastas compartilhadas do
   assert.match(deleteEmptyDirectory, /!Directory\.EnumerateFileSystemEntries\(path\)\.Any\(\).*Directory\.Delete\(path\)/)
 })
 
+test('desinstalação transfere a remoção ao auxiliar e preserva dados se a transferência falhar', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const finalize = setup.slice(setup.indexOf('private static void FinalizeUninstallProcess('), setup.indexOf('private static void WaitForParentExit('))
+  const uninstall = setup.slice(setup.indexOf('private static int FinalizeUninstall('), setup.indexOf('private static void FinalizeUninstallProcess('))
+
+  assert.match(finalize, /WaitForParentExit\(/)
+  assert.ok(finalize.indexOf('DeleteDirectory(') < finalize.indexOf('DeleteUserDataDirectories()'))
+  assert.ok(finalize.indexOf('DeleteDirectory(') < finalize.indexOf('DeleteSubKeyTree'))
+  assert.match(finalize, /ScheduleDeleteAfterExit\(Environment\.ProcessPath!/)
+  assert.match(uninstall, /Process\.Start\(startInfo\)\s*\?\? throw/)
+  assert.match(uninstall, /--parent-pid/)
+  assert.doesNotMatch(uninstall, /DeleteUserDataDirectories\(\)|DeleteShortcuts\(\)|DeleteSubKeyTree/)
+  assert.match(setup, /ScheduleDeleteAfterExit\(Environment\.ProcessPath!\)[\s\S]*MoveFileEx\(path, null, 0x4\)/)
+})
+
+test('finalizador valida a pasta de instalação antes de permitir remoção recursiva', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const entrypoint = setup.slice(setup.indexOf('private static int Main('), setup.indexOf('private static int ValidateEmbeddedPackage('))
+  const validation = setup.slice(setup.indexOf('private static void ValidateTestModeOperation('), setup.indexOf('private static int? RelaunchElevatedWhenRequired('))
+
+  assert.match(validation, /var finalizing = args\.Contains\("--finalize-uninstall"/)
+  assert.match(validation, /!installing && !uninstalling && !checkingUpdates && !finalizing/)
+  assert.match(validation, /FilaAgent-E2E-/)
+  assert.match(validation, /File\.GetAttributes\(fullInstallRoot\)[\s\S]*FileAttributes\.ReparsePoint/)
+})
+
 test('registro do Windows identifica Fila Agent e usa setup C# para remover', async () => {
   const setup = await read('windows-setup/Program.cs')
 
@@ -239,6 +265,21 @@ test('updates pedem confirmação quando iniciadas pelo cliente', async () => {
   assert.match(updateE2E, /expectedPreviousVersion/)
   assert.doesNotMatch(updateE2E, /await writeFile\(metadataPath|await writeFile\(sumsPath/)
   assert.doesNotMatch(updateE2E, /AppData', 'Roaming'\)|PrintFlowAgent'\)|17873/)
+})
+
+test('host reagenda falhas de atualização em 15 minutos e mantém 6 horas após conclusão', async () => {
+  const host = await read('windows-host/Program.cs')
+  const setup = await read('windows-setup/Program.cs')
+  const updater = await read('windows-setup/SignedUpdateService.cs')
+
+  assert.match(host, /UpdateRetryInterval = TimeSpan\.FromMinutes\(15\)/)
+  assert.match(host, /updateProcess\.ExitCode == 0[\s\S]*UpdateSuccessInterval[\s\S]*UpdateRetryInterval/)
+  assert.match(host, /catch \(Exception error\)[\s\S]*UpdateRetryInterval/)
+  assert.match(setup, /UpdateCheckResult\.Deferred \? 2 : 0/)
+  assert.match(updater, /enum UpdateCheckResult[\s\S]*Updated[\s\S]*NoUpdate[\s\S]*Deferred[\s\S]*Declined/)
+  assert.match(updater, /CheckAndInstallAsync[\s\S]*WriteHistory\(currentAtStart, "", "failed", error\.GetType\(\)\.Name\)/)
+  assert.match(updater, /"updates_blocked"/)
+  assert.match(updater, /"cloud_disconnected"/)
 })
 
 test('host C# executa o runtime integrado e localiza o pacote ao lado do aplicativo', async () => {

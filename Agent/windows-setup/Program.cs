@@ -7,6 +7,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -77,16 +78,21 @@ internal static class Program
             {
                 using var updateMutex = new Mutex(initiallyOwned: true, name: @"Local\FilaAgentUpdateCheck", createdNew: out var updateMutexCreated);
                 if (!updateMutexCreated) return 0;
-                return new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode, testDataDirectory,
+                var updateResult = new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode, testDataDirectory,
                     apiUrl, taskName, localPort).CheckAndInstallAsync(installRoot,
                     args.Contains("--interactive", StringComparer.OrdinalIgnoreCase),
-                    args.Contains("--confirm-updates", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult() ? 0 : 0;
+                    args.Contains("--confirm-updates", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult();
+                return updateResult == UpdateCheckResult.Deferred ? 2 : 0;
             }
             if (args.Contains("--finalize-uninstall", StringComparer.OrdinalIgnoreCase))
             {
-                DeleteDirectory(ReadArgument(args, "--install-dir") ?? DefaultInstallRoot);
-                if (!testMode && args.Contains("--remove-user-data", StringComparer.OrdinalIgnoreCase)) DeleteUserDataDirectories();
-                try { File.Delete(Environment.ProcessPath!); } catch { }
+                FinalizeUninstallProcess(
+                    ReadArgument(args, "--install-dir") ?? DefaultInstallRoot,
+                    ReadArgument(args, "--task-name") ?? DefaultTaskName,
+                    ReadArgument(args, "--parent-pid"),
+                    ReadArgument(args, "--parent-start-utc-ticks"),
+                    args.Contains("--remove-user-data", StringComparer.OrdinalIgnoreCase),
+                    testMode);
                 return 0;
             }
             if (args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase)) return Uninstall(installRoot, taskName, args.Contains("--remove-user-data", StringComparer.OrdinalIgnoreCase), testMode);
@@ -389,25 +395,79 @@ internal static class Program
 
     private static int FinalizeUninstall(string installRoot, string taskName, bool removeUserData, bool testMode = false)
     {
-        StopTask(taskName);
-        StopAgentProcesses(installRoot, "17873", requireIdle: !testMode);
-        if (!testMode)
+        var helper = Path.Combine(Path.GetTempPath(), $"FilaAgentUninstall-{Guid.NewGuid():N}.exe");
+        File.Copy(Environment.ProcessPath!, helper, true);
+        var currentProcess = Process.GetCurrentProcess();
+        var startInfo = new ProcessStartInfo(helper) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[]
         {
+            "--finalize-uninstall", "--install-dir", installRoot, "--task-name", taskName,
+            "--parent-pid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "--parent-start-utc-ticks", currentProcess.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        }) startInfo.ArgumentList.Add(argument);
+        if (removeUserData) startInfo.ArgumentList.Add("--remove-user-data");
+        if (testMode) startInfo.ArgumentList.Add("--test-mode");
+        try
+        {
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Nao foi possivel iniciar o finalizador da desinstalacao.");
+        }
+        catch
+        {
+            try { File.Delete(helper); } catch { }
+            throw;
+        }
+        return 0;
+    }
+
+    private static void FinalizeUninstallProcess(string installRoot, string taskName, string? parentPid, string? parentStartUtcTicks, bool removeUserData, bool testMode)
+    {
+        WaitForParentExit(parentPid, parentStartUtcTicks);
+        StopTask(taskName);
+        if (!testMode)
             foreach (var knownTaskName in new[] { DefaultTaskName, LegacyTaskName })
                 if (!taskName.Equals(knownTaskName, StringComparison.OrdinalIgnoreCase)) StopTask(knownTaskName);
+        StopAgentProcesses(installRoot, "17873", requireIdle: !testMode);
+
+        DeleteDirectory(installRoot);
+        RemoveStartupEntry(testMode ? GetTestStartupValueName(taskName) : StartupValueName);
+        if (!testMode)
+        {
             DeleteShortcuts();
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\printflow-agent", false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\fila-agent", false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FilaAgent", false);
             Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\PrintFlowAgent", false);
+            if (removeUserData) DeleteUserDataDirectories();
         }
-        RemoveStartupEntry(testMode ? GetTestStartupValueName(taskName) : StartupValueName);
-        if (!testMode && removeUserData) DeleteUserDataDirectories();
-        var helper = Path.Combine(Path.GetTempPath(), $"FilaAgentUninstall-{Guid.NewGuid():N}.exe");
-        File.Copy(Environment.ProcessPath!, helper, true);
-        Process.Start(new ProcessStartInfo(helper, $"--finalize-uninstall --install-dir \"{installRoot}\" --task-name \"{taskName}\" {(removeUserData ? "--remove-user-data" : "")} {(testMode ? "--test-mode" : "")}") { UseShellExecute = false, CreateNoWindow = true });
-        return 0;
+        ScheduleDeleteAfterExit(Environment.ProcessPath!);
     }
+
+    private static void WaitForParentExit(string? parentPidText, string? parentStartUtcTicksText)
+    {
+        if (!int.TryParse(parentPidText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parentPid) ||
+            !long.TryParse(parentStartUtcTicksText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var expectedStartUtcTicks))
+            throw new InvalidDataException("Identidade do processo de desinstalacao invalida.");
+
+        Process parent;
+        try { parent = Process.GetProcessById(parentPid); }
+        catch (ArgumentException) { return; }
+        using (parent)
+        {
+            if (parent.StartTime.ToUniversalTime().Ticks != expectedStartUtcTicks) return;
+            if (!parent.WaitForExit(60_000)) throw new TimeoutException("O processo inicial da desinstalacao nao encerrou no prazo.");
+        }
+    }
+
+    private static void ScheduleDeleteAfterExit(string path)
+    {
+        if (!MoveFileEx(path, null, 0x4))
+            Console.Error.WriteLine($"O auxiliar da desinstalacao nao foi marcado para limpeza: erro Win32 {Marshal.GetLastWin32Error()}.");
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileEx(string existingFileName, string? newFileName, uint flags);
 
     private static string? ReadArgument(string[] args, string name) { var i = Array.FindIndex(args, value => string.Equals(value, name, StringComparison.OrdinalIgnoreCase)); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
     private static string DefaultInstallRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FilaAgent");
@@ -506,7 +566,8 @@ internal static class Program
         var installing = args.Contains("--install-package", StringComparer.OrdinalIgnoreCase);
         var uninstalling = args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase);
         var checkingUpdates = args.Contains("--check-updates", StringComparer.OrdinalIgnoreCase);
-        if (!installing && !uninstalling && !checkingUpdates) return;
+        var finalizing = args.Contains("--finalize-uninstall", StringComparer.OrdinalIgnoreCase);
+        if (!installing && !uninstalling && !checkingUpdates && !finalizing) return;
 
         var localAppData = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
         bool IsDirectTestDirectory(string path, string prefix)
@@ -518,6 +579,9 @@ internal static class Program
 
         if (!IsDirectTestDirectory(installRoot, "FilaAgent-E2E-"))
             throw new InvalidOperationException("Test mode only permits an isolated FilaAgent-E2E-* install directory under LocalAppData.");
+        var fullInstallRoot = Path.GetFullPath(installRoot);
+        if (Directory.Exists(fullInstallRoot) && (File.GetAttributes(fullInstallRoot) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Test mode cannot mutate a reparse-point install directory.");
         if (!taskName.StartsWith("FilaAgent_E2E_", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Test mode only permits an isolated FilaAgent_E2E_* scheduled task.");
         if (!string.IsNullOrWhiteSpace(legacyTaskName) && !legacyTaskName.StartsWith("FilaAgent_E2E_Legacy_", StringComparison.OrdinalIgnoreCase))

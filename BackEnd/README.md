@@ -2,6 +2,8 @@
 
 API HTTP do Filamind. Ela centraliza autenticação, isolamento por empresa, cadastros, fila de impressão, arquivos, integrações, cobrança e comunicação com o Fila Agent. Este README descreve a API atual; não substitui a validação dos contratos em homologação.
 
+Documentação detalhada: [docs/backend](../docs/backend/README.md).
+
 ## Para Que Serve
 
 O BackEnd e o ponto confiavel do sistema. Ele:

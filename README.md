@@ -13,6 +13,10 @@ O repositório contém quatro aplicações independentes:
 
 O FrontEnd e o AdminFrontEnd usam a API; o Agent se comunica com o BackEnd e expõe apenas um serviço local em `127.0.0.1:17873` para detecção pelo navegador. O portal administrativo não é uma extensão do painel do cliente nem substitui a autorização no servidor.
 
+Os comandos npm da raiz apenas encaminham tarefas para as quatro aplicações. O painel web mantido fica em `FrontEnd`; não há uma aplicação Nuxt adicional na raiz.
+
+A documentação detalhada e organizada por escopo está no [índice de documentação](./docs/README.md). Os READMEs de cada aplicação continuam sendo guias rápidos.
+
 ## Pilares Consolidados
 
 O Filamind se apoia nos pilares abaixo. Esta secao define o que cada um
