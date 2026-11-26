@@ -228,11 +228,12 @@ export const registerUser = async ({ name, email, password, company, document })
   const normalizedEmail = normalizeEmail(email)
   const cleanName = String(name || '').trim()
   const companyName = String(company || cleanName || 'Filamind').trim()
-  const companyDocument = validCompanyDocument(document)
+  const documentValue = String(document || '').trim()
+  const companyDocument = documentValue ? validCompanyDocument(documentValue) : null
 
   if (!cleanName) throw new Error('Informe o nome.')
   if (!normalizedEmail.includes('@')) throw new Error('Informe um e-mail valido.')
-  if (!companyDocument) throw new Error('Informe um CPF ou CNPJ valido.')
+  if (documentValue && !companyDocument) throw new Error('Informe um CPF ou CNPJ valido.')
   const passwordPolicyError = validatePasswordPolicy(password)
   if (passwordPolicyError) throw new Error(passwordPolicyError)
 
@@ -254,9 +255,9 @@ export const registerUser = async ({ name, email, password, company, document })
   try {
     await query(
       `insert into tenants (id, name, document, document_hash, document_type, document_locked_at, email, is_initialized, billing_enforcement_exempt)
-       values ($1, $2, $3, $4, $5, now(), $6, false, false)
+       values ($1, $2, $3, $4, $5, case when $4 <> '' then now() else null end, $6, false, false)
        on conflict (id) do nothing`,
-      [tenantId, encryptField(companyName), encryptField(companyDocument.digits), companyDocument.hash, companyDocument.type, encryptField(normalizedEmail)]
+      [tenantId, encryptField(companyName), encryptField(companyDocument?.digits || ''), companyDocument?.hash || '', companyDocument?.type || null, encryptField(normalizedEmail)]
     )
   } catch (error) {
     if (error?.code === '23505') throw new Error('Nao foi possivel concluir o cadastro com este CPF ou CNPJ.')
@@ -314,9 +315,11 @@ export const loginOrRegisterGoogleUser = async ({ subject, email, name, company,
   const normalizedEmail = normalizeEmail(email)
   const cleanName = String(name || '').trim()
   const companyName = String(company || cleanName || 'Filamind').trim()
-  const companyDocument = validCompanyDocument(document)
+  const documentValue = String(document || '').trim()
+  const companyDocument = documentValue ? validCompanyDocument(documentValue) : null
 
   if (!subject || !normalizedEmail.includes('@')) throw new Error('Conta Google invalida.')
+  if (documentValue && !companyDocument) throw new Error('Informe um CPF ou CNPJ valido.')
 
   if (!hasDatabase) {
     const existing = [...memoryUsers.values()].find((user) => user.google_subject === subject || user.email === normalizedEmail)

@@ -35,7 +35,7 @@ internal sealed class AgentDiscoveryProgressReporter : IAsyncDisposable
 
     public void Add(MarlinUsbPrinter printer) => Add(new DiscoveredPrinter(
         printer.ConnectionType, printer.Protocol, null, printer.Manufacturer, printer.Name, null, null, null,
-        printer.Port, printer.Firmware, null, printer.RequiresCredentials, printer.RequiredCredentials, null));
+        printer.Port, printer.Firmware, printer.BaudRate, printer.RequiresCredentials, printer.RequiredCredentials, null));
 
     private void Add(DiscoveredPrinter printer)
     {

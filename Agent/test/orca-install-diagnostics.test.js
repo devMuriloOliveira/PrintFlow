@@ -13,5 +13,7 @@ test('setup C# preserva stdout e stderr do Orca e informa falha antes de mover i
   assert.match(install, /codigo \{process\.ExitCode\}.*\{details\}/)
   assert.match(validation, /SliceAsync/)
   assert.match(validation, /finally/)
+  assert.match(setup, /Falha ao preparar o OrcaSlicer portátil oficial\. Verifique o download, a validação, a extração e o teste local de fatiamento\./)
+  assert.doesNotMatch(setup, /Falha ao instalar OrcaSlicer pelo Windows Package Manager/)
   assert.ok(setup.indexOf('ValidateOrcaRuntime(temp, testMode)') < setup.indexOf('Directory.Move(root, backup)'))
 })

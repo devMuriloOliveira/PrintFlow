@@ -42,7 +42,7 @@ public sealed record HttpPrinterCommandResult(bool Success, bool Uploaded = fals
 
 public sealed class HttpPrinterAdapterService(HttpClient? httpClient = null) : IDisposable
 {
-    private readonly HttpClient _httpClient = httpClient ?? new HttpClient();
+    private readonly HttpClient _httpClient = httpClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
     private readonly bool _ownsClient = httpClient is null;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan UploadTimeout = TimeSpan.FromSeconds(120);
@@ -51,6 +51,7 @@ public sealed class HttpPrinterAdapterService(HttpClient? httpClient = null) : I
     {
         var protocol = NormalizeProtocol(printer.Protocol);
         var port = printer.Port ?? DefaultPort(protocol);
+        PrinterDestinationPolicy.Validate(protocol, printer.Ip, port);
         var baseUrl = new UriBuilder(Uri.UriSchemeHttp, printer.Ip, port).Uri.GetLeftPart(UriPartial.Authority);
         options ??= new Dictionary<string, string?>();
         var apiKey = NonBlank(options.GetValueOrDefault("apiKey"));

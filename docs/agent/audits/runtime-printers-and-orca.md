@@ -15,3 +15,4 @@ Este índice reúne a migração do runtime C#, adapters de impressoras, descobe
 ## Limites
 
 Mocks, smoke de slicing e contratos C# não comprovam operação com impressora física, firmware específico ou API externa em produção. Essas limitações permanecem válidas mesmo quando o pacote local é construído com sucesso.
+- [Verificação de descoberta, conexão e credenciais](./FILA-AGENT-MIGRATION-AUDIT.md)

@@ -25,6 +25,7 @@ internal static class Program
     private const string StartupValueName = "FilaAgent";
     private const string OrcaPortableUrl = "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Windows_V2.4.2_x64_portable.zip";
     private const string OrcaPortableSha256 = "feba3009dfb9d268779cca5758a1a5bc3b7d0722bf8fa48d5c57340de975d6be";
+    private const string TrustedCertificateSha256 = "AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB";
     [STAThread]
     private static int Main(string[] args)
     {
@@ -128,7 +129,16 @@ internal static class Program
             }
             if (testMode || args.Contains("--quiet", StringComparer.OrdinalIgnoreCase))
                 return 1;
-            MessageBox.Show($"Nao foi possivel concluir: {error.Message}{Environment.NewLine}{Environment.NewLine}Detalhes registrados em: {logPath}", "Fila Agent", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            var operation = args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase)
+                ? "A desinstalação"
+                : args.Contains("--install-package", StringComparer.OrdinalIgnoreCase)
+                    ? "A instalação ou atualização"
+                    : "A operação";
+            MessageBox.Show(
+                $"{operation} não foi concluída.{Environment.NewLine}{Environment.NewLine}Consulte o log técnico para obter detalhes:{Environment.NewLine}{logPath}",
+                "Fila Agent — operação não concluída",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
             return 1;
         }
         finally
@@ -210,11 +220,20 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(temp);
-            ZipFile.ExtractToDirectory(zipPath, temp);
+            var packageSnapshotPath = Path.Combine(temp, "AgentPackage.snapshot.zip");
+            using (var suppliedPackage = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var packageFile = new FileStream(packageSnapshotPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            {
+                CopyPackageSnapshot(suppliedPackage, packageFile);
+                ValidateInstallerPackageBinding(packageFile, testMode);
+                using var packageArchive = new ZipArchive(packageFile, ZipArchiveMode.Read);
+                ZipFileExtensions.ExtractToDirectory(packageArchive, temp);
+            }
             var host = Path.Combine(temp, "host", "FilaAgent.exe");
             var package = Path.Combine(temp, "package.json");
             if (!File.Exists(host) || !File.Exists(package)) throw new InvalidDataException("Pacote do Agent incompleto.");
-            if (!testMode) TrustDeveloperCertificateIfPresent();
+            if (!testMode)
+                TrustDeveloperCertificateIfPresent();
             ValidateOrcaRuntime(temp, testMode);
 
             if (hadExistingInstall) EnsureNoActivePrintJobs(root, localPort);
@@ -342,6 +361,49 @@ internal static class Program
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             if (installationCompleted && Directory.Exists(backup)) Directory.Delete(backup, true);
         }
+    }
+
+    private static void ValidateInstallerPackageBinding(FileStream suppliedPackage, bool testMode)
+    {
+        using var embeddedPackage = Assembly.GetExecutingAssembly().GetManifestResourceStream("FilaAgentSetup.AgentPackage.zip")
+            ?? throw new InvalidDataException("Payload ZIP nao foi embutido no instalador.");
+        var embeddedHash = SHA256.HashData(embeddedPackage);
+        var packageHash = SHA256.HashData(suppliedPackage);
+        if (!CryptographicOperations.FixedTimeEquals(packageHash, embeddedHash))
+            throw new CryptographicException("O pacote informado nao corresponde ao payload autenticado deste instalador.");
+
+        suppliedPackage.Position = 0;
+        if (testMode) return;
+        ValidateInstallerSignerIdentity();
+    }
+
+    private static void CopyPackageSnapshot(Stream suppliedPackage, FileStream snapshot)
+    {
+        using var embeddedPackage = Assembly.GetExecutingAssembly().GetManifestResourceStream("FilaAgentSetup.AgentPackage.zip")
+            ?? throw new InvalidDataException("Payload ZIP nao foi embutido no instalador.");
+        var expectedLength = embeddedPackage.Length;
+        var buffer = new byte[81920];
+        long copied = 0;
+        int read;
+        while ((read = suppliedPackage.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            copied += read;
+            if (copied > expectedLength) throw new InvalidDataException("O pacote informado excede o tamanho do payload autenticado.");
+            snapshot.Write(buffer, 0, read);
+        }
+        if (copied != expectedLength) throw new InvalidDataException("O tamanho do pacote informado nao corresponde ao payload autenticado.");
+        snapshot.Flush(true);
+        snapshot.Position = 0;
+    }
+
+    private static void ValidateInstallerSignerIdentity()
+    {
+        var executablePath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Nao foi possivel identificar o executavel do instalador.");
+        using var signer = new X509Certificate2(X509Certificate.CreateFromSignedFile(executablePath));
+        var signerHash = Convert.ToHexString(SHA256.HashData(signer.RawData));
+        if (!string.Equals(signerHash, TrustedCertificateSha256, StringComparison.OrdinalIgnoreCase))
+            throw new CryptographicException("O instalador nao foi assinado pelo certificado fixado do Fila Agent.");
     }
 
     private static int Uninstall(string installRoot, string taskName, bool removeUserData, bool testMode)
@@ -483,11 +545,17 @@ internal static class Program
     private static void TrustDeveloperCertificateIfPresent()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "PrintFlow-Agent-Dev-Certificate.cer");
-        if (!File.Exists(path)) return;
-        const string expectedSha256 = "AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB";
+        var installerPath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Nao foi possivel identificar o executavel do instalador.");
+        if (!File.Exists(path))
+        {
+            if (!AuthenticodeTrust.Verify(installerPath))
+                throw new CryptographicException("Windows nao confia na assinatura Authenticode deste instalador.");
+            return;
+        }
         var bytes = File.ReadAllBytes(path);
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
-        if (!string.Equals(hash, expectedSha256, StringComparison.OrdinalIgnoreCase)) throw new CryptographicException("Certificado Early Access nao corresponde ao pacote.");
+        if (!string.Equals(hash, TrustedCertificateSha256, StringComparison.OrdinalIgnoreCase)) throw new CryptographicException("Certificado Early Access nao corresponde ao pacote.");
         var certificate = new X509Certificate2(bytes);
         var usage = certificate.Extensions.OfType<X509EnhancedKeyUsageExtension>().SelectMany(item => item.EnhancedKeyUsages.Cast<Oid>()).Any(oid => oid.Value == "1.3.6.1.5.5.7.3.3");
         if (!usage) throw new CryptographicException("Certificado nao permite assinatura de codigo.");
@@ -499,11 +567,39 @@ internal static class Program
         });
         if (!trusted && MessageBox.Show("Este pacote usa o certificado Early Access do Fila Agent. Deseja confiar neste certificado para validar as atualizacoes assinadas futuras?", "Fila Agent - certificado de teste", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             throw new OperationCanceledException("Instalacao cancelada: certificado Early Access recusado.");
-        foreach (var storeName in new[] { StoreName.Root, StoreName.TrustedPublisher })
+
+        var addedStores = new List<StoreName>();
+        try
         {
-            using var store = new X509Store(storeName, StoreLocation.CurrentUser);
-            store.Open(OpenFlags.ReadWrite);
-            if (!store.Certificates.Cast<X509Certificate2>().Any(existing => existing.Thumbprint == certificate.Thumbprint)) store.Add(certificate);
+            foreach (var storeName in new[] { StoreName.Root, StoreName.TrustedPublisher })
+            {
+                using var store = new X509Store(storeName, StoreLocation.CurrentUser);
+                store.Open(OpenFlags.ReadWrite);
+                if (!store.Certificates.Cast<X509Certificate2>().Any(existing => existing.Thumbprint == certificate.Thumbprint))
+                {
+                    store.Add(certificate);
+                    addedStores.Add(storeName);
+                }
+            }
+
+            if (!AuthenticodeTrust.Verify(installerPath))
+                throw new CryptographicException("Windows nao confia na assinatura Authenticode deste instalador.");
+        }
+        catch (Exception installError)
+        {
+            var rollbackErrors = new List<Exception>();
+            foreach (var storeName in addedStores)
+            {
+                try
+                {
+                    using var store = new X509Store(storeName, StoreLocation.CurrentUser);
+                    store.Open(OpenFlags.ReadWrite);
+                    store.Remove(certificate);
+                }
+                catch (Exception rollbackError) { rollbackErrors.Add(rollbackError); }
+            }
+            if (rollbackErrors.Count > 0) throw new AggregateException("Falha ao validar Authenticode e ao reverter um ou mais certificados adicionados.", [installError, .. rollbackErrors]);
+            throw;
         }
     }
     private static int ShowUsage() { MessageBox.Show("Instalador nativo do Fila Agent.", "Fila Agent"); return 2; }
@@ -844,7 +940,7 @@ internal static class Program
             finally { dialog.Close(); }
         };
         dialog.ShowDialog();
-        if (failure is not null) throw new InvalidOperationException("Falha ao instalar OrcaSlicer pelo Windows Package Manager.", failure);
+        if (failure is not null) throw new InvalidOperationException("Falha ao preparar o OrcaSlicer portátil oficial. Verifique o download, a validação, a extração e o teste local de fatiamento.", failure);
     }
 
     private static bool WaitForHealth(string expectedVersion, string port, bool requirePaired, TimeSpan timeout)

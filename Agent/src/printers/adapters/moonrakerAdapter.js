@@ -3,6 +3,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import FormData from 'form-data'
 
+const printerRequest = (method, ...args) => {
+  const optionsIndex = method === 'get' || method === 'delete' ? 1 : 2
+  args[optionsIndex] = { ...(args[optionsIndex] || {}), maxRedirects: 0 }
+  return axios[method](...args)
+}
+
 const buildBaseUrl = (
   printer
 ) =>
@@ -184,7 +190,7 @@ export const moonrakerAdapter = {
     )
 
     const response =
-      await axios.get(
+      await printerRequest('get',
         `${baseUrl}/server/info`,
         {
           timeout: 8000,
@@ -238,7 +244,7 @@ export const moonrakerAdapter = {
     )
 
     const response =
-      await axios.get(
+      await printerRequest('get',
         `${connection.baseUrl}/printer/objects/query?print_stats&display_status&extruder&heater_bed`,
         {
           timeout: 8000,
@@ -307,7 +313,7 @@ export const moonrakerAdapter = {
     )
 
     const response =
-      await axios.post(
+      await printerRequest('post',
         `${connection.baseUrl}/server/files/upload`,
         form,
         {
@@ -346,7 +352,7 @@ export const moonrakerAdapter = {
       connection
     )
 
-    await axios.post(
+    await printerRequest('post',
       `${connection.baseUrl}/printer/print/pause`,
       {},
       {
@@ -373,7 +379,7 @@ export const moonrakerAdapter = {
       connection
     )
 
-    await axios.post(
+    await printerRequest('post',
       `${connection.baseUrl}/printer/print/resume`,
       {},
       {
@@ -400,7 +406,7 @@ export const moonrakerAdapter = {
       connection
     )
 
-    await axios.post(
+    await printerRequest('post',
       `${connection.baseUrl}/printer/print/cancel`,
       {},
       {

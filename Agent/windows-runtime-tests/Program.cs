@@ -289,7 +289,7 @@ try
         try
         {
             var realDpapiDirectory = Path.Combine(tempRoot, "printer-credentials-real-dpapi");
-            var realDpapiIdentity = new PrinterCredentialIdentity("octoprint", "192.0.2.55", 80);
+            var realDpapiIdentity = new PrinterCredentialIdentity("octoprint", "10.70.0.55", 80);
             var realDpapiProtector = new WindowsDpapiDataProtector();
             using var realDpapiWriter = new AgentPrinterCredentialStore(realDpapiDirectory, realDpapiProtector, credentialUser);
             await realDpapiWriter.SaveAsync(realDpapiIdentity, new Dictionary<string, string?> { ["apiKey"] = "DPAPI-SYNTHETIC-API-KEY" });
@@ -359,7 +359,7 @@ try
     using var diagnosticsResponse = await http.SendAsync(diagnosticsRequest);
     var diagnosticsBody = await diagnosticsResponse.Content.ReadAsStringAsync();
     using var diagnosticsJson = JsonDocument.Parse(diagnosticsBody);
-    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.34" &&
+    Check(diagnosticsResponse.StatusCode == HttpStatusCode.OK && diagnosticsJson.RootElement.GetProperty("agent").GetProperty("version").GetString() == "0.1.36" &&
         diagnosticsJson.RootElement.GetProperty("network").GetProperty("interfaces").ValueKind == JsonValueKind.Array,
         "diagnostico C# autenticado retorna contrato de agente e interfaces locais redigidas");
     Check(!diagnosticsBody.Contains("LAN-SECRET-1122", StringComparison.Ordinal) && !diagnosticsBody.Contains("printer-password", StringComparison.Ordinal) &&
@@ -737,7 +737,7 @@ try
         var environment = new Dictionary<string, string?> { ["FILA_AGENT_ORCA_SLICER_PATH"] = executablePath };
         var productionSlicer = new ProductionJobSlicingService(slicingCloud, slicingCache, new OrcaSlicerService(pinnedRunner), environment);
         var productionRequest = new ProductionJobSlicingRequest("77", productionFile with { StorageKey = "storage/job/77" },
-            new PrinterPinMetadata(Protocol: "bambu", Name: "P1S de teste", Manufacturer: "Bambu Lab", Model: "P1S", Ip: "192.0.2.1", Serial: "SERIAL-FIXTURE"));
+            new PrinterPinMetadata(Protocol: "bambu", Name: "P1S de teste", Manufacturer: "Bambu Lab", Model: "P1S", Ip: "10.70.0.1", Serial: "SERIAL-FIXTURE"));
         var productionResult = await productionSlicer.PrepareAsync(credentials, productionRequest);
         var sourcePath = Path.Combine(slicingCacheDirectory, $"{productionFileHash}.3mf");
         Check(productionResult.Success && productionResult.Profile.Id == "bambu-p1s-pla-basic" &&
@@ -806,7 +806,7 @@ try
                     printer = new
                     {
                         protocol = "bambu", name = "P1S de teste", manufacturer = "Bambu Lab", model = "P1S",
-                        ip = "192.0.2.1", serial = "SERIAL-FIXTURE", accessCode = "must-not-be-persisted"
+                        ip = "10.70.0.1", serial = "SERIAL-FIXTURE", accessCode = "must-not-be-persisted"
                     },
                     job = new
                     {
@@ -935,7 +935,34 @@ try
     using var bambuScanner = new NetworkDiscoveryService(bambuProbe, unusedHttp,
         _ => Task.FromResult<IReadOnlyList<BambuNetworkCandidate>>([]));
     var bambuCandidate = await bambuScanner.IdentifyPrinterAsync("192.168.2.5");
-    Check(bambuCandidate is { Protocol: "bambu", Port: 8883, RequiresCredentials: true } && bambuCandidate.RequiredCredentials.SequenceEqual(["serial", "accessCode"]), "fallback de porta identifica Bambu sem inventar nem descobrir o LAN Access Code");
+    Check(bambuCandidate is null, "porta 8883 aberta sem resposta SSDP nao classifica outro servico como Bambu");
+
+    Check(PrinterDestinationPolicy.IsAllowed("octoprint", "10.12.1.5", 80) &&
+        PrinterDestinationPolicy.IsAllowed("moonraker", "100.64.20.1", 7125) &&
+        PrinterDestinationPolicy.IsAllowed("prusalink", "169.254.1.8", 5000) &&
+        !PrinterDestinationPolicy.IsAllowed("octoprint", "8.8.8.8", 80) &&
+        !PrinterDestinationPolicy.IsAllowed("octoprint", "127.0.0.1", 80) &&
+        !PrinterDestinationPolicy.IsAllowed("octoprint", "169.254.169.254", 80) &&
+        !PrinterDestinationPolicy.IsAllowed("octoprint", "10.12.1.5", 8883) &&
+        !PrinterDestinationPolicy.IsAllowed("octoprint", "printer.local", 80),
+        "politica de destino permite LAN e VPN privada e rejeita endereco externo, hostname e porta incompatível");
+
+    var rejectedDestinationRequests = 0;
+    using var rejectedDestinationHttp = new HttpClient(new PrinterDiscoveryHttpHandler(_ =>
+    {
+        rejectedDestinationRequests++;
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+    }));
+    using var rejectedDestinationAdapter = new HttpPrinterAdapterService(rejectedDestinationHttp);
+    var publicPrinterRejected = false;
+    try
+    {
+        await rejectedDestinationAdapter.ConnectAsync(new NetworkPrinterDescriptor("octoprint", "8.8.8.8", 80),
+            new Dictionary<string, string?> { ["apiKey"] = "must-not-leave-agent" });
+    }
+    catch (InvalidDataException) { publicPrinterRejected = true; }
+    Check(publicPrinterRejected && rejectedDestinationRequests == 0,
+        "adapter HTTP rejeita destino externo antes de enviar credencial ou iniciar request");
 
     var subnetProbe = new FakePrinterPortConnectProbe(new HashSet<int> { 7125 }, host => host == "192.168.2.2");
     using var subnetHttp = new HttpClient(new PrinterDiscoveryHttpHandler(request =>
@@ -1019,12 +1046,12 @@ try
 
     var reconnectDirectory = Path.Combine(tempRoot, "printer-reconnect");
     using var reconnectCredentialStore = new AgentPrinterCredentialStore(reconnectDirectory, protector, credentialUser);
-    var reconnectPrinter = new PrinterCredentialIdentity("bambu", "192.0.2.40", 8883, "RECONNECT-SERIAL");
+    var reconnectPrinter = new PrinterCredentialIdentity("bambu", "10.70.0.40", 8883, "RECONNECT-SERIAL");
     await reconnectCredentialStore.SaveAsync(reconnectPrinter,
         new Dictionary<string, string?> { ["accessCode"] = "RECONNECT-LAN-CODE", ["serial"] = "RECONNECT-SERIAL" });
     var reconnectApiHandler = new PrinterAdapterHttpHandler(request => request.Uri.AbsolutePath switch
     {
-        "/api/agents/printers/reconnect" => JsonResponse("{\"printers\":[{\"id\":\"printer-9\",\"protocol\":\"bambu\",\"connectionType\":\"network\",\"name\":\"P1S fixture\",\"manufacturer\":\"Bambu Lab\",\"model\":\"P1S\",\"serial\":\"RECONNECT-SERIAL\",\"ip\":\"192.0.2.40\",\"port\":8883}] }"),
+        "/api/agents/printers/reconnect" => JsonResponse("{\"printers\":[{\"id\":\"printer-9\",\"protocol\":\"bambu\",\"connectionType\":\"network\",\"name\":\"P1S fixture\",\"manufacturer\":\"Bambu Lab\",\"model\":\"P1S\",\"serial\":\"RECONNECT-SERIAL\",\"ip\":\"10.70.0.40\",\"port\":8883}] }"),
         _ => JsonResponse("{}")
     });
     using (var reconnectHttp = new HttpClient(reconnectApiHandler))
@@ -1041,7 +1068,7 @@ try
                 mqttSession.Options?.AccessCode == "RECONNECT-LAN-CODE" && reconnectApiHandler.Requests.Single().GetHeader("x-agent-secret") == credentials.AgentSecret,
                 "runtime C# restaura impressora registrada e usa Access Code local cifrado, sem recebê-lo da API");
 
-            using var reconnectPrinterJson = JsonDocument.Parse("{\"protocol\":\"bambu\",\"connectionType\":\"network\",\"serial\":\"RECONNECT-SERIAL\",\"ip\":\"192.0.2.40\",\"port\":8883}");
+            using var reconnectPrinterJson = JsonDocument.Parse("{\"protocol\":\"bambu\",\"connectionType\":\"network\",\"serial\":\"RECONNECT-SERIAL\",\"ip\":\"10.70.0.40\",\"port\":8883}");
             var reused = await connectionManager.ConnectAsync(credentials, AgentPrinterDescriptor.FromJson(reconnectPrinterJson.RootElement));
             Check(reused.Reused && reconnectMqttFactory.Clients.Count == 1,
                 "conexao C# ativa por serial e reutilizada sem abrir uma segunda sessao MQTT");
@@ -1226,14 +1253,14 @@ try
     var startupCredentialStore = new AgentCredentialStore(startupDirectory, protector);
     using var startupPrinterCredentialStore = new AgentPrinterCredentialStore(startupDirectory, protector, credentialUser);
     await startupCredentialStore.SavePendingPairingCodeAsync("ab12-cd34");
-    await startupPrinterCredentialStore.SaveAsync(new PrinterCredentialIdentity("bambu", "192.0.2.88", 8883, "STARTUP-SERIAL"),
+    await startupPrinterCredentialStore.SaveAsync(new PrinterCredentialIdentity("bambu", "10.70.0.88", 8883, "STARTUP-SERIAL"),
         new Dictionary<string, string?> { ["accessCode"] = "STARTUP-LAN-CODE", ["serial"] = "STARTUP-SERIAL" });
     var startupHandler = new PrinterAdapterHttpHandler(request => request.Uri.AbsolutePath switch
     {
         "/api/agents/pair" => JsonResponse("{\"agentId\":\"agent-startup\",\"agentSecret\":\"secret-startup\",\"tenantId\":\"tenant-startup\",\"tenantName\":\"Empresa teste\",\"machineName\":\"PC-TESTE\"}"),
         "/api/agents/verify" => JsonResponse("{\"status\":\"ok\"}"),
         "/api/agents/credential/rotate" => JsonResponse("{\"rotated\":false}"),
-        "/api/agents/printers/reconnect" => JsonResponse("{\"printers\":[{\"id\":\"printer-startup\",\"protocol\":\"bambu\",\"connectionType\":\"network\",\"name\":\"P1S de teste\",\"manufacturer\":\"Bambu Lab\",\"model\":\"P1S\",\"serial\":\"STARTUP-SERIAL\",\"ip\":\"192.0.2.88\",\"port\":8883}] }"),
+        "/api/agents/printers/reconnect" => JsonResponse("{\"printers\":[{\"id\":\"printer-startup\",\"protocol\":\"bambu\",\"connectionType\":\"network\",\"name\":\"P1S de teste\",\"manufacturer\":\"Bambu Lab\",\"model\":\"P1S\",\"serial\":\"STARTUP-SERIAL\",\"ip\":\"10.70.0.88\",\"port\":8883}] }"),
         _ => JsonResponse("{}")
     });
     using (var startupHttp = new HttpClient(startupHandler))
@@ -1324,7 +1351,7 @@ try
         var printerCommandMonitors = new ProductionJobMonitorService(printerCommandCloud, printerCommandOperations,
             printerCommandManager, printerCommandFiles, pollInterval: TimeSpan.FromSeconds(1),
             stablePollInterval: TimeSpan.FromSeconds(1), maxPolls: 1_000);
-        var resumedMonitorPrinter = new AgentPrinterDescriptor("octoprint", "network", Name: "Octo teste", Ip: "192.0.2.90", Port: 5000);
+        var resumedMonitorPrinter = new AgentPrinterDescriptor("octoprint", "network", Name: "Octo teste", Ip: "10.70.0.90", Port: 5000);
         await printerCommandCredentialStore.SaveAsync(resumedMonitorPrinter.CredentialIdentity,
             new Dictionary<string, string?> { ["apiKey"] = "OCTO-LOCAL-SECRET" });
         printerCommandOperations.QueueProductionJobMonitor(new AgentProductionJobMonitor(
@@ -1333,7 +1360,7 @@ try
         using var printerNetworkDiscovery = new NetworkDiscoveryService(new FakePrinterPortConnectProbe([]),
             ssdpDiscovery: _ => Task.FromResult<IReadOnlyList<BambuNetworkCandidate>>([
                 new BambuNetworkCandidate("network", "bambu", "Bambu Lab", "Bambu Lab", "Bambu de teste", "A1", "BAMBU-TEST-001",
-                    "192.0.2.91", 8883, true, ["serial", "accessCode"])
+                    "10.70.0.91", 8883, true, ["serial", "accessCode"])
             ]));
         var printerUsbDiscovery = new UsbDiscoveryService(
             new FakeSerialPortCatalog([new SerialPortCandidate("COM7", "Marlin USB de teste")]),
@@ -1351,7 +1378,7 @@ try
             return await printerCommands.TryDispatchPendingAsync(credentials, document.RootElement);
         }
 
-        const string octoPrinter = "\"printer\":{\"protocol\":\"octoprint\",\"connectionType\":\"network\",\"name\":\"Octo teste\",\"ip\":\"192.0.2.90\",\"port\":5000}";
+        const string octoPrinter = "\"printer\":{\"protocol\":\"octoprint\",\"connectionType\":\"network\",\"name\":\"Octo teste\",\"ip\":\"10.70.0.90\",\"port\":5000}";
         var connected = await DispatchPrinterCommand("{\"command\":{\"id\":\"printer-connect\",\"type\":\"connect_printer\",\"payload\":{" + octoPrinter + ",\"options\":{\"apiKey\":\"OCTO-LOCAL-SECRET\"}}}}");
         var commandPrinterCredentialContents = await File.ReadAllTextAsync(Path.Combine(printerCommandDirectory, "printer-credentials.json"));
         var connectCompletion = printerCommandApiHandler.Requests.Single(request => request.Uri.AbsolutePath == "/api/agents/commands/printer-connect/complete");
@@ -1378,9 +1405,10 @@ try
             discovery.Result.Value.GetProperty("diagnostics").GetProperty("warnings").ValueKind == JsonValueKind.Array &&
             discoveryProgress is not null && discoveryProgress.Body.Contains("\"type\":\"discovery\"", StringComparison.Ordinal) &&
             discoveryProgress.Body.Contains("BAMBU-TEST-001", StringComparison.Ordinal) &&
+            discoveryProgress.Body.Contains("\"baudRate\":115200", StringComparison.Ordinal) &&
             printerCommandApiHandler.Requests.Any(request => request.Uri.AbsolutePath == "/api/agents/commands/printer-discovery/complete") &&
             !emptyPoll.Handled && emptyPoll.Status == "empty",
-            "poll C# busca comando pendente, descobre Bambu via SSDP e Marlin USB, publica progresso e volta ao estado vazio");
+            "poll C# descobre Bambu via SSDP e Marlin USB, publica firmware e baud rate e volta ao estado vazio");
 
         var pauseJson = "{\"command\":{\"id\":\"printer-pause\",\"type\":\"printer_pause\",\"payload\":{" + octoPrinter + "}}}";
         var pause = await DispatchPrinterCommand(pauseJson);

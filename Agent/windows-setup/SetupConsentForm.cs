@@ -20,27 +20,34 @@ internal sealed class SetupConsentForm : Form
         Font = new Font("Segoe UI", 9F);
         BackColor = Color.FromArgb(248, 250, 252);
 
+        var header = new Panel
+        {
+            BackColor = Color.FromArgb(239, 246, 255),
+            Location = new Point(16, 14),
+            Size = new Size(688, 138)
+        };
         var titleLabel = new Label
         {
             Text = heading,
             Font = new Font("Segoe UI", 19F, FontStyle.Bold),
             ForeColor = Color.FromArgb(15, 23, 42),
-            Location = new Point(28, 20),
-            Size = new Size(660, 38)
+            Location = new Point(18, 14),
+            Size = new Size(650, 38)
         };
         var summaryLabel = new Label
         {
             Text = summary,
             ForeColor = Color.FromArgb(51, 65, 85),
-            Location = new Point(31, 66),
-            Size = new Size(656, 86)
+            Location = new Point(21, 60),
+            Size = new Size(640, 66)
         };
+        header.Controls.AddRange([titleLabel, summaryLabel]);
         var termsLabel = new Label
         {
             Text = "Termos de Uso do Fila Agent — Early Access",
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             ForeColor = Color.FromArgb(30, 41, 59),
-            Location = new Point(31, 158),
+            Location = new Point(31, 164),
             Size = new Size(650, 24)
         };
         var termsBox = new TextBox
@@ -52,8 +59,8 @@ internal sealed class SetupConsentForm : Form
             BackColor = Color.White,
             Font = new Font("Segoe UI", 9F),
             Text = terms,
-            Location = new Point(30, 187),
-            Size = new Size(658, 325),
+            Location = new Point(30, 193),
+            Size = new Size(658, 319),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
         };
         var licenses = new Button
@@ -89,7 +96,7 @@ internal sealed class SetupConsentForm : Form
         _continue.Size = new Size(123, 36);
         _continue.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
 
-        Controls.AddRange([titleLabel, summaryLabel, termsLabel, termsBox, licenses, _accept, cancel, _continue]);
+        Controls.AddRange([header, termsLabel, termsBox, licenses, _accept, cancel, _continue]);
         AcceptButton = _continue;
         CancelButton = cancel;
     }
@@ -98,10 +105,9 @@ internal sealed class SetupConsentForm : Form
     {
         var isUpdate = !string.IsNullOrWhiteSpace(installedVersion);
         var change = isUpdate ? $"Atualizar Fila Agent {installedVersion} para {targetVersion ?? "a nova versão"}" : $"Instalar Fila Agent {targetVersion ?? ""}";
-        var summary = change + Environment.NewLine +
-            "O Agent inicia quando você entra no Windows, cria atalhos e aparece em Aplicativos Instalados para desinstalação. " +
-            "O Agent verifica atualizações e pede confirmação antes de aplicá-las. Pareamento e dados locais existentes são preservados." + Environment.NewLine +
-            "O Windows solicitará permissão para concluir a instalação. No Early Access, também será apresentada a confirmação separada do certificado de teste.";
+        var summary = isUpdate
+            ? "A versão atual será substituída após as verificações locais. Seu pareamento e os dados locais serão preservados. O Windows pode solicitar permissão para concluir a atualização."
+            : "O Fila Agent inicia quando você entra no Windows, cria atalhos e aparece em Aplicativos instalados. Conecte-o pelo Filamind no navegador. O Windows pode solicitar permissão e, no Early Access, confirmação do certificado de teste.";
         using var dialog = new SetupConsentForm(isUpdate ? "Atualizar Fila Agent" : "Instalar Fila Agent", change, summary, terms);
         dialog._accept.Checked = termsPreviouslyAccepted;
         return dialog.ShowDialog() == DialogResult.OK;
@@ -207,7 +213,8 @@ internal sealed class UninstallConsentForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(520, 260);
+        ClientSize = new Size(620, 370);
+        MinimumSize = new Size(620, 370);
         Font = new Font("Segoe UI", 9F);
         BackColor = Color.FromArgb(248, 250, 252);
 
@@ -216,22 +223,53 @@ internal sealed class UninstallConsentForm : Form
             Text = "Desinstalar Fila Agent",
             Font = new Font("Segoe UI", 17F, FontStyle.Bold),
             ForeColor = Color.FromArgb(15, 23, 42),
-            Location = new Point(25, 20),
-            Size = new Size(470, 36)
+            Location = new Point(28, 22),
+            Size = new Size(560, 38)
+        };
+        var version = new Label
+        {
+            Text = $"Versão instalada: {installedVersion}",
+            Font = new Font("Segoe UI Semibold", 9F),
+            ForeColor = Color.FromArgb(71, 85, 105),
+            Location = new Point(31, 66),
+            Size = new Size(550, 24)
         };
         var details = new Label
         {
-            Text = $"Versão instalada: {installedVersion}\nO programa, a tarefa de inicialização e os atalhos serão removidos. Por padrão, pareamento, credenciais e arquivos locais serão preservados.",
+            Text = "O programa, a inicialização automática e os atalhos serão removidos.",
             ForeColor = Color.FromArgb(51, 65, 85),
-            Location = new Point(28, 69),
-            Size = new Size(460, 72)
+            Location = new Point(31, 96),
+            Size = new Size(550, 32)
         };
-        _removeData.Text = "Também apagar pareamento, credenciais, cache e logs locais";
-        _removeData.Location = new Point(28, 151);
-        _removeData.Size = new Size(460, 27);
-        var cancel = new Button { Text = "Cancelar", DialogResult = DialogResult.Cancel, Location = new Point(258, 201), Size = new Size(100, 34) };
-        var uninstall = new Button { Text = "Desinstalar", DialogResult = DialogResult.OK, Location = new Point(371, 201), Size = new Size(117, 34) };
-        Controls.AddRange([heading, details, _removeData, cancel, uninstall]);
+        var dataPanel = new Panel
+        {
+            BackColor = Color.White,
+            BorderStyle = BorderStyle.FixedSingle,
+            Location = new Point(28, 140),
+            Size = new Size(564, 150)
+        };
+        var dataHeading = new Label
+        {
+            Text = "Seus dados locais",
+            Font = new Font("Segoe UI Semibold", 10F),
+            ForeColor = Color.FromArgb(15, 23, 42),
+            Location = new Point(16, 13),
+            Size = new Size(520, 25)
+        };
+        var dataDescription = new Label
+        {
+            Text = "Por padrão, pareamento, credenciais protegidas, cache e logs são mantidos neste computador.",
+            ForeColor = Color.FromArgb(71, 85, 105),
+            Location = new Point(16, 42),
+            Size = new Size(526, 42)
+        };
+        _removeData.Text = "Apagar também os dados locais padrão do Fila Agent";
+        _removeData.Location = new Point(16, 98);
+        _removeData.Size = new Size(526, 28);
+        dataPanel.Controls.AddRange([dataHeading, dataDescription, _removeData]);
+        var cancel = new Button { Text = "Manter instalação", DialogResult = DialogResult.Cancel, Location = new Point(332, 316), Size = new Size(128, 36) };
+        var uninstall = new Button { Text = "Desinstalar", DialogResult = DialogResult.OK, Location = new Point(472, 316), Size = new Size(120, 36) };
+        Controls.AddRange([heading, version, details, dataPanel, cancel, uninstall]);
         AcceptButton = uninstall;
         CancelButton = cancel;
     }

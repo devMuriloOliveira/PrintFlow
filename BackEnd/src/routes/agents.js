@@ -58,6 +58,13 @@ import {
   unsupportedAgentVersionPayload
 } from '../services/agentVersionPolicy.js'
 import { claimAgentPairingCode } from '../services/agentPairingCode.js'
+import {
+  decryptPrinterConnectionOptions,
+  encryptPrinterConnectionOptions,
+  redactCommandSecrets,
+  stripPrinterConnectionSecrets,
+  validatePrinterConnectionRequest
+} from '../services/agentPrinterConnectionSecurity.js'
 
 // ======================================================
 // CONFIGURAÃ‡Ã•ES
@@ -140,150 +147,6 @@ const hashPairingCode = (
 // O Agent nunca recebe DATA_ENCRYPTION_KEY.
 // ======================================================
 
-const getCommandEncryptionKey =
-  () => {
-    const rawKey =
-      String(
-        process.env
-          .DATA_ENCRYPTION_KEY ||
-        ''
-      ).trim()
-
-    if (!rawKey) {
-      throw new Error(
-        'DATA_ENCRYPTION_KEY nao configurada'
-      )
-    }
-
-    /*
-     * Transformamos a chave configurada
-     * em exatamente 32 bytes para
-     * AES-256.
-     */
-    return crypto
-      .createHash(
-        'sha256'
-      )
-      .update(
-        rawKey
-      )
-      .digest()
-  }
-
-// ======================================================
-// CONTEXTO DA CRIPTOGRAFIA
-// ======================================================
-
-const buildCommandSecretContext = (
-  tenantId,
-  agentId,
-  secretName
-) => {
-  return [
-    'printflow',
-    'agent-command',
-    String(
-      tenantId
-    ),
-    String(
-      agentId
-    ),
-    String(
-      secretName
-    ),
-    'v1'
-  ].join(':')
-}
-
-// ======================================================
-// CRIPTOGRAFAR SEGREDO
-// ======================================================
-
-const encryptCommandSecret = (
-  value,
-  context
-) => {
-  const plaintext =
-    String(
-      value || ''
-    )
-
-  if (!plaintext) {
-    throw new Error(
-      'Segredo vazio nao pode ser criptografado'
-    )
-  }
-
-  /*
-   * 12 bytes Ã© o tamanho recomendado
-   * para IV no AES-GCM.
-   */
-  const iv =
-    crypto.randomBytes(
-      12
-    )
-
-  const cipher =
-    crypto.createCipheriv(
-      'aes-256-gcm',
-      getCommandEncryptionKey(),
-      iv
-    )
-
-  /*
-   * AAD vincula esse ciphertext
-   * ao tenant + Agent + tipo do segredo.
-   *
-   * Isso impede reutilizar o segredo
-   * criptografado em outro Agent.
-   */
-  cipher.setAAD(
-    Buffer.from(
-      context,
-      'utf8'
-    )
-  )
-
-  const ciphertext =
-    Buffer.concat([
-      cipher.update(
-        plaintext,
-        'utf8'
-      ),
-
-      cipher.final()
-    ])
-
-  const authTag =
-    cipher.getAuthTag()
-
-  return {
-    protected:
-      true,
-
-    version:
-      1,
-
-    algorithm:
-      'aes-256-gcm',
-
-    iv:
-      iv.toString(
-        'base64'
-      ),
-
-    authTag:
-      authTag.toString(
-        'base64'
-      ),
-
-    ciphertext:
-      ciphertext.toString(
-        'base64'
-      )
-  }
-}
-
 export const authenticateAgentRequest =
   async (
     req
@@ -357,111 +220,6 @@ export const authenticateAgentRequest =
 
 // ======================================================
 // DESCRIPTOGRAFAR SEGREDO
-// ======================================================
-
-const decryptCommandSecret = (
-  encryptedValue,
-  context
-) => {
-  if (
-    !encryptedValue ||
-    encryptedValue.protected !==
-      true ||
-    encryptedValue.version !==
-      1 ||
-    encryptedValue.algorithm !==
-      'aes-256-gcm'
-  ) {
-    throw new Error(
-      'Segredo criptografado invalido'
-    )
-  }
-
-  const decipher =
-    crypto.createDecipheriv(
-      'aes-256-gcm',
-      getCommandEncryptionKey(),
-      Buffer.from(
-        encryptedValue.iv,
-        'base64'
-      )
-    )
-
-  decipher.setAAD(
-    Buffer.from(
-      context,
-      'utf8'
-    )
-  )
-
-  decipher.setAuthTag(
-    Buffer.from(
-      encryptedValue.authTag,
-      'base64'
-    )
-  )
-
-  const plaintext =
-    Buffer.concat([
-      decipher.update(
-        Buffer.from(
-          encryptedValue
-            .ciphertext,
-          'base64'
-        )
-      ),
-
-      decipher.final()
-    ])
-
-  return plaintext.toString(
-    'utf8'
-  )
-}
-
-// ======================================================
-// OCULTAR SEGREDOS DO FRONTEND
-// ======================================================
-
-const sanitizeCommandPayloadForUser = (
-  payload
-) => {
-  if (
-    !payload ||
-    typeof payload !==
-      'object'
-  ) {
-    return {}
-  }
-
-  const safePayload =
-    structuredClone(
-      payload
-    )
-
-  /*
-   * O usuÃ¡rio nÃ£o precisa receber
-   * o accessCode novamente quando
-   * consulta o resultado do comando.
-   */
-  if (
-    safePayload.options &&
-    typeof safePayload.options ===
-      'object' &&
-    'accessCode' in
-      safePayload.options
-  ) {
-    safePayload
-      .options
-      .accessCode =
-        '[PROTECTED]'
-  }
-
-  return safePayload
-}
-
-// ======================================================
-// GERAR CÃ“DIGO DE PAREAMENTO
 // ======================================================
 
 export const handleAgentPairingCodeCreate =
@@ -1757,6 +1515,11 @@ export const handleAgentRevoke =
         set
           status = 'failed',
           result = $3::jsonb,
+          payload = case
+            when command = 'connect_printer'
+              then jsonb_set(coalesce(payload, '{}'::jsonb), '{options}', '{}'::jsonb, true)
+            else payload
+          end,
           completed_at = now(),
           lease_expires_at = null
         where tenant_id = $1
@@ -2049,6 +1812,11 @@ export const handleAgentCommandsPending =
         set
           status = 'failed',
           result = $3::jsonb,
+          payload = case
+            when command = 'connect_printer'
+              then jsonb_set(coalesce(payload, '{}'::jsonb), '{options}', '{}'::jsonb, true)
+            else payload
+          end,
           completed_at = now(),
           lease_expires_at = null
         where agent_id = $1
@@ -2123,105 +1891,19 @@ export const handleAgentCommandsPending =
       command.payload ||
       {}
 
-    // ==================================================
-    // DESCRIPTOGRAFAR ACCESS CODE DA BAMBU
-    // ==================================================
-
-    if (
-      command.command ===
-        'connect_printer' &&
-      payloadForAgent
-        ?.printer
-        ?.protocol ===
-        'bambu' &&
-      payloadForAgent
-        ?.options
-        ?.accessCode
-    ) {
-      const storedAccessCode =
-        payloadForAgent
-          .options
-          .accessCode
-
-      let accessCode
-
-      /*
-       * Novo formato seguro.
-       */
-      if (
-        storedAccessCode &&
-        typeof storedAccessCode ===
-          'object' &&
-        storedAccessCode
-          .protected ===
-          true
-      ) {
-        const context =
-          buildCommandSecretContext(
-            agent.tenant_id,
-            agent.id,
-            'bambu-access-code'
-          )
-
-        accessCode =
-          decryptCommandSecret(
-            storedAccessCode,
-            context
-          )
-      } else {
-        /*
-         * Compatibilidade temporÃ¡ria
-         * com comandos antigos que
-         * possam ter sido salvos antes
-         * desta implementaÃ§Ã£o.
-         *
-         * Isso pode ser removido depois.
-         */
-        accessCode =
-          String(
-            storedAccessCode ||
-            ''
-          )
-      }
-
-      /*
-       * Clonamos para nÃ£o alterar
-       * acidentalmente o objeto do banco.
-       */
-      payloadForAgent =
-        structuredClone(
-          payloadForAgent
-        )
-
-      payloadForAgent.options = {
-        ...payloadForAgent.options,
-
-        accessCode
-      }
-
-      // ==================================================
-      // REMOVER SEGREDO DO COMANDO PERSISTIDO
-      // ==================================================
-
-      payloadForStorage =
-        structuredClone(
-          command.payload ||
-          {}
-        )
-
-      if (
-        payloadForStorage.options &&
-        typeof payloadForStorage
-          .options ===
-          'object'
-      ) {
-        delete payloadForStorage
-          .options
-          .accessCode
-      }
+    if (command.command === 'connect_printer') {
+      const protocol = payloadForAgent?.printer?.protocol
+      const prepared = decryptPrinterConnectionOptions({
+        tenantId: agent.tenant_id,
+        agentId: agent.id,
+        protocol,
+        options: payloadForAgent?.options || {}
+      })
+      payloadForAgent = structuredClone(payloadForAgent)
+      payloadForAgent.options = prepared.optionsForAgent
+      payloadForStorage = structuredClone(payloadForStorage)
+      payloadForStorage.options = prepared.optionsForStorage
     }
-
-    // ==================================================
     // MARCAR COMO RUNNING
     // ==================================================
 
@@ -3542,6 +3224,12 @@ export const handleAgentCommandComplete =
             result =
               $2::jsonb,
 
+            payload = case
+              when command = 'connect_printer'
+                then jsonb_set(coalesce(payload, '{}'::jsonb), '{options}', '{}'::jsonb, true)
+              else payload
+            end,
+
             completed_at =
               now(),
 
@@ -3879,6 +3567,28 @@ export const handleAgentCommandGet =
       )
     }
 
+    if (
+      command.command === 'connect_printer' &&
+      ['completed', 'failed'].includes(command.status)
+    ) {
+      const scrubbedPayload = stripPrinterConnectionSecrets(command.payload || {})
+      if (JSON.stringify(scrubbedPayload) !== JSON.stringify(command.payload || {})) {
+        await tenantQuery(
+          user.tenantId,
+          `
+            update agent_commands
+            set payload = $3::jsonb
+            where tenant_id = $1
+              and id = $2
+              and command = 'connect_printer'
+              and status in ('completed', 'failed')
+          `,
+          [user.tenantId, commandId, JSON.stringify(scrubbedPayload)]
+        )
+        command.payload = scrubbedPayload
+      }
+    }
+
     return sendJson(
       res,
       200,
@@ -3897,25 +3607,17 @@ export const handleAgentCommandGet =
           type:
             command.command,
 
-          /*
-           * Nunca devolvemos o segredo
-           * real para o FrontEnd.
-           */
           payload:
-            sanitizeCommandPayloadForUser(
-              command.payload ||
-              {}
-            ),
+            redactCommandSecrets(command.payload || {}),
 
           status:
             command.status,
 
           result:
-            command.result ||
-            null,
+            redactCommandSecrets(command.result || null),
 
           progress:
-            command.progress || null,
+            redactCommandSecrets(command.progress || null),
 
           createdAt:
             command.created_at,
@@ -4082,100 +3784,26 @@ export const handleAgentConnectPrinterCreate =
     // VALIDAÃ‡ÃƒO BAMBU
     // ==================================================
 
-    if (
-      protocol ===
-      'bambu'
-    ) {
-      const isMockPrinter =
-        printer.mock ===
-        true
-
-      if (
-        !printer.ip
-      ) {
-        return sendJson(
-          res,
-          400,
-          {
-            error:
-              'IP da Bambu obrigatorio'
-          }
-        )
-      }
-
-      if (
-        !printer.serial &&
-        !isMockPrinter
-      ) {
-        return sendJson(
-          res,
-          400,
-          {
-            error:
-              'Serial da Bambu obrigatorio'
-          }
-        )
-      }
-
-      if (
-        !options.accessCode &&
-        !isMockPrinter
-      ) {
-        return sendJson(
-          res,
-          400,
-          {
-            error:
-              'LAN Access Code da Bambu obrigatorio'
-          }
-        )
-      }
+    let normalizedConnection
+    try {
+      normalizedConnection = validatePrinterConnectionRequest({ printer, options })
+    } catch (error) {
+      return sendJson(res, error.statusCode || 400, { error: error.message })
     }
 
-    // ==================================================
-    // CRIPTOGRAFAR SEGREDOS
-    // ==================================================
-
-    const safeOptions = {
-      ...options
-    }
-
-    if (
-      protocol ===
-        'bambu' &&
-      printer.mock !==
-        true
-    ) {
-      const context =
-        buildCommandSecretContext(
-          user.tenantId,
-          agent.id,
-          'bambu-access-code'
-        )
-
-      /*
-       * IMPORTANTE:
-       *
-       * accessCode puro existe somente
-       * durante esta requisiÃ§Ã£o.
-       *
-       * O banco recebe exclusivamente
-       * o objeto criptografado.
-       */
-      safeOptions.accessCode =
-        encryptCommandSecret(
-          options.accessCode,
-          context
-        )
-    }
-
+    const safeOptions = encryptPrinterConnectionOptions({
+      tenantId: user.tenantId,
+      agentId: agent.id,
+      protocol: normalizedConnection.printer.protocol,
+      options: normalizedConnection.options
+    })
     // ==================================================
     // CRIAR PAYLOAD
     // ==================================================
 
     const payload = {
       printer: {
-        ...printer,
+        ...normalizedConnection.printer,
 
         protocol
       },

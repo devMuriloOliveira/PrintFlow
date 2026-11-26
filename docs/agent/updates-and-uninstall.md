@@ -19,3 +19,9 @@ Operações mutáveis em modo de teste exigem uma raiz direta `FilaAgent-E2E-*` 
 ## Limitações conhecidas
 
 O E2E local cobre instalação, atualização/rollback e desinstalação isolada, mas não comprova todos os cenários de falha de processo auxiliar, remoção completa de dados em máquina real, assinatura confiável em todos os clientes ou publicação da release.
+
+## Interface do Setup — 2026-11-26
+
+Os diálogos de instalação e desinstalação foram reorganizados para destacar versão, ação e preservação dos dados. Na desinstalação, os dados locais padrão continuam preservados sem seleção; a opção de apagá-los fica destacada em um painel separado. A janela também informa que o programa, a inicialização automática e os atalhos serão removidos. A falha do Setup agora orienta a pessoa a consultar o log técnico em vez de mostrar diretamente a mensagem bruta da exceção.
+
+Os contratos do instalador passaram 21/21 e o build Release passou sem avisos/erros. A captura visual em Windows interativo e a verificação em escalas DPI diferentes continuam pendentes; build e contratos não comprovam ausência de corte em tela real.

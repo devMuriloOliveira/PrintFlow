@@ -59,7 +59,7 @@ public sealed class NetworkDiscoveryService : IDisposable
         Func<CancellationToken, Task<IReadOnlyList<BambuNetworkCandidate>>>? ssdpDiscovery = null)
     {
         _portProbe = portProbe ?? new TcpPrinterPortConnectProbe();
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
         _ownsHttpClient = httpClient is null;
         _ssdpDiscovery = ssdpDiscovery ?? (token => BambuSsdpDiscoveryService.DiscoverAsync(1200, token));
     }
@@ -108,7 +108,7 @@ public sealed class NetworkDiscoveryService : IDisposable
         foreach (var port in await FindOpenPrinterPortsAsync(ip, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (port == 8883) return CreateBambuCandidate(ip);
+            if (port == 8883) continue;
             var moonraker = await DetectMoonrakerAsync(ip, port, cancellationToken);
             if (moonraker is not null) return moonraker;
             var octoPrint = await DetectOctoPrintAsync(ip, port, cancellationToken);
@@ -258,9 +258,6 @@ public sealed class NetworkDiscoveryService : IDisposable
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return null; }
     }
-
-    private static PrinterNetworkCandidate CreateBambuCandidate(string ip) =>
-        new("network", "bambu", "Bambu Lab", "Bambu Lab", ip, 8883, "Bambu Lab", true, ["serial", "accessCode"]);
 
     private static bool IsMockBambuEnabled(IReadOnlyDictionary<string, string?> environment)
     {

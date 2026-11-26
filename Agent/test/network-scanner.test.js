@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import {
   discoverBambuSsdp,
+  identifyPrinter,
   findOpenPrinterPorts,
   parseSsdpHeaders,
   getNetworkHostRange
@@ -39,6 +40,13 @@ test('descoberta consulta portas de um host em paralelo', async () => {
   assert.deepEqual(started.sort((a, b) => a - b), [80, 5000, 7125, 8883])
   releases.forEach(release => release())
   assert.deepEqual(await pending, [7125])
+})
+
+test('porta 8883 isolada nao classifica automaticamente um host como Bambu', async () => {
+  const result = await identifyPrinter('192.168.1.20', {
+    findPorts: async () => [8883]
+  })
+  assert.equal(result, null)
 })
 
 test('varredura de portas interrompe conexoes pendentes quando cancelada', async () => {

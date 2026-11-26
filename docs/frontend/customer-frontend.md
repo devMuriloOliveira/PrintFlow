@@ -33,3 +33,7 @@ Impressoras cadastradas manualmente podem ser usadas sem o Agent. Descoberta, co
 ## Limites
 
 O build estático comprova compilação do frontend. Não comprova login, permissões, dados persistidos, integração de marketplace, cobrança, deploy na Vercel ou operação de hardware.
+
+## Cadastro sem documento - 2026-11-26
+
+Na tela `/login`, CPF/CNPJ deixou de ser obrigatorio. O cliente recebe um aviso para completar o documento depois em **Configuracoes > Empresa**. A validacao continua ativa quando o valor e informado.
