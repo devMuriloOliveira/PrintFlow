@@ -6,10 +6,18 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { compareAgentReleaseTags } from '../src/config/agentReleaseVersion.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const validator = path.join(root, 'scripts', 'validate-agent-release-artifacts.mjs')
 const digest = bytes => createHash('sha256').update(bytes).digest('hex').toUpperCase()
+
+test('compara tags de release do Agent como versoes semanticas', () => {
+  assert.equal(compareAgentReleaseTags('agent-v0.1.34', 'agent-v0.1.37'), -3)
+  assert.ok(compareAgentReleaseTags('agent-v0.1.37', 'agent-v0.1.36') > 0)
+  assert.equal(compareAgentReleaseTags('agent-v1.2.3', 'agent-v1.2.3'), 0)
+  assert.throws(() => compareAgentReleaseTags('0.1.34', 'agent-v0.1.37'), /release tags/)
+})
 
 const releaseAssets = {
   'Fila-Agent-Windows.zip': Buffer.from('fila package'),

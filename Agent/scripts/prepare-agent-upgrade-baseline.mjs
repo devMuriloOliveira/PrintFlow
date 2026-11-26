@@ -1,21 +1,12 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { compareAgentReleaseTags } from '../src/config/agentReleaseVersion.js'
 
 const tag = process.env.FILA_AGENT_RELEASE_TAG ?? ''
 const outputFile = process.env.GITHUB_OUTPUT
 const currentMatch = /^agent-v(\d+)\.(\d+)\.(\d+)$/.exec(tag)
 if (!currentMatch || !outputFile) throw new Error('FILA_AGENT_RELEASE_TAG and GITHUB_OUTPUT are required.')
-
-const versionTuple = match => match.slice(1).map(Number)
-const compareVersions = (left, right) => {
-  const a = versionTuple(left)
-  const b = versionTuple(right)
-  for (let index = 0; index < a.length; index++) {
-    if (a[index] !== b[index]) return a[index] - b[index]
-  }
-  return 0
-}
 
 const list = spawnSync('gh', ['release', 'list', '--limit', '100', '--json', 'tagName'], { encoding: 'utf8' })
 if (list.error) throw list.error
@@ -23,8 +14,8 @@ if (list.status !== 0) throw new Error(`gh release list failed: ${list.stderr.tr
 const releases = JSON.parse(list.stdout)
 const earlierReleases = releases
   .map(release => release.tagName)
-  .filter(value => /^agent-v\d+\.\d+\.\d+$/.test(value) && compareVersions(value, tag) < 0)
-  .sort((left, right) => compareVersions(right, left))
+  .filter(value => /^agent-v\d+\.\d+\.\d+$/.test(value) && compareAgentReleaseTags(value, tag) < 0)
+  .sort((left, right) => compareAgentReleaseTags(right, left))
 const knownLegacyBaseline = 'agent-v0.1.34'
 const baseline = earlierReleases.includes(knownLegacyBaseline) ? knownLegacyBaseline : earlierReleases[0]
 
