@@ -69,6 +69,28 @@ jobs:
           dir /b dist || exit /b 1
           dotnet windows-release-tool\bin\Release\net8.0\FilaAgent.ReleaseTool.dll prepare-release --tag %FILA_AGENT_RELEASE_TAG% --minimum-supported-version %FILA_AGENT_MINIMUM_SUPPORTED_VERSION% || exit /b 1
 
+      - name: Download latest published release as upgrade baseline
+        id: upgrade-baseline
+        shell: cmd
+        working-directory: Agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts\prepare-agent-upgrade-baseline.mjs || exit /b 1
+
+      - name: Exercise signed upgrade from the installed Setup
+        if: steps.upgrade-baseline.outputs.available == 'true'
+        working-directory: Agent
+        shell: cmd
+        run: >-
+          node test\windows-native-install-e2e.mjs
+          dist\Fila-Agent-Setup.exe
+          dist\Fila-Agent-Windows.zip
+          dist\upgrade-baseline\Fila-Agent-Setup.exe
+          dist\upgrade-baseline\Fila-Agent-Windows.zip
+          ${{ steps.upgrade-baseline.outputs.version }}
+          dist
+
       - name: Publish Early Access release
         working-directory: Agent
         shell: cmd

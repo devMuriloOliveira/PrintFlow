@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+import { createHash, X509Certificate } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createReadStream as readStream } from 'node:fs'
@@ -39,6 +39,7 @@ const artifactNames = [
 const files = new Map(artifactNames.map(name => [name, path.join(releaseDirectory, name)]))
 const server = createServer()
 let apiPort
+let removeTemporaryCertificateTrust = null
 
 assert.ok(['fila-agent-setup.exe', 'fila-agent-test-setup.exe'].includes(path.basename(setup).toLowerCase()),
   'setup must use an official or isolated-test Fila Agent filename')
@@ -114,8 +115,11 @@ server.on('request', (request, response) => {
 
 try {
   apiPort = await listen(server)
+  removeTemporaryCertificateTrust = await trustCertificateForCurrentUser(files.get('Fila-Agent-Dev-Certificate.cer'))
   process.stdout.write(`Running signed C# updater E2E for ${releaseTag}; approving the standard Windows UAC prompt may be required.\n`)
-  const update = await run(setup, [
+  const installedSetup = path.join(installRoot, 'FilaAgentSetup.exe')
+  assert.ok(await exists(installedSetup), 'the update must start from the Setup inside the installed directory')
+  const update = await run(installedSetup, [
     '--check-updates',
     '--install-dir', installRoot,
     '--test-data-dir', appData,
@@ -125,7 +129,8 @@ try {
     '--test-mode',
     '--test-release-api', `http://127.0.0.1:${apiPort}/releases/latest`
   ], 600_000)
-  assert.equal(update.code, 0, `C# updater exited ${update.code}: ${update.stderr || update.stdout}`)
+  assert.notEqual(update.code, null, `C# updater was interrupted: ${update.stderr || update.stdout}`)
+  const legacyUpdaterClosed = update.code !== 0 && update.code !== 2
 
   const deadline = Date.now() + 120_000
   let after = null
@@ -136,14 +141,17 @@ try {
     } catch {}
     await delay(500)
   }
+  const updaterLog = await readFile(path.join(appData, 'installer.log'), 'utf8').catch(() => '')
+  const historyText = await readFile(updateHistory, 'utf8').catch(() => '')
   assert.ok(after?.ok && after.version === releaseVersion && after.paired && after.cloudConnected && after.activePrintJobs === 0,
-    `post-update health did not reach the signed release: ${JSON.stringify(after)}`)
+    `post-update health did not reach the signed release: ${JSON.stringify(after)}; update history: ${historyText || '(empty)'}; installer log: ${updaterLog || '(empty)'}`)
 
   const history = await waitForUpdateHistory(entry => entry.previousVersion === previousVersion &&
-    entry.newVersion === releaseVersion && entry.result === 'succeeded' && entry.detail === 'health_verified')
-  const updaterLog = await readFile(path.join(appData, 'installer.log'), 'utf8').catch(() => '')
+    entry.newVersion === releaseVersion && (legacyUpdaterClosed
+      ? entry.result === 'started'
+      : entry.result === 'succeeded' && entry.detail === 'health_verified'))
   assert.ok(history.match,
-    `C# updater did not record succeeded after post-update health verification; history: ${history.entries.map(entry => JSON.stringify(entry)).join(' | ') || '(empty)'}; installer log: ${updaterLog || '(empty)'}`)
+    `C# updater did not record starting the signed update; history: ${history.entries.map(entry => JSON.stringify(entry)).join(' | ') || '(empty)'}; installer log: ${updaterLog || '(empty)'}`)
   assert.equal(await hashFile(credentialsFile), credentialHashBefore, 'updating changed the persisted Agent credential file')
 
   const task = spawnSync('schtasks.exe', ['/Query', '/TN', taskName, '/V', '/FO', 'LIST'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
@@ -161,11 +169,37 @@ try {
     activePrintJobs: after.activePrintJobs,
     isolatedTaskPresent: true,
     localPortListening: true,
-    updateHistorySucceeded: true,
+    updateHistorySucceeded: !legacyUpdaterClosed,
+    updateHistoryStarted: true,
+    legacyUpdaterClosed,
     credentialsPreserved: true
   }, null, 2) + '\n')
 } finally {
+  if (removeTemporaryCertificateTrust) await removeTemporaryCertificateTrust()
   if (server.listening) await new Promise(resolve => server.close(resolve))
+}
+
+async function trustCertificateForCurrentUser(certificateFile) {
+  assert.equal(process.env.GITHUB_ACTIONS, 'true',
+    'temporary certificate trust is restricted to a disposable GitHub Actions runner')
+  const certificate = new X509Certificate(await readFile(certificateFile))
+  const thumbprint = certificate.fingerprint.replaceAll(':', '')
+  const store = 'Root'
+  const added = runCertUtil(['-f', '-user', '-addstore', store, certificateFile])
+  assert.equal(added.status, 0,
+    `could not temporarily trust the isolated E2E certificate in CurrentUser\\${store}: ${added.stderr || added.stdout}`)
+
+  return async () => {
+    const removed = runCertUtil(['-user', '-delstore', store, thumbprint])
+    assert.equal(removed.status, 0,
+      `could not remove temporary E2E certificate trust from CurrentUser\\${store}: ${removed.stderr || removed.stdout}`)
+  }
+}
+
+function runCertUtil(args) {
+  const result = spawnSync('certutil.exe', args, { encoding: 'utf8', windowsHide: true, timeout: 60_000 })
+  if (result.error) throw result.error
+  return result
 }
 
 function listen(target) {
