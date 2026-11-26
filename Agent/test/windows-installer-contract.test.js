@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
+import { certificateStoreScript } from './windows-certificate-store-script.mjs'
 
 const read = relativePath => fs.readFile(path.join(process.cwd(), relativePath), 'utf8')
 
@@ -58,6 +60,7 @@ test('atualizacao valida Orca oficial e executa updater fora da pasta instalada'
   const setup = await read('windows-setup/Program.cs')
   const updater = await read('windows-setup/SignedUpdateService.cs')
   const e2e = await read('test/windows-signed-update-e2e.mjs')
+  const certificateStore = await read('test/windows-certificate-store-script.mjs')
 
   assert.match(setup, /ValidateOrcaRuntime\(temp, testMode\)/)
   assert.doesNotMatch(setup, /PrepareOrcaRuntime|existingInstallRoot\).*ValidateOrcaRuntime/)
@@ -67,8 +70,30 @@ test('atualizacao valida Orca oficial e executa updater fora da pasta instalada'
   assert.match(updater, /FilaAgentUpdateWorker-/)
   assert.match(e2e, /const installedSetup = path\.join\(installRoot, 'FilaAgentSetup\.exe'\)[\s\S]*run\(installedSetup/)
   assert.match(e2e, /trustCertificateForCurrentUser\(files\.get\('Fila-Agent-Dev-Certificate\.cer'\)\)/)
-  assert.match(e2e, /-addstore[\s\S]*-delstore/)
+  assert.match(e2e, /powershell\.exe[\s\S]*-EncodedCommand/)
+  assert.match(e2e, /RUNNER_ENVIRONMENT, 'github-hosted'/)
+  assert.match(certificateStore, /X509Store\]::new\(\$storeName, \[System\.Security\.Cryptography\.X509Certificates\.StoreLocation\]::CurrentUser\)/)
+  assert.match(certificateStore, /FILA_AGENT_E2E_ADDED_STORES[\s\S]*\$store\.Remove\(\$certificate\)/)
+  assert.match(certificateStore, /\$store\.Add\(\$certificate\)[\s\S]*if \(-not \$verified\)/)
+  assert.match(certificateStore, /rollbackErrors[\s\S]*Certificate trust failed/)
+  assert.doesNotMatch(e2e + certificateStore, /certutil\.exe/)
   assert.match(e2e, /update history: \$\{historyText[\s\S]*installer log: \$\{updaterLog/)
+})
+
+test('script PowerShell do trust E2E passa pelo parser do Windows sem tocar no store', {
+  skip: process.platform !== 'win32'
+}, () => {
+  const parserScript = '$tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseInput($env:FILA_AGENT_E2E_SCRIPT_TO_PARSE, [ref]$tokens, [ref]$errors) > $null; if ($errors.Count -gt 0) { $errors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 }'
+  const encodedParser = Buffer.from(parserScript, 'utf16le').toString('base64')
+  const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedParser], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15_000,
+    env: { ...process.env, FILA_AGENT_E2E_SCRIPT_TO_PARSE: certificateStoreScript }
+  })
+
+  assert.equal(result.error, undefined, result.error?.message)
+  assert.equal(result.status, 0, result.stderr || result.stdout)
 })
 
 test('instalador encerra somente o verificador legado antes de mover a pasta', async () => {
