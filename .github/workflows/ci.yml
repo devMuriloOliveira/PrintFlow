@@ -81,7 +81,7 @@ jobs:
 
   backup-restore-integration:
     needs: security
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -104,7 +104,12 @@ jobs:
           cache: npm
           cache-dependency-path: BackEnd/package-lock.json
       - run: sudo apt-get update
-      - run: sudo apt-get install --yes postgresql-client
+      - name: Install PostgreSQL 16 client tools
+        run: sudo apt-get install --yes postgresql-client-16
+      - name: Verify PostgreSQL client versions
+        run: |
+          pg_dump-16 --version
+          pg_restore-16 --version
       - run: npm ci
         working-directory: BackEnd
       - run: npm run test:backup-restore
@@ -112,6 +117,8 @@ jobs:
         env:
           PRINTFLOW_RESTORE_TEST_DATABASE_URL: postgresql://postgres:restore-test-only@127.0.0.1:5432/postgres?sslmode=disable
           PRINTFLOW_RESTORE_TEST_CONFIRM: isolated-only
+          PG_DUMP_BIN: pg_dump-16
+          PG_RESTORE_BIN: pg_restore-16
 
   agent-production-package:
     needs: verify
