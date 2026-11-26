@@ -1,9 +1,9 @@
 # Auditoria e plano de migração do Fila Agent
 
-- **Última revisão:** 2026-10-17
-- **Base da release:** a versão atual está no commit `999bfcd` e na tag `agent-v0.1.31`.
-- **Versão atual:** `0.1.31` está publicada como release latest desde 2026-10-17: [Fila Agent 0.1.31](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.31).
-- **CI e publicação:** Agent Release #48 passou e publicou Setup, Transition Setup, ZIP, certificado público, manifesto, checksums e aliases PrintFlow. Setup (220 MB; SHA-256 `d5d5691a2114a7b1b1f30bbc3f4c58e32da4cfbfd6dcb62da6655d5876557db9`); ZIP (67 MB; SHA-256 `49acccdd15f2bf285e790069107aa2a6eee952b884271b4a33b87ca940b4aa7b`). Os aliases PrintFlow têm os mesmos hashes dos assets Fila Agent. O manifesto declara `.NET 8 self-contained`, `DEV_SELF_SIGNED`, `productionTrusted: false` e certificado SHA-256 `AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB`. A assinatura Early Access não é confiável para distribuição geral e a publicação não comprova operação com impressora física.
+- **Última revisão:** 2026-11-26
+- **Base da release:** commit `24be9c1` e tag `agent-v0.1.36`.
+- **Versão atual:** `0.1.36` está publicada e identificada como latest desde 2026-11-26: [Fila Agent 0.1.36](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.36).
+- **CI e publicação:** Agent Release #45859956183 passou e publicou Setup, Transition Setup, ZIP, certificado público, manifesto, checksums e aliases PrintFlow. Setup (230.926.416 bytes; SHA-256 `e0ceb2af49a4f68be67120b831e021a7b7a54da36b6206087b4d59c82bcd5979`); ZIP (70.274.607 bytes; SHA-256 `bb65dd2657c560668358c8472f742e1dbe909c077ad13dc7c4f16bc58db4d203`). Os aliases PrintFlow têm hashes idênticos. O certificado mantém a identidade Early Access pinada `AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB` (`DEV_SELF_SIGNED`, `productionTrusted: false`), sem confiança geral do Windows.
 
 Este arquivo reúne o estado técnico da migração e os registros de validação feitos ao longo do trabalho. As seções iniciais descrevem o estado mais recente; os registros datados ao final preservam o que foi verificado em cada etapa. Para uma decisão atual, use o resumo consolidado e confira a data do registro correspondente.
 
@@ -1097,3 +1097,13 @@ A varredura IPv4 é limitada por configuração, padrão de 1024 hosts e máximo
 
 **Limites e impacto:** este e somente um candidato local sem assinatura; nao foi instalado, publicado, enviado ao GitHub nem usado para atualizar clientes. O build usa a URL de API padrao do produto no artefato, mas nao fez chamadas a API hospedada nem alterou dados ou servicos. A inspecao visual dos dialogos do Setup em sessao interativa/DPI continua pendente, assim como testes com impressoras fisicas e validacao da assinatura/cadeia de confianca; portanto, nao e release aprovada para distribuicao.
 **Revisao independente:** nao foram encontrados defeitos concretos na sincronizacao das referencias `0.1.36` nem nos artefatos locais. A revisao confirmou os hashes acima, Setup sem assinatura e versao `0.1.36` nos manifestos do ZIP/host. A pendencia visual permanece.
+
+### Publicacao GitHub do Agent 0.1.36 - 2026-11-26
+
+**Commit e workflow:** a branch `release/agent-v0.1.36` foi enviada ao GitHub no commit `24be9c1131be7591b7b3d4b3111571bbe718e47d`; a tag `agent-v0.1.36` aponta para esse commit. O workflow [Agent Release 45859956183](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45859956183) terminou com sucesso em 2026-11-26. Validou a tag, passou `npm test`, gerou o pacote Windows assinado com o certificado Early Access persistido, preparou/verificou os artefatos e publicou a release. A release esta publicada e o endpoint GitHub `releases/latest` retorna `agent-v0.1.36`.
+
+**Artefatos publicados:** [Fila Agent 0.1.36 - Early Access / Pilot](https://github.com/devMuriloOliveira/PrintFlow/releases/tag/agent-v0.1.36). Setup `Fila-Agent-Setup.exe` (230.926.416 bytes; SHA-256 `e0ceb2af49a4f68be67120b831e021a7b7a54da36b6206087b4d59c82bcd5979`); ZIP `Fila-Agent-Windows.zip` (70.274.607 bytes; SHA-256 `bb65dd2657c560668358c8472f742e1dbe909c077ad13dc7c4f16bc58db4d203`). O alias de transicao e os aliases PrintFlow correspondem aos mesmos hashes. Certificado publico: SHA-256 `ac55382179b1b6ff5d7642083ed1e674dc92793ff83b55f151c0f8da0f9c7dbb`. O instalador e assinado, mas a assinatura continua Early Access autoassinada; nao cria confianca geral do Windows.
+
+**CI geral da branch:** [execucao 45859240943](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45859240943) aprovou seguranca, Backend, Agent, FrontEnd, AdminFrontEnd e o job `agent-production-package`. O job separado `backup-restore-integration` falhou porque o `pg_restore` tentou aplicar `transaction_timeout`, parametro nao reconhecido pelo servico PostgreSQL 16. O mesmo erro ja ocorria na CI de `main` antes da branch; nao bloqueou o workflow proprio de release. Nenhum ajuste de banco ou teste de restauracao foi feito nesta publicacao.
+
+**Impacto e pendencias:** a publicacao muda o download `releases/latest` do GitHub para 0.1.36. Nenhum deploy foi feito no Vercel ou Render, nenhum dado hospedado foi alterado e as mudancas de FrontEnd/Backend permanecem na branch de release, sem merge para `main`. A inspecao visual dos dialogos do Setup em sessao interativa/DPI e os testes com impressoras fisicas continuam pendentes. O fluxo desta release nao confirmou instalacao ou atualizacao em maquina cliente.
