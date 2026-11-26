@@ -40,7 +40,7 @@ const handleGoogleCredential = async (response: { credential?: string }) => {
       mode.value = 'register'
       form.name = err.data.profile?.name || form.name
       form.email = err.data.profile?.email || form.email
-      error.value = 'Complete empresa e CPF/CNPJ para criar sua conta Google.'
+      error.value = 'Complete o nome da empresa. CPF/CNPJ pode ser adicionado depois em Configurações > Empresa.'
       await nextTick()
       modeHeading.value?.focus({ preventScroll: true })
     } else {
@@ -118,13 +118,13 @@ const submit = async () => {
     } else {
       if (googleCredential.value) {
         const result = await auth.loginWithGoogle(googleCredential.value, { company: form.company, document: form.document })
-        notify('Conta criada com sucesso.')
-        await navigateTo(result.requiresCompanyProfile ? '/configuracoes/empresa' : '/')
+        notify(result.requiresCompanyProfile ? 'Conta criada. Você pode adicionar o CPF/CNPJ depois em Configurações > Empresa.' : 'Conta criada com sucesso.')
+        await navigateTo('/')
         return
       }
       const result = await auth.register({ name: form.name, company: form.company, document: form.document, email: form.email, password: form.password })
       if (result.verificationRequired) { notify('Verifique seu e-mail para ativar a conta.'); return }
-      notify('Conta criada com sucesso.')
+      notify(form.document.trim() ? 'Conta criada com sucesso.' : 'Conta criada. Você pode adicionar o CPF/CNPJ depois em Configurações > Empresa.')
     }
     await navigateTo('/')
   } catch (err: any) {
@@ -147,7 +147,7 @@ const submit = async () => {
               <label class="field"><span>Seu nome</span><input v-model="form.name" autocomplete="name" required placeholder="Como podemos chamar você?"></label>
               <label class="field"><span>Nome da empresa</span><input v-model="form.company" autocomplete="organization" required placeholder="Ex.: Studio Maker"></label>
               <div class="field"><span>Tipo de cadastro</span><div class="auth-document-kind" role="group" aria-label="Tipo de documento"><button type="button" class="auth-document-kind__item" :class="{ 'auth-document-kind__item--active': documentKind === 'cpf' }" @click="selectDocumentKind('cpf')">Pessoa física · CPF</button><button type="button" class="auth-document-kind__item" :class="{ 'auth-document-kind__item--active': documentKind === 'cnpj' }" @click="selectDocumentKind('cnpj')">Pessoa jurídica · CNPJ</button></div></div>
-              <label class="field"><span>{{ documentLabel }}</span><input v-model="form.document" inputmode="numeric" autocomplete="off" required :maxlength="documentMaxLength" :placeholder="documentPlaceholder" @input="form.document = formatDocument(form.document)"><small class="auth-hint">Usamos esse documento apenas para identificar a conta.</small></label>
+              <label class="field"><span>{{ documentLabel }}</span><input v-model="form.document" inputmode="numeric" autocomplete="off" :maxlength="documentMaxLength" :placeholder="documentPlaceholder" @input="form.document = formatDocument(form.document)"><small class="auth-hint">Opcional no cadastro. Você pode adicionar depois em Configurações &gt; Empresa.</small></label>
             </template>
             <label class="field"><span>E-mail</span><input v-model="form.email" type="email" autocomplete="email" required placeholder="voce@empresa.com"></label>
             <label v-if="!googleCredential" class="field"><span>Senha</span><span class="auth-password-input"><input v-model="form.password" :type="passwordType" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" required minlength="10" placeholder="Sua senha"><button type="button" @click="showPassword = !showPassword">{{ showPassword ? 'Ocultar' : 'Mostrar' }}</button></span></label>

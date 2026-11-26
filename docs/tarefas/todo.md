@@ -16,3 +16,7 @@ Este checklist será transferido para `docs/tarefas/` antes da migração dos do
 - [x] Centralizar pendências e tarefas em `docs/tarefas/`.
 - [x] Atualizar READMEs locais com links para `docs/`.
 - [x] Conferir links, diff e estado documental final.
+
+## Tarefa atual
+
+- [ ] [Clareza visual do Setup e desinstalador do Fila Agent](./agent-setup-ux.md) — aguardando inspeção visual manual.

@@ -3,6 +3,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import FormData from 'form-data'
 
+const printerRequest = (method, ...args) => {
+  const optionsIndex = method === 'get' || method === 'delete' ? 1 : 2
+  args[optionsIndex] = { ...(args[optionsIndex] || {}), maxRedirects: 0 }
+  return axios[method](...args)
+}
+
 const buildBaseUrl = (
   printer
 ) =>
@@ -158,7 +164,7 @@ export const octoprintAdapter = {
     )
 
     const response =
-      await axios.get(
+      await printerRequest('get',
         `${baseUrl}/api/version`,
         {
           timeout: 8000,
@@ -209,7 +215,7 @@ export const octoprintAdapter = {
     )
 
     const response =
-      await axios.get(
+      await printerRequest('get',
         `${connection.baseUrl}/api/job`,
         {
           timeout: 8000,
@@ -222,7 +228,7 @@ export const octoprintAdapter = {
       )
 
     const temperature =
-      await axios.get(
+      await printerRequest('get',
         `${connection.baseUrl}/api/printer`,
         {
           timeout: 8000,
@@ -281,7 +287,7 @@ export const octoprintAdapter = {
     )
 
     const response =
-      await axios.post(
+      await printerRequest('post',
         `${connection.baseUrl}/api/files/local`,
         form,
         {
@@ -320,7 +326,7 @@ export const octoprintAdapter = {
       connection
     )
 
-    await axios.post(
+    await printerRequest('post',
       `${connection.baseUrl}/api/job`,
       {
         command:
@@ -352,7 +358,7 @@ export const octoprintAdapter = {
       connection
     )
 
-    await axios.post(
+    await printerRequest('post',
       `${connection.baseUrl}/api/job`,
       {
         command:
@@ -384,7 +390,7 @@ export const octoprintAdapter = {
       connection
     )
 
-    await axios.post(
+    await printerRequest('post',
       `${connection.baseUrl}/api/job`,
       {
         command:

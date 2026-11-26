@@ -1,3 +1,5 @@
+import net from 'node:net'
+
 const PROFILES = {
   bambu: {
     protocol: 'bambu',
@@ -153,13 +155,29 @@ const normalizePort = (
   value,
   fallback
 ) => {
-  const port =
-    Number(value || fallback)
+  if (value === undefined || value === null || value === '') return fallback
+  const port = Number(value)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Porta de impressora invalida.')
+  return port
+}
 
-  return Number.isFinite(port) &&
-    port > 0
-    ? port
-    : fallback
+const isAllowedPrinterDestination = (protocol, ip, port) => {
+  if (net.isIPv4(ip) !== true) return false
+  const [first, second] = ip.split('.').map(Number)
+  if (ip === '169.254.169.254') return false
+  const lanAddress = first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 169 && second === 254) ||
+    (first === 100 && second >= 64 && second <= 127)
+  if (!lanAddress) return false
+  const allowedPorts = {
+    bambu: [8883],
+    moonraker: [7125],
+    octoprint: [80, 5000, 7125],
+    prusalink: [80, 5000, 7125]
+  }[protocol] || []
+  return allowedPorts.includes(port)
 }
 
 const normalizeBaudRate = (
@@ -256,6 +274,10 @@ export const normalizePrinterConfig = (
         printer?.port,
         profile.defaultPort
       )
+
+    if (!isAllowedPrinterDestination(profile.protocol, normalizedPrinter.ip, normalizedPrinter.port)) {
+      throw new Error('Destino da impressora deve usar IPv4 privado/VPN e porta suportada.')
+    }
   }
 
   if (
@@ -277,6 +299,10 @@ export const normalizePrinterConfig = (
       normalizeText(
         printer?.port
       )
+
+    if (!/^COM[1-9]\d{0,5}$/i.test(normalizedPrinter.port)) {
+      throw new Error('Porta USB Marlin invalida.')
+    }
 
     normalizedPrinter.baudRate =
       normalizeBaudRate(

@@ -558,11 +558,11 @@ export const discoverBambuSsdp = ({
 // IDENTIFICAR SERVICO EM UM IP
 // ======================================================
 
-const identifyPrinter = async (
+export const identifyPrinter = async (
   ip,
-  { signal } = {}
+  { signal, findPorts = findOpenPrinterPorts } = {}
 ) => {
-  const openPorts = await findOpenPrinterPorts(ip, { signal })
+  const openPorts = await findPorts(ip, { signal })
 
   for (const port of openPorts) {
 
@@ -574,17 +574,7 @@ const identifyPrinter = async (
     // BAMBU
     // ==================================================
 
-    if (
-      port === 8883
-    ) {
-      console.log(
-        `[Discovery] Possivel Bambu Lab encontrada em ${ip}:8883`
-      )
-
-      return createBambuCandidate(
-        ip
-      )
-    }
+    if (port === 8883) continue
 
     // ==================================================
     // MOONRAKER

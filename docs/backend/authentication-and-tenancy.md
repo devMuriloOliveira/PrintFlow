@@ -23,3 +23,13 @@ Segredos de Agent, tokens, códigos de OAuth, chaves de integração e credencia
 ## Verificação
 
 Os testes relacionados incluem `auth-security.test.js`, `authorization.test.js`, `tenant-isolation.test.js`, `auth-email-tokens.test.js` e testes de configurações/autorização. Eles são evidência local; não comprovam uma revisão de RLS no banco de produção nem a configuração real dos provedores.
+
+## Cadastro sem documento - 2026-11-26
+
+O cadastro por e-mail e Google aceita CPF/CNPJ ausente. Quando o campo e preenchido, o Backend valida o documento; quando fica vazio, o tenant e criado sem `document_locked_at` para permitir o preenchimento posterior em **Configuracoes > Empresa**. O aviso aparece na tela de cadastro e nenhum schema ou dado existente foi alterado.
+
+## Senha e entrega de e-mail - 2026-11-26
+
+Os fluxos de recuperacao e troca de senha estao implementados. A recuperacao envia um link temporario por Resend em `/api/auth/password-reset/request`; a troca autenticada valida a senha atual, envia um codigo de uso unico com validade de 10 minutos e encerra as sessoes anteriores apos a confirmacao. Os testes locais `password-change-email.test.js` (1 aprovado) e `auth-email-tokens.test.js` (3 aprovados) confirmam esses comportamentos com o envio simulado.
+
+As mensagens atuais sao texto simples montado no Backend, com assunto e instrucoes especificos para cada fluxo; nao existe template HTML ou editor de personalizacao. No ambiente local verificado, `RESEND_API_KEY` e `EMAIL_FROM` nao estao configurados, portanto nenhum envio real foi comprovado. `APP_PUBLIC_URL` esta configurada para um host local de tunel e deve ser revisada antes de testar links enviados a clientes.

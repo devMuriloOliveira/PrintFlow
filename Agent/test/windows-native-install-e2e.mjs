@@ -140,6 +140,21 @@ const getFreePort = async () => {
   return port
 }
 
+const assertNoAgentHostRunning = () => {
+  for (const imageName of ['FilaAgent.exe', 'PrintFlowAgentHost.exe']) {
+    const result = spawnSync('tasklist.exe', ['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV'], {
+      encoding: 'utf8', windowsHide: true, timeout: 5_000
+    })
+    if (result.error) throw result.error
+    if (result.status !== 0) {
+      throw new Error(`Native install E2E cannot safely check for an active Agent host (tasklist exit ${result.status}); run this local E2E with the required Windows process-inspection permission.`)
+    }
+    if (String(result.stdout || '').split(/\r?\n/).some(line => line.trim().startsWith(`"${imageName}"`))) {
+      throw new Error(`Native install E2E requires all Fila Agent hosts to be closed; found ${imageName}. The test will not stop an existing Agent.`)
+    }
+  }
+}
+
 const run = (file, args, timeoutMs = 180_000) => new Promise((resolve, reject) => {
   const child = spawn(file, args, { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = ''
@@ -301,6 +316,7 @@ const cleanup = async () => {
 try {
   assert.ok(await exists(setup), `native setup is missing: ${setup}`)
   assert.ok(await exists(zip), `Agent package ZIP is missing: ${zip}`)
+  assertNoAgentHostRunning()
   apiPort = await listen(apiServer)
   agentPort = await getFreePort()
 

@@ -121,6 +121,15 @@ public sealed class AgentPrinterConnectionManager : IAsyncDisposable
     {
         ThrowIfDisposed();
         var normalized = printer.Normalize();
+        if (normalized.Protocol == "marlin")
+        {
+            if (normalized.PortName is null || !System.Text.RegularExpressions.Regex.IsMatch(normalized.PortName, @"^COM[1-9]\d{0,5}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                throw new InvalidDataException("Porta USB Marlin invalida.");
+        }
+        else
+        {
+            PrinterDestinationPolicy.Validate(normalized.Protocol, normalized.Ip, normalized.Port);
+        }
         var key = normalized.ConnectionKey ?? throw new InvalidDataException("Nao foi possivel gerar a identificacao da impressora.");
         var gate = _locks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancellationToken);

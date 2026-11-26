@@ -2,6 +2,12 @@ import axios from 'axios'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+const printerRequest = (method, ...args) => {
+  const optionsIndex = method === 'get' || method === 'delete' ? 1 : 2
+  args[optionsIndex] = { ...(args[optionsIndex] || {}), maxRedirects: 0 }
+  return axios[method](...args)
+}
+
 const buildBaseUrl = (
   printer
 ) =>
@@ -181,7 +187,7 @@ export const prusaLinkAdapter = {
     )
 
     const response =
-      await axios.get(
+      await printerRequest('get',
         `${baseUrl}/api/version`,
         {
           timeout: 8000,
@@ -233,7 +239,7 @@ export const prusaLinkAdapter = {
     )
 
     const printer =
-      await axios.get(
+      await printerRequest('get',
         `${connection.baseUrl}/api/printer`,
         {
           timeout: 8000,
@@ -249,7 +255,7 @@ export const prusaLinkAdapter = {
 
     try {
       const response =
-        await axios.get(
+        await printerRequest('get',
           `${connection.baseUrl}/api/job`,
           {
             timeout: 8000,
@@ -302,7 +308,7 @@ export const prusaLinkAdapter = {
       )
 
     const response =
-      await axios.put(
+      await printerRequest('put',
         `${connection.baseUrl}/api/v1/files/local/${encodedName}`,
         buffer,
         {
@@ -367,7 +373,7 @@ export const prusaLinkAdapter = {
       )
     }
 
-    await axios.put(
+    await printerRequest('put',
       `${connection.baseUrl}/api/v1/job/${jobId}/pause`,
       null,
       {
@@ -411,7 +417,7 @@ export const prusaLinkAdapter = {
       )
     }
 
-    await axios.put(
+    await printerRequest('put',
       `${connection.baseUrl}/api/v1/job/${jobId}/resume`,
       null,
       {
@@ -455,7 +461,7 @@ export const prusaLinkAdapter = {
       )
     }
 
-    await axios.delete(
+    await printerRequest('delete',
       `${connection.baseUrl}/api/v1/job/${jobId}`,
       {
         timeout: 8000,

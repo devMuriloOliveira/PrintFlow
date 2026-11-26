@@ -129,3 +129,13 @@ test('exige usuario e senha para PrusaLink', () => {
     /password/
   )
 })
+
+test('bloqueia destino HTTP fora das faixas LAN/VPN e portas do protocolo', () => {
+  for (const ip of ['127.0.0.1', '8.8.8.8', 'printer.local', 'http://192.168.1.2', '169.254.169.254']) {
+    assert.throws(() => normalizePrinterConfig({ protocol: 'octoprint', ip }, { apiKey: 'key' }), /IPv4 privado\/VPN/)
+  }
+  for (const port of [0, -1, 65536, 80.5, 8883]) {
+    assert.throws(() => normalizePrinterConfig({ protocol: 'octoprint', ip: '10.0.0.4', port }, { apiKey: 'key' }), /Porta|porta/)
+  }
+  assert.equal(normalizePrinterConfig({ protocol: 'moonraker', ip: '100.64.10.4' }).printer.port, 7125)
+})

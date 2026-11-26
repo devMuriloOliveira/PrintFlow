@@ -1,6 +1,6 @@
 {
   "name": "fila-agent",
-  "version": "0.1.34",
+  "version": "0.1.36",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,6 +13,7 @@
     "start:node-reference": "node src/index.js",
     "dev:node-reference": "nodemon src/index.js",
     "test": "node --check src/index.js && node --test test/*.test.js",
+    "test:package-integrity-e2e": "node test/windows-package-integrity-e2e.mjs",
     "diagnostics": "node scripts/fila-agent-diagnostics.mjs",
     "support-bundle": "node scripts/fila-agent-support-bundle.mjs",
     "generate:icon": "node scripts/generate-windows-icon.js",

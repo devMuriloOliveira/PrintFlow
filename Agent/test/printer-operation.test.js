@@ -48,7 +48,7 @@ test('circuit breaker aplica backoff por impressora e recupera após connect bem
 })
 
 test('três connect simultâneos usam a mesma tentativa de conexão', async () => {
-  const printer = { protocol: 'bambu', connectionType: 'network', ip: '192.0.2.10', serial: 'PFDEDUPTEST001', mock: true }
+  const printer = { protocol: 'bambu', connectionType: 'network', ip: '10.70.0.10', serial: 'PFDEDUPTEST001', mock: true }
   const connected = await Promise.all([connectPrinter(printer), connectPrinter(printer), connectPrinter(printer)])
   assert.ok(connected.every(result => result.connected))
   assert.equal(listActiveConnections().filter(entry => entry.key === 'bambu:PFDEDUPTEST001').length, 1)

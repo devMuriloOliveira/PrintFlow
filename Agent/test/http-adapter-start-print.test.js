@@ -137,6 +137,7 @@ test('OctoPrint envia arquivo para /api/files/local com print=true', async () =>
       calls[0].options.headers['X-Api-Key'],
       'secret'
     )
+    assert.equal(calls[0].options.maxRedirects, 0)
   } finally {
     await fs.rm(
       directory,
@@ -216,6 +217,7 @@ test('Moonraker envia arquivo para /server/files/upload com print=true', async (
       calls[0].options.headers.Authorization,
       'Bearer token'
     )
+    assert.equal(calls[0].options.maxRedirects, 0)
   } finally {
     await fs.rm(
       directory,
@@ -290,6 +292,7 @@ test('PrusaLink envia arquivo para /api/v1/files/local com Print-After-Upload', 
       calls[0].options.headers['Print-After-Upload'],
       '?1'
     )
+    assert.equal(calls[0].options.maxRedirects, 0)
   } finally {
     await fs.rm(
       directory,

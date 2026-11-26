@@ -16,6 +16,7 @@ process.env.DATABASE_URL = ''
 
 const { hashPassword, validatePasswordPolicy, verifyPassword } = await import('../src/auth/password.js')
 const { createToken } = await import('../src/auth/token.js')
+const { loginOrRegisterGoogleUser } = await import('../src/repositories/authRepository.js')
 const { safeChangedFields } = await import('../src/repositories/crudRepository.js')
 const { describeAuditEvent } = await import('../src/services/operationalEvents.js')
 const { auditReportFilename, formatTenantAuditCsv, formatTenantAuditWorkbook } = await import('../src/routes/platformAdmin.js')
@@ -117,6 +118,33 @@ test('politica minima rejeita senhas fracas', () => {
   assert.equal(validatePasswordPolicy('SENHASENUMERO!'), 'A senha precisa conter letra minuscula.')
   assert.equal(validatePasswordPolicy('SenhaSemEspecial1'), 'A senha precisa conter caractere especial.')
   assert.equal(validatePasswordPolicy('SenhaForte1!'), '')
+})
+
+test('cadastro aceita ausencia de CPF ou CNPJ para preenchimento posterior', async () => {
+  const created = await request({
+    method: 'POST',
+    path: '/api/auth/register',
+    body: {
+      name: 'Usuario sem documento',
+      email: `sem-documento-${Date.now()}@example.com`,
+      password: 'SenhaForte1!',
+      company: 'Empresa sem documento'
+    }
+  })
+
+  assert.equal(created.status, 201)
+  assert.equal(created.body.user.role, 'owner')
+  const invalid = await request({
+    method: 'POST',
+    path: '/api/auth/register',
+    body: { name: 'Usuario documento invalido', email: `documento-invalido-${Date.now()}@example.com`, password: 'SenhaForte1!', company: 'Empresa documento invalido', document: '123' }
+  })
+  assert.equal(invalid.status, 400)
+  assert.match(invalid.body.error, /Informe um CPF ou CNPJ valido\./)
+  await assert.rejects(
+    () => loginOrRegisterGoogleUser({ subject: `google-invalid-${Date.now()}`, email: `google-invalid-${Date.now()}@example.com`, name: 'Google invalido', document: '123' }),
+    /Informe um CPF ou CNPJ valido\./
+  )
 })
 
 test('login possui rate limiting contra brute force', async () => {
