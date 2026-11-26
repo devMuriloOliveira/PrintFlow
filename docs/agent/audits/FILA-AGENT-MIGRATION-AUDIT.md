@@ -1143,3 +1143,13 @@ A varredura IPv4 é limitada por configuração, padrão de 1024 hosts e máximo
 **Verificações após a correção:** `node --test test/release-artifacts-contract.test.js` passou 5/5; `npm.cmd test` passou 172/172; `node ..\scripts\check-agent-release-contract.mjs` passou 36 checks; `node ..\scripts\validate-agent-package.mjs` aprovou 0.1.37; `node --check` passou no script de baseline e no novo módulo. A CI geral da branch [45873481786](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45873481786) concluiu com sucesso; o job de backup/restore também passou.
 
 **Publicação e próximo passo:** a release 0.1.34 e os assets `Fila-Agent-Setup.exe`/`Fila-Agent-Windows.zip` foram confirmados no GitHub. A tag 0.1.37 iniciou a execução, mas nenhuma release 0.1.37 foi publicada porque o job falhou antes do E2E. A correção precisa ser enviada e a tag atualizada antes de repetir a CI; o E2E legado permanece pendente.
+
+### Primeira execução do E2E legado 0.1.34 — 2026-11-26
+
+**Resultado:** após corrigir o comparador, [Agent Release 45874238632](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45874238632) selecionou e baixou corretamente a release `agent-v0.1.34`, mas o E2E não avançou a instalação: o health permaneceu em `0.1.34`, então o workflow interrompeu a publicação. A CI geral da branch concluiu com sucesso em [45874231783](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45874231783).
+
+**Investigação:** a release de teste é assinada com o certificado Early Access autoassinado. O log da etapa mostra que o Windows runner não confia nessa cadeia; `SignedUpdateService.ValidatePackage` exige `AuthenticodeTrust.Verify` também durante `--test-mode`. O erro do processo Setup não foi incluído na asserção de health daquela execução, portanto a causa imediata não foi capturada diretamente.
+
+**Correção de teste local:** o harness E2E agora adiciona temporariamente o certificado de teste ao `CurrentUser\Root` somente se ainda não estiver presente, executa a atualização assinada mantendo a verificação Authenticode, e remove o certificado se foi adicionado pelo harness. A falha de health também inclui o histórico e `installer.log` para diagnóstico. Contratos cobrem trust e limpeza. Nenhuma confiança de certificado é alterada na instalação do cliente nem no pacote de produção.
+
+**Estado:** `node --check`, contratos e suíte Agent serão executados antes do novo envio. O E2E Windows real e a publicação 0.1.37 continuam pendentes até a retentativa da tag concluir.

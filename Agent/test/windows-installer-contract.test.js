@@ -66,6 +66,9 @@ test('atualizacao valida Orca oficial e executa updater fora da pasta instalada'
   assert.match(updater, /TryStartWorkerOutsideInstallRoot\(installRoot\)/)
   assert.match(updater, /FilaAgentUpdateWorker-/)
   assert.match(e2e, /const installedSetup = path\.join\(installRoot, 'FilaAgentSetup\.exe'\)[\s\S]*run\(installedSetup/)
+  assert.match(e2e, /trustCertificateForCurrentUser\(files\.get\('Fila-Agent-Dev-Certificate\.cer'\)\)/)
+  assert.match(e2e, /-addstore[\s\S]*-delstore/)
+  assert.match(e2e, /update history: \$\{historyText[\s\S]*installer log: \$\{updaterLog/)
 })
 
 test('instalador encerra somente o verificador legado antes de mover a pasta', async () => {
