@@ -30,12 +30,14 @@ internal sealed class SignedUpdateService
     private readonly string? _testDataDirectory;
     private readonly string? _testApiUrl;
     private readonly string? _testTaskName;
+    private readonly bool _allowHandoff;
     private readonly string _healthUrl;
 
     public SignedUpdateService(string? testReleaseApi = null, bool testMode = false, string? testDataDirectory = null,
-        string? testApiUrl = null, string? testTaskName = null, string? localPort = null)
+        string? testApiUrl = null, string? testTaskName = null, string? localPort = null, bool allowHandoff = true)
     {
         _testMode = testMode;
+        _allowHandoff = allowHandoff;
         if (testReleaseApi is null)
         {
             if (testMode) throw new InvalidDataException("Atualização em modo de teste exige uma API de release local.");
@@ -110,6 +112,12 @@ internal sealed class SignedUpdateService
         {
             if (interactive) MessageBox.Show($"Você já está usando a versão mais recente do Fila Agent ({current}).", "Fila Agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return UpdateCheckResult.NoUpdate;
+        }
+
+        if (_allowHandoff && TryStartWorkerOutsideInstallRoot(installRoot))
+        {
+            WriteHistory(currentVersion, latest.ToString(), "deferred", "updater_handoff");
+            return UpdateCheckResult.Deferred;
         }
 
         if ((interactive || confirmUpdates) && MessageBox.Show($"Nova versão do Fila Agent disponível: {latest}\nVersão atual: {current}\n\nDeseja baixar e instalar agora? O instalador mostrará os termos e pedirá confirmação antes de substituir a versão atual.", "Fila Agent", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
@@ -190,6 +198,44 @@ internal sealed class SignedUpdateService
         if (!updated && interactive)
             MessageBox.Show($"A atualização não foi aplicada. O Fila Agent continua na versão {current}.", "Atualização cancelada", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return updated ? UpdateCheckResult.Updated : UpdateCheckResult.Declined;
+    }
+
+    private static bool TryStartWorkerOutsideInstallRoot(string installRoot)
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable)) return false;
+        var fullInstallRoot = Path.GetFullPath(installRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullExecutable = Path.GetFullPath(executable);
+        var installPrefix = fullInstallRoot + Path.DirectorySeparatorChar;
+        if (!fullExecutable.StartsWith(installPrefix, StringComparison.OrdinalIgnoreCase)) return false;
+
+        var workerPath = Path.Combine(Path.GetTempPath(), $"FilaAgentUpdateWorker-{Guid.NewGuid():N}.exe");
+        try
+        {
+            File.Copy(fullExecutable, workerPath);
+            using var current = Process.GetCurrentProcess();
+            var startInfo = new ProcessStartInfo(workerPath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetTempPath()
+            };
+            foreach (var argument in Environment.GetCommandLineArgs().Skip(1)) startInfo.ArgumentList.Add(argument);
+            foreach (var argument in new[]
+            {
+                "--update-worker",
+                "--wait-parent-pid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--wait-parent-start-utc-ticks", current.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            }) startInfo.ArgumentList.Add(argument);
+            using var worker = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Nao foi possivel iniciar a verificacao de atualizacao fora da pasta instalada.");
+            return true;
+        }
+        catch
+        {
+            try { File.Delete(workerPath); } catch { }
+            throw;
+        }
     }
 
     private static Task<T> RunWithProgressAsync<T>(string initialStatus, Func<UpdateProgressForm, Task<T>> operation)

@@ -77,10 +77,12 @@ internal static class Program
             }
             if (args.Contains("--check-updates", StringComparer.OrdinalIgnoreCase))
             {
+                if (args.Contains("--update-worker", StringComparer.OrdinalIgnoreCase))
+                    WaitForParentExit(ReadArgument(args, "--wait-parent-pid"), ReadArgument(args, "--wait-parent-start-utc-ticks"));
                 using var updateMutex = new Mutex(initiallyOwned: true, name: @"Local\FilaAgentUpdateCheck", createdNew: out var updateMutexCreated);
                 if (!updateMutexCreated) return 0;
                 var updateResult = new SignedUpdateService(ReadArgument(args, "--test-release-api"), testMode, testDataDirectory,
-                    apiUrl, taskName, localPort).CheckAndInstallAsync(installRoot,
+                    apiUrl, taskName, localPort, !args.Contains("--update-worker", StringComparer.OrdinalIgnoreCase)).CheckAndInstallAsync(installRoot,
                     args.Contains("--interactive", StringComparer.OrdinalIgnoreCase),
                     args.Contains("--confirm-updates", StringComparer.OrdinalIgnoreCase)).GetAwaiter().GetResult();
                 return updateResult == UpdateCheckResult.Deferred ? 2 : 0;
@@ -112,18 +114,14 @@ internal static class Program
             var logDirectory = testMode
                 ? ReadArgument(args, "--test-data-dir") ?? Path.Combine(ResolveInstallRoot(args), "test-data")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FilaAgentSetup", "logs");
-            var logPath = Path.Combine(logDirectory, "installer.log");
-            try
-            {
-                Directory.CreateDirectory(logDirectory);
-                File.AppendAllText(logPath, $"{DateTime.UtcNow:O} {error}{Environment.NewLine}");
-            }
-            catch (Exception loggingError)
+            var fallbackLogDirectory = Path.Combine(Path.GetTempPath(), "FilaAgentSetup", "logs");
+            var logPath = TryWriteInstallerLog(error, logDirectory, testMode ? null : fallbackLogDirectory, out var loggingError);
+            if (logPath is null)
             {
                 try
                 {
                     Console.Error.WriteLine($"Falha do instalador: {error}");
-                    Console.Error.WriteLine($"Nao foi possivel gravar installer.log: {loggingError.Message}");
+                    Console.Error.WriteLine($"Nao foi possivel gravar installer.log: {loggingError?.Message}");
                 }
                 catch { }
             }
@@ -134,8 +132,11 @@ internal static class Program
                 : args.Contains("--install-package", StringComparer.OrdinalIgnoreCase)
                     ? "A instalação ou atualização"
                     : "A operação";
+            var logInstructions = logPath is not null
+                ? $"Consulte o log técnico para obter detalhes:{Environment.NewLine}{logPath}"
+                : $"O arquivo de log não foi criado. Erro ao gravar: {loggingError?.GetType().Name}: {loggingError?.Message}";
             MessageBox.Show(
-                $"{operation} não foi concluída.{Environment.NewLine}{Environment.NewLine}Consulte o log técnico para obter detalhes:{Environment.NewLine}{logPath}",
+                $"{operation} não foi concluída.{Environment.NewLine}{Environment.NewLine}{logInstructions}",
                 "Fila Agent — operação não concluída",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -148,7 +149,33 @@ internal static class Program
             {
                 try { File.Delete(embeddedPackagePath); } catch { }
             }
+            if (args.Contains("--update-worker", StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Environment.ProcessPath))
+                ScheduleDeleteAfterExit(Environment.ProcessPath);
         }
+    }
+
+    private static string? TryWriteInstallerLog(Exception error, string primaryLogDirectory, string? fallbackLogDirectory, out Exception? loggingError)
+    {
+        loggingError = null;
+        var logDirectories = fallbackLogDirectory is null
+            ? new[] { primaryLogDirectory }
+            : new[] { primaryLogDirectory, fallbackLogDirectory }.Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in logDirectories)
+        {
+            var logPath = Path.Combine(directory, "installer.log");
+            try
+            {
+                Directory.CreateDirectory(directory);
+                File.AppendAllText(logPath, $"{DateTime.UtcNow:O} {error}{Environment.NewLine}");
+                loggingError = null;
+                return logPath;
+            }
+            catch (Exception writeError)
+            {
+                loggingError = writeError;
+            }
+        }
+        return null;
     }
 
     private static int ValidateEmbeddedPackage()
@@ -247,6 +274,7 @@ internal static class Program
             if (hadExistingInstall)
             {
                 StopAgentProcesses(root, localPort);
+                StopLegacyUpdateCheckers(root);
                 Directory.Move(root, backup);
                 movedExistingInstall = true;
             }
@@ -1014,6 +1042,41 @@ internal static class Program
         FindProcessesByExecutable("FilaAgent", Path.Combine(installRoot, "host", "FilaAgent.exe"))
             .Concat(FindProcessesByExecutable("PrintFlowAgentHost", Path.Combine(installRoot, "host", "PrintFlowAgentHost.exe")))
             .ToList();
+
+    private static void StopLegacyUpdateCheckers(string installRoot)
+    {
+        var setupPaths = new[] { "FilaAgentSetup.exe", "PrintFlowAgentSetup.exe" }
+            .Select(name => Path.Combine(installRoot, name))
+            .Where(File.Exists)
+            .ToArray();
+        var processes = setupPaths
+            .SelectMany(path => FindProcessesByExecutable(Path.GetFileNameWithoutExtension(path), path))
+            .DistinctBy(process => process.Id)
+            .ToList();
+
+        try
+        {
+            foreach (var process in processes)
+            {
+                try
+                {
+                    process.Refresh();
+                    if (process.HasExited || !string.Equals(process.MainWindowTitle, "Atualização do Fila Agent", StringComparison.Ordinal)) continue;
+                    process.Kill(entireProcessTree: false);
+                    if (!process.WaitForExit(15_000))
+                        throw new InvalidOperationException("O verificador de atualização antigo não encerrou; a instalação foi interrompida para preservar os arquivos.");
+                }
+                catch (InvalidOperationException) when (process.HasExited)
+                {
+                    // The legacy checker exited between inspection and the close request.
+                }
+            }
+        }
+        finally
+        {
+            foreach (var process in processes) process.Dispose();
+        }
+    }
 
     private static List<Process> FindProcessesByExecutable(string processName, string executablePath)
     {

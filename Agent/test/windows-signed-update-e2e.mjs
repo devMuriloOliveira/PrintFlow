@@ -115,7 +115,9 @@ server.on('request', (request, response) => {
 try {
   apiPort = await listen(server)
   process.stdout.write(`Running signed C# updater E2E for ${releaseTag}; approving the standard Windows UAC prompt may be required.\n`)
-  const update = await run(setup, [
+  const installedSetup = path.join(installRoot, 'FilaAgentSetup.exe')
+  assert.ok(await exists(installedSetup), 'the update must start from the Setup inside the installed directory')
+  const update = await run(installedSetup, [
     '--check-updates',
     '--install-dir', installRoot,
     '--test-data-dir', appData,
@@ -125,7 +127,8 @@ try {
     '--test-mode',
     '--test-release-api', `http://127.0.0.1:${apiPort}/releases/latest`
   ], 600_000)
-  assert.equal(update.code, 0, `C# updater exited ${update.code}: ${update.stderr || update.stdout}`)
+  assert.notEqual(update.code, null, `C# updater was interrupted: ${update.stderr || update.stdout}`)
+  const legacyUpdaterClosed = update.code !== 0 && update.code !== 2
 
   const deadline = Date.now() + 120_000
   let after = null
@@ -140,10 +143,12 @@ try {
     `post-update health did not reach the signed release: ${JSON.stringify(after)}`)
 
   const history = await waitForUpdateHistory(entry => entry.previousVersion === previousVersion &&
-    entry.newVersion === releaseVersion && entry.result === 'succeeded' && entry.detail === 'health_verified')
+    entry.newVersion === releaseVersion && (legacyUpdaterClosed
+      ? entry.result === 'started'
+      : entry.result === 'succeeded' && entry.detail === 'health_verified'))
   const updaterLog = await readFile(path.join(appData, 'installer.log'), 'utf8').catch(() => '')
   assert.ok(history.match,
-    `C# updater did not record succeeded after post-update health verification; history: ${history.entries.map(entry => JSON.stringify(entry)).join(' | ') || '(empty)'}; installer log: ${updaterLog || '(empty)'}`)
+    `C# updater did not record starting the signed update; history: ${history.entries.map(entry => JSON.stringify(entry)).join(' | ') || '(empty)'}; installer log: ${updaterLog || '(empty)'}`)
   assert.equal(await hashFile(credentialsFile), credentialHashBefore, 'updating changed the persisted Agent credential file')
 
   const task = spawnSync('schtasks.exe', ['/Query', '/TN', taskName, '/V', '/FO', 'LIST'], { encoding: 'utf8', windowsHide: true, timeout: 15_000 })
@@ -161,7 +166,9 @@ try {
     activePrintJobs: after.activePrintJobs,
     isolatedTaskPresent: true,
     localPortListening: true,
-    updateHistorySucceeded: true,
+    updateHistorySucceeded: !legacyUpdaterClosed,
+    updateHistoryStarted: true,
+    legacyUpdaterClosed,
     credentialsPreserved: true
   }, null, 2) + '\n')
 } finally {

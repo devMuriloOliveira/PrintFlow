@@ -25,3 +25,15 @@ O E2E local cobre instalação, atualização/rollback e desinstalação isolada
 Os diálogos de instalação e desinstalação foram reorganizados para destacar versão, ação e preservação dos dados. Na desinstalação, os dados locais padrão continuam preservados sem seleção; a opção de apagá-los fica destacada em um painel separado. A janela também informa que o programa, a inicialização automática e os atalhos serão removidos. A falha do Setup agora orienta a pessoa a consultar o log técnico em vez de mostrar diretamente a mensagem bruta da exceção.
 
 Os contratos do instalador passaram 21/21 e o build Release passou sem avisos/erros. A captura visual em Windows interativo e a verificação em escalas DPI diferentes continuam pendentes; build e contratos não comprovam ausência de corte em tela real.
+
+## Registro de falha do log — 2026-11-26
+
+Se o Setup não conseguir gravar em `%LOCALAPPDATA%\FilaAgentSetup\logs`, ele tenta `%TEMP%\FilaAgentSetup\logs` e mostra o caminho que conseguiu gravar. Se ambos falharem, o diálogo informa que o arquivo não foi criado e apresenta o erro de gravação, sem apontar para um caminho inexistente. Essa alteração foi verificada localmente; a release pública 0.1.36 ainda não contém essa correção.
+
+## Atualização iniciada pela instalação — 2026-11-26
+
+Quando há uma nova versão, o Setup iniciado da pasta instalada transfere a verificação para uma cópia temporária fora dessa pasta e encerra. O worker espera a saída do processo pai antes de baixar e iniciar a atualização assinada. Isso libera a pasta antiga para ser movida durante a substituição quando o Setup em execução já contém esse handoff. O host recebe o resultado como adiamento e mantém o retry de 15 minutos.
+
+O Setup não executa nem reutiliza o OrcaSlicer encontrado na instalação existente. Ele prepara e valida o runtime oficial fixado por hash no diretório temporário antes de substituir a instalação. Atualizações exigem conexão com a internet para obter esse runtime.
+
+Para Setups legados que não implementam o handoff, o novo Setup procura somente executáveis de Setup com caminho dentro da instalação e janela de progresso de atualização. Ele encerra esse verificador sem encerrar o instalador filho, espera até 15 segundos e aborta antes de mover a pasta se o processo não sair. O processo antigo do Host também é encerrado durante a troca; a versão nova inicia logo após a instalação. O intervalo de retry de 15 minutos vale para falha/adiamento e não é uma espera aplicada ao caminho bem-sucedido. Como o verificador legado termina antes de gravar o resultado final, o histórico antigo pode ficar com estado `started`; o E2E confirma o sucesso pelo health da nova versão. O E2E de release prefere a versão 0.1.34 como base para cobrir esse fluxo. Essa compatibilidade ainda depende da validação comportamental na CI Windows; nenhum E2E comprova assinatura confiável em todos os clientes ou atualização em todas as configurações de Windows.

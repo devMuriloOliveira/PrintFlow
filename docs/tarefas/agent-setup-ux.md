@@ -25,6 +25,7 @@ Fora do escopo: alterar o fluxo técnico de instalação/desinstalação, assina
 - [x] Ajustar espaçamento, dimensionamento e ordem dos controles no diálogo de instalação sem alterar o aceite dos Termos.
 - [x] Preservar tabulação, botões padrão/cancelar e a opção de apagar dados desmarcada por padrão.
 - [x] Executar contratos C# focados e build Release do Setup.
+- [x] Tentar destino `%TEMP%` quando a gravação do log principal falhar e não indicar arquivo inexistente.
 - [ ] Inspecionar manualmente os diálogos em Windows interativo, incluindo escalas/DPI distintas.
 
 ## Arquivos previstos
@@ -50,3 +51,13 @@ Baixo: mudança de apresentação e texto em janelas WinForms. O risco principal
 ## Impacto e reversão
 
 Somente apresentação e textos locais do Setup foram alterados. Nenhuma instalação, desinstalação, dado, certificado, release ou produção foi modificado. Reversão: restaurar `SetupConsentForm.cs`, `Program.cs` e o contrato de teste deste diff; nenhum dado de usuário exige rollback.
+
+## Correção de caminho do log — 2026-11-26
+
+**Evidência:** captura do Setup 0.1.36 mostrou o caminho `%LOCALAPPDATA%\FilaAgentSetup\logs\installer.log`, mas a pessoa não encontrou o arquivo. O código anterior tentava gravar o log e, se a gravação falhasse, só escrevia o motivo em `stderr`, mantendo na janela o caminho original como se o arquivo existisse.
+
+**Alteração:** `Agent/windows-setup/Program.cs` agora tenta `%TEMP%\FilaAgentSetup\logs` como fallback e só apresenta o caminho após confirmar a gravação. Se ambos os locais falharem, a janela informa que não há arquivo e mostra o erro ao gravar. `Agent/test/windows-installer-contract.test.js` cobre o comportamento do caminho e do fallback.
+
+**Verificações:** `node --test test/windows-installer-contract.test.js` passou 22/22; `npm.cmd test` passou 169/169; `dotnet build Agent\windows-setup\FilaAgentSetup.csproj --configuration Release --no-restore` passou sem avisos/erros. Um harness temporário executou o método real de gravação com o primeiro destino bloqueado e confirmou a criação do log no destino alternativo; os arquivos do harness foram removidos.
+
+**Limites:** a nova build não foi instalada no computador da captura; a versão publicada 0.1.36 continua exibindo a mensagem antiga. É necessária uma versão posterior do Setup para disponibilizar o fallback. A inspeção visual do diálogo em diferentes DPIs segue pendente.

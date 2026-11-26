@@ -41,6 +41,46 @@ test('setup nativo mostra termos antes de elevar e exige aceite explícito', asy
   assert.match(terms, /AGPL-3\.0/)
 })
 
+test('falha do setup informa somente um log gravado e possui destino temporario alternativo', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const entrypoint = setup.slice(setup.indexOf('private static int Main('), setup.indexOf('private static int ValidateEmbeddedPackage('))
+  const logWriter = setup.slice(setup.indexOf('private static string? TryWriteInstallerLog('), setup.indexOf('private static int ValidateEmbeddedPackage('))
+
+  assert.match(entrypoint, /Path\.Combine\(Path\.GetTempPath\(\), "FilaAgentSetup", "logs"\)/)
+  assert.match(entrypoint, /TryWriteInstallerLog\(error, logDirectory, testMode \? null : fallbackLogDirectory, out var loggingError\)/)
+  assert.match(entrypoint, /var logInstructions = logPath is not null[\s\S]*Consulte o log t[ée]cnico[\s\S]*O arquivo de log n[aã]o foi criado/)
+  assert.match(logWriter, /File\.AppendAllText\(logPath/)
+  assert.match(logWriter, /catch \(Exception writeError\)[\s\S]*loggingError = writeError/)
+  assert.match(logWriter, /return null/)
+})
+
+test('atualizacao valida Orca oficial e executa updater fora da pasta instalada', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const updater = await read('windows-setup/SignedUpdateService.cs')
+  const e2e = await read('test/windows-signed-update-e2e.mjs')
+
+  assert.match(setup, /ValidateOrcaRuntime\(temp, testMode\)/)
+  assert.doesNotMatch(setup, /PrepareOrcaRuntime|existingInstallRoot\).*ValidateOrcaRuntime/)
+  assert.match(setup, /--update-worker/)
+  assert.match(setup, /--wait-parent-pid/)
+  assert.match(updater, /TryStartWorkerOutsideInstallRoot\(installRoot\)/)
+  assert.match(updater, /FilaAgentUpdateWorker-/)
+  assert.match(e2e, /const installedSetup = path\.join\(installRoot, 'FilaAgentSetup\.exe'\)[\s\S]*run\(installedSetup/)
+})
+
+test('instalador encerra somente o verificador legado antes de mover a pasta', async () => {
+  const setup = await read('windows-setup/Program.cs')
+  const install = setup.slice(setup.indexOf('private static int Install('), setup.indexOf('private static void CopyDirectory('))
+  const closer = setup.slice(setup.indexOf('private static void StopLegacyUpdateCheckers('), setup.indexOf('private static List<Process> FindProcessesByExecutable('))
+
+  assert.match(install, /StopLegacyUpdateCheckers\(root\);[\s\S]*Directory\.Move\(root, backup\)/)
+  assert.match(closer, /FilaAgentSetup\.exe.*PrintFlowAgentSetup\.exe/)
+  assert.match(closer, /FindProcessesByExecutable\(Path\.GetFileNameWithoutExtension\(path\), path\)/)
+  assert.match(closer, /process\.MainWindowTitle, "Atualiza[çc][ãa]o do Fila Agent"/)
+  assert.match(closer, /process\.Kill\(entireProcessTree: false\)/)
+  assert.match(closer, /process\.WaitForExit\(15_000\)[\s\S]*instala[çc][ãa]o foi interrompida para preservar os arquivos/)
+})
+
 test('setup C# valida o pacote embutido antes de instalar', async () => {
   const setup = await read('windows-setup/Program.cs')
   const project = await read('windows-setup/FilaAgentSetup.csproj')
@@ -290,7 +330,7 @@ test('updates pedem confirmação quando iniciadas pelo cliente', async () => {
   assert.match(setup, /Local\\FilaAgentInstall/)
   assert.match(setup, /if \(!installMutexCreated\) return 0;/)
   assert.match(setup, /if \(installing \|\| checkingUpdates\)/)
-  assert.match(setup, /new SignedUpdateService\(ReadArgument\(args, "--test-release-api"\), testMode, testDataDirectory,[\s\S]*apiUrl, taskName, localPort\)/)
+  assert.match(setup, /new SignedUpdateService\(ReadArgument\(args, "--test-release-api"\), testMode, testDataDirectory,[\s\S]*apiUrl, taskName, localPort, !args\.Contains\("--update-worker"/)
   assert.match(updater, /Path\.Combine\(_dataDirectory, "updates", latest\.ToString\(\)\)/)
   assert.match(updater, /Path\.Combine\(_dataDirectory, "updates", "update-history\.jsonl"\)/)
   assert.match(updater, /installerStartInfo\.ArgumentList\.Add\("--test-data-dir"\)[\s\S]*installerStartInfo\.ArgumentList\.Add\("--api-url"\)[\s\S]*installerStartInfo\.ArgumentList\.Add\("--local-port"\)[\s\S]*installerStartInfo\.ArgumentList\.Add\("--task-name"\)/)
@@ -366,6 +406,9 @@ test('release tool constrói, valida, assina e publica os artefatos C# sem Power
   ]) assert.ok(workflow.includes(fragment), `workflow sem ${fragment}`)
   assert.ok(ciWorkflow.includes('Fila-Agent-Setup.exe --validate-embedded-package'))
   assert.ok(workflow.includes('secrets.FILA_AGENT_DEV_CERT_PFX_BASE64 || secrets.PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64'))
+  const baselineScript = await read('scripts/prepare-agent-upgrade-baseline.mjs')
+  assert.match(baselineScript, /agent-v0\.1\.34/)
+  assert.match(workflow, /prepare-agent-upgrade-baseline\.mjs/)
   assert.ok(tool.includes('Environment.GetEnvironmentVariable("FILA_AGENT_DEV_CERT_PFX_BASE64") ??'))
   assert.ok(tool.includes('Environment.GetEnvironmentVariable("PRINTFLOW_AGENT_DEV_CERT_PFX_BASE64")'))
   for (const script of ['start', 'start:tray', 'dev', 'build:windows', 'build:windows:dev-signed']) {
