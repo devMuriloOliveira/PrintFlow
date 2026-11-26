@@ -2,7 +2,7 @@
 
 ## Estado
 
-Aguardando validação
+Encerrada
 
 ## Data
 
@@ -24,7 +24,7 @@ Na execução CI `45859240943`, o serviço era `postgres:16`, mas o runner `ubun
 ## Critérios de aceitação
 
 - [x] O workflow seleciona ferramentas PostgreSQL 16 explicitamente para o serviço PostgreSQL 16.
-- [ ] O job remoto `backup-restore-integration` restaura o dump e valida os dados sem erro.
+- [x] O job remoto `backup-restore-integration` restaura o dump e valida os dados sem erro.
 
 ## Verificações executadas
 
@@ -34,22 +34,23 @@ Na execução CI `45859240943`, o serviço era `postgres:16`, mas o runner `ubun
 | Suíte Backend | `npm.cmd test` em `BackEnd` | 213 passaram, 1 ignorado, 0 falhas. |
 | Diff | `git diff --check` | Passou. |
 | CI após primeiro ajuste | [execução 45862104443](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45862104443) | Instalação do cliente 16 passou; verificação falhou porque `pg_dump-16` não existe no `PATH`; teste de restore não iniciou. |
+| CI final | [execução 45862390256](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45862390256) | `pg_dump`/`pg_restore` 16.16; `test:backup-restore` passou 2/2, incluindo restauração e integridade do fixture. |
 
 ## O que continua pendente
 
-- Aguardar a execução da CI após envio da alteração para confirmar o restore real no PostgreSQL 16.
 - Não foi possível reproduzir localmente porque este ambiente não disponibiliza Docker, `pg_dump` ou `pg_restore`.
+- O job separado `agent-production-package` ainda estava em andamento no momento deste registro; ele não participa da validação de backup/restauração.
 
 ## Risco e impacto
 
 - Dados: nenhum banco foi criado ou alterado nesta validação local.
 - Produção/publicação: nenhum deploy ou operação em banco hospedado.
 - Reversão: reverter a alteração isolada do job em `.github/workflows/ci.yml`.
-- Risco residual: até o job remoto passar, o comportamento ponta a ponta permanece não validado.
+- Risco residual: nenhum risco remanescente no teste PostgreSQL 16 identificado; a execução geral ainda aguardava o job independente de pacote do Agent.
 
 ## Encerramento
 
-A primeira repetição no commit `e1d9fb9` confirmou que o pacote `postgresql-client-16` existe no runner 24.04, mas falhou na etapa de versão porque `pg_dump-16` não é exposto pelo `PATH`. A configuração foi ajustada para usar os caminhos versionados `/usr/lib/postgresql/16/bin/pg_dump` e `/usr/lib/postgresql/16/bin/pg_restore`. Aguarda nova execução do CI para confirmar o restore real.
+A correção está implementada, enviada à branch de release e validada pelo job remoto em PostgreSQL 16.16. A primeira repetição no commit `e1d9fb9` confirmou a instalação do pacote 16, mas mostrou que `pg_dump-16` não é exposto pelo `PATH`; o commit `502bdd2` ajustou para usar os caminhos versionados `/usr/lib/postgresql/16/bin/pg_dump` e `/usr/lib/postgresql/16/bin/pg_restore`. A execução `45862390256` confirmou a restauração e integridade dos dados descartáveis.
 
 ## Referências oficiais
 
