@@ -18,7 +18,7 @@ Na execução CI `45859240943`, o serviço era `postgres:16`, mas o runner `ubun
 
 ## Alterações
 
-- `.github/workflows/ci.yml`: fixa o runner em Ubuntu 24.04, instala `postgresql-client-16`, verifica as ferramentas da versão 16 e define `PG_DUMP_BIN=pg_dump-16` e `PG_RESTORE_BIN=pg_restore-16` para o teste.
+- `.github/workflows/ci.yml`: fixa o runner em Ubuntu 24.04, instala `postgresql-client-16`, verifica os binários versionados e define seus caminhos absolutos em `PG_DUMP_BIN` e `PG_RESTORE_BIN`.
 - `docs/backend/persistence-and-integrations.md`: registra o alinhamento de versão entre ferramentas e servidor do teste.
 
 ## Critérios de aceitação
@@ -33,6 +33,7 @@ Na execução CI `45859240943`, o serviço era `postgres:16`, mas o runner `ubun
 | Teste focado | `npm.cmd run test:backup-restore` em `BackEnd` | Guarda local passou; teste real foi ignorado por ausência de PostgreSQL local isolado e confirmação explícita. |
 | Suíte Backend | `npm.cmd test` em `BackEnd` | 213 passaram, 1 ignorado, 0 falhas. |
 | Diff | `git diff --check` | Passou. |
+| CI após primeiro ajuste | [execução 45862104443](https://github.com/devMuriloOliveira/PrintFlow/actions/runs/45862104443) | Instalação do cliente 16 passou; verificação falhou porque `pg_dump-16` não existe no `PATH`; teste de restore não iniciou. |
 
 ## O que continua pendente
 
@@ -48,7 +49,7 @@ Na execução CI `45859240943`, o serviço era `postgres:16`, mas o runner `ubun
 
 ## Encerramento
 
-A configuração está implementada e a suíte local do Backend passou. O registro permanece aguardando validação porque o teste de integração depende do PostgreSQL 16 real no CI.
+A primeira repetição no commit `e1d9fb9` confirmou que o pacote `postgresql-client-16` existe no runner 24.04, mas falhou na etapa de versão porque `pg_dump-16` não é exposto pelo `PATH`. A configuração foi ajustada para usar os caminhos versionados `/usr/lib/postgresql/16/bin/pg_dump` e `/usr/lib/postgresql/16/bin/pg_restore`. Aguarda nova execução do CI para confirmar o restore real.
 
 ## Referências oficiais
 
