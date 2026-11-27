@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { notificationDestination } from '~/utils/notificationDestination'
+import type { OperationalNotification } from '~/composables/useOperationalNotifications'
+
 defineEmits<{ menu: [] }>()
 
 const { settings } = useAppData()
@@ -9,6 +12,32 @@ const workspaceName = computed(() => {
 const notificationsOpen = ref(false)
 const auth = useAuth()
 const { notifications, unreadCount, refreshNotifications, markNotificationRead } = useOperationalNotifications()
+const { notify } = useUi()
+const clearingNotifications = ref(false)
+const unreadNotifications = computed(() => notifications.value.filter(notification => !notification.readAt))
+const openNotification = (notification: OperationalNotification) => {
+  const destination = notificationDestination(notification.type)
+  void markNotificationRead(notification.id).then((marked) => {
+    if (!marked) notify('Não foi possível marcar a notificação como lida.', 'info')
+  })
+  if (destination) {
+    notificationsOpen.value = false
+    void navigateTo(destination)
+  }
+}
+const clearNotifications = async () => {
+  if (clearingNotifications.value) return
+  clearingNotifications.value = true
+  const ids = unreadNotifications.value.map(notification => notification.id)
+  let failed = 0
+  try {
+    for (const id of ids) if (!(await markNotificationRead(id))) failed++
+    await refreshNotifications()
+    if (failed) notify('Não foi possível marcar todas as notificações como lidas. Tente novamente.', 'info')
+  } finally {
+    clearingNotifications.value = false
+  }
+}
 let notificationTimer: ReturnType<typeof setInterval> | undefined
 
 const notificationDotClass = (severity: string) => ({
@@ -75,17 +104,22 @@ const initials = computed(() =>
           <div v-if="notificationsOpen" class="dropdown-card notifications">
             <div class="dropdown-card__head">
               <strong>Notificações</strong>
-              <span>{{ unreadCount ? `${unreadCount} nova${unreadCount === 1 ? '' : 's'}` : 'Em dia' }}</span>
+              <span>{{ unreadCount ? `${unreadCount} nova${unreadCount === 1 ? '' : 's'}` : 'Nenhuma recente' }}</span>
             </div>
 
-            <button v-for="notification in notifications" :key="notification.id" class="notification-item" type="button" @click="markNotificationRead(notification.id)">
+            <button v-for="notification in unreadNotifications" :key="notification.id" class="notification-item" type="button" :disabled="clearingNotifications" @click="openNotification(notification)">
               <i class="dot" :class="notificationDotClass(notification.severity)" />
               <div>
                 <strong>{{ notification.title }}</strong>
                 <small>{{ notification.message || notificationTime(notification.createdAt) }}</small>
+                <small v-if="notificationDestination(notification.type)">Abrir área →</small>
               </div>
             </button>
-            <div v-if="!notifications.length" class="notification-item notification-item--empty">Nenhuma notificacao operacional.</div>
+            <div v-if="!unreadNotifications.length" class="notification-item notification-item--empty">Nenhuma notificação não lida entre as mais recentes.</div>
+            <div class="notification-actions">
+              <NuxtLink to="/notificacoes" @click="notificationsOpen = false">Ver histórico</NuxtLink>
+              <button v-if="unreadNotifications.length || clearingNotifications" type="button" :disabled="clearingNotifications" @click="clearNotifications">{{ clearingNotifications ? 'Limpando...' : 'Limpar exibidas' }}</button>
+            </div>
 
             <div v-if="false" class="notification-item">
               <i class="dot dot--orange" />

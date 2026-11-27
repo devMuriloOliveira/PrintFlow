@@ -7,6 +7,8 @@ test('plano reserva estoque pronto e cria job somente para a falta no mesmo tena
   const calls = []
   const client = { async query(sql, params = []) {
     calls.push({ sql, params })
+    if (/^(savepoint|release savepoint|rollback to savepoint)/i.test(sql.trim())) return { rowCount: 0, rows: [] }
+    if (sql.includes('insert into operational_notifications')) return { rowCount: 1, rows: [{ id: 1 }] }
     if (sql.includes('from sales_fulfillment_plans')) return { rowCount: 0, rows: [] }
     if (sql.includes('from products p')) return { rowCount: 1, rows: [{ id: 4, name: 'Peca', printer_id: 2, agent_printer_id: 7, quantity: 3, reserved_quantity: 1 }] }
     if (sql.includes('insert into product_inventory')) return { rowCount: 1, rows: [] }

@@ -1,16 +1,28 @@
 <script setup lang="ts">
-defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
+const closeButton = ref<HTMLButtonElement | null>(null)
+let previousFocus: HTMLElement | null = null
+watch(() => props.open, async open => {
+  if (open) {
+    previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    closeButton.value?.focus()
+  } else {
+    if (previousFocus?.isConnected) previousFocus.focus()
+    previousFocus = null
+  }
+})
 const { settings } = useAppData()
 const subscriptionAccess = useSubscriptionAccess()
-const route = useRoute()
-const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.path === '/relatorios', Marketplaces: route.path === '/marketplaces', Estoque: route.path === '/estoque', Configurações: route.path.startsWith('/configuracoes/') })
+const route = useRouter().currentRoute
+const expandedItems = reactive<Record<string, boolean>>({ Relatórios: route.value.path === '/relatorios', Marketplaces: route.value.path === '/marketplaces', Estoque: route.value.path === '/estoque', Configurações: route.value.path.startsWith('/configuracoes/') })
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
 const normalizePath = (path: string) => path.length > 1 ? path.replace(/\/+$/, '') : path
 const hasSectionQuery = (to: string) => new URLSearchParams(to.split('?')[1] || '').has('secao')
 const childIsActive = (to: string) => {
   const [path, queryString] = to.split('?')
-  const [currentPath, currentQueryString] = String(route.fullPath || '').split('?')
+  const [currentPath, currentQueryString] = String(route.value.fullPath || '').split('?')
   if (normalizePath(currentPath) !== normalizePath(path)) return false
   const section = new URLSearchParams(queryString || '').get('secao')
   const currentSection = new URLSearchParams(currentQueryString || '').get('secao')
@@ -71,17 +83,17 @@ const sections = [
   }
 ]
 
-watch(() => route.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true; if (path === '/estoque') expandedItems.Estoque = true; if (path.startsWith('/configuracoes/')) expandedItems.Configurações = true })
+watch(() => route.value.path, path => { if (path === '/relatorios') expandedItems['Relatórios'] = true; if (path === '/marketplaces') expandedItems.Marketplaces = true; if (path === '/estoque') expandedItems.Estoque = true; if (path.startsWith('/configuracoes/')) expandedItems.Configurações = true })
 </script>
 
 <template>
   <div v-if="open" class="sidebar-backdrop" @click="emit('close')" />
 
-  <aside class="sidebar" :class="{ 'sidebar--open': open }">
+  <aside id="main-sidebar" class="sidebar" :class="{ 'sidebar--open': open }">
     <div class="sidebar__top">
       <AppLogo :logo-url="String(preferences.logoUrl || '')" brand-name="Filamind" />
 
-      <button class="icon-btn sidebar__close" aria-label="Fechar menu" @click="emit('close')">
+      <button ref="closeButton" class="icon-btn sidebar__close" aria-label="Fechar menu" @click="emit('close')">
         <UiIcon name="close" />
       </button>
     </div>

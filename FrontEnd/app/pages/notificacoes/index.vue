@@ -1,5 +1,16 @@
 <script setup lang="ts">
+import { notificationDestination } from '~/utils/notificationDestination'
+import type { OperationalNotification } from '~/composables/useOperationalNotifications'
+
 const { notifications, unreadCount, loading, refreshNotifications, markNotificationRead } = useOperationalNotifications()
+const { notify } = useUi()
+const openNotification = (notification: OperationalNotification) => {
+  const destination = notificationDestination(notification.type)
+  void markNotificationRead(notification.id).then((marked) => {
+    if (!marked) notify('Não foi possível marcar a notificação como lida.', 'info')
+  })
+  if (destination) void navigateTo(destination)
+}
 const auth = useAuth()
 const config = useRuntimeConfig()
 const health = ref<{ offlineAgents: number; activePrints: number; queuedPrints: number; pendingConfirmations: number; pendingAlerts: number; integrationsWithError: number; checkedAt: string } | null>(null)
@@ -52,9 +63,9 @@ onMounted(() => { refreshAll() })
       <div v-if="loading && !notifications.length" class="empty-state"><div><h3>Consultando notificações</h3></div></div>
       <div v-else-if="!notifications.length" class="empty-state"><div><div class="empty-state__icon"><UiIcon name="bell" /></div><h3>Nenhuma notificação operacional</h3><p>Os avisos relevantes aparecerão aqui.</p></div></div>
       <div v-else class="notification-list">
-        <button v-for="notification in notifications" :key="notification.id" class="notification-row" :class="{ 'notification-row--read': notification.readAt }" @click="markNotificationRead(notification.id)">
+        <button v-for="notification in notifications" :key="notification.id" class="notification-row" type="button" :class="{ 'notification-row--read': notification.readAt }" @click="openNotification(notification)">
           <span class="notification-row__icon"><UiIcon name="bell" :size="18" /></span>
-          <span class="notification-row__content"><strong>{{ notification.title }}</strong><small>{{ notification.message || 'Sem detalhes adicionais.' }}</small></span>
+          <span class="notification-row__content"><strong>{{ notification.title }}</strong><small>{{ notification.message || 'Sem detalhes adicionais.' }}</small><small v-if="notificationDestination(notification.type)">Abrir área →</small></span>
           <span class="notification-row__meta"><span class="badge" :class="severityClass(notification.severity)">{{ severityLabel(notification.severity) }}</span><small>{{ notificationTime(notification.createdAt) }}</small></span>
         </button>
       </div>

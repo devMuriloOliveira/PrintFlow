@@ -1,6 +1,7 @@
 import { hasDatabase, query, withTenant } from '../db/pool.js'
 import { randomUUID } from 'node:crypto'
 import { blindIndex, decryptField, encryptField } from '../security/crypto.js'
+import { writeOperationalNotification } from '../services/operationalEvents.js'
 
 const number = (value) => Number(value || 0)
 const text = (value) => String(value || '').trim()
@@ -358,6 +359,23 @@ const distributeLineAmount = (total, item, items, key) => {
 export const recordTrackedSales = async (integration, sale) => {
   const items = Array.isArray(sale?.items) && sale.items.length ? sale.items : [sale]
   const rows = []
+  const tenantId = integration?.tenant_id
+  const externalOrderId = text(sale?.externalOrderId)
+  const platform = platformName(sale?.platform || integration?.platform)
+  let firstImport = false
+  if (tenantId && integration?.id && externalOrderId) {
+    try {
+      const existing = await withTenant(tenantId, (client) => client.query(`
+        select 1 from tracked_sales
+         where tenant_id = $1 and integration_id = $2 and platform = $3 and external_order_hash = $4
+         limit 1
+      `, [tenantId, integration.id, platform, blindIndex(externalOrderId)]))
+      firstImport = existing.rows.length === 0
+    } catch {
+      // A notification lookup must not interrupt the sale import.
+      console.warn('[Marketplace] Nao foi possivel verificar se o pedido ja estava registrado.')
+    }
+  }
   for (const [index, item] of items.entries()) {
     const quantity = Math.max(1, Math.floor(Number(item.quantity || sale.quantity || 1)))
     const gross = distributeLineAmount(sale.gross, item, items, 'gross')
@@ -380,7 +398,29 @@ export const recordTrackedSales = async (integration, sale) => {
       reviewReason: item.reviewReason || sale.reviewReason || ''
     }, text(item.lineKey || (items.length === 1 ? 'default' : item.id || `line-${index}`))))
   }
-  return rows.filter(Boolean)
+  const tracked = rows.filter(Boolean)
+  if (firstImport && tracked.length) {
+    const marketplace = marketplaceDefaults[platform]?.name || 'Marketplace'
+    const names = items.map((item) => text(item?.productName)).filter(Boolean)
+    const product = names[0] ? ` Produto: ${names[0].slice(0, 150)}${items.length > 1 ? ` e mais ${items.length - 1} item(ns)` : ''}.` : ''
+    const status = ({ processing: 'em processamento', shipped: 'enviado', delivered: 'entregue',
+      pending: 'pendente', unpaid: 'aguardando pagamento', cancelled: 'cancelado', canceled: 'cancelado',
+      cancel_pending: 'cancelamento pendente', refunded: 'reembolsado', return_requested: 'devolucao solicitada' })[text(sale.status).toLowerCase()]
+    const soldAt = sale.soldAt ? new Date(sale.soldAt) : null
+    const orderDate = soldAt && !Number.isNaN(soldAt.getTime()) ? ` Data do pedido (UTC): ${soldAt.toISOString().slice(0, 10)}.` : ''
+    try {
+      await writeOperationalNotification(tenantId, {
+        type: 'marketplace.sale_received', severity: 'info', title: 'Pedido importado para o Filamind',
+        message: `${marketplace}: pedido importado.${product}${status ? ` Status informado: ${status}.` : ''}${orderDate}`,
+        entityType: 'tracked_sale', entityId: String(tracked[0].id),
+        dedupeKey: `marketplace-import:${integration.id}:${blindIndex(externalOrderId)}`
+      })
+    } catch {
+      // The imported sale is already committed; a notification failure must not undo it.
+      console.warn('[Marketplace] Nao foi possivel registrar a notificacao de importacao.')
+    }
+  }
+  return tracked
 }
 
 export const recordWebhookEvent = async (integration, event) => {

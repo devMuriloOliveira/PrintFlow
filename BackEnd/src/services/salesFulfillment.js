@@ -64,6 +64,24 @@ export const createSalesFulfillmentPlan = async ({ client, tenantId, sourceType,
     [tenantId, sourceType, sourceId, productId, requested, reserved, production, production ? 'partial_production' : 'reserved']
   )
 
+  if (ready > 0 && reserved === ready) {
+    await client.query('savepoint product_reservation_notification')
+    try {
+      await writeOperationalNotification(tenantId, {
+        type: 'inventory.product_out_of_stock', severity: 'warning',
+        title: 'Produto sem estoque disponivel',
+        message: `${row.name}: restam 0 unidades disponiveis (${Number(row.reserved_quantity) + reserved} reservadas).`,
+        entityType: 'products', entityId: String(productId),
+        dedupeKey: `product.out_of_stock.fulfillment:${plan.rows[0].id}`
+      }, client)
+      await client.query('release savepoint product_reservation_notification')
+    } catch (error) {
+      await client.query('rollback to savepoint product_reservation_notification')
+      await client.query('release savepoint product_reservation_notification')
+      console.warn('Falha ao registrar notificacao de produto sem estoque disponivel', { code: error?.code || 'unknown' })
+    }
+  }
+
   if (!production) return { plan: plan.rows[0], productionJobId: null, productionJobIds: [] }
   if (!row.printer_id) {
     await writeOperationalNotification(tenantId, {
@@ -195,7 +213,7 @@ export const fulfillSalesFulfillmentPlan = async ({ client, tenantId, orderId = 
   const before = Number(inventory.rows[0].quantity)
   const qty = Number(row.requested_quantity)
   await client.query(`update product_inventory set reserved_quantity = greatest(0, reserved_quantity - $3), status = case when quantity = 0 then 'Esgotado' when greatest(0, reserved_quantity - $3) >= quantity then 'Reservado' else 'Disponivel' end, updated_at = now() where tenant_id = $1 and product_id = $2`, [tenantId, row.product_id, qty])
-  const movement = await createProductMovementWithClient(client, tenantId, row.product_id, { type: 'out', quantity: qty, reason: `Expedicao automatica do ${sourceType === 'order' ? 'pedido' : 'marketplace'} #${sourceId}` }, audit)
+  const movement = await createProductMovementWithClient(client, tenantId, row.product_id, { type: 'out', quantity: qty, reason: `Expedicao automatica do ${sourceType === 'order' ? 'pedido' : 'marketplace'} #${sourceId}` }, audit, { skipOutOfStockNotification: true })
   await client.query(`update sales_fulfillment_plans set status = 'fulfilled', updated_at = now() where tenant_id = $1 and id = $2`, [tenantId, row.id])
   return { movementId: movement.id, quantity: qty, previousQuantity: before }
 }

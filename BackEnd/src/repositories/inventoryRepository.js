@@ -1,5 +1,5 @@
 import { withTenant } from '../db/pool.js'
-import { writeAuditEvent } from '../services/operationalEvents.js'
+import { writeAuditEvent, writeOperationalNotification } from '../services/operationalEvents.js'
 
 const movementTypes = new Set(['in', 'out', 'adjustment'])
 
@@ -13,7 +13,7 @@ export const createFilamentMovementWithClient = async (client, tenantId, filamen
   }
   if (!reason) throw new Error('Informe o motivo da movimentacao')
 
-  const current = await client.query('select id, remaining_weight, min_stock_weight from filaments where tenant_id = $1 and id = $2 for update', [tenantId, filamentId])
+  const current = await client.query('select id, remaining_weight, min_stock_weight, name from filaments where tenant_id = $1 and id = $2 for update', [tenantId, filamentId])
   if (!current.rowCount) throw new Error('Registro nao encontrado')
   const previousWeight = Number(current.rows[0].remaining_weight || 0)
   const resultingWeight = type === 'in' ? previousWeight + quantity : type === 'out' ? previousWeight - quantity : quantity
@@ -31,6 +31,24 @@ export const createFilamentMovementWithClient = async (client, tenantId, filamen
      returning id, movement_type, quantity, previous_quantity, resulting_quantity, reason, created_at`,
     [tenantId, filamentId, type, quantity, previousWeight, resultingWeight, reason, audit?.actorId || null]
   )
+  const minimumWeight = Number(current.rows[0].min_stock_weight)
+  if (previousWeight > minimumWeight && resultingWeight <= minimumWeight) {
+    await client.query('savepoint filament_low_stock_notification')
+    try {
+      await writeOperationalNotification(tenantId, {
+        type: 'inventory.filament_low_stock', severity: 'warning',
+        title: 'Estoque baixo de filamento',
+        message: `${current.rows[0].name}: restam ${resultingWeight} g; estoque minimo de ${minimumWeight} g.`,
+        entityType: 'filaments', entityId: String(filamentId),
+        dedupeKey: `filament.low_stock.movement:${movement.rows[0].id}`
+      }, client)
+      await client.query('release savepoint filament_low_stock_notification')
+    } catch (error) {
+      await client.query('rollback to savepoint filament_low_stock_notification')
+      await client.query('release savepoint filament_low_stock_notification')
+      console.warn('Falha ao registrar notificacao de estoque baixo', { code: error?.code || 'unknown' })
+    }
+  }
   if (audit?.actorId) await writeAuditEvent(tenantId, {
     action: `filaments.stock_${type}`, actorType: audit.actorType || 'user', actorId: audit.actorId,
     entityType: 'filaments', entityId: String(filamentId),
@@ -55,7 +73,7 @@ export const listFilamentMovements = async (tenantId, filamentId) => withTenant(
 
 const productMovementTypes = new Set(['in', 'out', 'adjustment'])
 
-export const createProductMovementWithClient = async (client, tenantId, productId, payload, audit = null) => {
+export const createProductMovementWithClient = async (client, tenantId, productId, payload, audit = null, options = {}) => {
   const type = String(payload?.type || '')
   const quantity = Number(payload?.quantity || 0)
   const reason = String(payload?.reason || '').trim().slice(0, 240)
@@ -66,7 +84,7 @@ export const createProductMovementWithClient = async (client, tenantId, productI
   if (!reason) throw new Error('Informe o motivo da movimentacao')
 
   const current = await client.query(
-    `select p.id, coalesce(pi.quantity, 0) as quantity, coalesce(pi.reserved_quantity, 0) as reserved_quantity
+    `select p.id, p.name, coalesce(pi.quantity, 0) as quantity, coalesce(pi.reserved_quantity, 0) as reserved_quantity
        from products p left join product_inventory pi on pi.product_id = p.id and pi.tenant_id = p.tenant_id
       where p.tenant_id = $1 and p.id = $2 for update of p`,
     [tenantId, productId]
@@ -91,6 +109,23 @@ export const createProductMovementWithClient = async (client, tenantId, productI
      returning id, resource, resource_id, movement_type, quantity, previous_quantity, resulting_quantity, reason, created_at`,
     [tenantId, productId, type, quantity, previousQuantity, resultingQuantity, reason, audit?.actorId || null]
   )
+  if (!options.skipOutOfStockNotification && previousQuantity > reservedQuantity && resultingQuantity === reservedQuantity) {
+    await client.query('savepoint product_out_of_stock_notification')
+    try {
+      await writeOperationalNotification(tenantId, {
+        type: 'inventory.product_out_of_stock', severity: 'warning',
+        title: 'Produto sem estoque disponivel',
+        message: `${current.rows[0].name}: restam 0 unidades disponiveis (${reservedQuantity} reservadas).`,
+        entityType: 'products', entityId: String(productId),
+        dedupeKey: `product.out_of_stock.movement:${movement.rows[0].id}`
+      }, client)
+      await client.query('release savepoint product_out_of_stock_notification')
+    } catch (error) {
+      await client.query('rollback to savepoint product_out_of_stock_notification')
+      await client.query('release savepoint product_out_of_stock_notification')
+      console.warn('Falha ao registrar notificacao de produto sem estoque disponivel', { code: error?.code || 'unknown' })
+    }
+  }
   if (audit?.actorId) await writeAuditEvent(tenantId, {
     action: `products.stock_${type}`, actorType: audit.actorType || 'user', actorId: audit.actorId,
     entityType: 'products', entityId: String(productId),

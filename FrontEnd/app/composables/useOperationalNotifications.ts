@@ -50,15 +50,22 @@ export const useOperationalNotifications = () => {
 
   const markNotificationRead = async (id: string) => {
     const item = notifications.value.find((notification) => notification.id === id)
-    if (!item || item.readAt) return
+    if (!item) return false
+    if (item.readAt) return true
     const readAt = new Date().toISOString()
     item.readAt = readAt
     try {
       await $fetch(`${apiBase}/api/operational-notifications/${encodeURIComponent(id)}/read`, {
         method: 'POST', headers: auth.authHeaders.value, body: {}
       })
+      const current = notifications.value.find((notification) => notification.id === id)
+      if (current) current.readAt = readAt
+      return true
     } catch {
       item.readAt = null
+      const current = notifications.value.find((notification) => notification.id === id)
+      if (current) current.readAt = null
+      return false
     }
   }
 

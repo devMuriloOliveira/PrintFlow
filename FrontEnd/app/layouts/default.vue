@@ -1,5 +1,14 @@
 <script setup lang="ts">
+import MobileNav from '../components/MobileNav.vue'
+
 const sidebarOpen = useState('sidebar-open', () => false)
+const route = useRoute()
+watch(() => route.fullPath, () => { sidebarOpen.value = false })
+const closeMenuOnEscape = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') sidebarOpen.value = false
+}
+onMounted(() => window.addEventListener('keydown', closeMenuOnEscape))
+onBeforeUnmount(() => window.removeEventListener('keydown', closeMenuOnEscape))
 const { toast } = useUi()
 const { settings } = useAppData()
 const preferences = computed(() => (settings.value?.preferences as Record<string, unknown> | undefined) || {})
@@ -19,6 +28,7 @@ const brandStyle = computed(() => ({
         <slot />
       </main>
     </div>
+    <MobileNav :open="sidebarOpen" @toggle="sidebarOpen = !sidebarOpen" @navigate="sidebarOpen = false" />
     <Transition name="toast">
       <div v-if="toast.visible" class="toast" :class="`toast--${toast.type}`">
         <UiIcon :name="toast.type === 'success' ? 'check' : 'info'" :size="18" />
