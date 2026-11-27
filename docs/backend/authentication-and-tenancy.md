@@ -33,3 +33,21 @@ O cadastro por e-mail e Google aceita CPF/CNPJ ausente. Quando o campo e preench
 Os fluxos de recuperacao e troca de senha estao implementados. A recuperacao envia um link temporario por Resend em `/api/auth/password-reset/request`; a troca autenticada valida a senha atual, envia um codigo de uso unico com validade de 10 minutos e encerra as sessoes anteriores apos a confirmacao. Os testes locais `password-change-email.test.js` (1 aprovado) e `auth-email-tokens.test.js` (3 aprovados) confirmam esses comportamentos com o envio simulado.
 
 As mensagens atuais sao texto simples montado no Backend, com assunto e instrucoes especificos para cada fluxo; nao existe template HTML ou editor de personalizacao. No ambiente local verificado, `RESEND_API_KEY` e `EMAIL_FROM` nao estao configurados, portanto nenhum envio real foi comprovado. `APP_PUBLIC_URL` esta configurada para um host local de tunel e deve ser revisada antes de testar links enviados a clientes.
+
+## RLS e anexos de suporte - 2026-11-27
+
+O ciclo de RLS em [`migrate.js`](../../BackEnd/src/db/migrate.js) passou a incluir as tabelas tenant-scoped `print_job_material_reservations`, `sales_fulfillment_plans` e `production_outputs`. As tabelas `tenant_audit_requests`, `tenant_audit_request_messages` e `tenant_audit_request_attachments` ficaram fora desta alteracao porque ainda existem caminhos administrativos legados que usam `query()` direto e precisam de migracao coordenada para `withPlatformAdmin()`. Nenhuma migracao foi executada contra banco local, staging ou producao nesta etapa.
+
+O servico [`supportAttachments.js`](../../BackEnd/src/services/supportAttachments.js) agora valida a assinatura de PDF, PNG e JPEG e exige texto UTF-8 valido para `text/plain`, `text` e `text/csv`, mantendo o limite de tamanho e a allowlist de MIME existente. Os fluxos administrativos de anexos executam consultas dentro de `withPlatformAdmin()` para preservar o contexto exigido pelo RLS. A validacao de conteudo foi coberta por testes de rejeicao e aceitacao.
+
+Verificacoes locais:
+
+- `npm.cmd --prefix BackEnd test -- test/support-attachments.test.js` — 4 aprovados, 0 falhas.
+- `npm.cmd --prefix BackEnd test` — 216 aprovados, 1 ignorado por exigir banco isolado para restore, 0 falhas.
+- `git diff --check` — aprovado.
+
+As verificacoes foram estaticas ou locais. O RLS real do PostgreSQL, o download atraves das rotas, o armazenamento externo e os ambientes de staging/producao nao foram exercitados. O risco residual e validar a segregacao entre tenants e o acesso de superadmin em um banco descartavel antes da publicacao.
+
+Validacao adicional local em 2026-11-27: `npm.cmd --prefix BackEnd test -- test/db-pool-query-queue.test.js test/tenant-isolation.test.js test/production-inventory.test.js test/sales-fulfillment.test.js test/support-attachments.test.js` — 15 aprovados, 0 falhas. O ambiente nao possui `psql`, `pg_isready`, Docker ou `DATABASE_URL`; por isso a migracao e o RLS real continuam pendentes de uma instancia PostgreSQL local descartavel.
+
+Essa limitacao foi resolvida temporariamente em um cluster PostgreSQL 18 descartavel na porta local 55432, usando o papel nao-superusuario `printflow_rls_test`. A migracao criou RLS forcado nas tres tabelas; Tenant A e Tenant B viram somente 1 linha propria em cada tabela, a atualizacao cruzada retornou 0 linhas, a insercao com `tenant_id` de outro tenant foi rejeitada pela politica e `withTenant()` retornou somente a linha do tenant selecionado. O cluster foi usado somente para dados ficticios e nao representa validacao de producao.

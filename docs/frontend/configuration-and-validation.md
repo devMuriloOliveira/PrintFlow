@@ -47,4 +47,18 @@ O frontend do cliente e o portal administrativo são publicados separadamente. A
 
 ## Segurança operacional
 
+## Identidade visual Filamind - 2026-11-27
+
+A marca fornecida pelo produto foi aplicada ao `FrontEnd` e ao `AdminFrontEnd` como `public/filamind-logo.png`, com `public/favicon.png` nos dois aplicativos. `AppLogo.vue` usa o novo asset no logo padrao; o `AdminShell` usa o mesmo asset no menu lateral. O `Agent` recebeu `assets/filamind-logo.png`, `assets/filamind-icon-256.png`, `assets/fila-agent-icon.png` e `assets/fila-agent-icon.ico`; o script `scripts/generate-windows-icon.js` passou a gerar o PNG/ICO a partir do icon de 256 px.
+
+Verificacoes executadas:
+
+- `npm.cmd --prefix FrontEnd run build` — concluido com preset static.
+- `npm.cmd --prefix AdminFrontEnd run build` — concluido com 9 rotas prerenderizadas.
+- `npm.cmd --prefix Agent test` — 173 aprovados, 0 falhas.
+- `npm.cmd --prefix Agent run generate:icon` — PNG e ICO regenerados.
+- Os assets foram conferidos por assinatura PNG/ICO e o favicon foi encontrado no HTML gerado dos dois builds.
+
+A imagem foi conferida visualmente como asset transparente. Nao foi executado teste manual em navegador autenticado nem instalado um pacote do Agent; a verificacao visual em runtime publicado continua pendente.
+
 Nenhuma senha, token, e-mail administrativo, chave de marketplace ou segredo deve ser colocado em `NUXT_PUBLIC_*`, no Git, em screenshots ou na documentação.

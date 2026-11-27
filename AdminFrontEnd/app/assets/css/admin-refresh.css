@@ -230,3 +230,4 @@ h1, h2, h3, .admin-logo strong, .metrics-grid strong, .company-summary strong, .
 @media (prefers-reduced-motion: reduce) {
   .admin-sidebar { transition: none; }
 }
+.admin-logo img { object-fit: contain; }
