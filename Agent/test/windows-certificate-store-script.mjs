@@ -1,9 +1,15 @@
 export const certificateStoreScript = `
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Temporary certificate trust is restricted to a disposable GitHub-hosted runner' }
-$expectedThumbprint = 'AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB'
+$expectedCertificateSha256 = 'AC55382179B1B6FF5D7642083ED1E674DC92793FF83B55F151C0F8DA0F9C7DBB'
 $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($env:FILA_AGENT_E2E_CERTIFICATE_FILE)
-if ($certificate.Thumbprint -ne $expectedThumbprint) { throw 'E2E certificate does not match the pinned Early Access certificate' }
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try {
+  $certificateSha256 = [BitConverter]::ToString($sha256.ComputeHash($certificate.RawData)).Replace('-', '')
+} finally {
+  $sha256.Dispose()
+}
+if ($certificateSha256 -ne $expectedCertificateSha256) { throw 'E2E certificate does not match the pinned Early Access SHA-256 identity' }
 $storeNames = @('Root', 'TrustedPublisher')
 $addedStores = [System.Collections.Generic.List[string]]::new()
 
