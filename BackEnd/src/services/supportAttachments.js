@@ -2,23 +2,39 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { env } from '../config/env.js'
-import { query, withTenant } from '../db/pool.js'
+import { withPlatformAdmin, withTenant } from '../db/pool.js'
 import { writeAuditEvent } from './operationalEvents.js'
 
 const allowedMimeTypes = new Set(['application/pdf', 'text/plain', 'text/csv', 'image/png', 'image/jpeg'])
 const cleanName = (value) => String(value || '').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').slice(0, 120) || 'anexo'
 const attachmentRow = (row) => ({ id: String(row.id), tenantId: row.tenant_id || undefined, requestId: row.request_id, originalName: row.original_name, mimeType: row.mime_type, sizeBytes: Number(row.size_bytes), expiresAt: row.expires_at, createdAt: row.created_at })
-const decodePayload = (payload = {}) => {
+const hasPrefix = (buffer, prefix) => buffer.length >= prefix.length && buffer.subarray(0, prefix.length).equals(Buffer.from(prefix))
+const isUtf8Text = (buffer) => {
+  try {
+    const value = new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+    return !value.includes('\u0000')
+  } catch {
+    return false
+  }
+}
+const contentMatchesMime = (buffer, mimeType) => {
+  if (mimeType === 'application/pdf') return hasPrefix(buffer, '%PDF-')
+  if (mimeType === 'image/png') return hasPrefix(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  if (mimeType === 'image/jpeg') return hasPrefix(buffer, [0xff, 0xd8, 0xff])
+  return isUtf8Text(buffer)
+}
+export const decodeAttachmentPayload = (payload = {}) => {
   const mimeType = String(payload.mimeType || '').toLowerCase()
   if (!allowedMimeTypes.has(mimeType)) throw new Error('Tipo de anexo nao permitido.')
   const raw = String(payload.data || '').replace(/^data:[^;]+;base64,/, '')
   if (!raw || !/^[a-z0-9+/]+=*$/i.test(raw)) throw new Error('Conteudo do anexo invalido.')
   const buffer = Buffer.from(raw, 'base64')
   if (!buffer.length || buffer.length > env.supportAttachmentMaxBytes) throw new Error('Anexo excede o tamanho permitido.')
+  if (!contentMatchesMime(buffer, mimeType)) throw new Error('O conteudo do anexo nao corresponde ao tipo declarado.')
   return { mimeType, buffer, fileName: cleanName(payload.fileName) }
 }
 const writeAttachmentFile = async (tenantId, requestId, payload) => {
-  const { mimeType, buffer, fileName } = decodePayload(payload)
+  const { mimeType, buffer, fileName } = decodeAttachmentPayload(payload)
   const id = `attachment_${randomBytes(16).toString('hex')}`
   const storageKey = `${tenantId}/${requestId}/${id}-${fileName}`
   const filePath = path.resolve(env.supportAttachmentStorageDir, storageKey)
@@ -27,8 +43,8 @@ const writeAttachmentFile = async (tenantId, requestId, payload) => {
   return { id, storageKey, filePath, mimeType, buffer, fileName }
 }
 
-const authorizedRequest = async (user, requestId) => {
-  const result = await query(`
+const authorizedRequest = async (client, user, requestId) => {
+  const result = await client.query(`
     select id, tenant_id from tenant_audit_requests request
      where id = $1 and request_kind = 'support'
        and (request.chat_assigned_to = $2 or exists (select 1 from platform_chat_collaborators c where c.request_id = request.id and c.user_id = $2))
@@ -39,18 +55,20 @@ const authorizedRequest = async (user, requestId) => {
 }
 
 export const addPlatformSupportAttachment = async (user, requestId, payload = {}) => {
-  const request = await authorizedRequest(user, requestId)
-  const stored = await writeAttachmentFile(request.tenant_id, request.id, payload)
-  try {
-    const result = await query(`
+  return withPlatformAdmin(async (client) => {
+    const request = await authorizedRequest(client, user, requestId)
+    const stored = await writeAttachmentFile(request.tenant_id, request.id, payload)
+    try {
+      const result = await client.query(`
       insert into tenant_audit_request_attachments (id, tenant_id, request_id, uploader_type, uploader_id, original_name, storage_key, mime_type, size_bytes, expires_at)
       values ($1, $2, $3, 'superadmin', $4, $5, $6, $7, $8, now() + ($9::int * interval '1 day')) returning id, tenant_id, request_id, original_name, mime_type, size_bytes, expires_at, created_at
     `, [stored.id, request.tenant_id, request.id, String(user.id), stored.fileName, stored.storageKey, stored.mimeType, stored.buffer.length, env.supportAttachmentRetentionDays])
-    return attachmentRow(result.rows[0])
-  } catch (error) {
-    await rm(stored.filePath, { force: true })
-    throw error
-  }
+      return attachmentRow(result.rows[0])
+    } catch (error) {
+      await rm(stored.filePath, { force: true })
+      throw error
+    }
+  })
 }
 
 const tenantRequest = (client, user, requestId, writable = false) => client.query(`select id, tenant_id from tenant_audit_requests where id = $1 and tenant_id = $2 and requested_by::text = $3 and request_kind = 'support' ${writable ? "and status not in ('closed', 'cancelled', 'expired') and support_status <> 'resolved'" : ''} limit 1`, [requestId, user.tenantId, String(user.id)])
@@ -91,18 +109,22 @@ export const readTenantSupportAttachment = async (user, requestId, attachmentId)
 })
 
 export const listPlatformSupportAttachments = async (user, requestId) => {
-  await authorizedRequest(user, requestId)
-  const result = await query(`select id, tenant_id, request_id, original_name, mime_type, size_bytes, expires_at, created_at from tenant_audit_request_attachments where request_id = $1 and deleted_at is null and expires_at > now() order by created_at asc`, [requestId])
-  return result.rows.map(attachmentRow)
+  return withPlatformAdmin(async (client) => {
+    await authorizedRequest(client, user, requestId)
+    const result = await client.query(`select id, tenant_id, request_id, original_name, mime_type, size_bytes, expires_at, created_at from tenant_audit_request_attachments where request_id = $1 and deleted_at is null and expires_at > now() order by created_at asc`, [requestId])
+    return result.rows.map(attachmentRow)
+  })
 }
 
 export const readPlatformSupportAttachment = async (user, requestId, attachmentId) => {
-  await authorizedRequest(user, requestId)
-  const result = await query(`select original_name, storage_key, mime_type, expires_at from tenant_audit_request_attachments where id = $1 and request_id = $2 and deleted_at is null and expires_at > now() limit 1`, [attachmentId, requestId])
-  if (!result.rowCount) throw new Error('Anexo nao encontrado ou expirado.')
-  const row = result.rows[0]
-  const filePath = path.resolve(env.supportAttachmentStorageDir, row.storage_key)
-  const root = path.resolve(env.supportAttachmentStorageDir)
-  if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Anexo invalido.')
-  return { ...row, body: await readFile(filePath) }
+  return withPlatformAdmin(async (client) => {
+    await authorizedRequest(client, user, requestId)
+    const result = await client.query(`select original_name, storage_key, mime_type, expires_at from tenant_audit_request_attachments where id = $1 and request_id = $2 and deleted_at is null and expires_at > now() limit 1`, [attachmentId, requestId])
+    if (!result.rowCount) throw new Error('Anexo nao encontrado ou expirado.')
+    const row = result.rows[0]
+    const filePath = path.resolve(env.supportAttachmentStorageDir, row.storage_key)
+    const root = path.resolve(env.supportAttachmentStorageDir)
+    if (!filePath.startsWith(`${root}${path.sep}`)) throw new Error('Anexo invalido.')
+    return { ...row, body: await readFile(filePath) }
+  })
 }
