@@ -116,7 +116,7 @@ server.on('request', (request, response) => {
 
 try {
   apiPort = await listen(server)
-  removeTemporaryCertificateTrust = await trustCertificateForCurrentUser(files.get('Fila-Agent-Dev-Certificate.cer'))
+  removeTemporaryCertificateTrust = await trustCertificateOnHostedRunner(files.get('Fila-Agent-Dev-Certificate.cer'))
   process.stdout.write(`Running signed C# updater E2E for ${releaseTag}; approving the standard Windows UAC prompt may be required.\n`)
   const installedSetup = path.join(installRoot, 'FilaAgentSetup.exe')
   assert.ok(await exists(installedSetup), 'the update must start from the Setup inside the installed directory')
@@ -180,7 +180,7 @@ try {
   if (server.listening) await new Promise(resolve => server.close(resolve))
 }
 
-async function trustCertificateForCurrentUser(certificateFile) {
+async function trustCertificateOnHostedRunner(certificateFile) {
   assert.equal(process.env.GITHUB_ACTIONS, 'true',
     'temporary certificate trust is restricted to a disposable GitHub Actions runner')
   assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted',
@@ -209,7 +209,7 @@ function runCertificateStoreAction(action, certificateFile, stores = []) {
     throw new Error(`PowerShell certificate store ${action} failed: ${result.error.code}; stdout: ${result.stdout || '(empty)'}; stderr: ${result.stderr || '(empty)'}`, { cause: result.error })
   }
   assert.equal(result.status, 0,
-    `could not ${action} temporary E2E certificate trust in CurrentUser stores: ${result.stderr || result.stdout}`)
+    `could not ${action} temporary E2E certificate trust in LocalMachine stores: ${result.stderr || result.stdout}`)
   return action === 'add' ? result.stdout.trim().split(',').filter(Boolean) : []
 }
 
