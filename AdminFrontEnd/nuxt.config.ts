@@ -14,7 +14,8 @@ export default defineNuxtConfig({
     head: {
       htmlAttrs: { lang: 'pt-BR' },
       title: 'Filamind | Administracao da Plataforma',
-      meta: [{ name: 'robots', content: 'noindex, nofollow, noarchive' }]
+      meta: [{ name: 'robots', content: 'noindex, nofollow, noarchive' }],
+      link: [{ rel: 'icon', type: 'image/png', href: '/favicon.png' }]
     }
   }
 })
