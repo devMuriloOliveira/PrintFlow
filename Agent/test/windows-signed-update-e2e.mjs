@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, X509Certificate } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createReadStream as readStream } from 'node:fs'
@@ -7,6 +7,7 @@ import { readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { certificateStoreScript } from './windows-certificate-store-script.mjs'
 
 const [setupArgument, releaseDirectoryArgument, installRootArgument, testDataDirectoryArgument,
   agentApiUrl, localPortText, taskName, expectedPreviousVersion] = process.argv.slice(2)
@@ -115,7 +116,7 @@ server.on('request', (request, response) => {
 
 try {
   apiPort = await listen(server)
-  removeTemporaryCertificateTrust = await trustCertificateForCurrentUser(files.get('Fila-Agent-Dev-Certificate.cer'))
+  removeTemporaryCertificateTrust = await trustCertificateOnHostedRunner(files.get('Fila-Agent-Dev-Certificate.cer'))
   process.stdout.write(`Running signed C# updater E2E for ${releaseTag}; approving the standard Windows UAC prompt may be required.\n`)
   const installedSetup = path.join(installRoot, 'FilaAgentSetup.exe')
   assert.ok(await exists(installedSetup), 'the update must start from the Setup inside the installed directory')
@@ -179,27 +180,37 @@ try {
   if (server.listening) await new Promise(resolve => server.close(resolve))
 }
 
-async function trustCertificateForCurrentUser(certificateFile) {
+async function trustCertificateOnHostedRunner(certificateFile) {
   assert.equal(process.env.GITHUB_ACTIONS, 'true',
     'temporary certificate trust is restricted to a disposable GitHub Actions runner')
-  const certificate = new X509Certificate(await readFile(certificateFile))
-  const thumbprint = certificate.fingerprint.replaceAll(':', '')
-  const store = 'Root'
-  const added = runCertUtil(['-f', '-user', '-addstore', store, certificateFile])
-  assert.equal(added.status, 0,
-    `could not temporarily trust the isolated E2E certificate in CurrentUser\\${store}: ${added.stderr || added.stdout}`)
+  assert.equal(process.env.RUNNER_ENVIRONMENT, 'github-hosted',
+    'temporary certificate trust requires an ephemeral GitHub-hosted runner')
+  const addedStores = runCertificateStoreAction('add', certificateFile)
 
   return async () => {
-    const removed = runCertUtil(['-user', '-delstore', store, thumbprint])
-    assert.equal(removed.status, 0,
-      `could not remove temporary E2E certificate trust from CurrentUser\\${store}: ${removed.stderr || removed.stdout}`)
+    if (addedStores.length > 0) runCertificateStoreAction('remove', certificateFile, addedStores)
   }
 }
 
-function runCertUtil(args) {
-  const result = spawnSync('certutil.exe', args, { encoding: 'utf8', windowsHide: true, timeout: 60_000 })
-  if (result.error) throw result.error
-  return result
+function runCertificateStoreAction(action, certificateFile, stores = []) {
+  const encodedScript = Buffer.from(certificateStoreScript, 'utf16le').toString('base64')
+  const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 60_000,
+    env: {
+      ...process.env,
+      FILA_AGENT_E2E_CERTIFICATE_FILE: certificateFile,
+      FILA_AGENT_E2E_CERTIFICATE_ACTION: action,
+      FILA_AGENT_E2E_ADDED_STORES: stores.join(',')
+    }
+  })
+  if (result.error) {
+    throw new Error(`PowerShell certificate store ${action} failed: ${result.error.code}; stdout: ${result.stdout || '(empty)'}; stderr: ${result.stderr || '(empty)'}`, { cause: result.error })
+  }
+  assert.equal(result.status, 0,
+    `could not ${action} temporary E2E certificate trust in LocalMachine stores: ${result.stderr || result.stdout}`)
+  return action === 'add' ? result.stdout.trim().split(',').filter(Boolean) : []
 }
 
 function listen(target) {
