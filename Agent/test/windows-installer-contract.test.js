@@ -79,6 +79,7 @@ test('atualizacao valida Orca oficial e executa updater fora da pasta instalada'
   assert.match(certificateStore, /Import-Certificate[\s\S]*-CertStoreLocation \$storePath/)
   assert.match(certificateStore, /addedStores\.Add\(\$storeName\)[\s\S]*Remove-Item -LiteralPath \$certificatePath/)
   assert.match(certificateStore, /WindowsBuiltInRole\]::Administrator/)
+  assert.ok(certificateStore.indexOf('function assertAdministrator') < certificateStore.indexOf("if ($env:FILA_AGENT_E2E_CERTIFICATE_ACTION -eq 'add')"))
   assert.match(e2e, /GITHUB_ACTIONS,[\s\S]*RUNNER_ENVIRONMENT, 'github-hosted'/)
   assert.doesNotMatch(e2e + certificateStore, /certutil\.exe/)
   assert.match(e2e, /update history: \$\{historyText[\s\S]*installer log: \$\{updaterLog/)

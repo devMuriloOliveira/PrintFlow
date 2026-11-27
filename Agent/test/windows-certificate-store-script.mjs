@@ -13,6 +13,14 @@ if ($certificateSha256 -ne $expectedCertificateSha256) { throw 'E2E certificate 
 $storeNames = @('Root', 'TrustedPublisher')
 $addedStores = [System.Collections.Generic.List[string]]::new()
 
+function assertAdministrator {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Temporary LocalMachine certificate trust requires an elevated disposable runner'
+  }
+}
+
 if ($env:FILA_AGENT_E2E_CERTIFICATE_ACTION -eq 'add') {
   assertAdministrator
   try {
@@ -47,13 +55,5 @@ if ($env:FILA_AGENT_E2E_CERTIFICATE_ACTION -eq 'add') {
   }
 } else {
   throw 'Unknown E2E certificate store action'
-}
-
-function assertAdministrator {
-  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Temporary LocalMachine certificate trust requires an elevated disposable runner'
-  }
 }
 `

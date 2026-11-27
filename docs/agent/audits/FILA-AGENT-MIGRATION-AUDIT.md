@@ -1200,4 +1200,6 @@ A varredura IPv4 é limitada por configuração, padrão de 1024 hosts e máximo
 
 **Correção local e evidência:** o helper agora calcula SHA-256 dos bytes DER (`RawData`) do certificado, a mesma identidade verificada pelo ReleaseTool e pelo updater. `npm.cmd --prefix Agent test` voltou a passar 173/173, incluindo parse PowerShell no Windows; os contratos do release tool passaram 36 checks; o validador aprovou `0.1.37`; `git diff --check` passou. A nova comparação ainda depende de ser exercitada no runner Windows.
 
+**Execução `46007903408`:** o runner passou pela validação, testes, assinatura do pacote e download da base `0.1.34`. O E2E voltou a parar antes de alterar stores ou iniciar o updater: a função PowerShell de verificação administrativa foi declarada depois da chamada e não estava disponível no momento da execução. A publicação foi ignorada. A declaração foi movida para antes do fluxo de ações e o teste de contrato agora exige essa ordem.
+
 **Estado:** a release continua bloqueada e a URL de `agent-v0.1.37` ainda não deve ser anunciada como download. O próximo workflow vai retestar importação, atualização assinada a partir de `0.1.34`, preservação de credenciais e publicação condicional. Nenhuma instalação de cliente, produção, dado ou certificado fora do runner foi alterado.
